@@ -53,6 +53,10 @@ kokua --frontend web              # or: kokua-web
 # then open http://127.0.0.1:8000
 ```
 
+Reloading the page replays the prior conversation (the assistant already keeps its context across
+reconnects; this makes it visible again), including reasoning and tool calls when `show_thinking` /
+`show_tools` are on.
+
 List what's installed:
 
 ```bash

@@ -50,6 +50,7 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         busy["active"] = True
         channel = WebChannel(websocket, show_thinking=config.show_thinking, show_tools=config.show_tools)
         assistant = await Assistant.create(config, channel, client=client)
+        await channel.send_history(assistant.history)  # show the prior conversation on (re)connect
 
         async def pump() -> None:
             # Feed inbound frames to the channel; on disconnect, the sentinel ends receive(),

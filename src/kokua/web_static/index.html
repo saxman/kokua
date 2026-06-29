@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AIMU Personal Assistant</title>
+  <title>Kokua</title>
   <style>
     :root { color-scheme: light dark; }
     * { box-sizing: border-box; }
@@ -41,7 +41,7 @@
   </style>
 </head>
 <body>
-  <header>AIMU Personal Assistant <small>local, single user</small></header>
+  <header>Kokua <small>local, single user</small></header>
   <div id="log"></div>
   <form id="form">
     <input id="msg" autocomplete="off" placeholder="Message your assistant..." autofocus />
@@ -112,6 +112,15 @@
         addBubble(frame.proactive ? "proactive" : "assistant", frame.text);
       } else if (frame.type === "approval") {
         renderApproval(frame.name, frame.arguments);
+      } else if (frame.type === "history") {
+        // Replay the prior conversation on (re)connect, reusing the live renderers.
+        for (const item of frame.items) {
+          if (item.type === "user") addBubble("user", item.text);
+          else if (item.type === "thinking") addBubble("thinking", item.text);
+          else if (item.type === "tool") addBubble("tool", toolLine(item.name, item.arguments));
+          else if (item.type === "message") addBubble(item.proactive ? "proactive" : "assistant", item.text);
+        }
+        log.scrollTop = log.scrollHeight;
       }
     };
 

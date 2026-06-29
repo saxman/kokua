@@ -223,6 +223,11 @@ class Assistant:
             scheduler.at(config.reminder_seconds, assistant._proactive, name="reminder")
         return assistant
 
+    @property
+    def history(self) -> list[dict]:
+        """The restored prior conversation (OpenAI-format message dicts), for a front end to display."""
+        return self._conversation.messages
+
     async def run(self) -> None:
         """Serve the channel and run the scheduler concurrently until the channel closes."""
         try:

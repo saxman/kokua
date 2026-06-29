@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from helpers import MockAsyncModelClient
-from kokua.channels.web import WebChannel
+from kokua.channels.web import WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
 from kokua.frontends.web import build_app
 
@@ -125,6 +127,87 @@ async def test_web_channel_aclose_idempotent():
     await channel.aclose()
     await channel.aclose()
     assert ws.closed == 1
+
+
+# --- History-on-reload -----------------------------------------------------------------------
+
+_CONVERSATION = [
+    {"role": "system", "content": "you are an assistant"},
+    {"role": "user", "content": "what's 2+2?"},
+    {
+        "role": "assistant",
+        "content": "4",
+        "thinking": "adding the numbers",
+        "tool_calls": [{"type": "function", "function": {"name": "calc", "arguments": {"x": 2}}, "id": "1"}],
+    },
+    {"role": "tool", "name": "calc", "content": "4", "tool_call_id": "1"},
+]
+
+
+def test_conversation_to_frames_full_replay():
+    items = conversation_to_frames(_CONVERSATION, show_thinking=True, show_tools=True)
+    assert items == [
+        {"type": "user", "text": "what's 2+2?"},
+        {"type": "thinking", "text": "adding the numbers"},
+        {"type": "tool", "name": "calc", "arguments": {"x": 2}},
+        {"type": "message", "text": "4", "proactive": False},
+    ]
+
+
+def test_conversation_to_frames_gating():
+    items = conversation_to_frames(_CONVERSATION, show_thinking=False, show_tools=False)
+    assert items == [
+        {"type": "user", "text": "what's 2+2?"},
+        {"type": "message", "text": "4", "proactive": False},
+    ]
+
+
+def test_conversation_to_frames_extracts_text_from_content_blocks():
+    messages = [{"role": "user", "content": [{"type": "text", "text": "hi"}, {"type": "image", "url": "x"}]}]
+    assert conversation_to_frames(messages, show_thinking=True, show_tools=True) == [{"type": "user", "text": "hi"}]
+
+
+def test_conversation_to_frames_empty():
+    assert conversation_to_frames([], show_thinking=True, show_tools=True) == []
+
+
+async def test_web_channel_send_history_emits_single_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    await channel.send_history(_CONVERSATION)
+    assert len(ws.frames) == 1
+    assert ws.frames[0]["type"] == "history"
+    assert {"type": "user", "text": "what's 2+2?"} in ws.frames[0]["items"]
+
+
+async def test_web_channel_send_history_empty_sends_nothing():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_history([])
+    assert ws.frames == []
+
+
+def test_ws_sends_history_on_connect(tmp_path):
+    from starlette.testclient import TestClient
+
+    from kokua.assistant import Assistant
+
+    cfg = _config(tmp_path)
+
+    async def seed():
+        seeder = await Assistant.create(cfg, WebChannel(_FakeWS()), client=MockAsyncModelClient(["Hi!"]))
+        await seeder._handle(ChannelMessage(text="hello", channel="web"))
+        seeder._conversation.close()  # flush TinyDB so a new connection restores it
+
+    asyncio.run(seed())
+
+    app = build_app(cfg, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        frame = ws.receive_json()  # first frame on connect should be the restored history
+
+    assert frame["type"] == "history"
+    assert {"type": "user", "text": "hello"} in frame["items"]
+    assert {"type": "message", "text": "Hi!", "proactive": False} in frame["items"]
 
 
 # --- Server round-trip via Starlette TestClient ----------------------------------------------
