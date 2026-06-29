@@ -1,0 +1,47 @@
+# Mopai configuration. Copy to $MOPAI_HOME/config.toml (default ~/.mopai/config.toml), or point at
+# it with --config PATH or $MOPAI_CONFIG. Every key is optional; the value shown is the built-in
+# default. Command-line flags override anything set here. Unknown keys are ignored with a warning.
+
+[assistant]
+# Model string, e.g. "anthropic:claude-sonnet-4-6". Unset -> $AIMU_LANGUAGE_MODEL / a local model.
+# model = "anthropic:claude-sonnet-4-6"
+
+# system_message = "You are a personal assistant running on the user's own machine. ..."
+
+# Send a proactive reminder this many seconds after startup. Unset -> no reminder.
+# reminder_seconds = 1800.0
+# reminder_text = "Proactively check in with the user with one short, useful suggestion for their day."
+
+# Stream the model's reasoning / tool calls into the channel.
+show_thinking = true
+show_tools = true
+
+# Persistent memory across conversations (facts + user documents).
+memory = true
+
+# Discover tool-pack plugins via the "mopai.tools" entry-point group.
+load_plugins = true
+
+[tools]
+# AIMU built-in tool groups to expose. Also accepts ["all"] or ["none"]. The generative groups
+# (image, audio, speech, transcription) require their AIMU_*_MODEL env var.
+groups = ["web", "fs", "compute", "misc"]
+
+[mcp]
+# Remote MCP server URLs to connect at startup.
+servers = []
+# Bearer token applied to all servers above that require authentication.
+# bearer = "..."
+
+[paths]
+# Absolute override for where all transient + user content lives. Default: $MOPAI_HOME/data.
+# data_dir = "/path/to/mopai-data"
+
+[frontend]
+# Which front end `mopai` runs: "cli", "web", or any installed plugin.
+name = "cli"
+
+[web]
+# Bind address for the web front end (ignored by other front ends).
+host = "127.0.0.1"
+port = 8000

@@ -16,23 +16,25 @@ privileges (see [Security](#security)).
 ## Install
 
 Mopai depends on AIMU. It currently uses AIMU features that are on AIMU's `main` branch but not yet in a
-published release, so **install AIMU from source first**:
+published release, so it installs AIMU **from source as an editable dependency**, configured via
+`[tool.uv.sources]` in `pyproject.toml`. Clone AIMU as a sibling of this repo, then sync:
 
 ```bash
-# 1. AIMU from a local checkout (recommended for co-development)...
-git clone https://github.com/saxman/aimu        # if you don't have it
-pip install -e ./aimu
-
-# ...or straight from main:
-# pip install "aimu @ git+https://github.com/saxman/aimu@main"
-
-# 2. Then Mopai (with the web extra + dev tools as desired)
-pip install -e '.[web,dev]'
+git clone https://github.com/saxman/aimu        # sibling of mopai/, if you don't have it
+uv sync --all-extras                             # installs the local editable ../aimu automatically
 ```
 
-The bare `aimu` dependency in `pyproject.toml` is satisfied by whichever AIMU is already installed, so the
-source/`main` install above is picked up. (Once AIMU publishes a release with the needed features, this
-will become a normal `pip install mopai`.)
+`[tool.uv.sources]` pins `aimu = { path = "../aimu", editable = true }`, so `uv sync` always installs the
+local checkout (and picks up your edits live) rather than the PyPI build, which carries the same version
+string but lacks the features Mopai needs. This requires `../aimu` to exist; for CI or a clone without it,
+swap that source for a git one (see the comment in `pyproject.toml`):
+
+```toml
+aimu = { git = "https://github.com/saxman/aimu", branch = "main" }
+```
+
+(Once AIMU publishes a release with the needed features, the source override goes away and this becomes a
+normal `uv add mopai` / `pip install mopai`.)
 
 ## Run
 
@@ -58,8 +60,17 @@ mopai --list-tool-packs    # example, + any installed plugins
 ```
 
 Useful flags: `--tools web,fs,compute,misc` (AIMU built-in tool groups), `--mcp <url>` (repeatable, connect
-a remote MCP server; `--mcp-bearer` for auth), `--no-memory`, `--no-plugins`, `--system`, `--skills-dir`,
-`--history`, `--host` / `--port` (web).
+a remote MCP server; `--mcp-bearer` for auth), `--no-memory`, `--no-plugins`, `--system`, `--config <path>`,
+`--host` / `--port` (web).
+
+### Configuration file
+
+Settings can also come from a TOML config file, so you don't have to repeat flags. Resolution order,
+highest precedence first: **command-line flag > config file > built-in default**. The file is read from
+`--config <path>`, else `$MOPAI_CONFIG`, else `$MOPAI_HOME/config.toml` (default `~/.mopai/config.toml`); a
+missing default-location file is fine. Every setting has a built-in default, so the file is entirely
+optional and you only set what you want to change. See [`config.example.toml`](config.example.toml) for the
+full set of keys with their defaults.
 
 ## Modules (plugins)
 
@@ -85,9 +96,22 @@ weather = "my_weather_pack:TOOL_PACK"
 
 ## State
 
-All persistent state lives under `~/.mopai` (override with the `MOPAI_HOME` environment variable):
-`skills/` (authored skills), `history.json` (conversation), `memory/` (semantic facts), `documents/`
-(saved documents). Nothing is written to your working directory.
+All state lives under `~/.mopai` (override the root with the `MOPAI_HOME` environment variable). The root
+holds an optional `config.toml` and a single `data/` directory for all transient and user-provided content:
+
+```
+~/.mopai/
+  config.toml          # optional (see Configuration file)
+  data/
+    skills/            # authored skills
+    history.json       # conversation
+    memory/            # semantic facts
+    documents/         # saved documents
+```
+
+Point `data/` elsewhere with `[paths] data_dir` in the config file. Nothing is written to your working
+directory. On first run after upgrading from a pre-`data/` layout, existing top-level `history.json` /
+`memory/` / `documents/` / `skills/` are moved into `data/` automatically.
 
 ## Security
 
@@ -100,8 +124,7 @@ trust. The CLI prints a notice on startup.
 ## Development
 
 ```bash
-pip install -e ../aimu          # AIMU from source (see Install)
-pip install -e '.[web,dev]'
+uv sync --all-extras            # installs the editable ../aimu + all extras (see Install)
 ruff check . && ruff format --check .
 pytest -q
 ```

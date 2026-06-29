@@ -77,23 +77,23 @@ async def run(config: AssistantConfig, args: argparse.Namespace) -> None:
     """Run the web server within the current asyncio loop (for the unified `mopai --frontend web`)."""
     import uvicorn
 
-    server = uvicorn.Server(uvicorn.Config(build_app(config), host=args.host, port=args.port))
+    server = uvicorn.Server(uvicorn.Config(build_app(config), host=config.host, port=config.port))
     await server.serve()
 
 
-def serve(config: AssistantConfig, *, host: str = "127.0.0.1", port: int = 8000, **uvicorn_kwargs) -> None:
+def serve(config: AssistantConfig, **uvicorn_kwargs) -> None:
     """Blocking server start, used by the `mopai-web` console script."""
     import uvicorn
 
-    uvicorn.run(build_app(config), host=host, port=port, **uvicorn_kwargs)
+    uvicorn.run(build_app(config), host=config.host, port=config.port, **uvicorn_kwargs)
 
 
 def main() -> None:
-    # The `mopai-web` convenience script: parse the standard CLI flags and serve the web front end.
-    from ..cli import build_arg_parser, config_from_args
+    # The `mopai-web` convenience script: resolve config (defaults < file < flags), then serve.
+    from ..cli import build_arg_parser, resolve_config
 
     args = build_arg_parser("mopai-web").parse_args()
-    serve(config_from_args(args), host=args.host, port=args.port)
+    serve(resolve_config(args))
 
 
 FRONTEND = FrontEnd(

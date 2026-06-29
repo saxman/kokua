@@ -26,13 +26,7 @@ class _FakeWS:
 
 
 def _config(tmp_path, **overrides) -> AssistantConfig:
-    base = {
-        "skills_dir": tmp_path / "skills",
-        "history_path": str(tmp_path / "history.json"),
-        "memory": False,
-        "memory_path": tmp_path / "memory",
-        "documents_path": tmp_path / "documents",
-    }
+    base = {"data_dir": tmp_path, "memory": False}
     base.update(overrides)
     return AssistantConfig(**base)
 

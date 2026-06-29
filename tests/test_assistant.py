@@ -10,7 +10,7 @@ import pytest
 import mopai.paths
 from helpers import MockAsyncModelClient
 from mopai.assistant import Assistant
-from mopai.cli import build_arg_parser, config_from_args
+from mopai.cli import build_arg_parser, resolve_config
 from mopai.config import AssistantConfig
 
 from aimu.aio.channels.base import Channel, ChannelMessage
@@ -41,13 +41,11 @@ class FakeChannel(Channel):
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
     base = {
-        "skills_dir": tmp_path / "skills",
-        "history_path": str(tmp_path / "history.json"),
+        # All leaf paths derive from data_dir; point it at the test's tmp dir.
+        "data_dir": tmp_path,
         # Memory is on by default in real runs, but off here so the bulk of the tests stay fast and
         # hermetic (no ChromaDB init / state writes). The memory tests opt in with memory=True.
         "memory": False,
-        "memory_path": tmp_path / "memory",
-        "documents_path": tmp_path / "documents",
     }
     base.update(overrides)
     return AssistantConfig(**base)
@@ -56,16 +54,17 @@ def _config(tmp_path: Path, **overrides) -> AssistantConfig:
 def test_arg_parser_defaults():
     args = build_arg_parser().parse_args([])
     assert args.model is None
-    assert args.skills_dir is None  # falls back to the state-dir default in config_from_args
-    assert args.history is None
+    assert args.config is None
+    assert args.frontend is None  # resolve_config falls back to the "cli" default
     assert args.reminder_seconds is None
-    assert args.frontend == "cli"
 
 
 def test_default_config_lives_under_state_dir():
-    cfg = config_from_args(build_arg_parser().parse_args([]))
+    cfg = resolve_config(build_arg_parser().parse_args([]))
+    assert cfg.data_dir == mopai.paths.data_dir()
     assert cfg.skills_dir == mopai.paths.skills_dir()
     assert cfg.history_path == str(mopai.paths.history_path())
+    assert cfg.frontend == "cli"
 
 
 def test_arg_parser_overrides():
@@ -75,27 +74,30 @@ def test_arg_parser_overrides():
             "anthropic:claude-sonnet-4-6",
             "--reminder-seconds",
             "5",
-            "--skills-dir",
-            "/tmp/s",
-            "--history",
-            "/tmp/h.json",
+            "--frontend",
+            "web",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9000",
         ]
     )
-    cfg = config_from_args(args)
+    cfg = resolve_config(args)
     assert cfg.model == "anthropic:claude-sonnet-4-6"
     assert cfg.reminder_seconds == 5.0
-    assert cfg.skills_dir == Path("/tmp/s")
-    assert cfg.history_path == "/tmp/h.json"
+    assert cfg.frontend == "web"
+    assert cfg.host == "0.0.0.0"
+    assert cfg.port == 9000
 
 
 def test_default_tools_groups():
     assert AssistantConfig().tools == ["web", "fs", "compute", "misc"]
-    assert config_from_args(build_arg_parser().parse_args([])).tools == ["web", "fs", "compute", "misc"]
+    assert resolve_config(build_arg_parser().parse_args([])).tools == ["web", "fs", "compute", "misc"]
 
 
 def test_tools_flag_parses_groups():
-    assert config_from_args(build_arg_parser().parse_args(["--tools", "web, misc"])).tools == ["web", "misc"]
-    assert config_from_args(build_arg_parser().parse_args(["--tools", "none"])).tools == ["none"]
+    assert resolve_config(build_arg_parser().parse_args(["--tools", "web, misc"])).tools == ["web", "misc"]
+    assert resolve_config(build_arg_parser().parse_args(["--tools", "none"])).tools == ["none"]
 
 
 async def test_assistant_wires_builtin_tools_by_default(tmp_path):
@@ -301,8 +303,8 @@ async def test_no_memory_omits_tools_and_stores(tmp_path):
 
 
 def test_memory_flag_parses():
-    assert config_from_args(build_arg_parser().parse_args([])).memory is True
-    assert config_from_args(build_arg_parser().parse_args(["--no-memory"])).memory is False
+    assert resolve_config(build_arg_parser().parse_args([])).memory is True
+    assert resolve_config(build_arg_parser().parse_args(["--no-memory"])).memory is False
 
 
 async def test_document_tools_round_trip(tmp_path):

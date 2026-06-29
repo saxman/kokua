@@ -1,17 +1,20 @@
 """Command-line entry point.
 
-Builds an :class:`~mopai.config.AssistantConfig` from flags, then runs the selected front end
+Resolves an :class:`~mopai.config.AssistantConfig` from (in increasing precedence) built-in
+defaults, an optional TOML config file, and command-line flags, then runs the selected front end
 (default ``cli``; ``web`` and any installed plugin are also selectable). ``--list-frontends`` /
 ``--list-tool-packs`` introspect the plugin registry.
+
+Flag defaults are the ``None`` sentinel rather than the real default value, so an unspecified flag
+defers to the config file (and then the built-in default) instead of overriding it.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-from pathlib import Path
 
-from . import plugins
+from . import paths, plugins, settings
 from .config import AssistantConfig
 
 
@@ -21,12 +24,25 @@ def build_arg_parser(prog: str = "mopai") -> argparse.ArgumentParser:
     # Plugin selection / introspection.
     parser.add_argument(
         "--frontend",
-        default="cli",
+        default=None,
         help="Front end to run: 'cli' (terminal), 'web' (browser), or any installed plugin. Default: cli.",
     )
     parser.add_argument("--list-frontends", action="store_true", help="List available front ends and exit.")
     parser.add_argument("--list-tool-packs", action="store_true", help="List installed tool-pack plugins and exit.")
-    parser.add_argument("--no-plugins", action="store_true", help="Disable tool-pack plugin discovery for this run.")
+    parser.add_argument(
+        "--plugins",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Discover tool-pack plugins via the 'mopai.tools' entry-point group. Default: on "
+        "(use --no-plugins to disable for this run).",
+    )
+
+    parser.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="Path to a TOML config file. Default: $MOPAI_CONFIG or $MOPAI_HOME/config.toml if present.",
+    )
 
     # Model + behaviour.
     parser.add_argument(
@@ -36,16 +52,6 @@ def build_arg_parser(prog: str = "mopai") -> argparse.ArgumentParser:
         "/ a locally available model.",
     )
     parser.add_argument("--system", default=None, help="Override the assistant's system message.")
-    parser.add_argument(
-        "--skills-dir",
-        default=None,
-        help="Directory where authored skills are written and discovered. Default: <state>/skills.",
-    )
-    parser.add_argument(
-        "--history",
-        default=None,
-        help="Conversation history database path. Default: <state>/history.json.",
-    )
     parser.add_argument(
         "--reminder-seconds",
         type=float,
@@ -60,18 +66,18 @@ def build_arg_parser(prog: str = "mopai") -> argparse.ArgumentParser:
     parser.add_argument(
         "--show-thinking",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
         help="Show the model's reasoning as it streams. Default: on (use --no-show-thinking to hide).",
     )
     parser.add_argument(
         "--show-tools",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
         help="Show tool calls as they happen. Default: on (use --no-show-tools to hide).",
     )
     parser.add_argument(
         "--tools",
-        default="web,fs,compute,misc",
+        default=None,
         help="Comma-separated AIMU built-in tool groups to expose: web, fs, compute, misc, image, "
         "audio, speech, transcription (or 'all' / 'none'). Default: web,fs,compute,misc. The "
         "generative groups (image/audio/speech/transcription) require their AIMU_*_MODEL env var.",
@@ -92,39 +98,49 @@ def build_arg_parser(prog: str = "mopai") -> argparse.ArgumentParser:
     parser.add_argument(
         "--memory",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
         help="Persistent memory across conversations: facts about the user (semantic) plus "
         "user-provided documents. Default: on (use --no-memory to disable).",
     )
 
     # Web front-end binding (ignored by other front ends).
-    parser.add_argument("--host", default="127.0.0.1", help="Web front end bind host. Default: 127.0.0.1")
-    parser.add_argument("--port", type=int, default=8000, help="Web front end bind port. Default: 8000")
+    parser.add_argument("--host", default=None, help="Web front end bind host. Default: 127.0.0.1")
+    parser.add_argument("--port", type=int, default=None, help="Web front end bind port. Default: 8000")
     return parser
 
 
-def config_from_args(args: argparse.Namespace) -> AssistantConfig:
-    # Omitted path flags fall back to the AssistantConfig defaults (under the app state dir).
-    kwargs = {
-        "model": args.model,
-        "reminder_seconds": args.reminder_seconds,
-        "show_thinking": args.show_thinking,
-        "show_tools": args.show_tools,
-        "tools": [group.strip() for group in args.tools.split(",") if group.strip()],
-        "mcp_servers": args.mcp or [],
-        "mcp_bearer": args.mcp_bearer,
-        "memory": args.memory,
-        "load_plugins": not args.no_plugins,
-    }
-    if args.skills_dir is not None:
-        kwargs["skills_dir"] = Path(args.skills_dir)
-    if args.history is not None:
-        kwargs["history_path"] = args.history
-    if args.system is not None:
-        kwargs["system_message"] = args.system
-    if args.reminder_text is not None:
-        kwargs["reminder_text"] = args.reminder_text
-    return AssistantConfig(**kwargs)
+def _cli_overrides(args: argparse.Namespace) -> dict:
+    """Collect the flags the user actually passed (non-sentinel), keyed by AssistantConfig field."""
+    overrides: dict = {}
+
+    def take(field: str, value, transform=None):
+        if value is not None:
+            overrides[field] = transform(value) if transform else value
+
+    take("model", args.model)
+    take("system_message", args.system)
+    take("reminder_seconds", args.reminder_seconds)
+    take("reminder_text", args.reminder_text)
+    take("show_thinking", args.show_thinking)
+    take("show_tools", args.show_tools)
+    take("tools", args.tools, lambda v: [group.strip() for group in v.split(",") if group.strip()])
+    take("mcp_servers", args.mcp)
+    take("mcp_bearer", args.mcp_bearer)
+    take("memory", args.memory)
+    take("load_plugins", args.plugins)
+    take("frontend", args.frontend)
+    take("host", args.host)
+    take("port", args.port)
+    return overrides
+
+
+def resolve_config(args: argparse.Namespace) -> AssistantConfig:
+    """Merge built-in defaults < config file < CLI flags, then migrate any legacy data layout."""
+    overrides = {**settings.load(args.config), **_cli_overrides(args)}
+    config = AssistantConfig(**overrides)
+    # Resolve to data/ before any store opens, moving pre-data/ content in if this is an upgrade.
+    paths.migrate_legacy_layout(config.data_dir)
+    return config
 
 
 def main() -> None:
@@ -142,8 +158,8 @@ def main() -> None:
             print(f"{name}: {pack.description}")
         return
 
-    config = config_from_args(args)
-    frontend = plugins.get_frontend(args.frontend)
+    config = resolve_config(args)
+    frontend = plugins.get_frontend(config.frontend)
     try:
         asyncio.run(frontend.run(config, args))
     except KeyboardInterrupt:

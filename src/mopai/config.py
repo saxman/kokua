@@ -43,8 +43,6 @@ MEMORY_GUIDANCE = (
 class AssistantConfig:
     model: Optional[str] = None
     system_message: str = DEFAULT_SYSTEM_MESSAGE
-    skills_dir: Path = field(default_factory=paths.skills_dir)
-    history_path: str = field(default_factory=lambda: str(paths.history_path()))
     reminder_seconds: Optional[float] = None
     reminder_text: str = DEFAULT_REMINDER_TEXT
     # Surface the model's reasoning and tool calls in the channel, not just the final answer.
@@ -57,7 +55,27 @@ class AssistantConfig:
     mcp_bearer: Optional[str] = None
     # Persistent memory: a SemanticMemoryStore for facts + a DocumentStore for documents. On by default.
     memory: bool = True
-    memory_path: Path = field(default_factory=paths.memory_dir)
-    documents_path: Path = field(default_factory=paths.documents_dir)
     # Load tool-pack plugins discovered via the "mopai.tools" entry-point group.
     load_plugins: bool = True
+    # Front end to run and, for the web front end, its bind address.
+    frontend: str = "cli"
+    host: str = "127.0.0.1"
+    port: int = 8000
+    # Single root for all transient and user-provided content; the leaf paths below derive from it.
+    data_dir: Path = field(default_factory=paths.data_dir)
+
+    @property
+    def skills_dir(self) -> Path:
+        return self.data_dir / "skills"
+
+    @property
+    def history_path(self) -> str:
+        return str(self.data_dir / "history.json")
+
+    @property
+    def memory_path(self) -> Path:
+        return self.data_dir / "memory"
+
+    @property
+    def documents_path(self) -> Path:
+        return self.data_dir / "documents"
