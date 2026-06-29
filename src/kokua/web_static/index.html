@@ -40,6 +40,7 @@
   <form id="form">
     <input id="msg" autocomplete="off" placeholder="Message your assistant..." autofocus />
     <button id="send" type="submit">Send</button>
+    <button id="stop" type="button">Stop</button>
   </form>
 
   <script>
@@ -47,6 +48,7 @@
     const form = document.getElementById("form");
     const input = document.getElementById("msg");
     const sendBtn = document.getElementById("send");
+    const stopBtn = document.getElementById("stop");
 
     let streamingBubble = null;  // the assistant answer bubble accumulating tokens
     let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
@@ -115,6 +117,11 @@
       addBubble("user", text);
       ws.send(text);
       input.value = "";
+    });
+
+    // Cancel the in-flight reply. `/stop` is a no-op server-side when nothing is running.
+    stopBtn.addEventListener("click", () => {
+      if (ws.readyState === WebSocket.OPEN) ws.send("/stop");
     });
   </script>
 </body>

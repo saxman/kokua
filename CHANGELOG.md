@@ -17,6 +17,9 @@ installable, modular application.
   `--list-tool-packs`, `--no-plugins`.
 - **Front ends**: `cli` (terminal via AIMU's `CLIChannel`) and `web` (Starlette + uvicorn WebSocket server
   with a streaming browser UI, behind the `web` extra).
+- **Stop an in-flight reply**: send `/stop` (the web UI also has a Stop button) to cancel the current turn;
+  the partial turn is kept so the conversation can continue. Built on AIMU's `aio.RunHandle`; reactive
+  turns run as background tasks so the channel keeps reading mid-turn.
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,

@@ -43,7 +43,8 @@ kokua --model anthropic:claude-sonnet-4-6 --reminder-seconds 30
 ```
 
 Omit `--model` to use `AIMU_LANGUAGE_MODEL` or a locally available model. Chat at the prompt; Ctrl-D exits.
-After ~30s a proactive message appears.
+After ~30s a proactive message appears. Send `/stop` to cancel a reply that's still streaming (the partial
+turn is kept, so the conversation continues); the web UI has a Stop button for the same.
 
 Run the **web** front end instead (needs the `web` extra):
 

@@ -18,7 +18,7 @@ import logging
 from typing import Callable, Optional
 
 from aimu import aio
-from aimu.aio import Channel, Scheduler
+from aimu.aio import Channel, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
 from aimu.history import ConversationManager
 from aimu.memory import DocumentStore, SemanticMemoryStore
@@ -148,6 +148,11 @@ class Assistant:
         # The reactive turn and a proactive turn share one agent/client; serialize them so
         # a reminder firing mid-conversation can't interleave on shared message state.
         self._lock = asyncio.Lock()
+        # Each reactive turn runs as a background task (a RunHandle) so the serve loop stays free to
+        # receive a `/stop` while a turn is in flight. `_current` is the latest turn (the one `/stop`
+        # cancels); `_turns` keeps task refs alive until they finish.
+        self._current: Optional[RunHandle] = None
+        self._turns: set = set()
 
     @classmethod
     async def create(cls, config: AssistantConfig, channel: Channel, *, client=None) -> "Assistant":
@@ -216,6 +221,12 @@ class Assistant:
                 tg.create_task(self._serve_channel())
                 tg.create_task(self._scheduler.run())
         finally:
+            # Cancel any turn still running at shutdown and let the cancellations settle (each turn
+            # persists its partial state on stop), so no task is left pending.
+            for task in list(self._turns):
+                task.cancel()
+            if self._turns:
+                await asyncio.gather(*self._turns, return_exceptions=True)
             for mcp in self._mcp_clients:
                 try:
                     await mcp.aclose()
@@ -225,7 +236,16 @@ class Assistant:
     async def _serve_channel(self) -> None:
         try:
             async for msg in self._channel.receive():
-                await self._handle(msg)
+                if (msg.text or "").strip().lower() == "/stop":
+                    if self._current is not None and not self._current.done:
+                        self._current.cancel()
+                    continue
+                # Start the turn as a background task so the loop keeps reading and a `/stop` can
+                # arrive mid-turn. Turns stay serialized by self._lock (a reminder can't interleave).
+                handle = RunHandle.start(self._handle(msg))
+                self._current = handle
+                self._turns.add(handle.task)
+                handle.task.add_done_callback(self._turns.discard)
         finally:
             self._scheduler.stop()  # channel closed -> stop the scheduler so run() returns
 
@@ -234,6 +254,15 @@ class Assistant:
             try:
                 stream = await self._agent.run(msg.text, stream=True, images=msg.images)
                 await self._channel.send(stream, reply_to=msg)
+            except asyncio.CancelledError:
+                # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
+                # agent snapshots it in a finally), and return so the daemon keeps serving.
+                try:
+                    await self._channel.send("(stopped)", reply_to=msg)
+                except Exception:
+                    pass
+                self._persist()
+                return
             except Exception:
                 logger.exception("Error handling message")
                 await self._channel.send("Sorry, something went wrong handling that.", reply_to=msg)
