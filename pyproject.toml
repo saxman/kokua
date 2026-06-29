@@ -1,0 +1,81 @@
+[project]
+name = "mopai"
+version = "0.1.0"
+description = "Mopai (my own personal ai): a hackable, modular personal-assistant application built on AIMU."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Paul Saxman" }]
+keywords = ["ai", "assistant", "agent", "llm", "aimu", "personal-assistant"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Mopai uses AIMU features that are on `main` but not yet in a published release
+# (make_document_tools, MCPClient url=). Until AIMU cuts a release that includes them,
+# install AIMU from source FIRST (see README): `pip install -e ../aimu`, or in CI
+# `pip install "aimu @ git+https://github.com/saxman/aimu@main"`. The bare `aimu`
+# requirement below is satisfied by whichever AIMU is already installed.
+# TODO: pin `aimu>=<next-release>` once those features ship to PyPI.
+dependencies = [
+    "aimu",
+]
+
+[project.optional-dependencies]
+# The web front end (Starlette + uvicorn WebSocket server).
+web = [
+    "starlette",
+    "uvicorn>=0.30",
+]
+dev = [
+    "ruff",
+    "pytest",
+    "pytest-asyncio",
+]
+
+[project.urls]
+Homepage = "https://github.com/saxman/mopai"
+Repository = "https://github.com/saxman/mopai"
+Changelog = "https://github.com/saxman/mopai/blob/main/CHANGELOG.md"
+
+# `mopai` runs the selected front end (default: cli). `mopai-web` is a convenience
+# for `mopai --frontend web`.
+[project.scripts]
+mopai = "mopai.cli:main"
+mopai-web = "mopai.frontends.web:main"
+
+# Built-in plugins, registered like any third-party module would be. Install a package
+# that adds an entry point under these groups and Mopai discovers it at runtime.
+[project.entry-points."mopai.frontends"]
+cli = "mopai.frontends.cli:FRONTEND"
+web = "mopai.frontends.web:FRONTEND"
+
+[project.entry-points."mopai.tools"]
+example = "mopai.toolpacks.example:TOOL_PACK"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mopai*"]
+
+[tool.setuptools.package-data]
+mopai = ["web_static/*.html"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"

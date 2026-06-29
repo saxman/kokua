@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AIMU Personal Assistant</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, system-ui, sans-serif;
+      margin: 0; height: 100vh; display: flex; flex-direction: column;
+      background: #f5f5f7; color: #111;
+    }
+    header { padding: 12px 16px; background: #1f2937; color: #fff; font-weight: 600; }
+    header small { font-weight: 400; opacity: 0.7; margin-left: 8px; }
+    #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .bubble { max-width: 70%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; line-height: 1.4; }
+    .user { align-self: flex-end; background: #2563eb; color: #fff; border-bottom-right-radius: 4px; }
+    .assistant { align-self: flex-start; background: #fff; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
+    .proactive { align-self: flex-start; background: #fef3c7; border: 1px solid #f59e0b; }
+    .proactive::before { content: "proactive "; font-size: 0.7em; text-transform: uppercase; opacity: 0.6; letter-spacing: 0.05em; }
+    .notice { align-self: center; font-size: 0.85em; opacity: 0.6; }
+    .thinking {
+      align-self: flex-start; max-width: 70%; font-size: 0.85em; font-style: italic;
+      color: #6b7280; background: transparent; border-left: 2px solid #d1d5db; padding: 2px 10px; white-space: pre-wrap;
+    }
+    .thinking::before { content: "thinking"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; font-style: normal; opacity: 0.7; }
+    .tool { align-self: flex-start; font-family: ui-monospace, monospace; font-size: 0.8em; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 4px 10px; }
+    .tool::before { content: "\1F527  "; }
+    form { display: flex; gap: 8px; padding: 12px 16px; background: #fff; border-top: 1px solid #e5e7eb; }
+    #msg { flex: 1; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 1em; }
+    button { padding: 10px 18px; border: none; border-radius: 10px; background: #2563eb; color: #fff; font-size: 1em; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+  </style>
+</head>
+<body>
+  <header>AIMU Personal Assistant <small>local, single user</small></header>
+  <div id="log"></div>
+  <form id="form">
+    <input id="msg" autocomplete="off" placeholder="Message your assistant..." autofocus />
+    <button id="send" type="submit">Send</button>
+  </form>
+
+  <script>
+    const log = document.getElementById("log");
+    const form = document.getElementById("form");
+    const input = document.getElementById("msg");
+    const sendBtn = document.getElementById("send");
+
+    let streamingBubble = null;  // the assistant answer bubble accumulating tokens
+    let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
+
+    function addBubble(cls, text) {
+      const el = document.createElement("div");
+      el.className = "bubble " + cls;
+      el.textContent = text || "";
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
+    }
+
+    function notice(text) { addBubble("notice", text); }
+
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+    function toolLine(name, args) {
+      let argStr = "";
+      if (args && typeof args === "object") {
+        argStr = Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
+      } else if (args != null) {
+        argStr = String(args);
+      }
+      return `${name || "tool"}(${argStr})`;
+    }
+
+    ws.onmessage = (event) => {
+      const frame = JSON.parse(event.data);
+      // Blocks are appended in arrival order (thinking -> tool -> answer, possibly several
+      // rounds per turn). A tool call or answer token closes any open thinking block.
+      if (frame.type === "thinking") {
+        if (!thinkingBlock) thinkingBlock = addBubble("thinking", "");
+        thinkingBlock.appendChild(document.createTextNode(frame.text));
+        log.scrollTop = log.scrollHeight;
+      } else if (frame.type === "tool") {
+        thinkingBlock = null;
+        addBubble("tool", toolLine(frame.name, frame.arguments));
+      } else if (frame.type === "token") {
+        thinkingBlock = null;
+        if (!streamingBubble) {
+          streamingBubble = addBubble("assistant", "");
+        } else if (log.lastElementChild !== streamingBubble) {
+          // New answer content after an intervening thinking/tool block: float the answer
+          // to the bottom so it never sits above later reasoning.
+          log.appendChild(streamingBubble);  // moves the existing node to the end
+        }
+        streamingBubble.textContent += frame.text;
+        log.scrollTop = log.scrollHeight;
+      } else if (frame.type === "done") {
+        streamingBubble = null;
+        thinkingBlock = null;
+      } else if (frame.type === "message") {
+        addBubble(frame.proactive ? "proactive" : "assistant", frame.text);
+      }
+    };
+
+    ws.onopen = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
+    ws.onclose = () => { notice("Disconnected."); input.disabled = true; sendBtn.disabled = true; };
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text || ws.readyState !== WebSocket.OPEN) return;
+      addBubble("user", text);
+      ws.send(text);
+      input.value = "";
+    });
+  </script>
+</body>
+</html>

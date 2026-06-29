@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Mopai runtime state (default: ~/.mopai). Ignored here in case MOPAI_HOME points at the repo.
+.mopai/
