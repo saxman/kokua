@@ -55,7 +55,7 @@ class AssistantConfig:
     mcp_bearer: Optional[str] = None
     # Persistent memory: a SemanticMemoryStore for facts + a DocumentStore for documents. On by default.
     memory: bool = True
-    # Load tool-pack plugins discovered via the "mopai.tools" entry-point group.
+    # Load tool-pack plugins discovered via the "kokua.tools" entry-point group.
     load_plugins: bool = True
     # Front end to run and, for the web front end, its bind address.
     frontend: str = "cli"

@@ -6,13 +6,13 @@ import logging
 
 import pytest
 
-import mopai.paths as paths
-from mopai import settings
-from mopai.cli import build_arg_parser, resolve_config
+import kokua.paths as paths
+from kokua import settings
+from kokua.cli import build_arg_parser, resolve_config
 
 
 def _write_config(text: str):
-    """Write config.toml at the default location ($MOPAI_HOME/config.toml) and return its path."""
+    """Write config.toml at the default location ($KOKUA_HOME/config.toml) and return its path."""
     path = paths.config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")

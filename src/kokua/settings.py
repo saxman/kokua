@@ -5,11 +5,11 @@ CLI's concern: it overlays these overrides onto anything the user passed on the 
 
 File lookup order (first specified location wins):
     1. an explicit path (``--config``)
-    2. ``$MOPAI_CONFIG``
-    3. ``$MOPAI_HOME/config.toml`` (the default)
+    2. ``$KOKUA_CONFIG``
+    3. ``$KOKUA_HOME/config.toml`` (the default)
 
 A missing default-location file is a silent no-op; a missing *explicitly requested* file is an
-error, so a typo in ``--config`` / ``$MOPAI_CONFIG`` fails loudly instead of silently ignoring the
+error, so a typo in ``--config`` / ``$KOKUA_CONFIG`` fails loudly instead of silently ignoring the
 intended settings.
 """
 
@@ -61,7 +61,7 @@ def resolve_path(explicit: Optional[str]) -> tuple[Path, bool]:
     """Return the config-file path and whether the user explicitly requested it."""
     if explicit:
         return Path(explicit).expanduser(), True
-    env = os.environ.get("MOPAI_CONFIG")
+    env = os.environ.get("KOKUA_CONFIG")
     if env:
         return Path(env).expanduser(), True
     return paths.config_path(), False

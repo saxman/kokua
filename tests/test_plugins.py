@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from helpers import MockAsyncModelClient
-from mopai import plugins
-from mopai.assistant import Assistant
-from mopai.config import AssistantConfig
-from mopai.plugins import FrontEnd, ToolPack
+from kokua import plugins
+from kokua.assistant import Assistant
+from kokua.config import AssistantConfig
+from kokua.plugins import FrontEnd, ToolPack
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:

@@ -1,4 +1,4 @@
-"""Mock-only tests for the Mopai assistant core and CLI parsing."""
+"""Mock-only tests for the Kokua assistant core and CLI parsing."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from typing import AsyncIterator
 
 import pytest
 
-import mopai.paths
+import kokua.paths
 from helpers import MockAsyncModelClient
-from mopai.assistant import Assistant
-from mopai.cli import build_arg_parser, resolve_config
-from mopai.config import AssistantConfig
+from kokua.assistant import Assistant
+from kokua.cli import build_arg_parser, resolve_config
+from kokua.config import AssistantConfig
 
 from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamingContentType
@@ -61,9 +61,9 @@ def test_arg_parser_defaults():
 
 def test_default_config_lives_under_state_dir():
     cfg = resolve_config(build_arg_parser().parse_args([]))
-    assert cfg.data_dir == mopai.paths.data_dir()
-    assert cfg.skills_dir == mopai.paths.skills_dir()
-    assert cfg.history_path == str(mopai.paths.history_path())
+    assert cfg.data_dir == kokua.paths.data_dir()
+    assert cfg.skills_dir == kokua.paths.skills_dir()
+    assert cfg.history_path == str(kokua.paths.history_path())
     assert cfg.frontend == "cli"
 
 

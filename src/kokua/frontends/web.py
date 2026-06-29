@@ -2,7 +2,7 @@
 
 Serves a static chat page and bridges one browser onto a per-connection Assistant session via
 `WebChannel`. Async-native, so scheduler-pushed proactive messages reach the browser unprompted.
-Requires the ``web`` extra (``pip install 'mopai[web]'``). Single user by design: one session per
+Requires the ``web`` extra (``pip install 'kokua[web]'``). Single user by design: one session per
 connection, sharing one history / skills / memory; a second simultaneous connection is rejected.
 """
 
@@ -25,7 +25,7 @@ from ..plugins import FrontEnd
 
 def _index_html() -> str:
     """Read the bundled chat page from package data (works for installed + source layouts)."""
-    return files("mopai").joinpath("web_static/index.html").read_text(encoding="utf-8")
+    return files("kokua").joinpath("web_static/index.html").read_text(encoding="utf-8")
 
 
 def build_app(config: AssistantConfig, *, client=None) -> Starlette:
@@ -74,7 +74,7 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
 
 
 async def run(config: AssistantConfig, args: argparse.Namespace) -> None:
-    """Run the web server within the current asyncio loop (for the unified `mopai --frontend web`)."""
+    """Run the web server within the current asyncio loop (for the unified `kokua --frontend web`)."""
     import uvicorn
 
     server = uvicorn.Server(uvicorn.Config(build_app(config), host=config.host, port=config.port))
@@ -82,17 +82,17 @@ async def run(config: AssistantConfig, args: argparse.Namespace) -> None:
 
 
 def serve(config: AssistantConfig, **uvicorn_kwargs) -> None:
-    """Blocking server start, used by the `mopai-web` console script."""
+    """Blocking server start, used by the `kokua-web` console script."""
     import uvicorn
 
     uvicorn.run(build_app(config), host=config.host, port=config.port, **uvicorn_kwargs)
 
 
 def main() -> None:
-    # The `mopai-web` convenience script: resolve config (defaults < file < flags), then serve.
+    # The `kokua-web` convenience script: resolve config (defaults < file < flags), then serve.
     from ..cli import build_arg_parser, resolve_config
 
-    args = build_arg_parser("mopai-web").parse_args()
+    args = build_arg_parser("kokua-web").parse_args()
     serve(resolve_config(args))
 
 

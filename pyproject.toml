@@ -1,7 +1,7 @@
 [project]
-name = "mopai"
+name = "kokua"
 version = "0.1.0"
-description = "Mopai (my own personal ai): a hackable, modular personal-assistant application built on AIMU."
+description = "Kokua (Hawaiian: help, assistance): a hackable, modular personal-assistant application built on AIMU."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -17,7 +17,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# Mopai uses AIMU features that are on `main` but not yet in a published release
+# Kokua uses AIMU features that are on `main` but not yet in a published release
 # (aio.channels/Scheduler, make_document_tools, MCPClient url=). The PyPI build of AIMU
 # carries the same version string but lacks these, so the dependency is sourced from the
 # local checkout via [tool.uv.sources] below (editable). `uv sync` installs that, not PyPI.
@@ -39,24 +39,24 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/saxman/mopai"
-Repository = "https://github.com/saxman/mopai"
-Changelog = "https://github.com/saxman/mopai/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/saxman/kokua"
+Repository = "https://github.com/saxman/kokua"
+Changelog = "https://github.com/saxman/kokua/blob/main/CHANGELOG.md"
 
-# `mopai` runs the selected front end (default: cli). `mopai-web` is a convenience
-# for `mopai --frontend web`.
+# `kokua` runs the selected front end (default: cli). `kokua-web` is a convenience
+# for `kokua --frontend web`.
 [project.scripts]
-mopai = "mopai.cli:main"
-mopai-web = "mopai.frontends.web:main"
+kokua = "kokua.cli:main"
+kokua-web = "kokua.frontends.web:main"
 
 # Built-in plugins, registered like any third-party module would be. Install a package
-# that adds an entry point under these groups and Mopai discovers it at runtime.
-[project.entry-points."mopai.frontends"]
-cli = "mopai.frontends.cli:FRONTEND"
-web = "mopai.frontends.web:FRONTEND"
+# that adds an entry point under these groups and Kokua discovers it at runtime.
+[project.entry-points."kokua.frontends"]
+cli = "kokua.frontends.cli:FRONTEND"
+web = "kokua.frontends.web:FRONTEND"
 
-[project.entry-points."mopai.tools"]
-example = "mopai.toolpacks.example:TOOL_PACK"
+[project.entry-points."kokua.tools"]
+example = "kokua.toolpacks.example:TOOL_PACK"
 
 # Source AIMU from the sibling checkout so `uv sync` installs the local editable copy
 # instead of the (stale, same-versioned) PyPI build. Path is relative to this file, so it
@@ -71,10 +71,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["mopai*"]
+include = ["kokua*"]
 
 [tool.setuptools.package-data]
-mopai = ["web_static/*.html"]
+kokua = ["web_static/*.html"]
 
 [tool.ruff]
 line-length = 120

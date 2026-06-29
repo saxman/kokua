@@ -1,11 +1,11 @@
 """App-owned state locations.
 
 The reference example stored everything under ``aimu.paths.output``; a standalone app owns
-its own directory instead. The state root defaults to ``~/.mopai`` and is overridable with the
-``MOPAI_HOME`` environment variable. The root holds an optional ``config.toml`` and a single
+its own directory instead. The state root defaults to ``~/.kokua`` and is overridable with the
+``KOKUA_HOME`` environment variable. The root holds an optional ``config.toml`` and a single
 ``data/`` directory under which all transient and user-provided content lives::
 
-    $MOPAI_HOME/
+    $KOKUA_HOME/
       config.toml          # optional; read if present
       data/
         history.json
@@ -21,13 +21,13 @@ from pathlib import Path
 
 
 def state_dir() -> Path:
-    """Root for all of Mopai's state: ``$MOPAI_HOME`` if set, else ``~/.mopai``.
+    """Root for all of Kokua's state: ``$KOKUA_HOME`` if set, else ``~/.kokua``.
 
     Configurable only via the env var, since the config file lives inside this directory and so
     must be locatable before it is read. Not created here; callers create what they write.
     """
-    env = os.environ.get("MOPAI_HOME")
-    return Path(env).expanduser() if env else Path.home() / ".mopai"
+    env = os.environ.get("KOKUA_HOME")
+    return Path(env).expanduser() if env else Path.home() / ".kokua"
 
 
 def data_dir() -> Path:

@@ -25,5 +25,5 @@ env/
 .idea/
 .vscode/
 
-# Mopai runtime state (default: ~/.mopai). Ignored here in case MOPAI_HOME points at the repo.
-.mopai/
+# Kokua runtime state (default: ~/.kokua). Ignored here in case KOKUA_HOME points at the repo.
+.kokua/

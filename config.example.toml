@@ -1,5 +1,5 @@
-# Mopai configuration. Copy to $MOPAI_HOME/config.toml (default ~/.mopai/config.toml), or point at
-# it with --config PATH or $MOPAI_CONFIG. Every key is optional; the value shown is the built-in
+# Kokua configuration. Copy to $KOKUA_HOME/config.toml (default ~/.kokua/config.toml), or point at
+# it with --config PATH or $KOKUA_CONFIG. Every key is optional; the value shown is the built-in
 # default. Command-line flags override anything set here. Unknown keys are ignored with a warning.
 
 [assistant]
@@ -19,7 +19,7 @@ show_tools = true
 # Persistent memory across conversations (facts + user documents).
 memory = true
 
-# Discover tool-pack plugins via the "mopai.tools" entry-point group.
+# Discover tool-pack plugins via the "kokua.tools" entry-point group.
 load_plugins = true
 
 [tools]
@@ -34,11 +34,11 @@ servers = []
 # bearer = "..."
 
 [paths]
-# Absolute override for where all transient + user content lives. Default: $MOPAI_HOME/data.
-# data_dir = "/path/to/mopai-data"
+# Absolute override for where all transient + user content lives. Default: $KOKUA_HOME/data.
+# data_dir = "/path/to/kokua-data"
 
 [frontend]
-# Which front end `mopai` runs: "cli", "web", or any installed plugin.
+# Which front end `kokua` runs: "cli", "web", or any installed plugin.
 name = "cli"
 
 [web]

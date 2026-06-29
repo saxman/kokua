@@ -19,11 +19,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      # Mopai needs AIMU features not yet on PyPI, so install AIMU from main first.
+      # Kokua needs AIMU features not yet on PyPI, so install AIMU from main first.
       # The bare `aimu` dependency in pyproject is then already satisfied.
       - name: Install AIMU from main
         run: pip install "aimu @ git+https://github.com/saxman/aimu@main"
-      - name: Install Mopai (dev + web)
+      - name: Install Kokua (dev + web)
         run: pip install -e '.[dev,web]'
       - name: Lint
         run: |

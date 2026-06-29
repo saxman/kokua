@@ -1,6 +1,6 @@
 """Command-line entry point.
 
-Resolves an :class:`~mopai.config.AssistantConfig` from (in increasing precedence) built-in
+Resolves an :class:`~kokua.config.AssistantConfig` from (in increasing precedence) built-in
 defaults, an optional TOML config file, and command-line flags, then runs the selected front end
 (default ``cli``; ``web`` and any installed plugin are also selectable). ``--list-frontends`` /
 ``--list-tool-packs`` introspect the plugin registry.
@@ -18,8 +18,8 @@ from . import plugins, settings
 from .config import AssistantConfig
 
 
-def build_arg_parser(prog: str = "mopai") -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog, description="Mopai: my own personal ai.")
+def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog, description="Kokua: a personal AI assistant.")
 
     # Plugin selection / introspection.
     parser.add_argument(
@@ -33,7 +33,7 @@ def build_arg_parser(prog: str = "mopai") -> argparse.ArgumentParser:
         "--plugins",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Discover tool-pack plugins via the 'mopai.tools' entry-point group. Default: on "
+        help="Discover tool-pack plugins via the 'kokua.tools' entry-point group. Default: on "
         "(use --no-plugins to disable for this run).",
     )
 
@@ -41,7 +41,7 @@ def build_arg_parser(prog: str = "mopai") -> argparse.ArgumentParser:
         "--config",
         default=None,
         metavar="PATH",
-        help="Path to a TOML config file. Default: $MOPAI_CONFIG or $MOPAI_HOME/config.toml if present.",
+        help="Path to a TOML config file. Default: $KOKUA_CONFIG or $KOKUA_HOME/config.toml if present.",
     )
 
     # Model + behaviour.

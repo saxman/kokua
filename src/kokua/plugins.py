@@ -1,18 +1,18 @@
 """The plugin system: front ends and tool-packs discovered via Python entry points.
 
-Mopai is modular. A **front end** runs the assistant over some transport (terminal, web, and
+Kokua is modular. A **front end** runs the assistant over some transport (terminal, web, and
 later Telegram/Slack); a **tool-pack** contributes extra agent tools. Both are discovered at
 runtime from entry-point groups, so a third party adds one by publishing a package that
-registers an entry point, with no change to Mopai's core:
+registers an entry point, with no change to Kokua's core:
 
-    [project.entry-points."mopai.frontends"]
-    telegram = "mopai_telegram:FRONTEND"
+    [project.entry-points."kokua.frontends"]
+    telegram = "kokua_telegram:FRONTEND"
 
-    [project.entry-points."mopai.tools"]
+    [project.entry-points."kokua.tools"]
     weather = "my_weather_pack:TOOL_PACK"
 
 The built-in `cli` / `web` front ends and the `example` tool-pack are registered exactly this
-way in Mopai's own pyproject. A hardcoded fallback registry also lists the built-ins so the app
+way in Kokua's own pyproject. A hardcoded fallback registry also lists the built-ins so the app
 still works when run from a source checkout that hasn't been ``pip install``-ed (no entry-point
 metadata yet).
 """
@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from importlib.metadata import entry_points
 from typing import Awaitable, Callable
 
-FRONTEND_GROUP = "mopai.frontends"
-TOOL_PACK_GROUP = "mopai.tools"
+FRONTEND_GROUP = "kokua.frontends"
+TOOL_PACK_GROUP = "kokua.tools"
 
 
 @dataclass(frozen=True)
@@ -91,5 +91,5 @@ def get_frontend(name: str) -> FrontEnd:
 
 
 def discover_tool_packs() -> dict[str, ToolPack]:
-    """Return all installed tool-packs by name (from the ``mopai.tools`` entry-point group)."""
+    """Return all installed tool-packs by name (from the ``kokua.tools`` entry-point group)."""
     return {name: obj for name, obj in _load_group(TOOL_PACK_GROUP).items() if isinstance(obj, ToolPack)}

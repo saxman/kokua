@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from helpers import MockAsyncModelClient
-from mopai.channels.web import WebChannel
-from mopai.config import AssistantConfig
-from mopai.frontends.web import build_app
+from kokua.channels.web import WebChannel
+from kokua.config import AssistantConfig
+from kokua.frontends.web import build_app
 
 from aimu.aio.channels.base import ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType

@@ -1,8 +1,8 @@
 """A tiny example tool-pack, the template for third-party tool modules.
 
 It contributes one trivial tool so the plugin path is real and testable end to end. Copy this
-shape into your own package, register it under the ``mopai.tools`` entry-point group, and
-``pip install`` it: Mopai will discover the pack and add its tools to the agent automatically.
+shape into your own package, register it under the ``kokua.tools`` entry-point group, and
+``pip install`` it: Kokua will discover the pack and add its tools to the agent automatically.
 """
 
 from __future__ import annotations

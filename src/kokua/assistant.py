@@ -8,7 +8,7 @@
               tool-pack plugins contribute extra tools
 
 Kept transport-agnostic (it takes a `Channel`), so the CLI and web front ends share it
-unchanged. The CLI/web entry points live in `mopai.cli` / `mopai.frontends`.
+unchanged. The CLI/web entry points live in `kokua.cli` / `kokua.frontends`.
 """
 
 from __future__ import annotations

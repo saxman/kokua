@@ -1,6 +1,6 @@
 """Test helpers: a mock async model client.
 
-Vendored from AIMU's ``tests/helpers_aio.py`` (the ``MockAsyncModelClient``) so Mopai's tests are
+Vendored from AIMU's ``tests/helpers_aio.py`` (the ``MockAsyncModelClient``) so Kokua's tests are
 self-contained and don't reach into the AIMU repo's test directory.
 """
 
