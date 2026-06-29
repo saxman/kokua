@@ -64,6 +64,14 @@ class WebChannel(Channel):
                 await self._safe_send({"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")})
         await self._safe_send({"type": "done"})
 
+    async def send_approval_request(self, name: str, arguments: Any) -> None:
+        """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
+
+        The reply flows back through the ordinary inbound path (receive()), so the Assistant's serve
+        loop routes it to the pending approval -- no interception is needed here.
+        """
+        await self._safe_send({"type": "approval", "name": name, "arguments": arguments})
+
     async def _safe_send(self, frame: dict) -> None:
         # Once closed (e.g. a proactive push racing a disconnect), swallow send errors so a late
         # frame can't crash the scheduler task.

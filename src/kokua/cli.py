@@ -102,6 +102,13 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Persistent memory across conversations: facts about the user (semantic) plus "
         "user-provided documents. Default: on (use --no-memory to disable).",
     )
+    parser.add_argument(
+        "--confirm-tools",
+        default=None,
+        metavar="NAMES",
+        help="Comma-separated tool names that require interactive confirmation before each call. "
+        "Default: add_skill_script,add_mcp_server,execute_python. Pass an empty string to disable.",
+    )
 
     # Web front-end binding (ignored by other front ends).
     parser.add_argument("--host", default=None, help="Web front end bind host. Default: 127.0.0.1")
@@ -143,6 +150,7 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
     take("mcp_bearer", args.mcp_bearer)
     take("memory", args.memory)
     take("load_plugins", args.plugins)
+    take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
     take("frontend", args.frontend)
     take("host", args.host)
     take("port", args.port)

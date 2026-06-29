@@ -130,6 +130,12 @@ point of a personal assistant, but it means a prompt-injected or mistaken model 
 your machine and call arbitrary remote tools. Only run Kokua with a model, inputs, and MCP servers you
 trust. The CLI prints a notice on startup.
 
+**Tool approval.** The riskiest tools require your confirmation before each call: a `y/N` prompt in the
+terminal, or Allow/Deny buttons in the web UI. By default this gates `add_skill_script`, `add_mcp_server`,
+and `execute_python`. Adjust the set with `[security] confirm_tools` in the config file or `--confirm-tools
+name1,name2` (an empty value disables it). Proactive (unprompted) turns auto-deny these regardless, so the
+assistant never runs a full-access tool on its own schedule without you.
+
 ## Development
 
 ```bash

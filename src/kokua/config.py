@@ -57,6 +57,9 @@ class AssistantConfig:
     memory: bool = True
     # Load tool-pack plugins discovered via the "kokua.tools" entry-point group.
     load_plugins: bool = True
+    # Tools that require interactive confirmation before each call (see assistant._approve). These
+    # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
+    confirm_tools: list[str] = field(default_factory=lambda: ["add_skill_script", "add_mcp_server", "execute_python"])
     # Front end to run and, for the web front end, its bind address.
     frontend: str = "cli"
     host: str = "127.0.0.1"

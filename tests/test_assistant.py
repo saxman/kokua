@@ -316,6 +316,101 @@ async def test_document_tools_round_trip(tmp_path):
     assert tools["read_document"]("/notes/standup.md") == "Yesterday, Today, Blockers"
 
 
+# --- Tool approval ----------------------------------------------------------------------------
+
+
+def test_default_confirm_tools():
+    assert AssistantConfig().confirm_tools == ["add_skill_script", "add_mcp_server", "execute_python"]
+    assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == [
+        "add_skill_script",
+        "add_mcp_server",
+        "execute_python",
+    ]
+
+
+def test_confirm_tools_flag_parses():
+    cfg = resolve_config(build_arg_parser().parse_args(["--confirm-tools", "add_skill_script, execute_python"]))
+    assert cfg.confirm_tools == ["add_skill_script", "execute_python"]
+
+
+def test_confirm_tools_flag_empty_disables():
+    assert resolve_config(build_arg_parser().parse_args(["--confirm-tools", ""])).confirm_tools == []
+
+
+async def test_assistant_wires_approval_policy(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert assistant._agent.tool_approval == assistant._approve
+
+
+async def test_approve_allows_ungated_tool_without_prompting(tmp_path):
+    channel = FakeChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path, confirm_tools=["add_skill_script"]), channel, client=MockAsyncModelClient([])
+    )
+    assert await assistant._approve("get_weather", {}) is True
+    assert channel.sent == []  # no prompt for an ungated tool
+
+
+async def test_approve_gated_tool_waits_for_routed_answer(tmp_path):
+    channel = FakeChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path, confirm_tools=["add_skill_script"]), channel, client=MockAsyncModelClient([])
+    )
+    task = asyncio.create_task(assistant._approve("add_skill_script", {"skill_name": "x"}))
+    await asyncio.sleep(0)  # let the policy register the pending approval and prompt
+    assert assistant._pending_approval is not None
+    assert channel.sent  # a prompt was sent to the user
+    assistant._pending_approval.set_result(True)
+    assert await task is True
+
+
+async def test_approve_proactive_auto_denies_gated_tool(tmp_path):
+    channel = FakeChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path, confirm_tools=["add_skill_script"]), channel, client=MockAsyncModelClient([])
+    )
+    assistant._in_proactive = True
+    assert await assistant._approve("add_skill_script", {}) is False
+    assert channel.sent == []  # auto-deny: no prompt, no waiting
+
+
+async def test_serve_loop_routes_message_to_pending_approval(tmp_path):
+    class _OneMsg(Channel):
+        name = "fake"
+
+        async def receive(self):
+            yield ChannelMessage(text="y", channel="fake")
+
+        async def send(self, content, *, reply_to=None):
+            pass
+
+    assistant = await Assistant.create(_config(tmp_path), _OneMsg(), client=MockAsyncModelClient([]))
+    fut = asyncio.get_running_loop().create_future()
+    assistant._pending_approval = fut
+
+    await assistant._serve_channel()
+
+    assert fut.done() and fut.result() is True
+    assert assistant._current is None  # the answer did not start a new turn
+
+
+async def test_denied_gated_tool_does_not_run(tmp_path):
+    cfg = _config(tmp_path, confirm_tools=["add_skill_script"])
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    # Proactive context makes _approve auto-deny without an interactive prompt, so the real dispatch
+    # path can be exercised synchronously.
+    assistant._in_proactive = True
+    agent = assistant._agent
+    agent._prepare_run()  # publish tool_approval + tools onto the client (as a run would)
+
+    await agent.model_client._handle_tool_calls(
+        [{"name": "add_skill_script", "arguments": {"skill_name": "disk", "filename": "u.py", "content": "print(1)\n"}}]
+    )
+
+    assert agent.model_client.messages[-1]["content"] == "Tool 'add_skill_script' was not approved."
+    assert not (cfg.skills_dir / "disk" / "scripts" / "u.py").exists()
+
+
 # --- /stop cancellation -----------------------------------------------------------------------
 
 

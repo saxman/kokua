@@ -92,6 +92,11 @@ def test_bool_rejected_for_numeric_field():
         settings.load()
 
 
+def test_security_confirm_tools_from_file():
+    _write_config('[security]\nconfirm_tools = ["add_skill_script"]\n')
+    assert _resolve().confirm_tools == ["add_skill_script"]
+
+
 def test_data_dir_override_redirects_leaf_paths(tmp_path):
     target = tmp_path / "elsewhere"
     _write_config(f'[paths]\ndata_dir = "{target}"\n')

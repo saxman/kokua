@@ -20,6 +20,11 @@ installable, modular application.
 - **Stop an in-flight reply**: send `/stop` (the web UI also has a Stop button) to cancel the current turn;
   the partial turn is kept so the conversation can continue. Built on AIMU's `aio.RunHandle`; reactive
   turns run as background tasks so the channel keeps reading mid-turn.
+- **Tool approval**: configured "risky" tools require confirmation before each call (terminal `y/N` or
+  web Allow/Deny), built on AIMU's `ToolApproval` gate. Default set `add_skill_script`, `add_mcp_server`,
+  `execute_python`; configurable via `[security] confirm_tools` / `--confirm-tools` (empty disables).
+  Proactive turns auto-deny gated tools. The reply is routed through the single channel reader, so it is
+  safe alongside `/stop`.
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,

@@ -103,6 +103,13 @@ async def test_web_channel_omits_thinking_and_tool_frames_by_default():
     assert ws.frames == [{"type": "token", "text": "4"}, {"type": "done"}]
 
 
+async def test_web_channel_send_approval_request_emits_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_approval_request("add_skill_script", {"skill_name": "x"})
+    assert ws.frames == [{"type": "approval", "name": "add_skill_script", "arguments": {"skill_name": "x"}}]
+
+
 async def test_web_channel_receive_ends_on_sentinel():
     channel = WebChannel(_FakeWS())
     await channel.feed("hello")

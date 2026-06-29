@@ -153,6 +153,12 @@ class Assistant:
         # cancels); `_turns` keeps task refs alive until they finish.
         self._current: Optional[RunHandle] = None
         self._turns: set = set()
+        # Tool-approval coordination. At most one approval is pending at a time (turns are
+        # serialized by self._lock); the serve loop resolves the future with the user's answer.
+        self._pending_approval: Optional[asyncio.Future] = None
+        # True while a proactive (unprompted) turn runs, so _approve auto-denies gated tools (no
+        # user is waiting to confirm).
+        self._in_proactive = False
 
     @classmethod
     async def create(cls, config: AssistantConfig, channel: Channel, *, client=None) -> "Assistant":
@@ -210,6 +216,9 @@ class Assistant:
         assistant._mcp_clients = mcp_clients  # same list the add_mcp_server tool appends to
         assistant._memory_store = memory_store
         assistant._document_store = document_store
+        # Gate configured "risky" tools behind interactive approval (see _approve). Published to the
+        # model client on every run by the agent's _prepare_run; an empty confirm_tools is a no-op.
+        agent.tool_approval = assistant._approve
         if config.reminder_seconds is not None:
             scheduler.at(config.reminder_seconds, assistant._proactive, name="reminder")
         return assistant
@@ -236,9 +245,16 @@ class Assistant:
     async def _serve_channel(self) -> None:
         try:
             async for msg in self._channel.receive():
-                if (msg.text or "").strip().lower() == "/stop":
+                text = (msg.text or "").strip().lower()
+                if text == "/stop":
                     if self._current is not None and not self._current.done:
                         self._current.cancel()
+                    continue
+                # While an approval is pending, the next message is the answer, not a new turn.
+                # (A `/stop` above still takes priority, cancelling the turn that is awaiting it.)
+                pending = self._pending_approval
+                if pending is not None and not pending.done():
+                    pending.set_result(text in ("y", "yes"))
                     continue
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. Turns stay serialized by self._lock (a reminder can't interleave).
@@ -248,6 +264,34 @@ class Assistant:
                 handle.task.add_done_callback(self._turns.discard)
         finally:
             self._scheduler.stop()  # channel closed -> stop the scheduler so run() returns
+
+    async def _approve(self, name: str, arguments: dict) -> bool:
+        """Tool-approval gate run before each tool call (published to the model client per run).
+
+        Ungated tools pass. A proactive (unprompted) turn auto-denies a gated tool, since no user is
+        waiting to confirm and an unprompted full-access call is what approval guards against.
+        Otherwise prompt over the channel and await the answer, which the serve loop routes here.
+        """
+        if name not in self._config.confirm_tools:
+            return True
+        if self._in_proactive:
+            return False
+        self._pending_approval = asyncio.get_running_loop().create_future()
+        try:
+            await self._prompt_approval(name, arguments)
+            return await self._pending_approval
+        finally:
+            # Cleared here so a `/stop` that cancels the turn mid-await (raising CancelledError out
+            # of the await) still leaves no stale pending approval.
+            self._pending_approval = None
+
+    async def _prompt_approval(self, name: str, arguments: dict) -> None:
+        """Ask the user to approve a tool call, however the channel can (web frame vs. plain text)."""
+        request = getattr(self._channel, "send_approval_request", None)
+        if request is not None:
+            await request(name, arguments)
+        else:
+            await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
 
     async def _handle(self, msg: ChannelMessage) -> None:
         async with self._lock:
@@ -271,9 +315,13 @@ class Assistant:
     async def _proactive(self) -> None:
         """Scheduled callback: produce a message unprompted and push it to the channel."""
         async with self._lock:
-            reply = await self._agent.run(self._config.reminder_text)
-            await self._channel.send(reply)
-            self._persist()
+            self._in_proactive = True
+            try:
+                reply = await self._agent.run(self._config.reminder_text)
+                await self._channel.send(reply)
+                self._persist()
+            finally:
+                self._in_proactive = False
 
     def _persist(self) -> None:
         # Copy each message so the manager's timestamp annotation doesn't leak into the live

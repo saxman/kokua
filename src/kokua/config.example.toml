@@ -34,6 +34,12 @@ servers = []
 # Bearer token applied to all servers above that require authentication.
 # bearer = "..."
 
+[security]
+# Tools that require interactive confirmation before each call (terminal y/N, or Allow/Deny in the
+# web UI). These run with full machine access. Set to [] to disable approval. Proactive (unprompted)
+# turns auto-deny these regardless.
+confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python"]
+
 [paths]
 # Absolute override for where all transient + user content lives. Default: $KOKUA_HOME/data.
 # data_dir = "/path/to/kokua-data"

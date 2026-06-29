@@ -28,6 +28,12 @@
     .thinking::before { content: "thinking"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; font-style: normal; opacity: 0.7; }
     .tool { align-self: flex-start; font-family: ui-monospace, monospace; font-size: 0.8em; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 4px 10px; }
     .tool::before { content: "\1F527  "; }
+    .approval { align-self: flex-start; max-width: 70%; background: #fff7ed; border: 1px solid #fdba74; border-radius: 12px; padding: 10px 14px; }
+    .approval .prompt { font-size: 0.9em; margin-bottom: 8px; }
+    .approval code { font-family: ui-monospace, monospace; font-size: 0.85em; }
+    .approval .actions { display: flex; gap: 8px; }
+    .approval button { padding: 6px 14px; font-size: 0.85em; }
+    .approval button.deny { background: #6b7280; }
     form { display: flex; gap: 8px; padding: 12px 16px; background: #fff; border-top: 1px solid #e5e7eb; }
     #msg { flex: 1; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 1em; }
     button { padding: 10px 18px; border: none; border-radius: 10px; background: #2563eb; color: #fff; font-size: 1em; cursor: pointer; }
@@ -104,8 +110,43 @@
         thinkingBlock = null;
       } else if (frame.type === "message") {
         addBubble(frame.proactive ? "proactive" : "assistant", frame.text);
+      } else if (frame.type === "approval") {
+        renderApproval(frame.name, frame.arguments);
       }
     };
+
+    // A gated tool needs confirmation: show the call and Allow/Deny buttons. The reply is a plain
+    // "y"/"n" frame, which the server routes to the waiting tool call (same path as typing it).
+    function renderApproval(name, args) {
+      const el = document.createElement("div");
+      el.className = "bubble approval";
+      const prompt = document.createElement("div");
+      prompt.className = "prompt";
+      prompt.textContent = "Allow ";
+      const code = document.createElement("code");
+      code.textContent = toolLine(name, args);
+      prompt.appendChild(code);
+      prompt.appendChild(document.createTextNode("?"));
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const answer = (reply) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(reply);
+        actions.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      };
+      const allow = document.createElement("button");
+      allow.textContent = "Allow";
+      allow.addEventListener("click", () => answer("y"));
+      const deny = document.createElement("button");
+      deny.className = "deny";
+      deny.textContent = "Deny";
+      deny.addEventListener("click", () => answer("n"));
+      actions.appendChild(allow);
+      actions.appendChild(deny);
+      el.appendChild(prompt);
+      el.appendChild(actions);
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
 
     ws.onopen = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
     ws.onclose = () => { notice("Disconnected."); input.disabled = true; sendBtn.disabled = true; };

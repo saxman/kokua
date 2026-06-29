@@ -58,6 +58,7 @@ _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callab
     ("tools", "groups"): ("tools", (list,), "a list of strings", _str_list),
     ("mcp", "servers"): ("mcp_servers", (list,), "a list of strings", _str_list),
     ("mcp", "bearer"): ("mcp_bearer", (str,), "a string", None),
+    ("security", "confirm_tools"): ("confirm_tools", (list,), "a list of strings", _str_list),
     ("paths", "data_dir"): ("data_dir", (str,), "a string path", lambda s, k, v: Path(v).expanduser()),
     ("frontend", "name"): ("frontend", (str,), "a string", None),
     ("web", "host"): ("host", (str,), "a string", None),
