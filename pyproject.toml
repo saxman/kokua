@@ -18,13 +18,12 @@ classifiers = [
 ]
 
 # Mopai uses AIMU features that are on `main` but not yet in a published release
-# (make_document_tools, MCPClient url=). Until AIMU cuts a release that includes them,
-# install AIMU from source FIRST (see README): `pip install -e ../aimu`, or in CI
-# `pip install "aimu @ git+https://github.com/saxman/aimu@main"`. The bare `aimu`
-# requirement below is satisfied by whichever AIMU is already installed.
-# TODO: pin `aimu>=<next-release>` once those features ship to PyPI.
+# (aio.channels/Scheduler, make_document_tools, MCPClient url=). The PyPI build of AIMU
+# carries the same version string but lacks these, so the dependency is sourced from the
+# local checkout via [tool.uv.sources] below (editable). `uv sync` installs that, not PyPI.
+# TODO: pin `aimu>=<next-release>` and drop the source override once those features ship.
 dependencies = [
-    "aimu",
+    "aimu[ollama]",
 ]
 
 [project.optional-dependencies]
@@ -58,6 +57,13 @@ web = "mopai.frontends.web:FRONTEND"
 
 [project.entry-points."mopai.tools"]
 example = "mopai.toolpacks.example:TOOL_PACK"
+
+# Source AIMU from the sibling checkout so `uv sync` installs the local editable copy
+# instead of the (stale, same-versioned) PyPI build. Path is relative to this file, so it
+# requires `../aimu` to exist. For CI or a fresh clone without it, swap to a git source:
+#   aimu = { git = "https://github.com/saxman/aimu", branch = "main" }
+[tool.uv.sources]
+aimu = { path = "../aimu", editable = true }
 
 [build-system]
 requires = ["setuptools"]
