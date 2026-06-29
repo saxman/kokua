@@ -7,10 +7,10 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolate_state(monkeypatch, tmp_path):
-    """Point state at a throwaway dir so tests never read or migrate the real ~/.mopai.
+    """Point state at a throwaway dir so tests never read or write the real ~/.mopai.
 
-    ``resolve_config`` runs the legacy-layout migration against ``$MOPAI_HOME``; without this an
-    unconfigured run during tests could move a developer's real history/memory into ``data/``.
+    Tests resolve the default config (``$MOPAI_HOME/config.toml``) and open stores under
+    ``$MOPAI_HOME/data``; isolating the root keeps them off a developer's real state.
     """
     monkeypatch.setenv("MOPAI_HOME", str(tmp_path / "mopai-home"))
     monkeypatch.delenv("MOPAI_CONFIG", raising=False)

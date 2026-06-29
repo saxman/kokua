@@ -17,12 +17,7 @@ its own directory instead. The state root defaults to ``~/.mopai`` and is overri
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
-
-# Content that older versions wrote directly under the state root, relative to it. Used only by the
-# one-time migration into ``data/``.
-_LEGACY_ENTRIES = ("history.json", "memory", "documents", "skills")
 
 
 def state_dir() -> Path:
@@ -58,22 +53,3 @@ def memory_dir() -> Path:
 
 def documents_dir() -> Path:
     return data_dir() / "documents"
-
-
-def migrate_legacy_layout(data: Path) -> None:
-    """Move pre-``data/`` content from the state root into ``data`` once.
-
-    Older versions wrote ``history.json`` / ``memory`` / ``documents`` / ``skills`` directly under
-    the state root. If any of those exist there and ``data`` does not yet exist, create ``data`` and
-    move them in, preserving the user's history and memory. No-op once ``data`` exists or there is
-    nothing to move.
-    """
-    if data.exists():
-        return
-    root = data.parent
-    legacy = [root / name for name in _LEGACY_ENTRIES if (root / name).exists()]
-    if not legacy:
-        return
-    data.mkdir(parents=True, exist_ok=True)
-    for source in legacy:
-        shutil.move(str(source), str(data / source.name))

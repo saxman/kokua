@@ -110,8 +110,7 @@ holds an optional `config.toml` and a single `data/` directory for all transient
 ```
 
 Point `data/` elsewhere with `[paths] data_dir` in the config file. Nothing is written to your working
-directory. On first run after upgrading from a pre-`data/` layout, existing top-level `history.json` /
-`memory/` / `documents/` / `skills/` are moved into `data/` automatically.
+directory.
 
 ## Security
 

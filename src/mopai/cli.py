@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from . import paths, plugins, settings
+from . import plugins, settings
 from .config import AssistantConfig
 
 
@@ -135,12 +135,9 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
 
 
 def resolve_config(args: argparse.Namespace) -> AssistantConfig:
-    """Merge built-in defaults < config file < CLI flags, then migrate any legacy data layout."""
+    """Merge built-in defaults < config file < CLI flags into the final config."""
     overrides = {**settings.load(args.config), **_cli_overrides(args)}
-    config = AssistantConfig(**overrides)
-    # Resolve to data/ before any store opens, moving pre-data/ content in if this is an upgrade.
-    paths.migrate_legacy_layout(config.data_dir)
-    return config
+    return AssistantConfig(**overrides)
 
 
 def main() -> None:

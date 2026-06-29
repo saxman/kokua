@@ -99,27 +99,3 @@ def test_data_dir_override_redirects_leaf_paths(tmp_path):
     assert cfg.data_dir == target
     assert cfg.skills_dir == target / "skills"
     assert cfg.history_path == str(target / "history.json")
-
-
-def test_migration_moves_legacy_layout_into_data():
-    root = paths.state_dir()
-    (root / "memory").mkdir(parents=True)
-    (root / "history.json").write_text("old", encoding="utf-8")
-
-    _resolve()  # runs migrate_legacy_layout against the default data_dir
-
-    assert (paths.data_dir() / "history.json").read_text(encoding="utf-8") == "old"
-    assert (paths.data_dir() / "memory").is_dir()
-    assert not (root / "history.json").exists()
-
-
-def test_migration_is_noop_when_data_dir_exists():
-    root = paths.state_dir()
-    paths.data_dir().mkdir(parents=True)  # data/ already present
-    stray = root / "history.json"
-    stray.write_text("stray", encoding="utf-8")
-
-    _resolve()
-
-    assert stray.exists()  # left in place; not migrated
-    assert not (paths.data_dir() / "history.json").exists()
