@@ -69,8 +69,17 @@ Settings can also come from a TOML config file, so you don't have to repeat flag
 highest precedence first: **command-line flag > config file > built-in default**. The file is read from
 `--config <path>`, else `$KOKUA_CONFIG`, else `$KOKUA_HOME/config.toml` (default `~/.kokua/config.toml`); a
 missing default-location file is fine. Every setting has a built-in default, so the file is entirely
-optional and you only set what you want to change. See [`config.example.toml`](config.example.toml) for the
-full set of keys with their defaults.
+optional and you only set what you want to change. See
+[`config.example.toml`](src/kokua/config.example.toml) for the full set of keys with their defaults.
+
+Scaffold a starter file at the default location with:
+
+```bash
+kokua config init           # writes $KOKUA_CONFIG or $KOKUA_HOME/config.toml; --force to overwrite
+```
+
+It writes the same documented example shown above (every key commented at its default), so changing a
+built-in default in a later release still takes effect for keys you leave commented.
 
 ## Modules (plugins)
 

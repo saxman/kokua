@@ -15,6 +15,7 @@ intended settings.
 
 from __future__ import annotations
 
+import importlib.resources
 import logging
 import os
 import tomllib
@@ -25,9 +26,16 @@ from . import paths
 
 logger = logging.getLogger(__name__)
 
+EXAMPLE_FILENAME = "config.example.toml"
+
 
 class ConfigError(Exception):
     """The config file exists but has a missing-required or wrong-typed value."""
+
+
+def example_text() -> str:
+    """The shipped example config: every key at its built-in default, all documented."""
+    return importlib.resources.files(__package__).joinpath(EXAMPLE_FILENAME).read_text(encoding="utf-8")
 
 
 def _str_list(section: str, key: str, value: list) -> list[str]:

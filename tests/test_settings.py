@@ -8,7 +8,7 @@ import pytest
 
 import kokua.paths as paths
 from kokua import settings
-from kokua.cli import build_arg_parser, resolve_config
+from kokua.cli import _init_config, build_arg_parser, resolve_config
 
 
 def _write_config(text: str):
@@ -99,3 +99,42 @@ def test_data_dir_override_redirects_leaf_paths(tmp_path):
     assert cfg.data_dir == target
     assert cfg.skills_dir == target / "skills"
     assert cfg.history_path == str(target / "history.json")
+
+
+def _init(*argv):
+    return _init_config(build_arg_parser().parse_args(["config", "init", *argv]))
+
+
+def test_config_init_writes_to_default_location():
+    assert not paths.config_path().exists()
+    assert _init() == 0
+    assert paths.config_path().read_text(encoding="utf-8") == settings.example_text()
+
+
+def test_config_init_refuses_to_overwrite_without_force():
+    _write_config("# pre-existing\n")
+    assert _init() == 1
+    assert paths.config_path().read_text(encoding="utf-8") == "# pre-existing\n"
+
+
+def test_config_init_force_overwrites():
+    _write_config("# pre-existing\n")
+    assert _init("--force") == 0
+    assert paths.config_path().read_text(encoding="utf-8") == settings.example_text()
+
+
+def test_config_init_custom_path(tmp_path):
+    target = tmp_path / "custom" / "config.toml"
+    assert _init("--path", str(target)) == 0
+    assert target.read_text(encoding="utf-8") == settings.example_text()
+
+
+def test_shipped_example_loads_cleanly(caplog):
+    """The example's active keys must parse without unknown-key or type warnings/errors."""
+    _init()
+    with caplog.at_level(logging.WARNING):
+        overrides = settings.load()
+    assert not any(rec.levelno >= logging.WARNING for rec in caplog.records)
+    assert overrides  # the example leaves several keys active at their default
+    cfg = _resolve()
+    assert cfg.show_thinking is True

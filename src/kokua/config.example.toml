@@ -1,6 +1,7 @@
-# Kokua configuration. Copy to $KOKUA_HOME/config.toml (default ~/.kokua/config.toml), or point at
-# it with --config PATH or $KOKUA_CONFIG. Every key is optional; the value shown is the built-in
-# default. Command-line flags override anything set here. Unknown keys are ignored with a warning.
+# Kokua configuration. Run `kokua config init` to write this to $KOKUA_HOME/config.toml (default
+# ~/.kokua/config.toml), copy it there yourself, or point at it with --config PATH or $KOKUA_CONFIG.
+# Every key is optional; the value shown is the built-in default. Command-line flags override anything
+# set here. Unknown keys are ignored with a warning.
 
 [assistant]
 # Model string, e.g. "anthropic:claude-sonnet-4-6". Unset -> $AIMU_LANGUAGE_MODEL / a local model.

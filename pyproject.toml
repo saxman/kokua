@@ -74,7 +74,7 @@ where = ["src"]
 include = ["kokua*"]
 
 [tool.setuptools.package-data]
-kokua = ["web_static/*.html"]
+kokua = ["web_static/*.html", "config.example.toml"]
 
 [tool.ruff]
 line-length = 120

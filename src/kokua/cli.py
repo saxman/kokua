@@ -106,6 +106,21 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
     # Web front-end binding (ignored by other front ends).
     parser.add_argument("--host", default=None, help="Web front end bind host. Default: 127.0.0.1")
     parser.add_argument("--port", type=int, default=None, help="Web front end bind port. Default: 8000")
+
+    # Subcommands. Optional: with none given, the flags above drive a normal assistant run.
+    subparsers = parser.add_subparsers(dest="command")
+    config_parser = subparsers.add_parser("config", help="Inspect or scaffold the configuration file.")
+    config_sub = config_parser.add_subparsers(dest="config_command")
+    init_parser = config_sub.add_parser(
+        "init", help="Write a starter config.toml (every key at its default) to the config location."
+    )
+    init_parser.add_argument(
+        "--path",
+        default=None,
+        metavar="PATH",
+        help="Write here instead of the default ($KOKUA_CONFIG or $KOKUA_HOME/config.toml).",
+    )
+    init_parser.add_argument("--force", action="store_true", help="Overwrite an existing config file.")
     return parser
 
 
@@ -140,8 +155,27 @@ def resolve_config(args: argparse.Namespace) -> AssistantConfig:
     return AssistantConfig(**overrides)
 
 
+def _init_config(args: argparse.Namespace) -> int:
+    """Write the shipped example to the config location. Refuses to clobber unless --force."""
+    path, _ = settings.resolve_path(args.path)
+    if path.exists() and not args.force:
+        print(f"config file already exists: {path} (use --force to overwrite)")
+        return 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(settings.example_text(), encoding="utf-8")
+    print(f"wrote starter config: {path}")
+    return 0
+
+
 def main() -> None:
-    args = build_arg_parser().parse_args()
+    parser = build_arg_parser()
+    args = parser.parse_args()
+
+    if args.command == "config":
+        if args.config_command == "init":
+            raise SystemExit(_init_config(args))
+        parser.parse_args(["config", "--help"])  # no/unknown subcommand: show config usage and exit.
+        return
 
     if args.list_frontends:
         for name, frontend in sorted(plugins.discover_frontends().items()):
