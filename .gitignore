@@ -25,5 +25,8 @@ env/
 .idea/
 .vscode/
 
+# Superpowers brainstorming/spec artifacts (kept local, not part of the project history)
+docs/superpowers/
+
 # Kokua runtime state (default: ~/.kokua). Ignored here in case KOKUA_HOME points at the repo.
 .kokua/
