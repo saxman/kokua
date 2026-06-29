@@ -18,7 +18,10 @@ installable, modular application.
 - **Front ends**: `cli` (terminal via AIMU's `CLIChannel`) and `web` (Starlette + uvicorn WebSocket server
   with a streaming browser UI, behind the `web` extra). Reloading the web page replays the prior
   conversation (user messages, answers, and reasoning/tool calls when `show_thinking` / `show_tools` are
-  on); the assistant already restored its context across reconnects, this makes it visible.
+  on); the assistant already restored its context across reconnects, this makes it visible. Assistant
+  replies render as markdown when a turn completes, via a small dependency-free renderer that
+  HTML-escapes the source first (so model/tool output cannot inject markup) and only permits
+  http(s)/mailto links.
 - **Stop an in-flight reply**: send `/stop` (the web UI also has a Stop button) to cancel the current turn;
   the partial turn is kept so the conversation can continue. Built on AIMU's `aio.RunHandle`; reactive
   turns run as background tasks so the channel keeps reading mid-turn.

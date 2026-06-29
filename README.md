@@ -55,7 +55,8 @@ kokua --frontend web              # or: kokua-web
 
 Reloading the page replays the prior conversation (the assistant already keeps its context across
 reconnects; this makes it visible again), including reasoning and tool calls when `show_thinking` /
-`show_tools` are on.
+`show_tools` are on. Assistant replies are rendered as markdown (headings, lists, code, links, etc.)
+once each turn completes; the source is HTML-escaped first, so model or tool output can't inject markup.
 
 List what's installed:
 

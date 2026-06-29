@@ -28,6 +28,20 @@
     .thinking::before { content: "thinking"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; font-style: normal; opacity: 0.7; }
     .tool { align-self: flex-start; font-family: ui-monospace, monospace; font-size: 0.8em; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 4px 10px; }
     .tool::before { content: "\1F527  "; }
+    /* Markdown-rendered bubbles: real block elements, so drop the plain-text pre-wrap. */
+    .md { white-space: normal; }
+    .md > :first-child { margin-top: 0; }
+    .md > :last-child { margin-bottom: 0; }
+    .md p { margin: 0.5em 0; }
+    .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 0.6em 0 0.3em; line-height: 1.25; }
+    .md h1 { font-size: 1.4em; } .md h2 { font-size: 1.25em; } .md h3 { font-size: 1.1em; }
+    .md ul, .md ol { margin: 0.4em 0; padding-left: 1.4em; }
+    .md li { margin: 0.15em 0; }
+    .md code { font-family: ui-monospace, monospace; font-size: 0.9em; background: #f3f4f6; padding: 0.1em 0.3em; border-radius: 4px; }
+    .md pre { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
+    .md pre code { background: none; padding: 0; }
+    .md blockquote { margin: 0.5em 0; padding-left: 0.8em; border-left: 3px solid #d1d5db; color: #4b5563; }
+    .md a { color: #2563eb; }
     .approval { align-self: flex-start; max-width: 70%; background: #fff7ed; border: 1px solid #fdba74; border-radius: 12px; padding: 10px 14px; }
     .approval .prompt { font-size: 0.9em; margin-bottom: 8px; }
     .approval code { font-family: ui-monospace, monospace; font-size: 0.85em; }
@@ -57,6 +71,7 @@
     const stopBtn = document.getElementById("stop");
 
     let streamingBubble = null;  // the assistant answer bubble accumulating tokens
+    let streamingText = "";      // raw answer text, re-rendered as markdown when the turn completes
     let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
 
     function addBubble(cls, text) {
@@ -69,6 +84,88 @@
     }
 
     function notice(text) { addBubble("notice", text); }
+
+    // --- Minimal, safe markdown rendering -----------------------------------------------------
+    // The assistant (and tool output) is untrusted, so HTML-escape everything FIRST, then add only
+    // a known set of tags. Raw HTML in the source can never reach the DOM as markup.
+    function escapeHtml(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function renderInline(text) {
+      // `text` is already HTML-escaped. Split out `code spans` so inline rules skip their contents.
+      return text.split(/(`[^`]+`)/).map((part) => {
+        if (part.length >= 2 && part.startsWith("`") && part.endsWith("`")) {
+          return "<code>" + part.slice(1, -1) + "</code>";
+        }
+        let s = part;
+        // [label](url): only http(s)/mailto. The url is escaped, so undo &amp; before the scheme test.
+        s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
+          if (/^(https?:\/\/|mailto:)/i.test(url.replace(/&amp;/g, "&"))) {
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+          }
+          return m;  // unsafe scheme: leave as literal text
+        });
+        s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        s = s.replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, "$1<em>$2</em>");
+        s = s.replace(/(^|[^\w])_([^_\s][^_]*?)_/g, "$1<em>$2</em>");
+        return s;
+      }).join("");
+    }
+
+    function renderMarkdown(src) {
+      const lines = escapeHtml(src).split("\n");
+      // Lines are already HTML-escaped, so a blockquote marker is "&gt;", not ">".
+      const special = /^(#{1,6}\s|&gt;\s?|```|\s*[-*+]\s+|\s*\d+\.\s+)/;
+      const blocks = [];
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
+        let m;
+        if (/^```/.test(line)) {
+          const code = [];
+          i++;
+          while (i < lines.length && !/^```\s*$/.test(lines[i])) { code.push(lines[i]); i++; }
+          i++;  // skip the closing fence
+          blocks.push("<pre><code>" + code.join("\n") + "</code></pre>");
+        } else if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+          blocks.push(`<h${m[1].length}>${renderInline(m[2])}</h${m[1].length}>`);
+          i++;
+        } else if (/^&gt;\s?/.test(line)) {
+          const quote = [];
+          while (i < lines.length && /^&gt;\s?/.test(lines[i])) { quote.push(lines[i].replace(/^&gt;\s?/, "")); i++; }
+          blocks.push("<blockquote>" + renderInline(quote.join(" ")) + "</blockquote>");
+        } else if (/^\s*[-*+]\s+/.test(line)) {
+          const items = [];
+          while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+            items.push("<li>" + renderInline(lines[i].replace(/^\s*[-*+]\s+/, "")) + "</li>"); i++;
+          }
+          blocks.push("<ul>" + items.join("") + "</ul>");
+        } else if (/^\s*\d+\.\s+/.test(line)) {
+          const items = [];
+          while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+            items.push("<li>" + renderInline(lines[i].replace(/^\s*\d+\.\s+/, "")) + "</li>"); i++;
+          }
+          blocks.push("<ol>" + items.join("") + "</ol>");
+        } else if (line.trim() === "") {
+          i++;
+        } else {
+          const para = [];
+          while (i < lines.length && lines[i].trim() !== "" && !special.test(lines[i])) { para.push(lines[i]); i++; }
+          blocks.push("<p>" + renderInline(para.join(" ")) + "</p>");
+        }
+      }
+      return blocks.join("\n");
+    }
+
+    function addMarkdownBubble(cls, text) {
+      const el = document.createElement("div");
+      el.className = "bubble md " + cls;
+      el.innerHTML = renderMarkdown(text || "");
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
+    }
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -98,18 +195,26 @@
         thinkingBlock = null;
         if (!streamingBubble) {
           streamingBubble = addBubble("assistant", "");
+          streamingText = "";
         } else if (log.lastElementChild !== streamingBubble) {
           // New answer content after an intervening thinking/tool block: float the answer
           // to the bottom so it never sits above later reasoning.
           log.appendChild(streamingBubble);  // moves the existing node to the end
         }
-        streamingBubble.textContent += frame.text;
+        // Stream as plain text; partial markdown can't be rendered until the turn finishes.
+        streamingText += frame.text;
+        streamingBubble.textContent = streamingText;
         log.scrollTop = log.scrollHeight;
       } else if (frame.type === "done") {
+        if (streamingBubble) {
+          streamingBubble.classList.add("md");
+          streamingBubble.innerHTML = renderMarkdown(streamingText);
+          log.scrollTop = log.scrollHeight;
+        }
         streamingBubble = null;
         thinkingBlock = null;
       } else if (frame.type === "message") {
-        addBubble(frame.proactive ? "proactive" : "assistant", frame.text);
+        addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text);
       } else if (frame.type === "approval") {
         renderApproval(frame.name, frame.arguments);
       } else if (frame.type === "history") {
@@ -118,7 +223,7 @@
           if (item.type === "user") addBubble("user", item.text);
           else if (item.type === "thinking") addBubble("thinking", item.text);
           else if (item.type === "tool") addBubble("tool", toolLine(item.name, item.arguments));
-          else if (item.type === "message") addBubble(item.proactive ? "proactive" : "assistant", item.text);
+          else if (item.type === "message") addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text);
         }
         log.scrollTop = log.scrollHeight;
       }
