@@ -124,13 +124,14 @@ holds an optional `config.toml` and a single `data/` directory for all transient
   config.toml          # optional (see Configuration file)
   data/
     skills/            # authored skills
-    history.json       # conversation
+    sessions.json      # conversations (web UI can hold several)
     memory/            # semantic facts
     documents/         # saved documents
 ```
 
 Point `data/` elsewhere with `[paths] data_dir` in the config file. Nothing is written to your working
-directory.
+directory. A `history.json` from an earlier single-conversation version, if present, is imported once into
+`sessions.json` as your first conversation.
 
 ## Security
 
