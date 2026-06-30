@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 from importlib.resources import files
+from typing import Optional
 
 from starlette.applications import Starlette
 from starlette.responses import HTMLResponse
@@ -26,6 +28,21 @@ from ..plugins import FrontEnd
 def _index_html() -> str:
     """Read the bundled chat page from package data (works for installed + source layouts)."""
     return files("kokua").joinpath("web_static/index.html").read_text(encoding="utf-8")
+
+
+def _parse_control(raw: str) -> Optional[dict]:
+    """Return a conversation-control object ({"type": "new"} / {"type": "select", "id"}), else None.
+
+    Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
+    approval "y"/"n") and is fed to the channel unchanged.
+    """
+    try:
+        obj = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(obj, dict) and obj.get("type") in ("new", "select"):
+        return obj
+    return None
 
 
 def build_app(config: AssistantConfig, *, client=None) -> Starlette:
@@ -50,14 +67,27 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         busy["active"] = True
         channel = WebChannel(websocket, show_thinking=config.show_thinking, show_tools=config.show_tools)
         assistant = await Assistant.create(config, channel, client=client)
-        await channel.send_history(assistant.history)  # show the prior conversation on (re)connect
+        # Show the conversation list and the active conversation's history on (re)connect.
+        await channel.send_conversations(assistant.list_conversations())
+        await channel.send_history(assistant.history)
 
         async def pump() -> None:
-            # Feed inbound frames to the channel; on disconnect, the sentinel ends receive(),
-            # which stops the scheduler and lets assistant.run() (and this group) return.
+            # Conversation controls (new/select) are handled here and never reach the channel; all
+            # other frames (chat, "/stop", approval "y"/"n") are fed to the channel as today. On
+            # disconnect, the sentinel ends receive(), stopping the scheduler and assistant.run().
             try:
                 while True:
-                    await channel.feed(await websocket.receive_text())
+                    raw = await websocket.receive_text()
+                    control = _parse_control(raw)
+                    if control is None:
+                        await channel.feed(raw)
+                        continue
+                    if control["type"] == "new":
+                        await assistant.new_conversation()
+                    elif control["type"] == "select":
+                        await assistant.select_conversation(control["id"])
+                    await channel.send_conversations(assistant.list_conversations())
+                    await channel.send_history(assistant.history)
             except WebSocketDisconnect:
                 pass
             finally:

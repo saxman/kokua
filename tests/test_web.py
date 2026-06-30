@@ -195,6 +195,14 @@ async def test_web_channel_send_history_empty_sends_nothing():
     assert ws.frames == []
 
 
+def _drain_until(ws, type_):
+    """Receive frames until one of the given type, returning that frame."""
+    while True:
+        frame = ws.receive_json()
+        if frame["type"] == type_:
+            return frame
+
+
 def test_ws_sends_history_on_connect(tmp_path):
     from starlette.testclient import TestClient
 
@@ -211,11 +219,46 @@ def test_ws_sends_history_on_connect(tmp_path):
 
     app = build_app(cfg, client=MockAsyncModelClient([]))
     with TestClient(app).websocket_connect("/ws") as ws:
-        frame = ws.receive_json()  # first frame on connect should be the restored history
+        frame = _drain_until(ws, "history")  # conversations is sent first, then the restored history
 
-    assert frame["type"] == "history"
     assert {"type": "user", "text": "hello"} in frame["items"]
     assert {"type": "message", "text": "Hi!", "proactive": False} in frame["items"]
+
+
+def test_ws_connect_sends_conversations(tmp_path):
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until(ws, "conversations")
+    assert convs["items"]  # at least the fresh active conversation
+    assert any(item.get("active") for item in convs["items"])
+
+
+def test_ws_new_then_select_round_trip(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        # Chat in the first conversation.
+        ws.send_text("first message")
+        _drain_until(ws, "done")
+        # The first message sets the title, which pushes a refreshed list; consume it.
+        titled = _drain_until(ws, "conversations")
+        assert any(i["title"] == "first message" for i in titled["items"])
+        # Start a new conversation; expect a refreshed list with both conversations.
+        ws.send_text(json.dumps({"type": "new"}))
+        convs = _drain_until(ws, "conversations")
+        ids = [i["id"] for i in convs["items"]]
+        assert len(ids) == 2
+        first_id = next(i["id"] for i in convs["items"] if i["title"] == "first message")
+        # Select the first conversation; its history should replay "first message".
+        ws.send_text(json.dumps({"type": "select", "id": first_id}))
+        hist = _drain_until(ws, "history")
+    assert any(item["type"] == "user" and item["text"] == "first message" for item in hist["items"])
 
 
 # --- Server round-trip via Starlette TestClient ----------------------------------------------
