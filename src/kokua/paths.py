@@ -47,6 +47,10 @@ def history_path() -> Path:
     return data_dir() / "history.json"
 
 
+def sessions_path() -> Path:
+    return data_dir() / "sessions.json"
+
+
 def memory_dir() -> Path:
     return data_dir() / "memory"
 

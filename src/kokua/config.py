@@ -76,6 +76,10 @@ class AssistantConfig:
         return str(self.data_dir / "history.json")
 
     @property
+    def sessions_path(self) -> Path:
+        return self.data_dir / "sessions.json"
+
+    @property
     def memory_path(self) -> Path:
         return self.data_dir / "memory"
 

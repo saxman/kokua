@@ -91,6 +91,15 @@ def test_arg_parser_overrides():
     assert cfg.port == 9000
 
 
+def test_sessions_path_under_data_dir(tmp_path):
+    cfg = AssistantConfig(data_dir=tmp_path, memory=False)
+    assert cfg.sessions_path == tmp_path / "sessions.json"
+
+
+def test_paths_sessions_path_is_data_dir_leaf():
+    assert kokua.paths.sessions_path() == kokua.paths.data_dir() / "sessions.json"
+
+
 def test_default_tools_groups():
     assert AssistantConfig().tools == ["web", "fs", "compute", "misc"]
     assert resolve_config(build_arg_parser().parse_args([])).tools == ["web", "fs", "compute", "misc"]
