@@ -23,7 +23,8 @@ installable, modular application.
   HTML-escapes the source first (so model/tool output cannot inject markup) and only permits
   http(s)/mailto links. Light and dark themes: the page follows the OS preference by default and has a
   header toggle that overrides it, remembered across reloads (no flash on load, no new dependencies).
-- **Stop an in-flight reply**: send `/stop` (the web UI also has a Stop button) to cancel the current turn;
+- **Stop an in-flight reply**: send `/stop` (the web UI also has a Stop button, enabled only while a reply
+  is being processed) to cancel the current turn;
   the partial turn is kept so the conversation can continue. Built on AIMU's `aio.RunHandle`; reactive
   turns run as background tasks so the channel keeps reading mid-turn.
 - **Tool approval**: configured "risky" tools require confirmation before each call (terminal `y/N` or

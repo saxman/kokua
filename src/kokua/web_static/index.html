@@ -102,7 +102,7 @@
   <form id="form">
     <input id="msg" autocomplete="off" placeholder="Message your assistant..." autofocus />
     <button id="send" type="submit">Send</button>
-    <button id="stop" type="button">Stop</button>
+    <button id="stop" type="button" disabled>Stop</button>
   </form>
 
   <script>
@@ -130,6 +130,12 @@
     let streamingBubble = null;  // the assistant answer bubble accumulating tokens
     let streamingText = "";      // raw answer text, re-rendered as markdown when the turn completes
     let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
+
+    // Stop is only meaningful while a reactive turn is being processed: enabled when the user sends,
+    // disabled when the turn ends (a `done` frame, or a non-proactive `message` for "(stopped)"/errors).
+    function setProcessing(active) {
+      stopBtn.disabled = !active;
+    }
 
     function addBubble(cls, text) {
       const el = document.createElement("div");
@@ -270,8 +276,10 @@
         }
         streamingBubble = null;
         thinkingBlock = null;
+        setProcessing(false);
       } else if (frame.type === "message") {
         addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text);
+        if (!frame.proactive) setProcessing(false);  // a reactive message ends the turn (e.g. "(stopped)" / error)
       } else if (frame.type === "approval") {
         renderApproval(frame.name, frame.arguments);
       } else if (frame.type === "history") {
@@ -320,7 +328,11 @@
     }
 
     ws.onopen = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
-    ws.onclose = () => { notice("Disconnected."); input.disabled = true; sendBtn.disabled = true; };
+    ws.onclose = () => {
+      notice("Disconnected.");
+      input.disabled = true; sendBtn.disabled = true;
+      setProcessing(false);
+    };
 
     form.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -329,11 +341,14 @@
       addBubble("user", text);
       ws.send(text);
       input.value = "";
+      setProcessing(true);  // a turn is now being processed; allow stopping it
     });
 
-    // Cancel the in-flight reply. `/stop` is a no-op server-side when nothing is running.
+    // Cancel the in-flight reply. Disabled unless a turn is processing; disable on click so it
+    // can't be sent twice (the server's "(stopped)" message also clears the processing state).
     stopBtn.addEventListener("click", () => {
       if (ws.readyState === WebSocket.OPEN) ws.send("/stop");
+      setProcessing(false);
     });
   </script>
 </body>
