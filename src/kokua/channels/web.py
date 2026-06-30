@@ -1,17 +1,16 @@
-"""A WebSocket Channel adapter bridging one browser onto AIMU's `Channel` ABC.
+"""Kokua's browser WebSocket channel: AIMU's ``WebChannel`` plus app-specific frame types.
 
-A server-side pump task feeds inbound text frames into a queue that `receive()` drains, and
-`send()` relays a finished string or a streamed reply as JSON frames the static page renders.
-Kept separate from the web server (frontends/web.py) so it can be unit-tested in isolation.
+The generic transport (queue-bridged ``receive()``, streamed ``send()``, the token/thinking/tool/done
+frame protocol, and the ``send_frame`` seam) lives in :class:`aimu.aio.channels.web.WebChannel`. This
+subclass adds the frames Kokua's richer page needs: a conversation-list sidebar, conversation-history
+replay, and tool-call approval prompts. Each is sent through the inherited public ``send_frame``.
 """
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any, AsyncIterator, Optional, Union
+from typing import Any
 
-from aimu.aio.channels.base import Channel, ChannelMessage
-from aimu.models import StreamChunk, StreamingContentType
+from aimu.aio.channels.web import WebChannel as BaseWebChannel
 
 
 def _text_of(content: Any) -> str:
@@ -50,59 +49,12 @@ def conversation_to_frames(messages: list[dict], *, show_thinking: bool, show_to
     return items
 
 
-class WebChannel(Channel):
-    """Bridges one browser WebSocket onto the Channel ABC.
-
-    The server's pump task calls `feed(text)` for each inbound frame and `feed(None)` on
-    disconnect; `receive()` ends on that sentinel, which lets the Assistant loop tear down cleanly.
-    Frames sent to the browser are JSON: ``{"type": "message"|"token"|"thinking"|"tool"|"done", ...}``.
-    """
-
-    name = "web"
-
-    def __init__(self, websocket: Any, *, show_thinking: bool = False, show_tools: bool = False):
-        # websocket is a Starlette WebSocket (duck-typed: async send_json / close). Tests pass a fake.
-        self._ws = websocket
-        self._inbound: asyncio.Queue[Optional[str]] = asyncio.Queue()
-        self._closed = False
-        self.show_thinking = show_thinking
-        self.show_tools = show_tools
-
-    async def feed(self, text: Optional[str]) -> None:
-        """Enqueue an inbound frame; ``None`` is the end-of-stream sentinel."""
-        await self._inbound.put(text)
-
-    async def receive(self) -> AsyncIterator[ChannelMessage]:
-        while True:
-            text = await self._inbound.get()
-            if text is None:  # sentinel: the socket closed
-                return
-            yield ChannelMessage(text=text, sender="web", channel=self.name)
-
-    async def send(
-        self,
-        content: Union[str, AsyncIterator[StreamChunk]],
-        *,
-        reply_to: Optional[ChannelMessage] = None,
-    ) -> None:
-        # A finished string is a single message frame. A proactive push (scheduler) has no
-        # reply_to and arrives as a string, so the page can flag it; reactive replies always stream.
-        if isinstance(content, str):
-            await self._safe_send({"type": "message", "text": content, "proactive": reply_to is None})
-            return
-        async for chunk in content:
-            if chunk.phase == StreamingContentType.GENERATING and chunk.content:
-                await self._safe_send({"type": "token", "text": chunk.content})
-            elif chunk.phase == StreamingContentType.THINKING and self.show_thinking and chunk.content:
-                await self._safe_send({"type": "thinking", "text": chunk.content})
-            elif chunk.phase == StreamingContentType.TOOL_CALLING and self.show_tools:
-                call = chunk.content if isinstance(chunk.content, dict) else {}
-                await self._safe_send({"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")})
-        await self._safe_send({"type": "done"})
+class WebChannel(BaseWebChannel):
+    """AIMU's ``WebChannel`` plus Kokua's conversation-sidebar, history-replay, and approval frames."""
 
     async def send_conversations(self, items: list[dict]) -> None:
         """Send the conversation list so the page can render the sidebar."""
-        await self._safe_send({"type": "conversations", "items": items})
+        await self.send_frame({"type": "conversations", "items": items})
 
     async def send_history(self, messages: list[dict]) -> None:
         """Send a conversation as one batched frame the page replays (replacing the current view).
@@ -110,7 +62,7 @@ class WebChannel(Channel):
         Always sent, even when empty, so switching to a new/empty conversation clears the page.
         """
         items = conversation_to_frames(messages, show_thinking=self.show_thinking, show_tools=self.show_tools)
-        await self._safe_send({"type": "history", "items": items})
+        await self.send_frame({"type": "history", "items": items})
 
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
@@ -118,23 +70,4 @@ class WebChannel(Channel):
         The reply flows back through the ordinary inbound path (receive()), so the Assistant's serve
         loop routes it to the pending approval -- no interception is needed here.
         """
-        await self._safe_send({"type": "approval", "name": name, "arguments": arguments})
-
-    async def _safe_send(self, frame: dict) -> None:
-        # Once closed (e.g. a proactive push racing a disconnect), swallow send errors so a late
-        # frame can't crash the scheduler task.
-        if self._closed:
-            return
-        try:
-            await self._ws.send_json(frame)
-        except Exception:
-            self._closed = True
-
-    async def aclose(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            await self._ws.close()
-        except Exception:
-            pass  # already closed by the client / disconnect
+        await self.send_frame({"type": "approval", "name": name, "arguments": arguments})
