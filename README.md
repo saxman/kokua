@@ -57,6 +57,7 @@ Reloading the page replays the prior conversation (the assistant already keeps i
 reconnects; this makes it visible again), including reasoning and tool calls when `show_thinking` /
 `show_tools` are on. Assistant replies are rendered as markdown (headings, lists, code, links, etc.)
 once each turn completes; the source is HTML-escaped first, so model or tool output can't inject markup.
+The page follows your OS light/dark preference, with a header toggle to override it (remembered across reloads).
 
 List what's installed:
 
