@@ -100,6 +100,10 @@ class WebChannel(Channel):
                 await self._safe_send({"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")})
         await self._safe_send({"type": "done"})
 
+    async def send_conversations(self, items: list[dict]) -> None:
+        """Send the conversation list so the page can render the sidebar."""
+        await self._safe_send({"type": "conversations", "items": items})
+
     async def send_history(self, messages: list[dict]) -> None:
         """Send the prior conversation as one batched frame so the page can render it on reload."""
         items = conversation_to_frames(messages, show_thinking=self.show_thinking, show_tools=self.show_tools)

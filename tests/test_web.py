@@ -105,6 +105,14 @@ async def test_web_channel_omits_thinking_and_tool_frames_by_default():
     assert ws.frames == [{"type": "token", "text": "4"}, {"type": "done"}]
 
 
+async def test_web_channel_send_conversations_emits_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    items = [{"id": "a1", "title": "Trip plan", "active": True}]
+    await channel.send_conversations(items)
+    assert ws.frames == [{"type": "conversations", "items": items}]
+
+
 async def test_web_channel_send_approval_request_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
