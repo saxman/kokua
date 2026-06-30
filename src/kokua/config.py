@@ -86,3 +86,8 @@ class AssistantConfig:
     @property
     def documents_path(self) -> Path:
         return self.data_dir / "documents"
+
+    @property
+    def mcp_servers_path(self) -> Path:
+        """Where runtime-added MCP servers are recorded so they reconnect across restarts."""
+        return self.data_dir / "mcp-servers.json"

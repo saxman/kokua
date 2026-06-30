@@ -229,7 +229,7 @@ async def test_startup_mcp_servers_wire_tools(tmp_path, monkeypatch):
     )
     names = {fn.__name__ for fn in assistant._agent.tools}
     assert {"remote_search", "remote_fetch"} <= names
-    assert len(assistant._mcp_clients) == 1
+    assert len(assistant._mcp_servers) == 1
 
 
 async def test_startup_mcp_connect_failure_does_not_crash(tmp_path, monkeypatch):
@@ -243,7 +243,7 @@ async def test_startup_mcp_connect_failure_does_not_crash(tmp_path, monkeypatch)
     assistant = await Assistant.create(
         _config(tmp_path, mcp_servers=["https://down/mcp"]), FakeChannel(), client=MockAsyncModelClient([])
     )
-    assert assistant._mcp_clients == []
+    assert assistant._mcp_servers == []
 
 
 async def test_add_mcp_server_tool_adds_tools_at_runtime(tmp_path, monkeypatch):
@@ -261,10 +261,11 @@ async def test_add_mcp_server_tool_adds_tools_at_runtime(tmp_path, monkeypatch):
     msg = await add_mcp(url="https://svc/mcp")
     assert "remote_search" in msg
     assert "remote_search" in {fn.__name__ for fn in assistant._agent.tools}
-    assert len(assistant._mcp_clients) == 1
+    assert len(assistant._mcp_servers) == 1
 
     msg2 = await add_mcp(url="https://svc/mcp")
-    assert "no new tools" in msg2
+    assert "Already connected" in msg2
+    assert len(assistant._mcp_servers) == 1
     assert [fn.__name__ for fn in assistant._agent.tools].count("remote_search") == 1
 
 
@@ -281,7 +282,7 @@ async def test_add_mcp_server_tool_reports_connect_failure(tmp_path, monkeypatch
 
     msg = await add_mcp(url="https://down/mcp")
     assert "Failed to connect" in msg and "boom" in msg
-    assert assistant._mcp_clients == []
+    assert assistant._mcp_servers == []
 
 
 # --- Memory (facts + documents) --------------------------------------------------------------
@@ -659,3 +660,116 @@ async def test_add_mcp_server_no_oauth_on_non_auth_failure(tmp_path, monkeypatch
     msg = await add_mcp(url="https://down/mcp")
     assert attempts == [None]  # did not escalate to OAuth
     assert "Failed to connect" in msg
+
+
+async def test_runtime_added_server_persists_and_reconnects(tmp_path, monkeypatch):
+    """A server added at runtime is recorded and reconnected on the next start (the reported bug)."""
+    from aimu import aio
+
+    from kokua import mcp_registry
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("remote_search")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    cfg = _config(tmp_path)
+
+    a1 = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    add_mcp = next(t for t in a1._agent.tools if t.__name__ == "add_mcp_server")
+    await add_mcp(url="https://svc/mcp")
+    a1._store.close()
+    # Recorded for reconnect, no secret on disk, auth_mode "none".
+    assert mcp_registry.load(cfg.mcp_servers_path) == [{"url": "https://svc/mcp", "auth_mode": "none"}]
+
+    # Simulate a restart: a fresh Assistant reconnects from the registry without re-adding.
+    a2 = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert "remote_search" in {fn.__name__ for fn in a2._agent.tools}
+    assert [conn.url for conn in a2._mcp_servers] == ["https://svc/mcp"]
+
+
+async def test_oauth_server_persists_and_reconnects_with_provider(tmp_path, monkeypatch):
+    """An OAuth server is recorded as auth_mode 'oauth' and reconnects via the provider directly."""
+    from aimu import aio
+
+    from kokua import mcp_registry
+    from kokua.mcp_auth import ChatOAuth
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        if auth is None:  # unauthenticated attempt -> challenge
+            raise RuntimeError("Client error '401 Unauthorized'")
+        return _FakeMCP([_fake_mcp_tool("remote_trade")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    cfg = _config(tmp_path)
+
+    a1 = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    add_mcp = next(t for t in a1._agent.tools if t.__name__ == "add_mcp_server")
+    await add_mcp(url="https://svc/mcp")
+    a1._store.close()
+    assert mcp_registry.load(cfg.mcp_servers_path) == [{"url": "https://svc/mcp", "auth_mode": "oauth"}]
+
+    # Restart: reconnect goes straight to the OAuth provider (no plain attempt first).
+    seen = []
+
+    async def fake_connect2(*, url=None, auth=None, **kw):
+        seen.append(auth)
+        return _FakeMCP([_fake_mcp_tool("remote_trade")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect2)
+    a2 = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert "remote_trade" in {fn.__name__ for fn in a2._agent.tools}
+    assert len(seen) == 1 and isinstance(seen[0], ChatOAuth)  # reconnected via the provider, no re-auth dance
+
+
+async def test_bearer_server_not_persisted(tmp_path, monkeypatch):
+    """A bearer-token server is session-only: its secret is never written, so it is not reconnected."""
+    from aimu import aio
+
+    from kokua import mcp_registry
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("remote_trade")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    cfg = _config(tmp_path)
+
+    a1 = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    add_mcp = next(t for t in a1._agent.tools if t.__name__ == "add_mcp_server")
+    msg = await add_mcp(url="https://svc/mcp", bearer_token="secret")
+    a1._store.close()
+    assert "session only" in msg
+    assert mcp_registry.load(cfg.mcp_servers_path) == []
+
+    a2 = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert "remote_trade" not in {fn.__name__ for fn in a2._agent.tools}
+
+
+async def test_remove_mcp_server_drops_tools_and_forgets(tmp_path, monkeypatch):
+    """remove_mcp_server removes the live tools and the persisted record, so no reconnect on restart."""
+    from aimu import aio
+
+    from kokua import mcp_registry
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("remote_search")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    cfg = _config(tmp_path)
+
+    a1 = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    add_mcp = next(t for t in a1._agent.tools if t.__name__ == "add_mcp_server")
+    remove_mcp = next(t for t in a1._agent.tools if t.__name__ == "remove_mcp_server")
+    await add_mcp(url="https://svc/mcp")
+
+    assert await remove_mcp(url="https://nope/mcp") == "No MCP server is connected at 'https://nope/mcp'."
+
+    msg = await remove_mcp(url="https://svc/mcp")
+    assert "Disconnected" in msg and "remote_search" in msg
+    assert "remote_search" not in {fn.__name__ for fn in a1._agent.tools}
+    assert a1._mcp_servers == []
+    assert mcp_registry.load(cfg.mcp_servers_path) == []
+    a1._store.close()
+
+    # Restart: the removed server is not reconnected.
+    a2 = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert "remote_search" not in {fn.__name__ for fn in a2._agent.tools}

@@ -16,9 +16,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from aimu import aio
 from aimu.aio import Channel, RunHandle, Scheduler
@@ -30,6 +31,7 @@ from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_scri
 from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
+from . import mcp_registry
 from .config import MEMORY_GUIDANCE, AssistantConfig
 from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
@@ -88,27 +90,88 @@ def _looks_like_auth_required(exc: BaseException) -> bool:
     return any(s in text for s in ("401", "403", "unauthor", "forbidden", "www-authenticate", "oauth"))
 
 
-def make_add_mcp_server_tool(
-    agent: aio.SkillAgent, mcp_clients: list, *, notify: Notify, oauth_storage_dir: Path
-) -> Callable:
-    """Build an ``add_mcp_server`` tool bound to ``agent`` and a live-client registry.
+@dataclass
+class _ServerConnection:
+    """A live remote-MCP connection and the tools it contributed (for teardown and removal)."""
 
-    Lets the assistant connect to a remote MCP service by URL mid-session and use its tools
-    immediately. The new tools are appended to ``agent.tools`` (the configured list the
-    SkillAgent copies to its model client every run, so they persist across turns), deduped by
-    name. The connected client is kept in ``mcp_clients`` for the connection's lifetime.
+    url: str
+    client: Any  # aio.MCPClient
+    tools: list[str]  # __name__ of each tool this server added to agent.tools
+    auth_mode: str  # "none" | "oauth" | "bearer"
 
-    OAuth-protected servers are handled automatically: ``notify`` posts the authorization link
-    into the chat (and a browser opens), and tokens persist under ``oauth_storage_dir`` so a
-    later reconnect is silent.
+
+async def _connect_mcp(
+    url: str,
+    *,
+    bearer_token: Optional[str] = None,
+    auth_mode: Optional[str] = None,
+    notify: Notify,
+    oauth_storage_dir: Path,
+) -> tuple[Any, str]:
+    """Connect to a remote MCP server, returning ``(client, auth_mode_used)``.
+
+    With ``auth_mode`` known (a boot reconnect) the connection uses that mode directly. With it
+    ``None`` (a runtime add) the connection tries unauthenticated first and falls back to the OAuth
+    flow on an auth challenge. A ``bearer_token`` always takes precedence. OAuth posts an
+    authorization link via ``notify`` and persists tokens under ``oauth_storage_dir`` (so a cached
+    token reconnects silently).
+    """
+    if bearer_token:
+        return await aio.MCPClient.connect(url=url, auth=bearer_token), "bearer"
+    if auth_mode == "oauth":
+        provider = build_chat_oauth(url, notify=notify, token_storage_dir=oauth_storage_dir)
+        return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
+    if auth_mode == "none":
+        return await aio.MCPClient.connect(url=url), "none"
+    # Unknown (runtime add): try unauthenticated, fall back to OAuth on an auth challenge.
+    try:
+        return await aio.MCPClient.connect(url=url), "none"
+    except Exception as exc:
+        if not _looks_like_auth_required(exc):
+            raise
+        logger.info("MCP server %s requires authorization; starting OAuth flow.", url)
+        provider = build_chat_oauth(url, notify=notify, token_storage_dir=oauth_storage_dir)
+        return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
+
+
+async def _attach_server(agent: aio.SkillAgent, connections: list, url: str, client: Any, auth_mode: str) -> list[str]:
+    """Add a connected server's tools to ``agent.tools`` (deduped) and record the connection.
+
+    Returns the names of the tools newly added. Tools land on ``agent.tools`` (the configured list
+    the SkillAgent copies to its model client every run, so they survive the per-run reset).
+    """
+    new_tools = await client.as_tools()
+    existing = {getattr(fn, "__name__", None) for fn in agent.tools}
+    added = [fn for fn in new_tools if fn.__name__ not in existing]
+    agent.tools.extend(added)
+    names = [fn.__name__ for fn in added]
+    connections.append(_ServerConnection(url=url, client=client, tools=names, auth_mode=auth_mode))
+    return names
+
+
+def make_mcp_tools(
+    agent: aio.SkillAgent,
+    connections: list,
+    *,
+    notify: Notify,
+    oauth_storage_dir: Path,
+    registry_path: Path,
+) -> list[Callable]:
+    """Build the ``add_mcp_server`` / ``remove_mcp_server`` tools bound to one connection registry.
+
+    Lets the assistant connect to (and disconnect from) a remote MCP service by URL mid-session.
+    A reconnectable server (unauthenticated or OAuth) is recorded in ``registry_path`` so it
+    reconnects on the next restart; bearer-token servers are session-only (their secret is not
+    written to disk). ``connections`` is the live list shared with the boot path and teardown.
     """
 
     @tool
     async def add_mcp_server(url: str, bearer_token: Optional[str] = None) -> str:
         """Connect to a remote MCP server by URL and add its tools to this assistant.
 
-        The server's tools become callable immediately, even in this same turn. Returns the names
-        of the newly available tools.
+        The server's tools become callable immediately, even in this same turn, and the connection
+        is remembered so it is restored automatically the next time the assistant starts. Returns
+        the names of the newly available tools.
 
         Authentication is handled for you: just pass the URL. If the server is unprotected it
         connects directly. If it requires OAuth, you post an authorization link into the chat and
@@ -117,32 +180,46 @@ def make_add_mcp_server_tool(
         is impossible from here, that flow is built in. Pass bearer_token only when the user gives
         you a static token to use instead of the OAuth flow.
         """
+        if any(conn.url == url for conn in connections):
+            return f"Already connected to {url}; its tools are available. Use remove_mcp_server to disconnect first."
         try:
-            if bearer_token:
-                mcp = await aio.MCPClient.connect(url=url, auth=bearer_token)
-            else:
-                try:
-                    mcp = await aio.MCPClient.connect(url=url)
-                except Exception as exc:
-                    if not _looks_like_auth_required(exc):
-                        raise
-                    # The server challenged for auth; run the OAuth flow. ChatOAuth posts the
-                    # authorization link into the chat and opens a browser; FastMCP captures the
-                    # token via a local callback and persists it for future sessions.
-                    logger.info("MCP server %s requires authorization; starting OAuth flow.", url)
-                    provider = build_chat_oauth(url, notify=notify, token_storage_dir=oauth_storage_dir)
-                    mcp = await aio.MCPClient.connect(url=url, auth=provider)
-            new_tools = await mcp.as_tools()
+            client, auth_mode = await _connect_mcp(
+                url, bearer_token=bearer_token, notify=notify, oauth_storage_dir=oauth_storage_dir
+            )
+            added = await _attach_server(agent, connections, url, client, auth_mode)
         except Exception as exc:
             return f"Failed to connect to MCP server {url!r}: {exc}"
-        mcp_clients.append(mcp)
-        existing = {getattr(fn, "__name__", None) for fn in agent.tools}
-        added = [fn for fn in new_tools if fn.__name__ not in existing]
-        agent.tools.extend(added)
-        names = ", ".join(fn.__name__ for fn in added) if added else "(no new tools)"
-        return f"Connected to {url}. Tools now available: {names}."
+        # Persist reconnectable servers (no secret on disk); a bearer server stays session-only.
+        if auth_mode in mcp_registry.RECONNECTABLE:
+            mcp_registry.add(registry_path, url, auth_mode)
+            note = ""
+        else:
+            note = " (session only; add it to config.toml [mcp] to keep a bearer-token server across restarts)"
+        names = ", ".join(added) if added else "(no new tools)"
+        return f"Connected to {url}. Tools now available: {names}.{note}"
 
-    return add_mcp_server
+    @tool
+    async def remove_mcp_server(url: str) -> str:
+        """Disconnect a remote MCP server added earlier and remove its tools.
+
+        Drops the server's tools, closes the connection, and forgets it so it is not reconnected on
+        the next restart. Pass the same URL that was used to add it.
+        """
+        entry = next((c for c in connections if c.url == url), None)
+        if entry is None:
+            return f"No MCP server is connected at {url!r}."
+        removed = set(entry.tools)
+        agent.tools[:] = [fn for fn in agent.tools if getattr(fn, "__name__", None) not in removed]
+        connections.remove(entry)
+        try:
+            await entry.client.aclose()
+        except Exception:
+            logger.debug("Error closing MCP client for %s", url, exc_info=True)
+        mcp_registry.remove(registry_path, url)
+        names = ", ".join(sorted(removed)) if removed else "(none)"
+        return f"Disconnected {url}. Removed tools: {names}."
+
+    return [add_mcp_server, remove_mcp_server]
 
 
 def _load_plugin_tools(config: AssistantConfig) -> list:
@@ -236,7 +313,7 @@ class Assistant:
         self._config = config
         # Live remote-MCP connections (startup + runtime-added) kept alive for their lifetime
         # and closed on shutdown. Assigned by create().
-        self._mcp_clients: list = []
+        self._mcp_servers: list[_ServerConnection] = []
         # Persistent memory stores (None when --no-memory). Assigned by create(); persistence is
         # automatic (Chroma PersistentClient / DocumentStore disk writes), so no teardown needed.
         self._memory_store: Optional[SemanticMemoryStore] = None
@@ -279,30 +356,51 @@ class Assistant:
         manager = SkillManager(skill_dirs=[str(config.skills_dir)])
         author_skill = make_skill_authoring_tool(manager, config.skills_dir)
         agent = aio.SkillAgent(client, tools=[author_skill], skill_manager=manager, name="assistant")
-        # add_skill_script and add_mcp_server need the agent (to surface new tools this turn), so
+        # add_skill_script and the MCP tools need the agent (to surface new tools this turn), so
         # they are built after it. Built-in tools, memory tools, and plugin tools are appended too;
         # the SkillAgent re-appends its skills-server tools each run.
-        mcp_clients: list = []
+        connections: list[_ServerConnection] = []
+        oauth_storage_dir = config.data_dir / "mcp-oauth"
         agent.tools = [
             author_skill,
             make_skill_script_tool(agent, manager, config.skills_dir),
-            make_add_mcp_server_tool(
-                agent, mcp_clients, notify=channel.send, oauth_storage_dir=config.data_dir / "mcp-oauth"
+            *make_mcp_tools(
+                agent,
+                connections,
+                notify=channel.send,
+                oauth_storage_dir=oauth_storage_dir,
+                registry_path=config.mcp_servers_path,
             ),
             *memory_tools,
             *plugin_tools,
             *_resolve_builtin_tools(config.tools),
         ]
 
-        # Connect any startup MCP servers; their tools persist on agent.tools. A connect failure
-        # logs and continues so one unreachable server can't stop the assistant from starting.
+        # Reconnect MCP servers at boot so their tools are available without re-adding them: first
+        # the ones declared in config (--mcp / [mcp] servers), then the ones added at runtime and
+        # recorded in the registry (deduped by URL). A connect failure logs and continues so one
+        # unreachable server can't stop the assistant from starting.
         for url in config.mcp_servers:
             try:
-                mcp = await aio.MCPClient.connect(url=url, auth=config.mcp_bearer)
-                agent.tools.extend(await mcp.as_tools())
-                mcp_clients.append(mcp)
+                client_, mode = await _connect_mcp(
+                    url, bearer_token=config.mcp_bearer, notify=channel.send, oauth_storage_dir=oauth_storage_dir
+                )
+                await _attach_server(agent, connections, url, client_, mode)
             except Exception:
                 logger.warning("Could not connect MCP server %s; continuing without it.", url, exc_info=True)
+
+        connected_urls = {conn.url for conn in connections}
+        for record in mcp_registry.load(config.mcp_servers_path):
+            url = record["url"]
+            if url in connected_urls:
+                continue
+            try:
+                client_, mode = await _connect_mcp(
+                    url, auth_mode=record.get("auth_mode"), notify=channel.send, oauth_storage_dir=oauth_storage_dir
+                )
+                await _attach_server(agent, connections, url, client_, mode)
+            except Exception:
+                logger.warning("Could not reconnect MCP server %s; continuing without it.", url, exc_info=True)
 
         # Multiple conversations live in a session store. On first run (no store yet), import the
         # last single-conversation history.json so the existing chat is not lost. The active
@@ -317,7 +415,7 @@ class Assistant:
 
         scheduler = Scheduler()
         assistant = cls(agent, channel, scheduler, store, session, config)
-        assistant._mcp_clients = mcp_clients  # same list the add_mcp_server tool appends to
+        assistant._mcp_servers = connections  # same list the MCP tools append to / remove from
         assistant._memory_store = memory_store
         assistant._document_store = document_store
         # Gate configured "risky" tools behind interactive approval (see _approve). Published to the
@@ -395,9 +493,9 @@ class Assistant:
                 task.cancel()
             if self._turns:
                 await asyncio.gather(*self._turns, return_exceptions=True)
-            for mcp in self._mcp_clients:
+            for conn in self._mcp_servers:
                 try:
-                    await mcp.aclose()
+                    await conn.client.aclose()
                 except Exception:
                     logger.debug("Error closing MCP client", exc_info=True)
             self._store.close()
