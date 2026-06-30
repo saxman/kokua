@@ -15,6 +15,7 @@ from kokua.cli import build_arg_parser, resolve_config
 from kokua.config import AssistantConfig
 
 from aimu.aio.channels.base import Channel, ChannelMessage
+from aimu.history import ConversationManager
 from aimu.models import StreamingContentType
 
 
@@ -142,7 +143,7 @@ async def test_assistant_handles_message(tmp_path):
     await assistant._handle(ChannelMessage(text="do a thing", channel="fake"))
 
     assert channel.sent == ["Sure, done."]
-    assert assistant._conversation.messages  # persisted at least the turn
+    assert assistant.history  # persisted at least the turn
 
 
 async def test_assistant_proactive_message(tmp_path):
@@ -162,7 +163,7 @@ async def test_assistant_persists_and_restores(tmp_path):
     client1 = MockAsyncModelClient(["first reply"])
     assistant1 = await Assistant.create(cfg, channel1, client=client1)
     await assistant1._handle(ChannelMessage(text="remember this"))
-    assistant1._conversation.close()  # flush TinyDB
+    assistant1._store.close()  # flush TinyDB
 
     channel2 = FakeChannel()
     client2 = MockAsyncModelClient([])  # no turn; just restore
@@ -323,6 +324,55 @@ async def test_document_tools_round_trip(tmp_path):
     tools = {fn.__name__: fn for fn in assistant._agent.tools}
     assert tools["save_document"]("/notes/standup.md", "Yesterday, Today, Blockers") == "Saved /notes/standup.md."
     assert tools["read_document"]("/notes/standup.md") == "Yesterday, Today, Blockers"
+
+
+# --- Multiple conversations -------------------------------------------------------------------
+
+
+async def test_turn_persists_to_active_session_with_title(tmp_path):
+    channel = FakeChannel()
+    client = MockAsyncModelClient(["Sure."])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+
+    await assistant._handle(ChannelMessage(text="plan my trip to Kauai", channel="fake"))
+
+    stored = assistant._store.get(assistant._session.key)
+    assert any(m.get("content") == "plan my trip to Kauai" for m in stored.messages)
+    assert stored.metadata["title"] == "plan my trip to Kauai"
+
+
+async def test_history_returns_active_session_messages(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"))
+    assert assistant.history == assistant._session.messages
+    assert any(m.get("content") == "hello" for m in assistant.history)
+
+
+async def test_fresh_start_has_empty_active_session(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert assistant._session.messages == []
+    assert assistant._store.list_keys() == [assistant._session.key]
+
+
+async def test_migration_imports_last_history_as_first_conversation(tmp_path):
+    cfg = _config(tmp_path)
+    cm = ConversationManager(cfg.history_path, use_last_conversation=False)
+    cm.update_conversation(
+        [
+            {"role": "user", "content": "remember the budget"},
+            {"role": "assistant", "content": "noted"},
+        ]
+    )
+    cm.close()
+    assert not cfg.sessions_path.exists()
+
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    keys = assistant._store.list_keys()
+    assert len(keys) == 1
+    imported = assistant._store.get(keys[0])
+    assert any(m.get("content") == "remember the budget" for m in imported.messages)
+    assert imported.metadata["title"] == "remember the budget"
 
 
 # --- Tool approval ----------------------------------------------------------------------------
@@ -503,3 +553,46 @@ async def test_assistant_authors_and_registers_runnable_script(tmp_path):
     assert (cfg.skills_dir / "disk" / "scripts" / "usage.py").exists()
     # reload_skills() ran, so the new script tool is callable on the live client.
     assert "disk__usage" in [fn.__name__ for fn in assistant._agent.model_client.tools]
+
+
+async def test_add_mcp_server_auto_oauth_on_auth_challenge(tmp_path, monkeypatch):
+    """A tokenless connect that hits a 401 transparently retries with OAuth."""
+    from aimu import aio
+
+    attempts = []
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        attempts.append(auth)
+        if auth is None:  # first, unauthenticated attempt -> server challenges
+            raise RuntimeError("failed to connect: Client error '401 Unauthorized'")
+        return _FakeMCP([_fake_mcp_tool("remote_trade")])  # auth="oauth" attempt succeeds
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    add_mcp = next(t for t in assistant._agent.tools if t.__name__ == "add_mcp_server")
+
+    msg = await add_mcp(url="https://svc/mcp")  # no bearer token -> auto OAuth on the 401
+    assert attempts == [None, "oauth"]
+    assert "remote_trade" in msg
+    assert "remote_trade" in {fn.__name__ for fn in assistant._agent.tools}
+
+
+async def test_add_mcp_server_no_oauth_on_non_auth_failure(tmp_path, monkeypatch):
+    """A non-auth failure (unreachable host) is reported without an OAuth attempt (no browser)."""
+    from aimu import aio
+
+    attempts = []
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        attempts.append(auth)
+        raise RuntimeError("Connection refused")
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    add_mcp = next(t for t in assistant._agent.tools if t.__name__ == "add_mcp_server")
+
+    msg = await add_mcp(url="https://down/mcp")
+    assert attempts == [None]  # did not escalate to OAuth
+    assert "Failed to connect" in msg

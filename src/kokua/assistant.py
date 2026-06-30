@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
+from datetime import datetime
+from pathlib import Path
 from typing import Callable, Optional
 
 from aimu import aio
@@ -22,6 +25,7 @@ from aimu.aio import Channel, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
 from aimu.history import ConversationManager
 from aimu.memory import DocumentStore, SemanticMemoryStore
+from aimu.sessions import Session, TinyDBSessionStore
 from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_script_tool
 from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
@@ -72,6 +76,17 @@ def _resolve_builtin_tools(names: list[str]) -> list:
     return resolved
 
 
+def _looks_like_auth_required(exc: BaseException) -> bool:
+    """Heuristic: did this connection failure come from an auth challenge (so OAuth should run)?
+
+    Matches the failure text against common auth signals (401/403, "unauthorized", a
+    WWW-Authenticate / OAuth hint). Deliberately narrow so a plain unreachable host (DNS,
+    connection refused) does not trigger an OAuth attempt.
+    """
+    text = f"{exc} {getattr(exc, '__cause__', '') or ''}".lower()
+    return any(s in text for s in ("401", "403", "unauthor", "forbidden", "www-authenticate", "oauth"))
+
+
 def make_add_mcp_server_tool(agent: aio.SkillAgent, mcp_clients: list) -> Callable:
     """Build an ``add_mcp_server`` tool bound to ``agent`` and a live-client registry.
 
@@ -85,11 +100,28 @@ def make_add_mcp_server_tool(agent: aio.SkillAgent, mcp_clients: list) -> Callab
     async def add_mcp_server(url: str, bearer_token: Optional[str] = None) -> str:
         """Connect to a remote MCP server by URL and add its tools to this assistant.
 
-        The server's tools become callable immediately, even in this same turn. Pass
-        bearer_token for an authenticated server. Returns the names of the newly available tools.
+        The server's tools become callable immediately, even in this same turn. Returns the names
+        of the newly available tools.
+
+        Authentication is automatic: just pass the URL. If the server is unprotected it connects
+        directly; if it requires OAuth, a browser window opens for you to authorize and the token
+        is captured and used for the rest of the session, no token needed up front. Pass
+        bearer_token only to use a static token instead of the OAuth flow.
         """
         try:
-            mcp = await aio.MCPClient.connect(url=url, auth=bearer_token)
+            if bearer_token:
+                mcp = await aio.MCPClient.connect(url=url, auth=bearer_token)
+            else:
+                try:
+                    mcp = await aio.MCPClient.connect(url=url)
+                except Exception as exc:
+                    if not _looks_like_auth_required(exc):
+                        raise
+                    # The server challenged for auth; run the OAuth flow. FastMCP discovers the
+                    # auth server, opens a browser to authorize, captures the token via a local
+                    # callback, and uses it for this session.
+                    logger.info("MCP server %s requires authorization; starting OAuth flow.", url)
+                    mcp = await aio.MCPClient.connect(url=url, auth="oauth")
             new_tools = await mcp.as_tools()
         except Exception as exc:
             return f"Failed to connect to MCP server {url!r}: {exc}"
@@ -122,6 +154,58 @@ def _load_plugin_tools(config: AssistantConfig) -> list:
     return tools
 
 
+def _message_text(content) -> str:
+    """Plain text of a message's content (a string, or the text blocks of a multimodal list)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def _derive_title(messages: list[dict]) -> Optional[str]:
+    """A conversation title from the first user message (stripped, truncated), or None."""
+    for message in messages:
+        if message.get("role") == "user":
+            text = _message_text(message.get("content")).strip()
+            if text:
+                return text[:40]
+    return None
+
+
+def _import_last_history(store: TinyDBSessionStore, config: AssistantConfig) -> None:
+    """One-time migration: import the last single-conversation history.json into the store."""
+    history_path = Path(config.history_path)
+    if not history_path.exists():
+        return
+    manager = ConversationManager(str(history_path), use_last_conversation=True)
+    messages = [dict(m) for m in manager.messages]
+    manager.close()
+    if not messages:
+        return
+    now = datetime.now().isoformat()
+    store.save(
+        Session(
+            key=uuid.uuid4().hex,
+            messages=messages,
+            metadata={"title": _derive_title(messages), "created_at": now, "updated_at": now},
+        )
+    )
+
+
+def _active_session(store: TinyDBSessionStore) -> Session:
+    """The most-recently-updated session, creating a fresh empty one if the store is empty."""
+    keys = store.list_keys()
+    if keys:
+        sessions = [store.get(key) for key in keys]
+        sessions.sort(key=lambda s: s.metadata.get("updated_at", ""), reverse=True)
+        return sessions[0]
+    now = datetime.now().isoformat()
+    session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
+    store.save(session)
+    return session
+
+
 class Assistant:
     """A single-user personal assistant wired from AIMU primitives."""
 
@@ -130,13 +214,15 @@ class Assistant:
         agent: aio.SkillAgent,
         channel: Channel,
         scheduler: Scheduler,
-        conversation: ConversationManager,
+        store: TinyDBSessionStore,
+        session: Session,
         config: AssistantConfig,
     ):
         self._agent = agent
         self._channel = channel
         self._scheduler = scheduler
-        self._conversation = conversation
+        self._store = store
+        self._session = session
         self._config = config
         # Live remote-MCP connections (startup + runtime-added) kept alive for their lifetime
         # and closed on shutdown. Assigned by create().
@@ -206,13 +292,19 @@ class Assistant:
             except Exception:
                 logger.warning("Could not connect MCP server %s; continuing without it.", url, exc_info=True)
 
-        conversation = ConversationManager(config.history_path, use_last_conversation=True)
-        prior = conversation.messages
-        if prior:
-            agent.restore(prior)
+        # Multiple conversations live in a session store. On first run (no store yet), import the
+        # last single-conversation history.json so the existing chat is not lost. The active
+        # conversation is the most recently updated (a fresh empty one if there are none).
+        first_run = not config.sessions_path.exists()
+        store = TinyDBSessionStore(str(config.sessions_path))
+        if first_run:
+            _import_last_history(store, config)
+        session = _active_session(store)
+        if session.messages:
+            agent.restore(session.messages)
 
         scheduler = Scheduler()
-        assistant = cls(agent, channel, scheduler, conversation, config)
+        assistant = cls(agent, channel, scheduler, store, session, config)
         assistant._mcp_clients = mcp_clients  # same list the add_mcp_server tool appends to
         assistant._memory_store = memory_store
         assistant._document_store = document_store
@@ -225,8 +317,8 @@ class Assistant:
 
     @property
     def history(self) -> list[dict]:
-        """The restored prior conversation (OpenAI-format message dicts), for a front end to display."""
-        return self._conversation.messages
+        """The active conversation's messages (OpenAI-format), for a front end to display."""
+        return self._session.messages
 
     async def run(self) -> None:
         """Serve the channel and run the scheduler concurrently until the channel closes."""
@@ -246,6 +338,7 @@ class Assistant:
                     await mcp.aclose()
                 except Exception:
                     logger.debug("Error closing MCP client", exc_info=True)
+            self._store.close()
 
     async def _serve_channel(self) -> None:
         try:
@@ -328,7 +421,17 @@ class Assistant:
             finally:
                 self._in_proactive = False
 
-    def _persist(self) -> None:
-        # Copy each message so the manager's timestamp annotation doesn't leak into the live
-        # model-client message dicts.
-        self._conversation.update_conversation([dict(m) for m in self._agent.model_client.messages])
+    def _persist(self) -> bool:
+        """Snapshot the agent's messages onto the active session and save. Returns True if a title
+        was just derived (first user message), so a caller can refresh the conversation list."""
+        messages = [dict(m) for m in self._agent.model_client.messages]
+        self._session.messages = messages
+        title_set = False
+        if not self._session.metadata.get("title"):
+            title = _derive_title(messages)
+            if title:
+                self._session.metadata["title"] = title
+                title_set = True
+        self._session.metadata["updated_at"] = datetime.now().isoformat()
+        self._store.save(self._session)
+        return title_set
