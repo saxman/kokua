@@ -364,6 +364,12 @@ class Assistant:
             self._session = self._store.get(conversation_id)
             self._agent.restore(self._session.messages)
 
+    async def _maybe_push_conversations(self) -> None:
+        """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""
+        send = getattr(self._channel, "send_conversations", None)
+        if send is not None:
+            await send(self.list_conversations())
+
     async def run(self) -> None:
         """Serve the channel and run the scheduler concurrently until the channel closes."""
         try:
@@ -447,12 +453,14 @@ class Assistant:
                     await self._channel.send("(stopped)", reply_to=msg)
                 except Exception:
                     pass
-                self._persist()
+                if self._persist():
+                    await self._maybe_push_conversations()
                 return
             except Exception:
                 logger.exception("Error handling message")
                 await self._channel.send("Sorry, something went wrong handling that.", reply_to=msg)
-            self._persist()
+            if self._persist():
+                await self._maybe_push_conversations()
 
     async def _proactive(self) -> None:
         """Scheduled callback: produce a message unprompted and push it to the channel."""
@@ -461,7 +469,8 @@ class Assistant:
             try:
                 reply = await self._agent.run(self._config.reminder_text)
                 await self._channel.send(reply)
-                self._persist()
+                if self._persist():
+                    await self._maybe_push_conversations()
             finally:
                 self._in_proactive = False
 

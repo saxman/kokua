@@ -375,6 +375,27 @@ async def test_migration_imports_last_history_as_first_conversation(tmp_path):
     assert imported.metadata["title"] == "remember the budget"
 
 
+class _ConvCapturingChannel(FakeChannel):
+    def __init__(self):
+        super().__init__()
+        self.conversation_pushes: list[list] = []
+
+    async def send_conversations(self, items):
+        self.conversation_pushes.append(items)
+
+
+async def test_first_turn_pushes_conversations(tmp_path):
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["a", "b"]))
+
+    await assistant._handle(ChannelMessage(text="hello there", channel="fake"))
+    assert len(channel.conversation_pushes) == 1  # title just set -> one push
+    assert channel.conversation_pushes[0][0]["title"] == "hello there"
+
+    await assistant._handle(ChannelMessage(text="again", channel="fake"))
+    assert len(channel.conversation_pushes) == 1  # title already set -> no further push
+
+
 async def test_list_conversations_recency_desc(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a", "b"]))
     await assistant._handle(ChannelMessage(text="first chat", channel="fake"))
