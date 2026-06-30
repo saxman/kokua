@@ -23,6 +23,10 @@ installable, modular application.
   HTML-escapes the source first (so model/tool output cannot inject markup) and only permits
   http(s)/mailto links. Light and dark themes: the page follows the OS preference by default and has a
   header toggle that overrides it, remembered across reloads (no flash on load, no new dependencies).
+- **Multiple web conversations**: the web UI lists conversations in a sidebar (auto-titled from the
+  first message) and lets you start a new one or select an existing one to continue, backed by AIMU's
+  `sessions` store. Memory stays shared across conversations. An existing single-conversation
+  `history.json` is imported once as the first conversation. CLI multi-conversation is a later change.
 - **Stop an in-flight reply**: send `/stop` (the web UI also has a Stop button, enabled only while a reply
   is being processed) to cancel the current turn;
   the partial turn is kept so the conversation can continue. Built on AIMU's `aio.RunHandle`; reactive
