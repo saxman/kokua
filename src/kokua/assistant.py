@@ -31,6 +31,7 @@ from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
 from .config import MEMORY_GUIDANCE, AssistantConfig
+from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
 
 logger = logging.getLogger(__name__)
@@ -87,13 +88,19 @@ def _looks_like_auth_required(exc: BaseException) -> bool:
     return any(s in text for s in ("401", "403", "unauthor", "forbidden", "www-authenticate", "oauth"))
 
 
-def make_add_mcp_server_tool(agent: aio.SkillAgent, mcp_clients: list) -> Callable:
+def make_add_mcp_server_tool(
+    agent: aio.SkillAgent, mcp_clients: list, *, notify: Notify, oauth_storage_dir: Path
+) -> Callable:
     """Build an ``add_mcp_server`` tool bound to ``agent`` and a live-client registry.
 
     Lets the assistant connect to a remote MCP service by URL mid-session and use its tools
     immediately. The new tools are appended to ``agent.tools`` (the configured list the
     SkillAgent copies to its model client every run, so they persist across turns), deduped by
     name. The connected client is kept in ``mcp_clients`` for the connection's lifetime.
+
+    OAuth-protected servers are handled automatically: ``notify`` posts the authorization link
+    into the chat (and a browser opens), and tokens persist under ``oauth_storage_dir`` so a
+    later reconnect is silent.
     """
 
     @tool
@@ -103,10 +110,12 @@ def make_add_mcp_server_tool(agent: aio.SkillAgent, mcp_clients: list) -> Callab
         The server's tools become callable immediately, even in this same turn. Returns the names
         of the newly available tools.
 
-        Authentication is automatic: just pass the URL. If the server is unprotected it connects
-        directly; if it requires OAuth, a browser window opens for you to authorize and the token
-        is captured and used for the rest of the session, no token needed up front. Pass
-        bearer_token only to use a static token instead of the OAuth flow.
+        Authentication is handled for you: just pass the URL. If the server is unprotected it
+        connects directly. If it requires OAuth, you post an authorization link into the chat and
+        open a browser window for the user to approve; once they do, the connection completes and
+        the token is saved for future sessions. Do not claim you cannot authenticate or that this
+        is impossible from here, that flow is built in. Pass bearer_token only when the user gives
+        you a static token to use instead of the OAuth flow.
         """
         try:
             if bearer_token:
@@ -117,11 +126,12 @@ def make_add_mcp_server_tool(agent: aio.SkillAgent, mcp_clients: list) -> Callab
                 except Exception as exc:
                     if not _looks_like_auth_required(exc):
                         raise
-                    # The server challenged for auth; run the OAuth flow. FastMCP discovers the
-                    # auth server, opens a browser to authorize, captures the token via a local
-                    # callback, and uses it for this session.
+                    # The server challenged for auth; run the OAuth flow. ChatOAuth posts the
+                    # authorization link into the chat and opens a browser; FastMCP captures the
+                    # token via a local callback and persists it for future sessions.
                     logger.info("MCP server %s requires authorization; starting OAuth flow.", url)
-                    mcp = await aio.MCPClient.connect(url=url, auth="oauth")
+                    provider = build_chat_oauth(url, notify=notify, token_storage_dir=oauth_storage_dir)
+                    mcp = await aio.MCPClient.connect(url=url, auth=provider)
             new_tools = await mcp.as_tools()
         except Exception as exc:
             return f"Failed to connect to MCP server {url!r}: {exc}"
@@ -276,7 +286,9 @@ class Assistant:
         agent.tools = [
             author_skill,
             make_skill_script_tool(agent, manager, config.skills_dir),
-            make_add_mcp_server_tool(agent, mcp_clients),
+            make_add_mcp_server_tool(
+                agent, mcp_clients, notify=channel.send, oauth_storage_dir=config.data_dir / "mcp-oauth"
+            ),
             *memory_tools,
             *plugin_tools,
             *_resolve_builtin_tools(config.tools),

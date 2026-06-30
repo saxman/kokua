@@ -614,8 +614,10 @@ async def test_assistant_authors_and_registers_runnable_script(tmp_path):
 
 
 async def test_add_mcp_server_auto_oauth_on_auth_challenge(tmp_path, monkeypatch):
-    """A tokenless connect that hits a 401 transparently retries with OAuth."""
+    """A tokenless connect that hits a 401 transparently retries with a ChatOAuth provider."""
     from aimu import aio
+
+    from kokua.mcp_auth import ChatOAuth
 
     attempts = []
 
@@ -623,7 +625,7 @@ async def test_add_mcp_server_auto_oauth_on_auth_challenge(tmp_path, monkeypatch
         attempts.append(auth)
         if auth is None:  # first, unauthenticated attempt -> server challenges
             raise RuntimeError("failed to connect: Client error '401 Unauthorized'")
-        return _FakeMCP([_fake_mcp_tool("remote_trade")])  # auth="oauth" attempt succeeds
+        return _FakeMCP([_fake_mcp_tool("remote_trade")])  # the OAuth-provider attempt succeeds
 
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
@@ -631,9 +633,12 @@ async def test_add_mcp_server_auto_oauth_on_auth_challenge(tmp_path, monkeypatch
     add_mcp = next(t for t in assistant._agent.tools if t.__name__ == "add_mcp_server")
 
     msg = await add_mcp(url="https://svc/mcp")  # no bearer token -> auto OAuth on the 401
-    assert attempts == [None, "oauth"]
+    assert attempts[0] is None  # first attempt unauthenticated
+    assert isinstance(attempts[1], ChatOAuth)  # retried with a chat-link OAuth provider
     assert "remote_trade" in msg
     assert "remote_trade" in {fn.__name__ for fn in assistant._agent.tools}
+    # Tokens persist under the app data dir so a later reconnect is silent.
+    assert (tmp_path / "mcp-oauth").exists()
 
 
 async def test_add_mcp_server_no_oauth_on_non_auth_failure(tmp_path, monkeypatch):
