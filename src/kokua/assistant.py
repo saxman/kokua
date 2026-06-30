@@ -135,15 +135,22 @@ async def _connect_mcp(
 
 
 async def _attach_server(agent: aio.SkillAgent, connections: list, url: str, client: Any, auth_mode: str) -> list[str]:
-    """Add a connected server's tools to ``agent.tools`` (deduped) and record the connection.
+    """Add a connected server's tools to the agent (deduped) and record the connection.
 
     Returns the names of the tools newly added. Tools land on ``agent.tools`` (the configured list
-    the SkillAgent copies to its model client every run, so they survive the per-run reset).
+    the SkillAgent copies to its model client every run, so they survive the per-run reset) **and**
+    on the live ``model_client.tools`` dispatch list. The live append is what makes a server added
+    mid-turn callable in the *same* turn: ``_prepare_run`` only rebuilds ``model_client.tools`` at
+    the start of a run, so without it the new tools are absent from this turn's dispatch table and a
+    call returns "tool not found". Mirrors ``SkillAgent.reload_skills``. (At boot ``_prepare_run``
+    rebuilds from ``agent.tools`` anyway, so the live append is simply redundant there.)
     """
     new_tools = await client.as_tools()
     existing = {getattr(fn, "__name__", None) for fn in agent.tools}
     added = [fn for fn in new_tools if fn.__name__ not in existing]
     agent.tools.extend(added)
+    live_existing = {getattr(fn, "__name__", None) for fn in agent.model_client.tools}
+    agent.model_client.tools = list(agent.model_client.tools) + [fn for fn in added if fn.__name__ not in live_existing]
     names = [fn.__name__ for fn in added]
     connections.append(_ServerConnection(url=url, client=client, tools=names, auth_mode=auth_mode))
     return names
@@ -209,7 +216,11 @@ def make_mcp_tools(
         if entry is None:
             return f"No MCP server is connected at {url!r}."
         removed = set(entry.tools)
+        # Drop from both the configured list (future runs) and the live dispatch list (this turn).
         agent.tools[:] = [fn for fn in agent.tools if getattr(fn, "__name__", None) not in removed]
+        agent.model_client.tools = [
+            fn for fn in agent.model_client.tools if getattr(fn, "__name__", None) not in removed
+        ]
         connections.remove(entry)
         try:
             await entry.client.aclose()

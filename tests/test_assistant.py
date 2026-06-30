@@ -773,3 +773,35 @@ async def test_remove_mcp_server_drops_tools_and_forgets(tmp_path, monkeypatch):
     # Restart: the removed server is not reconnected.
     a2 = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     assert "remote_search" not in {fn.__name__ for fn in a2._agent.tools}
+
+
+async def test_runtime_added_tool_is_live_in_the_same_turn(tmp_path, monkeypatch):
+    """A server added mid-turn is callable that same turn (its tools join the live dispatch list).
+
+    Regression: _prepare_run snapshots model_client.tools at run start, so appending only to
+    agent.tools left the new tools out of this turn's dispatch table -> "tool not found" when the
+    model called one after add_mcp_server reported it available.
+    """
+    from aimu import aio
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("get_portfolio")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    agent = assistant._agent
+
+    # Simulate a turn in progress: _prepare_run snapshots the live dispatch list (no remote server yet).
+    agent._prepare_run()
+    assert "get_portfolio" not in {fn.__name__ for fn in agent.model_client.tools}
+
+    add_mcp = next(t for t in agent.tools if t.__name__ == "add_mcp_server")
+    await add_mcp(url="https://svc/mcp")
+
+    # Callable now, same turn: present in the live dispatch list, not just the configured agent.tools.
+    assert "get_portfolio" in {fn.__name__ for fn in agent.model_client.tools}
+
+    # And remove_mcp_server drops it from the live list too (not just agent.tools).
+    remove_mcp = next(t for t in agent.tools if t.__name__ == "remove_mcp_server")
+    await remove_mcp(url="https://svc/mcp")
+    assert "get_portfolio" not in {fn.__name__ for fn in agent.model_client.tools}
