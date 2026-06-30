@@ -93,6 +93,14 @@
     .md pre code { background: none; padding: 0; }
     .md blockquote { margin: 0.5em 0; padding-left: 0.8em; border-left: 3px solid var(--quote-border); color: var(--quote-fg); }
     .md a { color: var(--accent); }
+    .md table { border-collapse: collapse; margin: 0.5em 0; display: block; overflow-x: auto; max-width: 100%; }
+    .md th, .md td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
+    .md th { background: var(--code-bg); font-weight: 600; }
+    .md hr { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
+    .md del { opacity: 0.7; }
+    .md input[type="checkbox"] { margin-right: 0.4em; }
+    .md li { list-style-position: outside; }
+    .md li.task-list-item { list-style: none; margin-left: -1.1em; }
     .approval { align-self: flex-start; max-width: 70%; background: var(--approval-bg); border: 1px solid var(--approval-border); border-radius: 12px; padding: 10px 14px; }
     .approval .prompt { font-size: 0.9em; margin-bottom: 8px; }
     .approval code { font-family: ui-monospace, monospace; font-size: 0.85em; }
@@ -125,6 +133,9 @@
     </main>
   </div>
 
+  <!-- Vendored markdown renderer + sanitizer (offline; see web_static/*.js for pinned versions). -->
+  <script src="marked.min.js"></script>
+  <script src="purify.min.js"></script>
   <script>
     const log = document.getElementById("log");
     const form = document.getElementById("form");
@@ -190,83 +201,32 @@
 
     function notice(text) { addBubble("notice", text); }
 
-    // --- Minimal, safe markdown rendering -----------------------------------------------------
-    // The assistant (and tool output) is untrusted, so HTML-escape everything FIRST, then add only
-    // a known set of tags. Raw HTML in the source can never reach the DOM as markup.
-    function escapeHtml(s) {
-      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-    }
-
-    function renderInline(text) {
-      // `text` is already HTML-escaped. Split out `code spans` so inline rules skip their contents.
-      return text.split(/(`[^`]+`)/).map((part) => {
-        if (part.length >= 2 && part.startsWith("`") && part.endsWith("`")) {
-          return "<code>" + part.slice(1, -1) + "</code>";
+    // --- Markdown rendering (vendored marked + DOMPurify) -------------------------------------
+    // marked parses full GFM (incl. tables); DOMPurify sanitizes its HTML, since the assistant and
+    // tool output are untrusted. Force links to open safely. If the libs failed to load, fall back
+    // to plain text so a bad render never injects markup or crashes the page.
+    const markdownReady = typeof marked !== "undefined" && typeof DOMPurify !== "undefined";
+    if (markdownReady) {
+      marked.setOptions({ gfm: true, breaks: false });
+      DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+        if (node.tagName === "A" && node.getAttribute("href")) {
+          node.setAttribute("target", "_blank");
+          node.setAttribute("rel", "noopener noreferrer");
         }
-        let s = part;
-        // [label](url): only http(s)/mailto. The url is escaped, so undo &amp; before the scheme test.
-        s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
-          if (/^(https?:\/\/|mailto:)/i.test(url.replace(/&amp;/g, "&"))) {
-            return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
-          }
-          return m;  // unsafe scheme: leave as literal text
-        });
-        s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-        s = s.replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, "$1<em>$2</em>");
-        s = s.replace(/(^|[^\w])_([^_\s][^_]*?)_/g, "$1<em>$2</em>");
-        return s;
-      }).join("");
+      });
     }
 
     function renderMarkdown(src) {
-      const lines = escapeHtml(src).split("\n");
-      // Lines are already HTML-escaped, so a blockquote marker is "&gt;", not ">".
-      const special = /^(#{1,6}\s|&gt;\s?|```|\s*[-*+]\s+|\s*\d+\.\s+)/;
-      const blocks = [];
-      let i = 0;
-      while (i < lines.length) {
-        const line = lines[i];
-        let m;
-        if (/^```/.test(line)) {
-          const code = [];
-          i++;
-          while (i < lines.length && !/^```\s*$/.test(lines[i])) { code.push(lines[i]); i++; }
-          i++;  // skip the closing fence
-          blocks.push("<pre><code>" + code.join("\n") + "</code></pre>");
-        } else if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
-          blocks.push(`<h${m[1].length}>${renderInline(m[2])}</h${m[1].length}>`);
-          i++;
-        } else if (/^&gt;\s?/.test(line)) {
-          const quote = [];
-          while (i < lines.length && /^&gt;\s?/.test(lines[i])) { quote.push(lines[i].replace(/^&gt;\s?/, "")); i++; }
-          blocks.push("<blockquote>" + renderInline(quote.join(" ")) + "</blockquote>");
-        } else if (/^\s*[-*+]\s+/.test(line)) {
-          const items = [];
-          while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
-            items.push("<li>" + renderInline(lines[i].replace(/^\s*[-*+]\s+/, "")) + "</li>"); i++;
-          }
-          blocks.push("<ul>" + items.join("") + "</ul>");
-        } else if (/^\s*\d+\.\s+/.test(line)) {
-          const items = [];
-          while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-            items.push("<li>" + renderInline(lines[i].replace(/^\s*\d+\.\s+/, "")) + "</li>"); i++;
-          }
-          blocks.push("<ol>" + items.join("") + "</ol>");
-        } else if (line.trim() === "") {
-          i++;
-        } else {
-          const para = [];
-          while (i < lines.length && lines[i].trim() !== "" && !special.test(lines[i])) { para.push(lines[i]); i++; }
-          blocks.push("<p>" + renderInline(para.join(" ")) + "</p>");
-        }
-      }
-      return blocks.join("\n");
+      if (!markdownReady) return null;  // signal: caller should fall back to plain text
+      return DOMPurify.sanitize(marked.parse(src || ""));
     }
 
     function addMarkdownBubble(cls, text) {
       const el = document.createElement("div");
       el.className = "bubble md " + cls;
-      el.innerHTML = renderMarkdown(text || "");
+      const html = renderMarkdown(text);
+      if (html === null) el.textContent = text || "";
+      else el.innerHTML = html;
       log.appendChild(el);
       log.scrollTop = log.scrollHeight;
       return el;
@@ -312,8 +272,11 @@
         log.scrollTop = log.scrollHeight;
       } else if (frame.type === "done") {
         if (streamingBubble) {
-          streamingBubble.classList.add("md");
-          streamingBubble.innerHTML = renderMarkdown(streamingText);
+          const html = renderMarkdown(streamingText);
+          if (html !== null) {  // null -> libs unavailable; leave the streamed plain text as-is
+            streamingBubble.classList.add("md");
+            streamingBubble.innerHTML = html;
+          }
           log.scrollTop = log.scrollHeight;
         }
         streamingBubble = null;

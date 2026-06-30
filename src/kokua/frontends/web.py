@@ -15,7 +15,7 @@ from importlib.resources import files
 from typing import Optional
 
 from starlette.applications import Starlette
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -28,6 +28,14 @@ from ..plugins import FrontEnd
 def _index_html() -> str:
     """Read the bundled chat page from package data (works for installed + source layouts)."""
     return files("kokua").joinpath("web_static/index.html").read_text(encoding="utf-8")
+
+
+# Vendored browser libraries served at the page's root (the page loads them by relative URL).
+_STATIC_JS = ("marked.min.js", "purify.min.js")
+
+
+def _static_js(filename: str) -> str:
+    return files("kokua").joinpath(f"web_static/{filename}").read_text(encoding="utf-8")
 
 
 def _parse_control(raw: str) -> Optional[dict]:
@@ -55,6 +63,12 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
 
     async def index(request):
         return HTMLResponse(_index_html())
+
+    async def static_js(request):
+        name = request.path_params["name"]
+        if name not in _STATIC_JS:  # only serve the known vendored files
+            return Response(status_code=404)
+        return Response(_static_js(name), media_type="text/javascript")
 
     async def ws_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
@@ -101,7 +115,13 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
             busy["active"] = False
             await channel.aclose()
 
-    return Starlette(routes=[Route("/", index), WebSocketRoute("/ws", ws_endpoint)])
+    return Starlette(
+        routes=[
+            Route("/", index),
+            Route("/{name:str}", static_js),  # vendored marked.min.js / purify.min.js
+            WebSocketRoute("/ws", ws_endpoint),
+        ]
+    )
 
 
 async def run(config: AssistantConfig, args: argparse.Namespace) -> None:

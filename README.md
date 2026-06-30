@@ -55,8 +55,9 @@ kokua --frontend web              # or: kokua-web
 
 Reloading the page replays the prior conversation (the assistant already keeps its context across
 reconnects; this makes it visible again), including reasoning and tool calls when `show_thinking` /
-`show_tools` are on. Assistant replies are rendered as markdown (headings, lists, code, links, etc.)
-once each turn completes; the source is HTML-escaped first, so model or tool output can't inject markup.
+`show_tools` are on. Assistant replies are rendered as GitHub-flavored markdown (tables, nested lists, code, links, task
+lists, etc.) once each turn completes, via vendored `marked` + `DOMPurify` (bundled, no CDN); the HTML
+is sanitized, so model or tool output can't inject scripts or markup.
 The page follows your OS light/dark preference, with a header toggle to override it (remembered across reloads).
 
 The web UI holds multiple conversations: the left sidebar lists them (titled automatically from the first

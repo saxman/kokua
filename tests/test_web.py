@@ -288,3 +288,15 @@ def test_index_route_serves_html(tmp_path):
     resp = TestClient(app).get("/")
     assert resp.status_code == 200
     assert "<html" in resp.text.lower()
+
+
+def test_vendored_js_served(tmp_path):
+    from starlette.testclient import TestClient
+
+    client = TestClient(build_app(_config(tmp_path), client=MockAsyncModelClient([])))
+    for name, marker in [("marked.min.js", "marked"), ("purify.min.js", "DOMPurify")]:
+        resp = client.get("/" + name)
+        assert resp.status_code == 200
+        assert "javascript" in resp.headers["content-type"]
+        assert marker in resp.text  # the library's own name appears in its source/header
+    assert client.get("/nope.js").status_code == 404

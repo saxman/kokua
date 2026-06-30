@@ -19,9 +19,10 @@ installable, modular application.
   with a streaming browser UI, behind the `web` extra). Reloading the web page replays the prior
   conversation (user messages, answers, and reasoning/tool calls when `show_thinking` / `show_tools` are
   on); the assistant already restored its context across reconnects, this makes it visible. Assistant
-  replies render as markdown when a turn completes, via a small dependency-free renderer that
-  HTML-escapes the source first (so model/tool output cannot inject markup) and only permits
-  http(s)/mailto links. Light and dark themes: the page follows the OS preference by default and has a
+  replies render as GitHub-flavored markdown when a turn completes (tables, nested lists, code, task
+  lists, strikethrough, links), via vendored `marked` + `DOMPurify` (bundled in `web_static/`, served
+  locally, no CDN); the rendered HTML is sanitized so model/tool output cannot inject scripts or markup,
+  and links open with `rel="noopener"`. Light and dark themes: the page follows the OS preference by default and has a
   header toggle that overrides it, remembered across reloads (no flash on load, no new dependencies).
 - **Multiple web conversations**: the web UI lists conversations in a sidebar (auto-titled from the
   first message) and lets you start a new one or select an existing one to continue, backed by AIMU's
