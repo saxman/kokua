@@ -375,6 +375,43 @@ async def test_migration_imports_last_history_as_first_conversation(tmp_path):
     assert imported.metadata["title"] == "remember the budget"
 
 
+async def test_list_conversations_recency_desc(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a", "b"]))
+    await assistant._handle(ChannelMessage(text="first chat", channel="fake"))
+    first_id = assistant._session.key
+    await assistant.new_conversation()
+    await assistant._handle(ChannelMessage(text="second chat", channel="fake"))
+    second_id = assistant._session.key
+
+    items = assistant.list_conversations()
+    assert [i["id"] for i in items] == [second_id, first_id]  # most recent first
+    assert items[0]["title"] == "second chat"
+    assert items[0]["active"] is True and items[1]["active"] is False
+
+
+async def test_new_conversation_resets_agent(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a"]))
+    await assistant._handle(ChannelMessage(text="old chat", channel="fake"))
+    assert assistant._agent.model_client.messages  # has the old turn
+
+    new_id = await assistant.new_conversation()
+    assert assistant._session.key == new_id
+    assert assistant._session.messages == []
+    assert assistant._agent.model_client.messages == []  # restore([]) cleared it
+
+
+async def test_select_conversation_restores_messages(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a"]))
+    await assistant._handle(ChannelMessage(text="keep me", channel="fake"))
+    first_id = assistant._session.key
+    await assistant.new_conversation()
+    assert not any(m.get("content") == "keep me" for m in assistant._agent.model_client.messages)
+
+    await assistant.select_conversation(first_id)
+    assert assistant._session.key == first_id
+    assert any(m.get("content") == "keep me" for m in assistant._agent.model_client.messages)
+
+
 # --- Tool approval ----------------------------------------------------------------------------
 
 

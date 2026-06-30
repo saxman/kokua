@@ -320,6 +320,50 @@ class Assistant:
         """The active conversation's messages (OpenAI-format), for a front end to display."""
         return self._session.messages
 
+    def list_conversations(self) -> list[dict]:
+        """All conversations as {id, title, updated_at, active}, most-recently-updated first."""
+        items = []
+        for key in self._store.list_keys():
+            session = self._store.get(key)
+            items.append(
+                {
+                    "id": key,
+                    "title": session.metadata.get("title") or "New conversation",
+                    "updated_at": session.metadata.get("updated_at", ""),
+                    "active": key == self._session.key,
+                }
+            )
+        items.sort(key=lambda item: item["updated_at"], reverse=True)
+        return items
+
+    async def _cancel_current_turn(self) -> None:
+        """Cancel any in-flight turn and let it settle, so its partial state persists to the
+        conversation it belongs to before we switch away."""
+        if self._current is not None and not self._current.done:
+            self._current.cancel()
+            try:
+                await self._current.task
+            except Exception:
+                pass
+
+    async def new_conversation(self) -> str:
+        """Start and switch to a new, empty conversation; returns its id."""
+        await self._cancel_current_turn()
+        async with self._lock:
+            now = datetime.now().isoformat()
+            session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
+            self._store.save(session)
+            self._session = session
+            self._agent.restore(session.messages)
+        return session.key
+
+    async def select_conversation(self, conversation_id: str) -> None:
+        """Switch the active conversation to an existing one and restore it into the agent."""
+        await self._cancel_current_turn()
+        async with self._lock:
+            self._session = self._store.get(conversation_id)
+            self._agent.restore(self._session.messages)
+
     async def run(self) -> None:
         """Serve the channel and run the scheduler concurrently until the channel closes."""
         try:
