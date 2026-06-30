@@ -105,10 +105,12 @@ class WebChannel(Channel):
         await self._safe_send({"type": "conversations", "items": items})
 
     async def send_history(self, messages: list[dict]) -> None:
-        """Send the prior conversation as one batched frame so the page can render it on reload."""
+        """Send a conversation as one batched frame the page replays (replacing the current view).
+
+        Always sent, even when empty, so switching to a new/empty conversation clears the page.
+        """
         items = conversation_to_frames(messages, show_thinking=self.show_thinking, show_tools=self.show_tools)
-        if items:
-            await self._safe_send({"type": "history", "items": items})
+        await self._safe_send({"type": "history", "items": items})
 
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.

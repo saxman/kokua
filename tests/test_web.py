@@ -188,11 +188,11 @@ async def test_web_channel_send_history_emits_single_frame():
     assert {"type": "user", "text": "what's 2+2?"} in ws.frames[0]["items"]
 
 
-async def test_web_channel_send_history_empty_sends_nothing():
+async def test_web_channel_send_history_empty_sends_empty_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
-    await channel.send_history([])
-    assert ws.frames == []
+    await channel.send_history([])  # sent even when empty, so switching clears the page
+    assert ws.frames == [{"type": "history", "items": []}]
 
 
 def _drain_until(ws, type_):
@@ -255,6 +255,7 @@ def test_ws_new_then_select_round_trip(tmp_path):
         ids = [i["id"] for i in convs["items"]]
         assert len(ids) == 2
         first_id = next(i["id"] for i in convs["items"] if i["title"] == "first message")
+        _drain_until(ws, "history")  # the new conversation's (empty) history
         # Select the first conversation; its history should replay "first message".
         ws.send_text(json.dumps({"type": "select", "id": first_id}))
         hist = _drain_until(ws, "history")

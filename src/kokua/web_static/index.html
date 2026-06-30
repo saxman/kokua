@@ -42,12 +42,24 @@
       --code-bg: #0b0e13; --quote-fg: #9ca3af; --quote-border: #4b5563;
       --muted: #9ca3af;
     }
+    :root { --sidebar-bg: #ececef; --sidebar-active: #d8dade; }
+    :root[data-theme="dark"] { --sidebar-bg: #161a22; --sidebar-active: #232a36; }
     * { box-sizing: border-box; }
     body {
       font-family: -apple-system, system-ui, sans-serif;
       margin: 0; height: 100vh; display: flex; flex-direction: column;
       background: var(--bg); color: var(--fg);
     }
+    #app { display: flex; flex: 1; min-height: 0; }
+    #sidebar { width: 240px; flex: none; background: var(--sidebar-bg); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 10px; gap: 8px; overflow-y: auto; }
+    #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    #new-conv { background: var(--accent); color: var(--accent-fg); }
+    #conv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+    #conv-list li { padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 0.9em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #conv-list li:hover { background: var(--sidebar-active); }
+    #conv-list li.active { background: var(--sidebar-active); font-weight: 600; cursor: default; }
     header { padding: 12px 16px; background: var(--header-bg); color: var(--header-fg); font-weight: 600;
       display: flex; align-items: center; justify-content: space-between; }
     header small { font-weight: 400; opacity: 0.7; margin-left: 8px; }
@@ -94,16 +106,24 @@
   </style>
 </head>
 <body>
-  <header>
-    <span>Kokua <small>local, single user</small></span>
-    <button id="theme" type="button">🌙</button>
-  </header>
-  <div id="log"></div>
-  <form id="form">
-    <input id="msg" autocomplete="off" placeholder="Message your assistant..." autofocus />
-    <button id="send" type="submit">Send</button>
-    <button id="stop" type="button" disabled>Stop</button>
-  </form>
+  <div id="app">
+    <aside id="sidebar">
+      <button id="new-conv" type="button">+ New conversation</button>
+      <ul id="conv-list"></ul>
+    </aside>
+    <main id="main">
+      <header>
+        <span>Kokua <small>local, single user</small></span>
+        <button id="theme" type="button">🌙</button>
+      </header>
+      <div id="log"></div>
+      <form id="form">
+        <input id="msg" autocomplete="off" placeholder="Message your assistant..." autofocus />
+        <button id="send" type="submit">Send</button>
+        <button id="stop" type="button" disabled>Stop</button>
+      </form>
+    </main>
+  </div>
 
   <script>
     const log = document.getElementById("log");
@@ -112,6 +132,28 @@
     const sendBtn = document.getElementById("send");
     const stopBtn = document.getElementById("stop");
     const themeBtn = document.getElementById("theme");
+    const convList = document.getElementById("conv-list");
+    const newConvBtn = document.getElementById("new-conv");
+
+    function renderConversations(items) {
+      convList.innerHTML = "";
+      for (const item of items) {
+        const li = document.createElement("li");
+        li.textContent = item.title;
+        if (item.active) {
+          li.classList.add("active");
+        } else {
+          li.addEventListener("click", () => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "select", id: item.id }));
+          });
+        }
+        convList.appendChild(li);
+      }
+    }
+
+    newConvBtn.addEventListener("click", () => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "new" }));
+    });
 
     // The theme was applied pre-paint by the head script; here we wire the toggle and its label.
     function syncThemeButton() {
@@ -282,8 +324,11 @@
         if (!frame.proactive) setProcessing(false);  // a reactive message ends the turn (e.g. "(stopped)" / error)
       } else if (frame.type === "approval") {
         renderApproval(frame.name, frame.arguments);
+      } else if (frame.type === "conversations") {
+        renderConversations(frame.items);
       } else if (frame.type === "history") {
-        // Replay the prior conversation on (re)connect, reusing the live renderers.
+        // Replay a conversation (on connect or after switching), reusing the live renderers.
+        log.innerHTML = "";  // replace any current transcript
         for (const item of frame.items) {
           if (item.type === "user") addBubble("user", item.text);
           else if (item.type === "thinking") addBubble("thinking", item.text);
