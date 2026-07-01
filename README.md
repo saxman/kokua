@@ -74,7 +74,7 @@ preference); the theme is a per-browser choice remembered locally, applied befor
 flash.
 
 A built-in `pdf` tool-pack gives the assistant a `markdown_to_pdf` tool: ask it to turn something into a
-PDF and it writes the file to `data/documents/`. In the web UI the assistant hands back a download link
+PDF and it writes the file to `data/downloads/`. In the web UI the assistant hands back a download link
 (files are served at `/download/<name>`); from the CLI it reports the file path.
 
 List what's installed:
@@ -140,7 +140,8 @@ holds an optional `config.toml` and a single `data/` directory for all transient
     skills/            # authored skills
     sessions.json      # conversations (web UI can hold several)
     memory/            # semantic facts
-    documents/         # saved documents
+    documents/         # saved documents (text; scanned by the DocumentStore)
+    downloads/         # generated files (e.g. PDFs), served by the web UI at /download
     runtime-settings.json  # runtime model settings from the web settings panel
 ```
 

@@ -53,9 +53,10 @@ def test_markdown_to_pdf_writes_valid_pdf(tmp_path):
         "| A | B |\n|---|---|\n| 1 | 2 |\n\n```py\nprint('x')\n```\n\n- one\n- two\n"
     )
     result = tool(md, "report")
-    out = cfg.documents_path / "report.pdf"
+    out = cfg.downloads_path / "report.pdf"
     assert out.is_file()
     assert out.read_bytes().startswith(b"%PDF-")  # a real PDF, and Unicode did not raise
+    assert not (cfg.documents_path / "report.pdf").exists()  # never written into the DocumentStore dir
     assert "/download/report.pdf" in result  # surfaces the web download link
 
 

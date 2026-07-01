@@ -303,8 +303,8 @@ def test_download_route_serves_documents(tmp_path):
     from starlette.testclient import TestClient
 
     cfg = _config(tmp_path)
-    cfg.documents_path.mkdir(parents=True, exist_ok=True)
-    (cfg.documents_path / "report.pdf").write_bytes(b"%PDF-1.4 fake")
+    cfg.downloads_path.mkdir(parents=True, exist_ok=True)
+    (cfg.downloads_path / "report.pdf").write_bytes(b"%PDF-1.4 fake")
     client = TestClient(build_app(cfg, client=MockAsyncModelClient([])))
 
     resp = client.get("/download/report.pdf")

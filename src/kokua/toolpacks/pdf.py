@@ -1,11 +1,13 @@
 """A built-in tool-pack that renders Markdown to a PDF file.
 
 Contributes one tool, ``markdown_to_pdf``, that converts Markdown -> HTML (via the ``markdown``
-package) -> PDF (via ``fpdf2``), saving into the user's documents folder. Both libraries are pure
-Python (no system libraries), so the pack works out of the box wherever Kokua is installed.
+package) -> PDF (via ``fpdf2``), saving into the downloads folder. Both libraries are pure Python
+(no system libraries), so the pack works out of the box wherever Kokua is installed.
 
-The web front end serves the documents folder at ``/download/<name>`` (see ``frontends/web.py``), so the
-tool's result includes that relative link for the browser as well as the absolute path for the CLI.
+PDFs go in ``downloads_path`` rather than ``documents_path`` on purpose: the DocumentStore scans the
+documents folder as UTF-8 text at startup, so a binary PDF there would break document loading. The web
+front end serves the downloads folder at ``/download/<name>`` (see ``frontends/web.py``), so the tool's
+result includes that relative link for the browser as well as the absolute path for the CLI.
 """
 
 from __future__ import annotations
@@ -58,15 +60,15 @@ def _safe_pdf_name(filename: str) -> str:
 
 
 def build(config: AssistantConfig) -> list:
-    """Return this pack's tools, bound to the configured documents folder."""
+    """Return this pack's tools, bound to the configured downloads folder."""
 
     @tool
     def markdown_to_pdf(markdown_text: str, filename: str = "document.pdf") -> str:
-        """Render Markdown text to a PDF file saved in the user's documents folder.
+        """Render Markdown text to a PDF file saved in the user's downloads folder.
 
         Args:
             markdown_text: The Markdown source to render (headings, lists, tables, fenced code, links).
-            filename: Output file name; ".pdf" is appended if missing. Saved to the documents folder.
+            filename: Output file name; ".pdf" is appended if missing. Saved to the downloads folder.
         """
         import markdown
         from fpdf import FPDF
@@ -79,8 +81,8 @@ def build(config: AssistantConfig) -> list:
         pdf.set_font("helvetica", size=12)
         pdf.write_html(html)
 
-        config.documents_path.mkdir(parents=True, exist_ok=True)
-        out_path = config.documents_path / name
+        config.downloads_path.mkdir(parents=True, exist_ok=True)
+        out_path = config.downloads_path / name
         pdf.output(str(out_path))
         return f"Saved PDF to {out_path}. In the web UI, download it at /download/{name}."
 

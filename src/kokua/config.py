@@ -92,6 +92,12 @@ class AssistantConfig:
         return self.data_dir / "documents"
 
     @property
+    def downloads_path(self) -> Path:
+        """Generated binary artifacts (e.g. PDFs) the web UI serves at /download. Kept out of
+        ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at startup."""
+        return self.data_dir / "downloads"
+
+    @property
     def mcp_servers_path(self) -> Path:
         """Where runtime-added MCP servers are recorded so they reconnect across restarts."""
         return self.data_dir / "mcp-servers.json"

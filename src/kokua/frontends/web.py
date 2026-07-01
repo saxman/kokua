@@ -78,13 +78,13 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         return Response(_static_js(name), media_type="text/javascript")
 
     async def download(request):
-        # Serve a file from the documents folder (e.g. a PDF from the markdown_to_pdf tool). The
+        # Serve a file from the downloads folder (e.g. a PDF from the markdown_to_pdf tool). The
         # {name:str} route converter already excludes "/"; the basename check and is_file() guard
-        # against any remaining traversal, and nothing outside documents_path is reachable.
+        # against any remaining traversal, and nothing outside downloads_path is reachable.
         name = request.path_params["name"]
         if name != Path(name).name:
             return Response(status_code=404)
-        path = config.documents_path / name
+        path = config.downloads_path / name
         if not path.is_file():
             return Response(status_code=404)
         return FileResponse(path, filename=name)
