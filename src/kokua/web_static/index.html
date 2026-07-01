@@ -303,12 +303,23 @@
       stopBtn.disabled = !active;
     }
 
+    // Follow streamed output only while the user is already at the bottom. Once they scroll up we
+    // stop yanking the view down, so they can read earlier text mid-generation; scrolling back to
+    // the bottom re-enables following. Updated from the user's own scrolls (programmatic scrolls to
+    // the bottom just keep it true).
+    let stickToBottom = true;
+    function atBottom() {
+      return log.scrollHeight - log.scrollTop - log.clientHeight < 40;  // small slack for rounding
+    }
+    function autoscroll() { if (stickToBottom) log.scrollTop = log.scrollHeight; }
+    log.addEventListener("scroll", () => { stickToBottom = atBottom(); });
+
     function addBubble(cls, text) {
       const el = document.createElement("div");
       el.className = "bubble " + cls;
       el.textContent = text || "";
       log.appendChild(el);
-      log.scrollTop = log.scrollHeight;
+      autoscroll();
       return el;
     }
 
@@ -341,7 +352,7 @@
       if (html === null) el.textContent = text || "";
       else el.innerHTML = html;
       log.appendChild(el);
-      log.scrollTop = log.scrollHeight;
+      autoscroll();
       return el;
     }
 
@@ -365,7 +376,7 @@
       if (frame.type === "thinking") {
         if (!thinkingBlock) thinkingBlock = addBubble("thinking", "");
         thinkingBlock.appendChild(document.createTextNode(frame.text));
-        log.scrollTop = log.scrollHeight;
+        autoscroll();
       } else if (frame.type === "tool") {
         thinkingBlock = null;
         addBubble("tool", toolLine(frame.name, frame.arguments));
@@ -382,7 +393,7 @@
         // Stream as plain text; partial markdown can't be rendered until the turn finishes.
         streamingText += frame.text;
         streamingBubble.textContent = streamingText;
-        log.scrollTop = log.scrollHeight;
+        autoscroll();
       } else if (frame.type === "done") {
         if (streamingBubble) {
           const html = renderMarkdown(streamingText);
@@ -390,7 +401,7 @@
             streamingBubble.classList.add("md");
             streamingBubble.innerHTML = html;
           }
-          log.scrollTop = log.scrollHeight;
+          autoscroll();
         }
         streamingBubble = null;
         thinkingBlock = null;
@@ -407,13 +418,14 @@
       } else if (frame.type === "history") {
         // Replay a conversation (on connect or after switching), reusing the live renderers.
         log.innerHTML = "";  // replace any current transcript
+        stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
         for (const item of frame.items) {
           if (item.type === "user") addBubble("user", item.text);
           else if (item.type === "thinking") addBubble("thinking", item.text);
           else if (item.type === "tool") addBubble("tool", toolLine(item.name, item.arguments));
           else if (item.type === "message") addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text);
         }
-        log.scrollTop = log.scrollHeight;
+        autoscroll();
       }
     };
 
@@ -447,7 +459,7 @@
       el.appendChild(prompt);
       el.appendChild(actions);
       log.appendChild(el);
-      log.scrollTop = log.scrollHeight;
+      autoscroll();
     }
 
     ws.onopen = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
@@ -461,6 +473,7 @@
       e.preventDefault();
       const text = input.value.trim();
       if (!text || ws.readyState !== WebSocket.OPEN) return;
+      stickToBottom = true;  // sending snaps back to the bottom to follow the reply
       addBubble("user", text);
       ws.send(text);
       input.value = "";
