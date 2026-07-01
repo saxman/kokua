@@ -299,6 +299,24 @@ def test_ws_get_and_apply_settings(tmp_path):
     assert echoed["values"]["show_tools"] is False
 
 
+def test_download_route_serves_documents(tmp_path):
+    from starlette.testclient import TestClient
+
+    cfg = _config(tmp_path)
+    cfg.documents_path.mkdir(parents=True, exist_ok=True)
+    (cfg.documents_path / "report.pdf").write_bytes(b"%PDF-1.4 fake")
+    client = TestClient(build_app(cfg, client=MockAsyncModelClient([])))
+
+    resp = client.get("/download/report.pdf")
+    assert resp.status_code == 200
+    assert resp.content == b"%PDF-1.4 fake"
+    assert "application/pdf" in resp.headers["content-type"]
+
+    assert client.get("/download/missing.pdf").status_code == 404  # no such file
+    # A nested path can't match the single-segment {name} route, so nothing outside the folder is reachable.
+    assert client.get("/download/sub/evil.pdf").status_code == 404
+
+
 # --- Server round-trip via Starlette TestClient ----------------------------------------------
 
 

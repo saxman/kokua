@@ -73,11 +73,15 @@ penalty parameters. The panel also has a theme selector (auto / light / dark; au
 preference); the theme is a per-browser choice remembered locally, applied before first paint to avoid a
 flash.
 
+A built-in `pdf` tool-pack gives the assistant a `markdown_to_pdf` tool: ask it to turn something into a
+PDF and it writes the file to `data/documents/`. In the web UI the assistant hands back a download link
+(files are served at `/download/<name>`); from the CLI it reports the file path.
+
 List what's installed:
 
 ```bash
 kokua --list-frontends     # cli, web, + any installed plugins
-kokua --list-tool-packs    # example, + any installed plugins
+kokua --list-tool-packs    # example, pdf, + any installed plugins
 ```
 
 Useful flags: `--tools web,fs,compute,misc` (AIMU built-in tool groups), `--mcp <url>` (repeatable, connect

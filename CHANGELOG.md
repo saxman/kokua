@@ -47,6 +47,11 @@ installable, modular application.
   (`provider defaults < config.toml < the panel`); `config.toml` is never rewritten by the app. The theme
   is a per-browser choice (stored locally, not server-side). Provider support varies: thinking models
   ignore `top_p`/`top_k` and force `temperature`, and Anthropic does not support the penalty parameters.
+- **Markdown-to-PDF tool**: a built-in `pdf` tool-pack contributes `markdown_to_pdf`, which renders
+  Markdown to a PDF (via `fpdf2` + `markdown`, both pure-Python, no system libraries) saved in
+  `data/documents/`. Enabled by default like any tool-pack. The web front end serves the documents folder
+  at `GET /download/<name>`, so the assistant can hand back a download link; the tool also returns the
+  absolute path for the CLI.
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,

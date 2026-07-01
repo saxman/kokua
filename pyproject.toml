@@ -24,6 +24,9 @@ classifiers = [
 # TODO: pin `aimu>=<next-release>` and drop the source override once those features ship.
 dependencies = [
     "aimu[ollama]",
+    # Markdown -> PDF for the built-in `pdf` tool-pack (both pure-Python, no system libraries).
+    "fpdf2>=2.7",
+    "markdown>=3.5",
 ]
 
 [project.optional-dependencies]
@@ -57,6 +60,7 @@ web = "kokua.frontends.web:FRONTEND"
 
 [project.entry-points."kokua.tools"]
 example = "kokua.toolpacks.example:TOOL_PACK"
+pdf = "kokua.toolpacks.pdf:TOOL_PACK"
 
 # Source AIMU from the sibling checkout so `uv sync` installs the local editable copy
 # instead of the (stale, same-versioned) PyPI build. Path is relative to this file, so it

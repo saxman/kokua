@@ -13,10 +13,11 @@ import asyncio
 import json
 import logging
 from importlib.resources import files
+from pathlib import Path
 from typing import Optional
 
 from starlette.applications import Starlette
-from starlette.responses import HTMLResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -75,6 +76,18 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         if name not in _STATIC_JS:  # only serve the known vendored files
             return Response(status_code=404)
         return Response(_static_js(name), media_type="text/javascript")
+
+    async def download(request):
+        # Serve a file from the documents folder (e.g. a PDF from the markdown_to_pdf tool). The
+        # {name:str} route converter already excludes "/"; the basename check and is_file() guard
+        # against any remaining traversal, and nothing outside documents_path is reachable.
+        name = request.path_params["name"]
+        if name != Path(name).name:
+            return Response(status_code=404)
+        path = config.documents_path / name
+        if not path.is_file():
+            return Response(status_code=404)
+        return FileResponse(path, filename=name)
 
     async def ws_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
@@ -139,6 +152,7 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
     return Starlette(
         routes=[
             Route("/", index),
+            Route("/download/{name:str}", download),  # generated files (e.g. markdown_to_pdf PDFs)
             Route("/{name:str}", static_js),  # vendored marked.min.js / purify.min.js
             WebSocketRoute("/ws", ws_endpoint),
         ]
