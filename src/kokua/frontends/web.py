@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 from importlib.resources import files
 from typing import Optional
 
@@ -23,6 +24,8 @@ from ..assistant import Assistant
 from ..channels.web import WebChannel
 from ..config import AssistantConfig
 from ..plugins import FrontEnd
+
+logger = logging.getLogger(__name__)
 
 
 def _index_html() -> str:
@@ -38,8 +41,11 @@ def _static_js(filename: str) -> str:
     return files("kokua").joinpath(f"web_static/{filename}").read_text(encoding="utf-8")
 
 
+_CONTROL_TYPES = ("new", "select", "settings", "get_settings")
+
+
 def _parse_control(raw: str) -> Optional[dict]:
-    """Return a conversation-control object ({"type": "new"} / {"type": "select", "id"}), else None.
+    """Return a control object ({"type": "new"/"select"/"settings"/"get_settings", ...}), else None.
 
     Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
     approval "y"/"n") and is fed to the channel unchanged.
@@ -48,7 +54,7 @@ def _parse_control(raw: str) -> Optional[dict]:
         obj = json.loads(raw)
     except (ValueError, TypeError):
         return None
-    if isinstance(obj, dict) and obj.get("type") in ("new", "select"):
+    if isinstance(obj, dict) and obj.get("type") in _CONTROL_TYPES:
         return obj
     return None
 
@@ -81,9 +87,11 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         busy["active"] = True
         channel = WebChannel(websocket, show_thinking=config.show_thinking, show_tools=config.show_tools)
         assistant = await Assistant.create(config, channel, client=client)
-        # Show the conversation list and the active conversation's history on (re)connect.
+        # Show the conversation list, the active conversation's history, and the current settings on
+        # (re)connect, so the sidebar, chat, and settings panel are all populated.
         await channel.send_conversations(assistant.list_conversations())
         await channel.send_history(assistant.history)
+        await channel.send_settings(assistant.current_settings())
 
         async def pump() -> None:
             # Conversation controls (new/select) are handled here and never reach the channel; all
@@ -95,6 +103,19 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
                     control = _parse_control(raw)
                     if control is None:
                         await channel.feed(raw)
+                        continue
+                    # Settings controls only touch model config, not the conversation list, so they
+                    # return the current settings and skip the sidebar/history refresh below.
+                    if control["type"] == "get_settings":
+                        await channel.send_settings(assistant.current_settings())
+                        continue
+                    if control["type"] == "settings":
+                        try:
+                            await assistant.apply_settings(control.get("values", {}))
+                        except Exception:
+                            logger.warning("Could not apply settings", exc_info=True)
+                            await channel.send("Sorry, those settings could not be applied.")
+                        await channel.send_settings(assistant.current_settings())
                         continue
                     if control["type"] == "new":
                         await assistant.new_conversation()

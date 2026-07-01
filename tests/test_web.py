@@ -113,6 +113,14 @@ async def test_web_channel_send_conversations_emits_frame():
     assert ws.frames == [{"type": "conversations", "items": items}]
 
 
+async def test_web_channel_send_settings_emits_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    values = {"model": "m1", "show_thinking": True, "show_tools": False, "generate_kwargs": {"temperature": 0.3}}
+    await channel.send_settings(values)
+    assert ws.frames == [{"type": "settings", "values": values}]
+
+
 async def test_web_channel_send_approval_request_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -260,6 +268,35 @@ def test_ws_new_then_select_round_trip(tmp_path):
         ws.send_text(json.dumps({"type": "select", "id": first_id}))
         hist = _drain_until(ws, "history")
     assert any(item["type"] == "user" and item["text"] == "first message" for item in hist["items"])
+
+
+def test_ws_sends_settings_on_connect(tmp_path):
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        frame = _drain_until(ws, "settings")
+    assert "generate_kwargs" in frame["values"]
+    assert "show_thinking" in frame["values"] and "show_tools" in frame["values"]
+
+
+def test_ws_get_and_apply_settings(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "settings")  # the connect-time push
+        ws.send_text(json.dumps({"type": "get_settings"}))
+        _drain_until(ws, "settings")
+        # Apply a kwargs + display change (no model switch, so no real client is built).
+        ws.send_text(
+            json.dumps({"type": "settings", "values": {"generate_kwargs": {"temperature": 0.6}, "show_tools": False}})
+        )
+        echoed = _drain_until(ws, "settings")
+    assert echoed["values"]["generate_kwargs"]["temperature"] == 0.6
+    assert echoed["values"]["show_tools"] is False
 
 
 # --- Server round-trip via Starlette TestClient ----------------------------------------------

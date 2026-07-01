@@ -31,7 +31,7 @@ from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_scri
 from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
-from . import mcp_registry
+from . import mcp_registry, runtime_settings
 from .config import MEMORY_GUIDANCE, AssistantConfig
 from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
@@ -304,6 +304,29 @@ def _active_session(store: TinyDBSessionStore) -> Session:
     return session
 
 
+def _layer_generate_kwargs(client, base: dict, config: AssistantConfig, runtime: dict) -> None:
+    """Rebuild the client's default generate kwargs in place, layering the runtime override on top.
+
+    Order (later wins): provider built-in defaults (`base`) < config.toml `[generation]` < the runtime
+    values the settings panel set. Only keys present in a layer are applied, so a key the user never
+    set (e.g. presence_penalty on Anthropic) is never injected.
+    """
+    kwargs = client.default_generate_kwargs
+    kwargs.clear()
+    kwargs.update(base)
+    kwargs.update(config.generation)
+    kwargs.update(runtime)
+
+
+def _apply_show_flags(channel: Channel, config: AssistantConfig, settings: dict) -> None:
+    """Apply show_thinking / show_tools from a settings dict to the config and channel (if it has them)."""
+    for flag in ("show_thinking", "show_tools"):
+        if flag in settings:
+            setattr(config, flag, settings[flag])
+            if hasattr(channel, flag):
+                setattr(channel, flag, settings[flag])
+
+
 class Assistant:
     """A single-user personal assistant wired from AIMU primitives."""
 
@@ -343,12 +366,29 @@ class Assistant:
         # True while a proactive (unprompted) turn runs, so _approve auto-denies gated tools (no
         # user is waiting to confirm).
         self._in_proactive = False
+        # The active model client's provider built-in generate kwargs, snapshotted before any override
+        # is layered on, so a settings change (or a cleared field) can rebuild from a clean base.
+        # Assigned by create() and refreshed on a runtime model switch.
+        self._base_generate_kwargs: dict = {}
 
     @classmethod
     async def create(cls, config: AssistantConfig, channel: Channel, *, client=None) -> "Assistant":
+        # Runtime-mutable settings the web panel persisted: generation kwargs, display prefs, and the
+        # active model. Layered over config.toml (which is never rewritten); see runtime_settings.
+        stored = runtime_settings.load(config.runtime_settings_path)
         if client is None:
+            # A persisted model choice wins over config.model, and config.model is kept in sync so
+            # current_settings() and the panel reflect the model actually running.
+            if stored.get("model"):
+                config.model = stored["model"]
             system = config.system_message + (MEMORY_GUIDANCE if config.memory else "")
             client = aio.client(config.model, system=system)
+
+        # Snapshot the provider's built-in generate kwargs, then layer config.toml + persisted runtime
+        # values on top, and apply persisted display prefs. Runs for injected clients (tests) too.
+        base_generate_kwargs = dict(client.default_generate_kwargs)
+        _layer_generate_kwargs(client, base_generate_kwargs, config, stored.get("generate_kwargs", {}))
+        _apply_show_flags(channel, config, stored)
 
         # Persistent memory: a SemanticMemoryStore for facts about the user and a DocumentStore for
         # longer reference documents. Both live under the app state dir, so they survive restarts and
@@ -429,6 +469,7 @@ class Assistant:
         assistant._mcp_servers = connections  # same list the MCP tools append to / remove from
         assistant._memory_store = memory_store
         assistant._document_store = document_store
+        assistant._base_generate_kwargs = base_generate_kwargs
         # Gate configured "risky" tools behind interactive approval (see _approve). Published to the
         # model client on every run by the agent's _prepare_run; an empty confirm_tools is a no-op.
         agent.tool_approval = assistant._approve
@@ -484,6 +525,51 @@ class Assistant:
         async with self._lock:
             self._session = self._store.get(conversation_id)
             self._agent.restore(self._session.messages)
+
+    def current_settings(self) -> dict:
+        """The effective runtime settings for the web panel to display: model, prefs, generate kwargs."""
+        return {
+            "model": str(self._config.model) if self._config.model else "",
+            "show_thinking": getattr(self._channel, "show_thinking", self._config.show_thinking),
+            "show_tools": getattr(self._channel, "show_tools", self._config.show_tools),
+            "generate_kwargs": dict(self._agent.model_client.default_generate_kwargs),
+        }
+
+    async def apply_settings(self, incoming: dict) -> None:
+        """Apply a settings-panel change at runtime and persist it so it survives restarts.
+
+        Generation-kwargs and display-pref changes are applied in place under the turn lock. Switching
+        the model rebuilds the model client (mirroring select_conversation: cancel the in-flight turn,
+        then restore conversation state onto the new client). A model that fails to build leaves the
+        running client untouched.
+        """
+        settings = runtime_settings.sanitize(incoming)
+        new_model = settings.get("model")
+        switching = bool(new_model) and new_model != (str(self._config.model) if self._config.model else "")
+
+        if switching:
+            await self._cancel_current_turn()
+        async with self._lock:
+            if switching:
+                await self._switch_model(new_model)
+            _apply_show_flags(self._channel, self._config, settings)
+            _layer_generate_kwargs(
+                self._agent.model_client, self._base_generate_kwargs, self._config, settings["generate_kwargs"]
+            )
+            runtime_settings.save(self._config.runtime_settings_path, settings)
+
+    async def _switch_model(self, model: str) -> None:
+        """Rebuild the model client for a new model, carrying over conversation state and tools.
+
+        Tools bind the agent (not the client), so they survive the swap and are republished to the new
+        client on the next run. Raises (leaving the old client in place) if the model can't be built.
+        """
+        system = self._config.system_message + (MEMORY_GUIDANCE if self._config.memory else "")
+        new_client = aio.client(model, system=system)  # build first; only swap on success
+        self._agent.model_client = new_client
+        self._agent.restore(self._session.messages)
+        self._config.model = model
+        self._base_generate_kwargs = dict(new_client.default_generate_kwargs)
 
     async def _maybe_push_conversations(self) -> None:
         """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""

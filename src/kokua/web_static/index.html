@@ -4,12 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kokua</title>
-  <!-- Resolve the theme before first paint (stored choice, else OS preference) to avoid a flash. -->
+  <!-- Resolve the theme before first paint to avoid a flash. Stored choice is "auto" (follow the OS,
+       the default), "light", or "dark"; a missing value is treated as "auto". -->
   <script>
     (function () {
       try {
         var stored = localStorage.getItem("theme");
-        var dark = stored ? stored === "dark" : window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
+        var useOS = !stored || stored === "auto";
+        var dark = useOS ? (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) : stored === "dark";
         document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
       } catch (e) {}
     })();
@@ -63,8 +65,6 @@
     header { padding: 12px 16px; background: var(--header-bg); color: var(--header-fg); font-weight: 600;
       display: flex; align-items: center; justify-content: space-between; }
     header small { font-weight: 400; opacity: 0.7; margin-left: 8px; }
-    #theme { background: transparent; border: 1px solid rgba(255, 255, 255, 0.3); color: var(--header-fg);
-      border-radius: 8px; padding: 4px 10px; font-size: 1em; line-height: 1; cursor: pointer; }
     #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
     .bubble { max-width: 70%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; line-height: 1.4; }
     .user { align-self: flex-end; background: var(--accent); color: var(--accent-fg); border-bottom-right-radius: 4px; }
@@ -111,6 +111,24 @@
     #msg { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 1em; background: var(--surface); color: var(--fg); }
     button { padding: 10px 18px; border: none; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-size: 1em; cursor: pointer; }
     button:disabled { opacity: 0.5; cursor: default; }
+    .header-actions { display: flex; gap: 8px; }
+    #settings-btn { background: transparent; border: 1px solid rgba(255, 255, 255, 0.3); color: var(--header-fg);
+      border-radius: 8px; padding: 4px 10px; font-size: 1em; line-height: 1; cursor: pointer; }
+    /* Settings modal */
+    .hidden { display: none !important; }
+    .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal-card { background: var(--surface); color: var(--fg); border: 1px solid var(--border); border-radius: 12px;
+      padding: 20px 22px; width: 420px; max-width: 92vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); }
+    .modal-card h2 { margin: 0 0 12px; font-size: 1.2em; }
+    #settings-form { display: flex; flex-direction: column; gap: 10px; }
+    #settings-form fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    #settings-form legend { padding: 0 6px; font-weight: 600; }
+    .field { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.9em; }
+    .field input, .field select { width: 55%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--fg); font-size: 0.95em; }
+    .check { display: flex; align-items: center; gap: 8px; font-size: 0.9em; }
+    .hint { font-size: 0.78em; color: var(--muted); margin: 2px 0 0; }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+    button.secondary { background: var(--muted); }
   </style>
 </head>
 <body>
@@ -122,7 +140,9 @@
     <main id="main">
       <header>
         <span>Kokua <small>local, single user</small></span>
-        <button id="theme" type="button">🌙</button>
+        <span class="header-actions">
+          <button id="settings-btn" type="button" title="Settings">⚙️</button>
+        </span>
       </header>
       <div id="log"></div>
       <form id="form">
@@ -131,6 +151,45 @@
         <button id="stop" type="button" disabled>Stop</button>
       </form>
     </main>
+  </div>
+
+  <!-- Settings panel: model, generation kwargs, and display prefs. Applied at runtime and persisted. -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Settings</h2>
+      <form id="settings-form">
+        <label class="field">Model
+          <input id="set-model" type="text" autocomplete="off" placeholder="e.g. anthropic:claude-sonnet-4-6" />
+        </label>
+        <fieldset>
+          <legend>Generation</legend>
+          <label class="field">temperature <input id="gen-temperature" type="number" step="0.1" min="0" max="2" /></label>
+          <label class="field">max_tokens <input id="gen-max_tokens" type="number" step="1" min="1" /></label>
+          <label class="field">top_p <input id="gen-top_p" type="number" step="0.01" min="0" max="1" /></label>
+          <label class="field">top_k <input id="gen-top_k" type="number" step="1" min="0" /></label>
+          <label class="field">presence_penalty <input id="gen-presence_penalty" type="number" step="0.1" min="-2" max="2" /></label>
+          <label class="field">repetition_penalty <input id="gen-repetition_penalty" type="number" step="0.1" min="0" max="2" /></label>
+          <p class="hint">Leave a field blank to use the model/provider default. Thinking models ignore
+            top_p/top_k and force temperature; Anthropic does not support the penalty parameters.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Display</legend>
+          <label class="field">theme
+            <select id="set-theme">
+              <option value="auto">Auto (system)</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label class="check"><input id="set-show_thinking" type="checkbox" /> Show thinking</label>
+          <label class="check"><input id="set-show_tools" type="checkbox" /> Show tool calls</label>
+        </fieldset>
+        <div class="modal-actions">
+          <button type="submit">Save</button>
+          <button id="settings-cancel" type="button" class="secondary">Cancel</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- Vendored markdown renderer + sanitizer (offline; see web_static/*.js for pinned versions). -->
@@ -142,7 +201,6 @@
     const input = document.getElementById("msg");
     const sendBtn = document.getElementById("send");
     const stopBtn = document.getElementById("stop");
-    const themeBtn = document.getElementById("theme");
     const convList = document.getElementById("conv-list");
     const newConvBtn = document.getElementById("new-conv");
 
@@ -166,19 +224,74 @@
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "new" }));
     });
 
-    // The theme was applied pre-paint by the head script; here we wire the toggle and its label.
-    function syncThemeButton() {
-      const dark = document.documentElement.getAttribute("data-theme") === "dark";
-      themeBtn.textContent = dark ? "☀️" : "🌙";
-      themeBtn.title = dark ? "Switch to light theme" : "Switch to dark theme";
+    // --- Settings panel -----------------------------------------------------------------------
+    const settingsBtn = document.getElementById("settings-btn");
+    const settingsModal = document.getElementById("settings-modal");
+    const settingsForm = document.getElementById("settings-form");
+    const settingsCancel = document.getElementById("settings-cancel");
+    const GEN_KEYS = ["temperature", "max_tokens", "top_p", "top_k", "presence_penalty", "repetition_penalty"];
+
+    function openSettings() {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "get_settings" }));
+      document.getElementById("set-theme").value = currentThemeChoice();  // client-side; not from the server
+      settingsModal.classList.remove("hidden");
     }
-    syncThemeButton();
-    themeBtn.addEventListener("click", () => {
-      const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
-      try { localStorage.setItem("theme", next); } catch (e) {}
-      syncThemeButton();
+    function closeSettings() { settingsModal.classList.add("hidden"); }
+
+    // Fill the form from a server settings frame. A blank generation field means "use the default".
+    function populateSettings(values) {
+      document.getElementById("set-model").value = values.model || "";
+      document.getElementById("set-show_thinking").checked = !!values.show_thinking;
+      document.getElementById("set-show_tools").checked = !!values.show_tools;
+      const gk = values.generate_kwargs || {};
+      for (const key of GEN_KEYS) {
+        const el = document.getElementById("gen-" + key);
+        el.value = (gk[key] === undefined || gk[key] === null) ? "" : gk[key];
+      }
+    }
+
+    settingsBtn.addEventListener("click", openSettings);
+    settingsCancel.addEventListener("click", closeSettings);
+    settingsModal.addEventListener("click", (e) => { if (e.target === settingsModal) closeSettings(); });
+
+    settingsForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const generate_kwargs = {};
+      for (const key of GEN_KEYS) {
+        const raw = document.getElementById("gen-" + key).value.trim();
+        if (raw === "") continue;  // omit blanks so unset kwargs fall back to the default
+        const n = Number(raw);
+        if (Number.isFinite(n)) generate_kwargs[key] = n;
+      }
+      const values = {
+        model: document.getElementById("set-model").value.trim(),
+        show_thinking: document.getElementById("set-show_thinking").checked,
+        show_tools: document.getElementById("set-show_tools").checked,
+        generate_kwargs,
+      };
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "settings", values }));
+      applyThemeChoice(document.getElementById("set-theme").value);  // client-side; not sent to the server
+      closeSettings();
     });
+
+    // Theme is a per-browser preference (localStorage), applied pre-paint by the head script; the
+    // settings panel's selector is the only control. "auto" follows the OS light/dark preference.
+    function currentThemeChoice() {
+      try { return localStorage.getItem("theme") || "auto"; } catch (e) { return "auto"; }
+    }
+    function applyThemeChoice(choice) {
+      const dark = choice === "auto"
+        ? (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches)
+        : choice === "dark";
+      document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+      try { localStorage.setItem("theme", choice); } catch (e) {}
+    }
+    // While "auto" is active, track live OS theme changes.
+    if (window.matchMedia) {
+      matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+        if (currentThemeChoice() === "auto") applyThemeChoice("auto");
+      });
+    }
 
     let streamingBubble = null;  // the assistant answer bubble accumulating tokens
     let streamingText = "";      // raw answer text, re-rendered as markdown when the turn completes
@@ -287,6 +400,8 @@
         if (!frame.proactive) setProcessing(false);  // a reactive message ends the turn (e.g. "(stopped)" / error)
       } else if (frame.type === "approval") {
         renderApproval(frame.name, frame.arguments);
+      } else if (frame.type === "settings") {
+        populateSettings(frame.values);
       } else if (frame.type === "conversations") {
         renderConversations(frame.items);
       } else if (frame.type === "history") {

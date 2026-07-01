@@ -32,6 +32,7 @@ def test_file_overrides_built_in_defaults():
         """
         [assistant]
         model = "anthropic:claude-sonnet-4-6"
+        [display]
         show_thinking = false
         [tools]
         groups = ["fs", "misc"]
@@ -95,6 +96,25 @@ def test_bool_rejected_for_numeric_field():
 def test_security_confirm_tools_from_file():
     _write_config('[security]\nconfirm_tools = ["add_skill_script"]\n')
     assert _resolve().confirm_tools == ["add_skill_script"]
+
+
+def test_generation_section_collects_into_dict():
+    _write_config("[generation]\ntemperature = 0.3\nmax_tokens = 2048\n")
+    assert _resolve().generation == {"temperature": 0.3, "max_tokens": 2048}
+
+
+def test_generation_unknown_key_warns_and_is_ignored(caplog):
+    _write_config("[generation]\nbogus = 1\ntemperature = 0.5\n")
+    with caplog.at_level(logging.WARNING):
+        cfg = _resolve()
+    assert cfg.generation == {"temperature": 0.5}
+    assert any("generation].bogus" in rec.message for rec in caplog.records)
+
+
+def test_generation_type_mismatch_raises():
+    _write_config('[generation]\ntemperature = "hot"\n')
+    with pytest.raises(settings.ConfigError, match=r"\[generation\].temperature must be a number"):
+        settings.load()
 
 
 def test_data_dir_override_redirects_leaf_paths(tmp_path):

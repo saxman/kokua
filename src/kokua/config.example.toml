@@ -13,15 +13,17 @@
 # reminder_seconds = 1800.0
 # reminder_text = "Proactively check in with the user with one short, useful suggestion for their day."
 
-# Stream the model's reasoning / tool calls into the channel.
-show_thinking = true
-show_tools = true
-
 # Persistent memory across conversations (facts + user documents).
 memory = true
 
 # Discover tool-pack plugins via the "kokua.tools" entry-point group.
 load_plugins = true
+
+[display]
+# Stream the model's reasoning / tool calls into the channel. The web settings panel toggles these
+# at runtime; a change there persists to data/runtime-settings.json and overrides these defaults.
+show_thinking = true
+show_tools = true
 
 [tools]
 # AIMU built-in tool groups to expose. Also accepts ["all"] or ["none"]. The generative groups
@@ -52,3 +54,16 @@ name = "cli"
 # Bind address for the web front end (ignored by other front ends).
 host = "127.0.0.1"
 port = 8000
+
+[generation]
+# Baseline model generation kwargs. The web settings panel overrides these at runtime and persists
+# its own choice separately (to data/runtime-settings.json), so these act only as the starting
+# defaults. Provider support varies: AIMU forces temperature and drops top_p/top_k for thinking
+# models, and Anthropic does not support presence_penalty / repetition_penalty (OpenAI-family keys).
+# Unset keys fall back to the provider's built-in default.
+# temperature = 0.1
+# max_tokens = 1024
+# top_p = 1.0
+# top_k = 40
+# presence_penalty = 0.0
+# repetition_penalty = 1.0

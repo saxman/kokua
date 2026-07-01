@@ -64,6 +64,10 @@ class WebChannel(BaseWebChannel):
         items = conversation_to_frames(messages, show_thinking=self.show_thinking, show_tools=self.show_tools)
         await self.send_frame({"type": "history", "items": items})
 
+    async def send_settings(self, values: dict) -> None:
+        """Send the current runtime settings so the page can populate its settings panel."""
+        await self.send_frame({"type": "settings", "values": values})
+
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
 

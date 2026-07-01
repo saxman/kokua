@@ -22,7 +22,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import paths
+from . import paths, runtime_settings
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,8 @@ _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callab
     ("assistant", "system_message"): ("system_message", (str,), "a string", None),
     ("assistant", "reminder_seconds"): ("reminder_seconds", (int, float), "a number", lambda s, k, v: float(v)),
     ("assistant", "reminder_text"): ("reminder_text", (str,), "a string", None),
-    ("assistant", "show_thinking"): ("show_thinking", (bool,), "a boolean", None),
-    ("assistant", "show_tools"): ("show_tools", (bool,), "a boolean", None),
+    ("display", "show_thinking"): ("show_thinking", (bool,), "a boolean", None),
+    ("display", "show_tools"): ("show_tools", (bool,), "a boolean", None),
     ("assistant", "memory"): ("memory", (bool,), "a boolean", None),
     ("assistant", "load_plugins"): ("load_plugins", (bool,), "a boolean", None),
     ("tools", "groups"): ("tools", (list,), "a list of strings", _str_list),
@@ -91,6 +91,18 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
     for section, entries in data.items():
         if not isinstance(entries, dict):
             logger.warning("ignoring top-level config key %r (expected a [section] table)", section)
+            continue
+        # The [generation] table maps to the single `generation` dict field (one key per generation
+        # kwarg) rather than the usual one-key-one-field _SCHEMA entries, so handle it separately.
+        # Types are checked loudly here; range validation is left to runtime_settings.sanitize.
+        if section == "generation":
+            for key, value in entries.items():
+                if key not in runtime_settings.GENERATION_KEYS:
+                    logger.warning("ignoring unknown config key [generation].%s", key)
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ConfigError(f"[generation].{key} must be a number, got {type(value).__name__}")
+                overrides.setdefault("generation", {})[key] = value
             continue
         for key, value in entries.items():
             spec = _SCHEMA.get((section, key))

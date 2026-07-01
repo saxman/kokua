@@ -53,6 +53,10 @@ class AssistantConfig:
     # Remote MCP server URLs to connect at startup; a bearer token (if set) is applied to all.
     mcp_servers: list[str] = field(default_factory=list)
     mcp_bearer: Optional[str] = None
+    # Baseline model generation kwargs seeded from the [generation] TOML section. At runtime the web
+    # settings panel overrides these (persisted separately to runtime-settings.json); see the
+    # layering note there. Kept as a plain dict so provider-specific keys pass through untouched.
+    generation: dict = field(default_factory=dict)
     # Persistent memory: a SemanticMemoryStore for facts + a DocumentStore for documents. On by default.
     memory: bool = True
     # Load tool-pack plugins discovered via the "kokua.tools" entry-point group.
@@ -91,3 +95,8 @@ class AssistantConfig:
     def mcp_servers_path(self) -> Path:
         """Where runtime-added MCP servers are recorded so they reconnect across restarts."""
         return self.data_dir / "mcp-servers.json"
+
+    @property
+    def runtime_settings_path(self) -> Path:
+        """Where the web settings panel persists runtime model settings across restarts."""
+        return self.data_dir / "runtime-settings.json"

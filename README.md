@@ -58,11 +58,20 @@ reconnects; this makes it visible again), including reasoning and tool calls whe
 `show_tools` are on. Assistant replies are rendered as GitHub-flavored markdown (tables, nested lists, code, links, task
 lists, etc.) once each turn completes, via vendored `marked` + `DOMPurify` (bundled, no CDN); the HTML
 is sanitized, so model or tool output can't inject scripts or markup.
-The page follows your OS light/dark preference, with a header toggle to override it (remembered across reloads).
 
 The web UI holds multiple conversations: the left sidebar lists them (titled automatically from the first
 message) and has a "+ New conversation" button; click any conversation to continue it. Memory (facts and
 documents) is shared across all conversations. The CLI remains single-conversation for now.
+
+The header's gear button opens a settings panel to change, at runtime, the model generation parameters
+(`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), display prefs
+(`show_thinking` / `show_tools`), and the active model. These changes apply on the next turn and are
+remembered across restarts (saved to `data/runtime-settings.json`, layered over the optional
+`[generation]` config section). Leave a generation field blank to use the model/provider default; note
+that thinking models ignore `top_p`/`top_k` and force `temperature`, and Anthropic does not support the
+penalty parameters. The panel also has a theme selector (auto / light / dark; auto follows your OS
+preference); the theme is a per-browser choice remembered locally, applied before first paint to avoid a
+flash.
 
 List what's installed:
 
@@ -128,6 +137,7 @@ holds an optional `config.toml` and a single `data/` directory for all transient
     sessions.json      # conversations (web UI can hold several)
     memory/            # semantic facts
     documents/         # saved documents
+    runtime-settings.json  # runtime model settings from the web settings panel
 ```
 
 Point `data/` elsewhere with `[paths] data_dir` in the config file. Nothing is written to your working

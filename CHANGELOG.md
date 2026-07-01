@@ -22,8 +22,9 @@ installable, modular application.
   replies render as GitHub-flavored markdown when a turn completes (tables, nested lists, code, task
   lists, strikethrough, links), via vendored `marked` + `DOMPurify` (bundled in `web_static/`, served
   locally, no CDN); the rendered HTML is sanitized so model/tool output cannot inject scripts or markup,
-  and links open with `rel="noopener"`. Light and dark themes: the page follows the OS preference by default and has a
-  header toggle that overrides it, remembered across reloads (no flash on load, no new dependencies).
+  and links open with `rel="noopener"`. Light and dark themes: a theme selector in the settings panel
+  (auto / light / dark; auto follows the OS preference) sets a per-browser choice remembered locally and
+  applied before first paint (no flash on load, no new dependencies).
 - **Multiple web conversations**: the web UI lists conversations in a sidebar (auto-titled from the
   first message) and lets you start a new one or select an existing one to continue, backed by AIMU's
   `sessions` store. Memory stays shared across conversations. An existing single-conversation
@@ -37,6 +38,15 @@ installable, modular application.
   `execute_python`; configurable via `[security] confirm_tools` / `--confirm-tools` (empty disables).
   Proactive turns auto-deny gated tools. The reply is routed through the single channel reader, so it is
   safe alongside `/stop`.
+- **Web settings panel**: a gear button in the web header opens a panel to change, at runtime, the model
+  generation kwargs (`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`,
+  `repetition_penalty`), display prefs (`show_thinking` / `show_tools` plus the auto/light/dark theme),
+  and the active model. Server-backed changes take effect on the next turn (switching the model rebuilds
+  the client and carries the conversation over) and persist across restarts to
+  `data/runtime-settings.json`, layered over the optional `[generation]` config section
+  (`provider defaults < config.toml < the panel`); `config.toml` is never rewritten by the app. The theme
+  is a per-browser choice (stored locally, not server-side). Provider support varies: thinking models
+  ignore `top_p`/`top_k` and force `temperature`, and Anthropic does not support the penalty parameters.
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,

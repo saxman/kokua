@@ -10,6 +10,7 @@ import pytest
 
 import kokua.paths
 from helpers import MockAsyncModelClient
+from kokua import runtime_settings
 from kokua.assistant import Assistant
 from kokua.cli import build_arg_parser, resolve_config
 from kokua.config import AssistantConfig
@@ -805,3 +806,81 @@ async def test_runtime_added_tool_is_live_in_the_same_turn(tmp_path, monkeypatch
     remove_mcp = next(t for t in agent.tools if t.__name__ == "remove_mcp_server")
     await remove_mcp(url="https://svc/mcp")
     assert "get_portfolio" not in {fn.__name__ for fn in agent.model_client.tools}
+
+
+# --- Settings (generation kwargs, display prefs, model) --------------------------------------
+
+
+async def test_boot_applies_stored_settings(tmp_path):
+    cfg = _config(tmp_path)
+    runtime_settings.save(
+        cfg.runtime_settings_path,
+        {"generate_kwargs": {"temperature": 0.4, "max_tokens": 500}, "show_tools": False},
+    )
+    client = MockAsyncModelClient([])
+    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    assert client.default_generate_kwargs == {"temperature": 0.4, "max_tokens": 500}
+    assert assistant._config.show_tools is False
+
+
+async def test_boot_layers_runtime_over_config_generation(tmp_path):
+    # config.toml [generation] is the baseline; the runtime store overrides only the keys it sets.
+    cfg = _config(tmp_path, generation={"temperature": 0.1, "max_tokens": 100})
+    runtime_settings.save(cfg.runtime_settings_path, {"generate_kwargs": {"temperature": 0.9}})
+    client = MockAsyncModelClient([])
+    await Assistant.create(cfg, FakeChannel(), client=client)
+    assert client.default_generate_kwargs == {"temperature": 0.9, "max_tokens": 100}
+
+
+async def test_boot_without_settings_file_writes_nothing(tmp_path):
+    cfg = _config(tmp_path)
+    await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    assert not cfg.runtime_settings_path.exists()
+
+
+async def test_apply_settings_updates_and_persists(tmp_path):
+    cfg = _config(tmp_path)
+    client = MockAsyncModelClient([])
+    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    await assistant.apply_settings({"generate_kwargs": {"temperature": 0.5}, "show_tools": False})
+    assert client.default_generate_kwargs["temperature"] == 0.5
+    assert assistant._config.show_tools is False
+    saved = runtime_settings.load(cfg.runtime_settings_path)
+    assert saved["generate_kwargs"]["temperature"] == 0.5
+    assert saved["show_tools"] is False
+
+
+async def test_apply_settings_blank_field_reverts_to_config_generation(tmp_path):
+    cfg = _config(tmp_path, generation={"temperature": 0.2})
+    client = MockAsyncModelClient([])
+    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    await assistant.apply_settings({"generate_kwargs": {"temperature": 0.9}})
+    assert client.default_generate_kwargs["temperature"] == 0.9
+    await assistant.apply_settings({"generate_kwargs": {}})  # cleared -> back to the config baseline
+    assert client.default_generate_kwargs["temperature"] == 0.2
+
+
+async def test_apply_settings_switches_model(tmp_path, monkeypatch):
+    first = MockAsyncModelClient(["hi"])
+    assistant = await Assistant.create(_config(tmp_path, model="m1"), FakeChannel(), client=first)
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"))  # populate conversation state
+
+    second = MockAsyncModelClient([])
+    monkeypatch.setattr("kokua.assistant.aio.client", lambda *a, **k: second)
+
+    await assistant.apply_settings({"model": "m2", "generate_kwargs": {}})
+
+    assert assistant._agent.model_client is second
+    assert assistant._config.model == "m2"
+    # conversation restored onto the new client (system message stripped, the user turn preserved)
+    assert any(m.get("content") == "hello" for m in second.messages)
+
+
+async def test_current_settings_reports_effective(tmp_path):
+    client = MockAsyncModelClient([])
+    assistant = await Assistant.create(_config(tmp_path, model="m1"), FakeChannel(), client=client)
+    await assistant.apply_settings({"generate_kwargs": {"temperature": 0.7}})
+    s = assistant.current_settings()
+    assert s["model"] == "m1"
+    assert s["generate_kwargs"]["temperature"] == 0.7
+    assert "show_thinking" in s and "show_tools" in s
