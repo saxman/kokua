@@ -8,9 +8,21 @@ replay, and tool-call approval prompts. Each is sent through the inherited publi
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, AsyncIterator, Optional, Union
 
+from aimu.aio.channels.base import ChannelMessage
 from aimu.aio.channels.web import WebChannel as BaseWebChannel
+from aimu.models import (
+    PROVENANCE_CONTINUATION,
+    PROVENANCE_FINAL_ANSWER,
+    PROVENANCE_KEY,
+    PROVENANCE_PROACTIVE,
+    StreamChunk,
+)
+
+# User-role turns the agent loop injects between tool-calling iterations. They are byte-for-byte
+# ordinary user messages except for this provenance tag, so display keys off the tag alone.
+_LOOP_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
 
 
 def _text_of(content: Any) -> str:
@@ -32,7 +44,13 @@ def conversation_to_frames(messages: list[dict], *, show_thinking: bool, show_to
     items: list[dict] = []
     for message in messages:
         role = message.get("role")
+        provenance = message.get(PROVENANCE_KEY)
         if role == "user":
+            if provenance in _LOOP_PROVENANCE:
+                # A framework-injected continuation/final-answer turn, not user input. Show the same
+                # loop marker the live stream emits at an iteration boundary, not a user bubble.
+                items.append({"type": "loop"})
+                continue
             text = _text_of(message.get("content"))
             if text:
                 items.append({"type": "user", "text": text})
@@ -45,12 +63,41 @@ def conversation_to_frames(messages: list[dict], *, show_thinking: bool, show_to
                     items.append({"type": "tool", "name": fn.get("name"), "arguments": fn.get("arguments")})
             text = _text_of(message.get("content"))
             if text:
-                items.append({"type": "message", "text": text, "proactive": False})
+                items.append({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE})
     return items
 
 
 class WebChannel(BaseWebChannel):
     """AIMU's ``WebChannel`` plus Kokua's conversation-sidebar, history-replay, and approval frames."""
+
+    async def send(
+        self,
+        content: Union[str, AsyncIterator[StreamChunk]],
+        *,
+        reply_to: Optional[ChannelMessage] = None,
+    ) -> None:
+        """Stream a reply, emitting a ``loop`` marker at each agent-loop iteration boundary.
+
+        Wraps the chunk iterator so the base ``send`` loop is reused unchanged (it has no per-chunk
+        hook); strings (including proactive pushes) pass straight through.
+        """
+        if isinstance(content, str):
+            await super().send(content, reply_to=reply_to)
+            return
+        await super().send(self._mark_loop_boundaries(content), reply_to=reply_to)
+
+    async def _mark_loop_boundaries(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
+        """Yield ``chunks`` unchanged, emitting a ``loop`` frame just before each iteration increment.
+
+        ``StreamChunk.iteration`` is 0 for the first response and rises by one per agent-loop
+        continuation, so a rise marks the boundary the injected turn sits at.
+        """
+        last_iteration = 0
+        async for chunk in chunks:
+            if chunk.iteration > last_iteration:
+                await self.send_frame({"type": "loop"})
+                last_iteration = chunk.iteration
+            yield chunk
 
     async def send_conversations(self, items: list[dict]) -> None:
         """Send the conversation list so the page can render the sidebar."""

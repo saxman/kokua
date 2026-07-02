@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from aimu import aio
+from aimu import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROACTIVE, aio
 from aimu.aio import Channel, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
 from aimu.history import ConversationManager
@@ -291,6 +291,35 @@ def _import_last_history(store: TinyDBSessionStore, config: AssistantConfig) -> 
     )
 
 
+def _backfill_continuation_provenance(store: TinyDBSessionStore) -> int:
+    """Tag legacy agent-loop continuation turns persisted before the provenance key existed.
+
+    Turns the agent loop injected before AIMU added ``provenance`` were stored as ordinary
+    ``{"role": "user"}`` messages, so history replay showed them as user bubbles. Match them by their
+    default continuation-prompt text (kokua never overrides ``continuation_prompt``) and tag them.
+    Idempotent: already-tagged and non-matching messages are skipped and only changed sessions are
+    re-saved, so it is safe to run on every startup. Returns the number of messages tagged.
+    """
+    from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
+
+    tagged = 0
+    for key in store.list_keys():
+        session = store.get(key)
+        changed = False
+        for message in session.messages:
+            if (
+                message.get("role") == "user"
+                and PROVENANCE_KEY not in message
+                and message.get("content") == DEFAULT_CONTINUATION_PROMPT
+            ):
+                message[PROVENANCE_KEY] = PROVENANCE_CONTINUATION
+                tagged += 1
+                changed = True
+        if changed:
+            store.save(session)
+    return tagged
+
+
 def _active_session(store: TinyDBSessionStore) -> Session:
     """The most-recently-updated session, creating a fresh empty one if the store is empty."""
     keys = store.list_keys()
@@ -460,6 +489,7 @@ class Assistant:
         store = TinyDBSessionStore(str(config.sessions_path))
         if first_run:
             _import_last_history(store, config)
+        _backfill_continuation_provenance(store)
         session = _active_session(store)
         if session.messages:
             agent.restore(session.messages)
@@ -674,7 +704,13 @@ class Assistant:
         async with self._lock:
             self._in_proactive = True
             try:
+                # Tag every message this unprompted run appends so replayed history can distinguish it
+                # from a user-driven turn. The agent doesn't reset on run (system prompt lives on the
+                # client), so the pre-run length is a stable start index for the exchange.
+                start = len(self._agent.model_client.messages)
                 reply = await self._agent.run(self._config.reminder_text)
+                for message in self._agent.model_client.messages[start:]:
+                    message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
                 await self._channel.send(reply)
                 if self._persist():
                     await self._maybe_push_conversations()

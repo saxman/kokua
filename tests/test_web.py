@@ -10,7 +10,14 @@ from kokua.config import AssistantConfig
 from kokua.frontends.web import build_app
 
 from aimu.aio.channels.base import ChannelMessage
-from aimu.models import StreamChunk, StreamingContentType
+from aimu.models import (
+    PROVENANCE_CONTINUATION,
+    PROVENANCE_FINAL_ANSWER,
+    PROVENANCE_KEY,
+    PROVENANCE_PROACTIVE,
+    StreamChunk,
+    StreamingContentType,
+)
 
 
 class _FakeWS:
@@ -75,6 +82,23 @@ async def test_web_channel_emits_thinking_and_tool_frames_when_enabled():
         {"type": "thinking", "text": "hmm"},
         {"type": "tool", "name": "calc", "arguments": {"x": 2}},
         {"type": "token", "text": "4"},
+        {"type": "done"},
+    ]
+
+
+async def test_web_channel_send_emits_loop_marker_on_iteration_increment():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "a", iteration=0)
+        yield StreamChunk(StreamingContentType.GENERATING, "b", iteration=1)
+
+    await channel.send(gen())
+    assert ws.frames == [
+        {"type": "token", "text": "a"},
+        {"type": "loop"},
+        {"type": "token", "text": "b"},
         {"type": "done"},
     ]
 
@@ -185,6 +209,23 @@ def test_conversation_to_frames_extracts_text_from_content_blocks():
 
 def test_conversation_to_frames_empty():
     assert conversation_to_frames([], show_thinking=True, show_tools=True) == []
+
+
+def test_conversation_to_frames_continuation_user_turn_renders_loop_marker():
+    messages = [{"role": "user", "content": "Continue working.", PROVENANCE_KEY: PROVENANCE_CONTINUATION}]
+    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [{"type": "loop"}]
+
+
+def test_conversation_to_frames_final_answer_user_turn_renders_loop_marker():
+    messages = [{"role": "user", "content": "Give the final answer.", PROVENANCE_KEY: PROVENANCE_FINAL_ANSWER}]
+    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [{"type": "loop"}]
+
+
+def test_conversation_to_frames_marks_proactive_assistant_turn():
+    messages = [{"role": "assistant", "content": "Don't forget lunch.", PROVENANCE_KEY: PROVENANCE_PROACTIVE}]
+    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [
+        {"type": "message", "text": "Don't forget lunch.", "proactive": True}
+    ]
 
 
 async def test_web_channel_send_history_emits_single_frame():
