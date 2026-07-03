@@ -87,6 +87,8 @@ async def test_web_channel_emits_thinking_and_tool_frames_when_enabled():
 
 
 async def test_web_channel_send_emits_loop_marker_on_iteration_increment():
+    from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
+
     ws = _FakeWS()
     channel = WebChannel(ws)
 
@@ -97,7 +99,7 @@ async def test_web_channel_send_emits_loop_marker_on_iteration_increment():
     await channel.send(gen())
     assert ws.frames == [
         {"type": "token", "text": "a"},
-        {"type": "loop"},
+        {"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT},
         {"type": "token", "text": "b"},
         {"type": "done"},
     ]
@@ -211,14 +213,18 @@ def test_conversation_to_frames_empty():
     assert conversation_to_frames([], show_thinking=True, show_tools=True) == []
 
 
-def test_conversation_to_frames_continuation_user_turn_renders_loop_marker():
+def test_conversation_to_frames_continuation_user_turn_renders_loop_marker_with_prompt():
     messages = [{"role": "user", "content": "Continue working.", PROVENANCE_KEY: PROVENANCE_CONTINUATION}]
-    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [{"type": "loop"}]
+    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [
+        {"type": "loop", "text": "Continue working."}
+    ]
 
 
-def test_conversation_to_frames_final_answer_user_turn_renders_loop_marker():
+def test_conversation_to_frames_final_answer_user_turn_renders_loop_marker_with_prompt():
     messages = [{"role": "user", "content": "Give the final answer.", PROVENANCE_KEY: PROVENANCE_FINAL_ANSWER}]
-    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [{"type": "loop"}]
+    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [
+        {"type": "loop", "text": "Give the final answer."}
+    ]
 
 
 def test_conversation_to_frames_marks_proactive_assistant_turn():

@@ -72,9 +72,13 @@
     .proactive { align-self: flex-start; background: var(--proactive-bg); border: 1px solid var(--proactive-border); }
     .proactive::before { content: "proactive "; font-size: 0.7em; text-transform: uppercase; opacity: 0.6; letter-spacing: 0.05em; }
     .notice { align-self: center; font-size: 0.85em; opacity: 0.6; }
-    /* Marks an agent-loop continuation boundary (a framework-injected turn), not user input. */
-    .loop { align-self: center; font-size: 0.75em; opacity: 0.55; letter-spacing: 0.04em; text-transform: uppercase; }
-    .loop::before { content: "\21BB  "; }
+    /* Marks an agent-loop continuation boundary (a framework-injected turn), not user input.
+       Shows the injected prompt text for inspection; styled like the thinking block. */
+    .loop {
+      align-self: flex-start; max-width: 70%; font-size: 0.8em; color: var(--muted);
+      background: transparent; border-left: 2px solid var(--thinking-border); padding: 2px 10px; white-space: pre-wrap;
+    }
+    .loop::before { content: "\21BB  continuation"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; }
     .thinking {
       align-self: flex-start; max-width: 70%; font-size: 0.85em; font-style: italic;
       color: var(--thinking-fg); background: transparent; border-left: 2px solid var(--thinking-border); padding: 2px 10px; white-space: pre-wrap;
@@ -387,7 +391,7 @@
         // Agent-loop continuation boundary. Leave streamingBubble open so the answer keeps
         // accumulating and floats below this marker (same float-to-bottom rule as tool blocks).
         thinkingBlock = null;
-        addBubble("loop", "continuing");
+        addBubble("loop", frame.text || "");
       } else if (frame.type === "token") {
         thinkingBlock = null;
         if (!streamingBubble) {
@@ -431,7 +435,7 @@
           if (item.type === "user") addBubble("user", item.text);
           else if (item.type === "thinking") addBubble("thinking", item.text);
           else if (item.type === "tool") addBubble("tool", toolLine(item.name, item.arguments));
-          else if (item.type === "loop") addBubble("loop", "continuing");
+          else if (item.type === "loop") addBubble("loop", item.text || "");
           else if (item.type === "message") addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text);
         }
         autoscroll();

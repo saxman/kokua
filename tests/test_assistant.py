@@ -171,53 +171,6 @@ async def test_assistant_proactive_tags_turn_provenance(tmp_path):
     assert all(p in (None, PROVENANCE_PROACTIVE) for p in tagged)
 
 
-def test_backfill_continuation_provenance_tags_legacy_messages(tmp_path):
-    import uuid
-
-    from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
-    from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY
-    from aimu.sessions import Session, TinyDBSessionStore
-
-    from kokua.assistant import _backfill_continuation_provenance
-
-    store = TinyDBSessionStore(str(tmp_path / "sessions.json"))
-    key = uuid.uuid4().hex
-    store.save(
-        Session(
-            key=key,
-            messages=[
-                {"role": "user", "content": "real question"},
-                {"role": "assistant", "content": "partial"},
-                {"role": "user", "content": DEFAULT_CONTINUATION_PROMPT},
-                {"role": "assistant", "content": "final"},
-            ],
-            metadata={},
-        )
-    )
-
-    _backfill_continuation_provenance(store)
-
-    messages = store.get(key).messages
-    assert messages[0].get(PROVENANCE_KEY) is None  # a real user turn is left untouched
-    assert messages[2].get(PROVENANCE_KEY) == PROVENANCE_CONTINUATION
-
-
-def test_backfill_continuation_provenance_is_idempotent(tmp_path):
-    import uuid
-
-    from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
-    from aimu.sessions import Session, TinyDBSessionStore
-
-    from kokua.assistant import _backfill_continuation_provenance
-
-    store = TinyDBSessionStore(str(tmp_path / "sessions.json"))
-    key = uuid.uuid4().hex
-    store.save(Session(key=key, messages=[{"role": "user", "content": DEFAULT_CONTINUATION_PROMPT}], metadata={}))
-
-    assert _backfill_continuation_provenance(store) == 1  # tagged one message
-    assert _backfill_continuation_provenance(store) == 0  # nothing left to tag
-
-
 async def test_assistant_persists_and_restores(tmp_path):
     cfg = _config(tmp_path)
 

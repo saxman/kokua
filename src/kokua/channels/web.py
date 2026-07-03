@@ -47,9 +47,9 @@ def conversation_to_frames(messages: list[dict], *, show_thinking: bool, show_to
         provenance = message.get(PROVENANCE_KEY)
         if role == "user":
             if provenance in _LOOP_PROVENANCE:
-                # A framework-injected continuation/final-answer turn, not user input. Show the same
-                # loop marker the live stream emits at an iteration boundary, not a user bubble.
-                items.append({"type": "loop"})
+                # A framework-injected continuation/final-answer turn, not user input. Show a loop
+                # marker carrying the injected prompt text (for inspection), not a user bubble.
+                items.append({"type": "loop", "text": _text_of(message.get("content"))})
                 continue
             text = _text_of(message.get("content"))
             if text:
@@ -90,12 +90,16 @@ class WebChannel(BaseWebChannel):
         """Yield ``chunks`` unchanged, emitting a ``loop`` frame just before each iteration increment.
 
         ``StreamChunk.iteration`` is 0 for the first response and rises by one per agent-loop
-        continuation, so a rise marks the boundary the injected turn sits at.
+        continuation, so a rise marks the boundary the injected turn sits at. The chunk carries the
+        iteration number but not the injected prompt text, so the marker shows the default continuation
+        prompt (kokua never overrides ``continuation_prompt``); replay reads the actual stored content.
         """
+        from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
+
         last_iteration = 0
         async for chunk in chunks:
             if chunk.iteration > last_iteration:
-                await self.send_frame({"type": "loop"})
+                await self.send_frame({"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT})
                 last_iteration = chunk.iteration
             yield chunk
 

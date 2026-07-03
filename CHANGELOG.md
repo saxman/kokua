@@ -31,11 +31,10 @@ installable, modular application.
   `history.json` is imported once as the first conversation. CLI multi-conversation is a later change.
 - **Distinguish agent-loop turns from user input (web)**: the agent loop injects its own continuation
   turns as `user`-role messages; using AIMU's inert `provenance` message key, the web UI now renders these
-  as a muted `↻ continuing` marker at each loop-iteration boundary instead of as user bubbles, both live
-  (keyed off `StreamChunk.iteration`) and on history replay. Proactive turns are tagged and replay with
-  their existing amber styling. Real user turns are unaffected. A one-time, idempotent backfill on
-  startup tags continuation turns persisted before the provenance key existed (matched by the default
-  continuation-prompt text) so pre-existing conversations render correctly too.
+  as a muted `↻ continuation` marker at each loop-iteration boundary instead of as user bubbles, both live
+  (keyed off `StreamChunk.iteration`) and on history replay. The marker shows the injected prompt text for
+  inspection. Proactive turns are tagged and replay with their existing amber styling. Real user turns are
+  unaffected.
 - **Stop an in-flight reply**: send `/stop` (the web UI also has a Stop button, enabled only while a reply
   is being processed) to cancel the current turn;
   the partial turn is kept so the conversation can continue. Built on AIMU's `aio.RunHandle`; reactive
