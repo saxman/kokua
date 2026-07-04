@@ -58,6 +58,13 @@ def test_sanitize_model_and_flags():
     assert "show_tools" not in result  # non-bool dropped
 
 
+def test_sanitize_keeps_plan_flags():
+    result = runtime_settings.sanitize({"plan_mode": True, "plan_review": False, "plan_bogus": True})
+    assert result["plan_mode"] is True
+    assert result["plan_review"] is False
+    assert "plan_bogus" not in result
+
+
 def test_sanitize_blank_model_omitted():
     assert "model" not in runtime_settings.sanitize({"model": "   "})
 

@@ -98,6 +98,12 @@ def test_security_confirm_tools_from_file():
     assert _resolve().confirm_tools == ["add_skill_script"]
 
 
+def test_planning_flags_from_file():
+    _write_config("[planning]\nplan_mode = true\nplan_review = true\n")
+    cfg = _resolve()
+    assert cfg.plan_mode is True and cfg.plan_review is True
+
+
 def test_generation_section_collects_into_dict():
     _write_config("[generation]\ntemperature = 0.3\nmax_tokens = 2048\n")
     assert _resolve().generation == {"temperature": 0.3, "max_tokens": 2048}

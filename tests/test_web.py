@@ -364,6 +364,66 @@ def test_download_route_serves_documents(tmp_path):
     assert client.get("/download/sub/evil.pdf").status_code == 404
 
 
+def test_ws_plan_autonomous_emits_plan_then_answer(tmp_path):
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path, plan_mode=True), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text("do the thing")
+        plan = _drain_until(ws, "plan")
+        frames = []
+        while True:
+            f = ws.receive_json()
+            frames.append(f)
+            if f["type"] == "done":
+                break
+    assert plan["text"] == "THE PLAN"
+    assert {"type": "token", "text": "THE ANSWER"} in frames
+
+
+def test_ws_plan_review_approve_then_executes(tmp_path):
+    from starlette.testclient import TestClient
+
+    app = build_app(
+        _config(tmp_path, plan_mode=True, plan_review=True), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"])
+    )
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text("do X")
+        assert _drain_until(ws, "plan")["text"] == "THE PLAN"
+        assert _drain_until(ws, "plan_review")["plan"] == "THE PLAN"  # paused for review
+        ws.send_text("approve")
+        frames = []
+        while True:
+            f = ws.receive_json()
+            frames.append(f)
+            if f["type"] == "done":
+                break
+    assert {"type": "token", "text": "THE ANSWER"} in frames
+
+
+def test_ws_plan_review_reject_skips_execution(tmp_path):
+    from starlette.testclient import TestClient
+
+    # Only the plan response is queued; if execution ran it would raise (index error), so a clean
+    # "(plan rejected)" message proves execution was skipped.
+    app = build_app(_config(tmp_path, plan_mode=True, plan_review=True), client=MockAsyncModelClient(["THE PLAN"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text("do X")
+        _drain_until(ws, "plan_review")
+        ws.send_text("reject")
+        msg = _drain_until(ws, "message")
+    assert "rejected" in msg["text"]
+
+
+def test_ws_slash_plan_triggers_planning_when_mode_off(tmp_path):
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path, plan_mode=False), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text("/plan do X")
+        assert _drain_until(ws, "plan")["text"] == "THE PLAN"  # planning happened despite mode off
+
+
 # --- Server round-trip via Starlette TestClient ----------------------------------------------
 
 

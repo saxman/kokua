@@ -77,6 +77,12 @@ A built-in `pdf` tool-pack gives the assistant a `markdown_to_pdf` tool: ask it 
 PDF and it writes the file to `data/downloads/`. In the web UI the assistant hands back a download link
 (files are served at `/download/<name>`); from the CLI it reports the file path.
 
+**Deep planning mode.** With it on, the assistant drafts an explicit plan before doing the work — which
+tools, skills, and MCP services it will use, what it will web-search for, and where it needs to build a
+skill or connect a new MCP server — then carries it out. Enable *Review the plan before executing* to
+pause for your Approve / Edit / Reject; otherwise it runs the plan automatically. Toggle both in the
+settings panel (or `[planning]` in the config file), or plan a single request with `/plan <task>`.
+
 List what's installed:
 
 ```bash

@@ -53,6 +53,8 @@ _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callab
     ("assistant", "reminder_text"): ("reminder_text", (str,), "a string", None),
     ("display", "show_thinking"): ("show_thinking", (bool,), "a boolean", None),
     ("display", "show_tools"): ("show_tools", (bool,), "a boolean", None),
+    ("planning", "plan_mode"): ("plan_mode", (bool,), "a boolean", None),
+    ("planning", "plan_review"): ("plan_review", (bool,), "a boolean", None),
     ("assistant", "memory"): ("memory", (bool,), "a boolean", None),
     ("assistant", "load_plugins"): ("load_plugins", (bool,), "a boolean", None),
     ("tools", "groups"): ("tools", (list,), "a list of strings", _str_list),

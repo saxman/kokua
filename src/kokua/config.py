@@ -48,6 +48,11 @@ class AssistantConfig:
     # Surface the model's reasoning and tool calls in the channel, not just the final answer.
     show_thinking: bool = True
     show_tools: bool = True
+    # Deep planning mode: when on, every turn first produces an explicit plan (tools/skills/MCP to use
+    # or build) before executing. plan_review gates execution on the user's Approve/Edit/Reject; off is
+    # autonomous (plan shown, then it proceeds). A per-message "/plan <task>" invokes planning ad hoc.
+    plan_mode: bool = False
+    plan_review: bool = False
     # AIMU built-in tool groups to expose (see assistant._TOOL_GROUPS; "all"/"none" also accepted).
     tools: list[str] = field(default_factory=lambda: ["web", "fs", "compute", "misc"])
     # Remote MCP server URLs to connect at startup; a bearer token (if set) is applied to all.

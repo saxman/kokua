@@ -73,9 +73,9 @@ def _coerce(value: Any, kind: type, lo: Optional[float], hi: Optional[float]) ->
 def sanitize(raw: dict) -> dict:
     """Keep only known keys, coerce types, drop None / out-of-range / junk.
 
-    Accepts the persisted / wire shape ``{"model", "show_thinking", "show_tools", "generate_kwargs"}``
-    and returns the same shape with only the keys that survived validation. ``generate_kwargs`` holds
-    only the parameters the user actually set.
+    Accepts the persisted / wire shape ``{"model", "show_thinking", "show_tools", "plan_mode",
+    "plan_review", "generate_kwargs"}`` and returns the same shape with only the keys that survived
+    validation. ``generate_kwargs`` holds only the parameters the user actually set.
     """
     result: dict = {}
 
@@ -83,7 +83,7 @@ def sanitize(raw: dict) -> dict:
     if isinstance(model, str) and model.strip():
         result["model"] = model.strip()
 
-    for flag in ("show_thinking", "show_tools"):
+    for flag in ("show_thinking", "show_tools", "plan_mode", "plan_review"):
         if isinstance(raw.get(flag), bool):
             result[flag] = raw[flag]
 

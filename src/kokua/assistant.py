@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -37,6 +37,38 @@ from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
 
 logger = logging.getLogger(__name__)
+
+# Deep planning mode prompts. The plan phase runs the agent (tools enabled, so it can web-search and
+# consult its skill catalog) to produce an explicit plan without doing the work; the execute phase then
+# carries out the approved plan. Planning is scratch work kept out of the saved conversation (see
+# _make_plan), and the executor's synthetic turn is rewritten back to the user's words (see _planned_turn).
+PLAN_PROMPT = """\
+Before doing any work, produce an explicit plan for how you will accomplish the request below. Do NOT \
+carry out the work or produce the final deliverable yet -- only plan.
+
+Request:
+{request}
+
+Your plan should:
+- State the goal and what a complete, correct answer looks like.
+- Give the concrete steps you will take, in order, as a numbered markdown list.
+- For each step, name the specific tool, skill, or MCP service you will use. Where a needed capability \
+is missing, say so and how you will get it: build a new skill (author_skill), connect an MCP service \
+(add_mcp_server), and web-search to find a suitable MCP service or documentation when that helps.
+- Note what you will verify before finishing.
+
+You may use read-only tools (e.g. web search) to inform the plan, but make no changes yet. Respond with \
+just the plan."""
+
+EXECUTE_PROMPT = """\
+Carry out the following approved plan to fully answer the original request. Follow the plan, adapting if \
+you discover something that requires it, and use the tools/skills it names.
+
+Original request:
+{request}
+
+Approved plan:
+{plan}"""
 
 # AIMU's built-in tool subgroups, selectable by name via the --tools flag / AssistantConfig.tools.
 # The generative groups (image/audio/speech/transcription) need their AIMU_*_MODEL env var set and
@@ -363,6 +395,10 @@ class Assistant:
         # Tool-approval coordination. At most one approval is pending at a time (turns are
         # serialized by self._lock); the serve loop resolves the future with the user's answer.
         self._pending_approval: Optional[asyncio.Future] = None
+        # Plan-review coordination (deep planning mode): while a plan awaits the user's
+        # approve/edit/reject, the serve loop resolves the future. Mirrors the approval gate.
+        self._pending_plan: Optional[asyncio.Future] = None
+        self._pending_plan_text = ""
         # True while a proactive (unprompted) turn runs, so _approve auto-denies gated tools (no
         # user is waiting to confirm).
         self._in_proactive = False
@@ -389,6 +425,9 @@ class Assistant:
         base_generate_kwargs = dict(client.default_generate_kwargs)
         _layer_generate_kwargs(client, base_generate_kwargs, config, stored.get("generate_kwargs", {}))
         _apply_show_flags(channel, config, stored)
+        for flag in ("plan_mode", "plan_review"):  # config-only toggles persisted by the settings panel
+            if flag in stored:
+                setattr(config, flag, stored[flag])
 
         # Persistent memory: a SemanticMemoryStore for facts about the user and a DocumentStore for
         # longer reference documents. Both live under the app state dir, so they survive restarts and
@@ -532,6 +571,8 @@ class Assistant:
             "model": str(self._config.model) if self._config.model else "",
             "show_thinking": getattr(self._channel, "show_thinking", self._config.show_thinking),
             "show_tools": getattr(self._channel, "show_tools", self._config.show_tools),
+            "plan_mode": self._config.plan_mode,
+            "plan_review": self._config.plan_review,
             "generate_kwargs": dict(self._agent.model_client.default_generate_kwargs),
         }
 
@@ -553,6 +594,9 @@ class Assistant:
             if switching:
                 await self._switch_model(new_model)
             _apply_show_flags(self._channel, self._config, settings)
+            for flag in ("plan_mode", "plan_review"):  # config-only toggles (no channel attribute)
+                if flag in settings:
+                    setattr(self._config, flag, settings[flag])
             _layer_generate_kwargs(
                 self._agent.model_client, self._base_generate_kwargs, self._config, settings["generate_kwargs"]
             )
@@ -600,7 +644,8 @@ class Assistant:
     async def _serve_channel(self) -> None:
         try:
             async for msg in self._channel.receive():
-                text = (msg.text or "").strip().lower()
+                raw = msg.text or ""
+                text = raw.strip().lower()
                 if text == "/stop":
                     if self._current is not None and not self._current.done:
                         self._current.cancel()
@@ -611,9 +656,30 @@ class Assistant:
                 if pending is not None and not pending.done():
                     pending.set_result(text in ("y", "yes"))
                     continue
+                # While a plan awaits review, the next message is the approve/edit/reject decision.
+                plan_pending = self._pending_plan
+                if plan_pending is not None and not plan_pending.done():
+                    if text in ("approve", "yes", "y"):
+                        plan_pending.set_result(self._pending_plan_text)
+                    elif text in ("reject", "no", "n"):
+                        plan_pending.set_result(None)
+                    elif text.startswith("edit:"):
+                        plan_pending.set_result(raw.split(":", 1)[1].strip() or self._pending_plan_text)
+                    else:
+                        plan_pending.set_result(raw.strip())  # any other text is an edited plan
+                    continue
+                # `/plan <task>` invokes deep planning for this one turn regardless of the mode toggle.
+                plan_turn = None
+                if text == "/plan" or text.startswith("/plan "):
+                    task = raw.strip()[len("/plan") :].strip()
+                    if not task:
+                        await self._channel.send("Usage: /plan <task>")
+                        continue
+                    msg = replace(msg, text=task)
+                    plan_turn = True
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. Turns stay serialized by self._lock (a reminder can't interleave).
-                handle = RunHandle.start(self._handle(msg))
+                handle = RunHandle.start(self._handle(msg, plan=plan_turn))
                 self._current = handle
                 self._turns.add(handle.task)
                 handle.task.add_done_callback(self._turns.discard)
@@ -648,11 +714,16 @@ class Assistant:
         else:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
 
-    async def _handle(self, msg: ChannelMessage) -> None:
+    async def _handle(self, msg: ChannelMessage, plan: Optional[bool] = None) -> None:
+        # `plan` forces planning on/off for this turn (from `/plan`); None defers to the mode toggle.
+        do_plan = self._config.plan_mode if plan is None else plan
         async with self._lock:
             try:
-                stream = await self._agent.run(msg.text, stream=True, images=msg.images)
-                await self._channel.send(stream, reply_to=msg)
+                if do_plan:
+                    await self._planned_turn(msg)
+                else:
+                    stream = await self._agent.run(msg.text, stream=True, images=msg.images)
+                    await self._channel.send(stream, reply_to=msg)
             except asyncio.CancelledError:
                 # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
                 # agent snapshots it in a finally), and return so the daemon keeps serving.
@@ -668,6 +739,71 @@ class Assistant:
                 await self._channel.send("Sorry, something went wrong handling that.", reply_to=msg)
             if self._persist():
                 await self._maybe_push_conversations()
+
+    async def _planned_turn(self, msg: ChannelMessage) -> None:
+        """Deep planning: plan first, show it, optionally await review, then execute the approved plan."""
+        plan_text = await self._make_plan(msg)
+        await self._send_plan(plan_text)
+        approved = plan_text
+        if self._config.plan_review:
+            approved = await self._review_plan(plan_text)
+            if approved is None:  # rejected
+                await self._channel.send("(plan rejected)", reply_to=msg)
+                return
+        # Execute the approved plan. The executor's prompt weaves in the plan; afterwards we rewrite the
+        # synthetic user turn back to the user's own words so the saved conversation stays clean.
+        base_len = len(self._agent.model_client.messages)
+        stream = await self._agent.run(
+            EXECUTE_PROMPT.format(request=msg.text, plan=approved), stream=True, images=msg.images
+        )
+        await self._channel.send(stream, reply_to=msg)
+        msgs = self._agent.model_client.messages
+        if len(msgs) > base_len and msgs[base_len].get("role") == "user":
+            msgs[base_len]["content"] = msg.text
+
+    async def _make_plan(self, msg: ChannelMessage) -> str:
+        """Run the agent to produce a plan, keeping the planning exchange out of the saved conversation.
+
+        Tools stay enabled so the planner can web-search and consult its skill catalog; the turns it adds
+        (planner prompt, tool calls, plan) are rolled back afterwards -- planning is scratch work, and the
+        approved plan is re-supplied to the executor in _planned_turn.
+        """
+        base = list(self._agent.model_client.messages)
+        try:
+            plan = await self._agent.run(PLAN_PROMPT.format(request=msg.text), images=msg.images)
+        finally:
+            self._agent.model_client.messages = base
+        return plan if isinstance(plan, str) else str(plan)
+
+    async def _send_plan(self, plan_text: str) -> None:
+        """Show the plan, as a distinct plan frame if the channel supports it, else as text."""
+        send = getattr(self._channel, "send_plan", None)
+        if send is not None:
+            await send(plan_text)
+        else:
+            await self._channel.send(f"Plan:\n\n{plan_text}")
+
+    async def _review_plan(self, plan_text: str) -> Optional[str]:
+        """Await the user's decision on a plan: approve (the plan), edit (their text), or reject (None).
+
+        Mirrors _approve: create a future, prompt the channel, and let the serve loop resolve it.
+        """
+        self._pending_plan = asyncio.get_running_loop().create_future()
+        self._pending_plan_text = plan_text
+        try:
+            await self._prompt_plan_review(plan_text)
+            return await self._pending_plan
+        finally:
+            self._pending_plan = None
+            self._pending_plan_text = ""
+
+    async def _prompt_plan_review(self, plan_text: str) -> None:
+        """Ask the user to review a plan, however the channel can (web frame vs. plain text)."""
+        request = getattr(self._channel, "send_plan_review_request", None)
+        if request is not None:
+            await request(plan_text)
+        else:
+            await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'.")
 
     async def _proactive(self) -> None:
         """Scheduled callback: produce a message unprompted and push it to the channel."""

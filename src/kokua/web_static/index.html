@@ -86,6 +86,8 @@
     .thinking::before { content: "thinking"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; font-style: normal; opacity: 0.7; }
     .tool { align-self: flex-start; font-family: ui-monospace, monospace; font-size: 0.8em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 4px 10px; }
     .tool::before { content: "\1F527  "; }
+    .plan { align-self: flex-start; max-width: 85%; background: var(--approval-bg); border: 1px solid var(--approval-border); border-radius: 12px; padding: 8px 14px; }
+    .plan::before { content: "\1F4CB  plan"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; margin-bottom: 4px; }
     /* Markdown-rendered bubbles: real block elements, so drop the plain-text pre-wrap. */
     .md { white-space: normal; }
     .md > :first-child { margin-top: 0; }
@@ -191,6 +193,13 @@
           <label class="check"><input id="set-show_thinking" type="checkbox" /> Show thinking</label>
           <label class="check"><input id="set-show_tools" type="checkbox" /> Show tool calls</label>
         </fieldset>
+        <fieldset>
+          <legend>Planning</legend>
+          <label class="check"><input id="set-plan_mode" type="checkbox" /> Deep planning mode (plan before acting)</label>
+          <label class="check"><input id="set-plan_review" type="checkbox" /> Review the plan before executing</label>
+          <p class="hint">With planning on, each turn drafts a plan first. Review pauses for your
+            Approve / Edit / Reject; off runs the plan automatically. You can also send "/plan &lt;task&gt;".</p>
+        </fieldset>
         <div class="modal-actions">
           <button type="submit">Save</button>
           <button id="settings-cancel" type="button" class="secondary">Cancel</button>
@@ -250,6 +259,8 @@
       document.getElementById("set-model").value = values.model || "";
       document.getElementById("set-show_thinking").checked = !!values.show_thinking;
       document.getElementById("set-show_tools").checked = !!values.show_tools;
+      document.getElementById("set-plan_mode").checked = !!values.plan_mode;
+      document.getElementById("set-plan_review").checked = !!values.plan_review;
       const gk = values.generate_kwargs || {};
       for (const key of GEN_KEYS) {
         const el = document.getElementById("gen-" + key);
@@ -274,6 +285,8 @@
         model: document.getElementById("set-model").value.trim(),
         show_thinking: document.getElementById("set-show_thinking").checked,
         show_tools: document.getElementById("set-show_tools").checked,
+        plan_mode: document.getElementById("set-plan_mode").checked,
+        plan_review: document.getElementById("set-plan_review").checked,
         generate_kwargs,
       };
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "settings", values }));
@@ -423,6 +436,10 @@
         if (!frame.proactive) setProcessing(false);  // a reactive message ends the turn (e.g. "(stopped)" / error)
       } else if (frame.type === "approval") {
         renderApproval(frame.name, frame.arguments);
+      } else if (frame.type === "plan") {
+        addMarkdownBubble("plan", frame.text);
+      } else if (frame.type === "plan_review") {
+        renderPlanReview(frame.plan);
       } else if (frame.type === "settings") {
         populateSettings(frame.values);
       } else if (frame.type === "conversations") {
@@ -469,6 +486,50 @@
       deny.addEventListener("click", () => answer("n"));
       actions.appendChild(allow);
       actions.appendChild(deny);
+      el.appendChild(prompt);
+      el.appendChild(actions);
+      log.appendChild(el);
+      autoscroll();
+    }
+
+    // Deep planning review: show Approve / Edit / Reject. Replies are plain "approve"/"reject"/"edit: <text>"
+    // frames the server routes to the waiting plan (same path as tool approval).
+    function renderPlanReview(planText) {
+      const el = document.createElement("div");
+      el.className = "bubble approval";
+      const prompt = document.createElement("div");
+      prompt.className = "prompt";
+      prompt.textContent = "Proceed with this plan?";
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const send = (reply) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(reply);
+        el.querySelectorAll("button, textarea").forEach((b) => (b.disabled = true));
+      };
+      const approve = document.createElement("button");
+      approve.textContent = "Approve";
+      approve.addEventListener("click", () => send("approve"));
+      const edit = document.createElement("button");
+      edit.textContent = "Edit";
+      edit.addEventListener("click", () => {
+        const box = document.createElement("textarea");
+        box.value = planText;
+        box.rows = Math.min(16, (planText.match(/\n/g) || []).length + 3);
+        box.style.width = "100%";
+        const saveEdit = document.createElement("button");
+        saveEdit.textContent = "Approve edited";
+        saveEdit.addEventListener("click", () => send("edit: " + box.value));
+        actions.replaceChildren(saveEdit);
+        el.insertBefore(box, actions);
+        box.focus();
+      });
+      const reject = document.createElement("button");
+      reject.className = "deny";
+      reject.textContent = "Reject";
+      reject.addEventListener("click", () => send("reject"));
+      actions.appendChild(approve);
+      actions.appendChild(edit);
+      actions.appendChild(reject);
       el.appendChild(prompt);
       el.appendChild(actions);
       log.appendChild(el);

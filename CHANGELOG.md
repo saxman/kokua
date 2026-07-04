@@ -59,6 +59,13 @@ installable, modular application.
   `GET /download/<name>`, so the assistant can hand back a download link; the tool also returns the
   absolute path for the CLI. (Downloads live in their own folder, not `data/documents/`, so the binary
   PDFs never disturb the DocumentStore, which scans the documents folder as text.)
+- **Deep planning mode**: when on, a turn first drafts an explicit plan (which tools/skills/MCP services
+  to use, what to web-search for, and where to build a skill via `author_skill` or connect a server via
+  `add_mcp_server`) and then executes it. `plan_review` pauses for Approve / Edit / Reject; off runs the
+  plan autonomously. Toggle it in the settings panel or `[planning]` config, or invoke it for one request
+  with `/plan <task>`. Built on Kokua's existing turn loop and tool-approval round-trip (AIMU already makes
+  the agent plan-capable); planning is scratch work kept out of the saved conversation, which stores your
+  actual request and the answer. `web-search`-for-MCP relies on the default `web` tools.
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,

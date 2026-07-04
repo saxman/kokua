@@ -55,6 +55,13 @@ name = "cli"
 host = "127.0.0.1"
 port = 8000
 
+[planning]
+# Deep planning mode: draft an explicit plan (which tools/skills/MCP services to use or build) before
+# doing the work. plan_review pauses for your Approve/Edit/Reject; off runs the plan autonomously. Both
+# are also toggleable at runtime in the web settings panel, and "/plan <task>" plans a single request.
+# plan_mode = false
+# plan_review = false
+
 [generation]
 # Baseline model generation kwargs. The web settings panel overrides these at runtime and persists
 # its own choice separately (to data/runtime-settings.json), so these act only as the starting

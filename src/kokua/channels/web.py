@@ -126,3 +126,12 @@ class WebChannel(BaseWebChannel):
         loop routes it to the pending approval -- no interception is needed here.
         """
         await self.send_frame({"type": "approval", "name": name, "arguments": arguments})
+
+    async def send_plan(self, plan: str) -> None:
+        """Show a deep-planning plan as its own bubble (rendered as markdown by the page)."""
+        await self.send_frame({"type": "plan", "text": plan})
+
+    async def send_plan_review_request(self, plan: str) -> None:
+        """Ask the browser to review a plan; the page replies with a normal 'approve'/'reject'/'edit:'
+        frame that the serve loop routes to the pending plan (same path as approval)."""
+        await self.send_frame({"type": "plan_review", "plan": plan})
