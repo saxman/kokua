@@ -5,11 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from helpers import MockAsyncModelClient
-from kokua import runtime_settings
+from kokua import review, runtime_settings
 from kokua.assistant import Assistant
 from kokua.config import AssistantConfig
 from kokua.review import Verdict
 
+from aimu import aio
 from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamingContentType
 
@@ -76,6 +77,56 @@ APPROVE = Verdict(approved=True)
 def test_verdict_defaults():
     v = Verdict(approved=True)
     assert v.issues == [] and v.suggestions == ""
+
+
+def test_reviewer_toolset_boundary():
+    """The reviewer gets verification tools (date, web, compute) but no access to user state."""
+    names = {t.__name__ for t in review.REVIEWER_TOOLS}
+    # Present: the motivating date tool, web lookup, and computation (incl. execute_python for math).
+    assert {"get_current_date_and_time", "web_search", "get_webpage", "calculate", "execute_python"} <= names
+    # Absent: the user's memory/documents, skill authoring, and MCP mutation.
+    assert not (names & {"store_memory", "search_memories", "save_document", "search_documents"})
+    assert not any(n in names for n in ("author_skill", "add_skill_script", "add_mcp_server", "remove_mcp_server"))
+
+
+async def test_reviewer_runs_tool_loop_then_extracts_verdict(monkeypatch):
+    """A reviewer runs a bounded tool-calling assessment, then finalize_verdict parses the typed verdict."""
+    # A simulated tool round ("tool" -> follow-up prose), a continuation turn, then the structured verdict.
+    client = MockAsyncModelClient(
+        ["tool", "prose after the tool call", "final assessment", '{"approved": true, "issues": [], "suggestions": ""}']
+    )
+    client.model.supports_structured_output = False  # route the verdict through the parse path
+
+    def fake_reviewer_agent(model, system, tools=None):
+        return aio.Agent(client, tools=[])  # tools irrelevant: the mock fakes the tool round
+
+    monkeypatch.setattr("kokua.review._reviewer_agent", fake_reviewer_agent)
+
+    verdict = await review.review_plan("mock", "do X", "PLAN")
+
+    assert verdict.approved is True
+    # The reviewer actually exercised a tool round before verdicting (not a single tool-less call).
+    assert any(m.get("role") == "tool" for m in client.messages)
+
+
+async def test_streamed_reviewer_streams_then_extracts_verdict(monkeypatch):
+    """The streamed reviewer yields its assessment chunks, then finalize_verdict returns the verdict.
+
+    Guards the two-phase streamed path (``stream_*`` must ``await agent.run(stream=True)`` to get an
+    async iterator, then ``finalize_verdict`` on the same client)."""
+    client = MockAsyncModelClient(
+        ["tool", "streamed assessment", "final", '{"approved": false, "issues": ["stale date"], "suggestions": ""}']
+    )
+    client.model.supports_structured_output = False
+    monkeypatch.setattr("kokua.review._reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[]))
+
+    rc, stream = await review.stream_plan_review("mock", "do X", "PLAN")
+    parts = [ch.content async for ch in stream if ch.phase == StreamingContentType.GENERATING]
+    verdict = await review.finalize_verdict(rc)
+
+    assert "streamed assessment" in "".join(parts)
+    assert any(m.get("role") == "tool" for m in client.messages)
+    assert verdict.approved is False and verdict.issues == ["stale date"]
 
 
 # --- adversarial plan review ----------------------------------------------------------------

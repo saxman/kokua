@@ -87,6 +87,17 @@ installable, modular application.
   approved / rejected (with the issues) -- so the otherwise-silent reviewer pauses are visible. Added
   via a generic `subagent` WebSocket frame (no change to the model conversation schema); reviewer
   verdicts are recorded per turn in `session.metadata` and replayed in order on reload.
+- **Tool-using reviewers**: the adversarial reviewers are now tool-enabled agents rather than a single
+  tool-less call. Each runs a bounded tool-calling assessment over a curated verification toolset
+  (`review.REVIEWER_TOOLS`: current date/time, web lookup, and computation) and then extracts the typed
+  verdict in a follow-up structured call. This fixes reviewers rejecting correct answers they couldn't
+  verify -- most visibly recency claims, since a context-free reviewer had no way to know today's date
+  (Kokua injects the date into no prompt; it must be fetched via `get_current_date_and_time`, exactly as
+  the main agent does). The toolset deliberately excludes the user's memory/documents, skills, and MCP
+  mutation, so the reviewer stays an independent critic with no access to user state. Known limitation
+  (see README): the toolset includes `execute_python` for calculations, and unlike the main agent the
+  reviewer has no approval gate, so it can run code unattended during a review -- an intentional
+  short-term tradeoff to revisit (sandbox the reviewer, or drop to `calculate`-only).
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,

@@ -92,6 +92,14 @@ default and combine with human plan-review (the critique is shown to you before 
 UI the reviewers appear as their own cards ("Plan reviewer / Result reviewer — reviewing…" → approved /
 rejected with the issues), and those cards replay in order when you reload the conversation.
 
+The reviewers are tool-using agents: each runs a bounded tool-calling assessment over a curated
+verification toolset (the current date/time, web lookup, and computation) before returning its verdict,
+so it can check recency and factual/numeric claims instead of rejecting anything it can't confirm from
+the request alone. (This is why, e.g., a correct "as of today" answer is no longer rejected for
+date-unawareness: the reviewer fetches the date the same way the main agent does.) The toolset excludes
+your memory/documents, skills, and MCP servers, so the reviewer stays an independent critic with no
+access to your state. See [Security](#security) for a known limitation of this toolset.
+
 Turn on **Show all reasoning** for the full trace: every LLM call in a planned turn (planner, each
 reviewer, executor, and each revision) streams its reasoning + output live under a labeled phase header,
 and every intermediate plan and result version is shown (reviewers stream a prose assessment, then a
@@ -183,6 +191,15 @@ terminal, or Allow/Deny buttons in the web UI. By default this gates `add_skill_
 and `execute_python`. Adjust the set with `[security] confirm_tools` in the config file or `--confirm-tools
 name1,name2` (an empty value disables it). Proactive (unprompted) turns auto-deny these regardless, so the
 assistant never runs a full-access tool on its own schedule without you.
+
+**Known limitation -- reviewer tools bypass the approval gate.** When adversarial review is on (the
+deep planning mode described under [Run](#run)), the reviewer is a tool-using agent, and its
+verification toolset includes `execute_python` (so it can run calculations to check numeric claims). Unlike the main
+agent, the reviewer has **no** approval gate -- an autonomous critic can't pause to ask you mid-review --
+so it can run arbitrary Python unattended while reviewing. This is an intentional short-term tradeoff we
+intend to revisit (e.g. sandboxing the reviewer, or restricting it to safe `calculate`-only arithmetic).
+Until then, treat "review on" as granting the reviewer the same code-execution reach the main agent has,
+and only enable it with a model and inputs you trust.
 
 ## Development
 
