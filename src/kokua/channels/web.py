@@ -131,7 +131,8 @@ class WebChannel(BaseWebChannel):
         """Show a deep-planning plan as its own bubble (rendered as markdown by the page)."""
         await self.send_frame({"type": "plan", "text": plan})
 
-    async def send_plan_review_request(self, plan: str) -> None:
+    async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
         """Ask the browser to review a plan; the page replies with a normal 'approve'/'reject'/'edit:'
-        frame that the serve loop routes to the pending plan (same path as approval)."""
-        await self.send_frame({"type": "plan_review", "plan": plan})
+        frame that the serve loop routes to the pending plan (same path as approval). ``critique`` carries
+        any adversarial-reviewer concerns for the user to weigh."""
+        await self.send_frame({"type": "plan_review", "plan": plan, "critique": critique})

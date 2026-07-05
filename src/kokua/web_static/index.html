@@ -197,8 +197,11 @@
           <legend>Planning</legend>
           <label class="check"><input id="set-plan_mode" type="checkbox" /> Deep planning mode (plan before acting)</label>
           <label class="check"><input id="set-plan_review" type="checkbox" /> Review the plan before executing</label>
+          <label class="check"><input id="set-plan_review_agent" type="checkbox" /> Adversarial plan review (independent agent critiques + replans)</label>
+          <label class="check"><input id="set-result_review" type="checkbox" /> Review the result before showing it (runs non-streamed)</label>
           <p class="hint">With planning on, each turn drafts a plan first. Review pauses for your
-            Approve / Edit / Reject; off runs the plan automatically. You can also send "/plan &lt;task&gt;".</p>
+            Approve / Edit / Reject; off runs the plan automatically. You can also send "/plan &lt;task&gt;".
+            Adversarial review adds an independent critic for the plan and/or the final answer.</p>
         </fieldset>
         <div class="modal-actions">
           <button type="submit">Save</button>
@@ -261,6 +264,8 @@
       document.getElementById("set-show_tools").checked = !!values.show_tools;
       document.getElementById("set-plan_mode").checked = !!values.plan_mode;
       document.getElementById("set-plan_review").checked = !!values.plan_review;
+      document.getElementById("set-plan_review_agent").checked = !!values.plan_review_agent;
+      document.getElementById("set-result_review").checked = !!values.result_review;
       const gk = values.generate_kwargs || {};
       for (const key of GEN_KEYS) {
         const el = document.getElementById("gen-" + key);
@@ -287,6 +292,8 @@
         show_tools: document.getElementById("set-show_tools").checked,
         plan_mode: document.getElementById("set-plan_mode").checked,
         plan_review: document.getElementById("set-plan_review").checked,
+        plan_review_agent: document.getElementById("set-plan_review_agent").checked,
+        result_review: document.getElementById("set-result_review").checked,
         generate_kwargs,
       };
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "settings", values }));
@@ -439,7 +446,7 @@
       } else if (frame.type === "plan") {
         addMarkdownBubble("plan", frame.text);
       } else if (frame.type === "plan_review") {
-        renderPlanReview(frame.plan);
+        renderPlanReview(frame.plan, frame.critique);
       } else if (frame.type === "settings") {
         populateSettings(frame.values);
       } else if (frame.type === "conversations") {
@@ -494,12 +501,20 @@
 
     // Deep planning review: show Approve / Edit / Reject. Replies are plain "approve"/"reject"/"edit: <text>"
     // frames the server routes to the waiting plan (same path as tool approval).
-    function renderPlanReview(planText) {
+    function renderPlanReview(planText, critique) {
       const el = document.createElement("div");
       el.className = "bubble approval";
       const prompt = document.createElement("div");
       prompt.className = "prompt";
       prompt.textContent = "Proceed with this plan?";
+      let note = null;
+      if (critique) {
+        note = document.createElement("div");
+        note.className = "prompt";
+        note.style.opacity = "0.8";
+        note.style.whiteSpace = "pre-wrap";
+        note.textContent = "Reviewer's concerns:\n" + critique;
+      }
       const actions = document.createElement("div");
       actions.className = "actions";
       const send = (reply) => {
@@ -531,6 +546,7 @@
       actions.appendChild(edit);
       actions.appendChild(reject);
       el.appendChild(prompt);
+      if (note) el.appendChild(note);
       el.appendChild(actions);
       log.appendChild(el);
       autoscroll();

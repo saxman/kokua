@@ -61,6 +61,13 @@ port = 8000
 # are also toggleable at runtime in the web settings panel, and "/plan <task>" plans a single request.
 # plan_mode = false
 # plan_review = false
+# Adversarial review (both off by default). plan_review_agent: an independent, context-free agent critiques
+# the plan and Kokua re-plans on rejection. result_review: an independent agent checks the final answer
+# before it is shown -- this runs the answer non-streamed -- and Kokua revises on rejection. review_rounds
+# bounds each replan/revise loop.
+# plan_review_agent = false
+# result_review = false
+# review_rounds = 2
 
 [generation]
 # Baseline model generation kwargs. The web settings panel overrides these at runtime and persists

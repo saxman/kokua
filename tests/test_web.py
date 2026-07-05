@@ -415,6 +415,27 @@ def test_ws_plan_review_reject_skips_execution(tmp_path):
     assert "rejected" in msg["text"]
 
 
+def test_ws_plan_review_agent_surfaces_critique_to_human(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+
+    from kokua.review import Verdict
+
+    async def reject(*a, **k):
+        return Verdict(approved=False, issues=["needs a verification step"])
+
+    monkeypatch.setattr("kokua.review.review_plan", reject)
+    app = build_app(
+        _config(tmp_path, plan_mode=True, plan_review=True, plan_review_agent=True, review_rounds=0),
+        client=MockAsyncModelClient(["THE PLAN"]),
+    )
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text("do X")
+        frame = _drain_until(ws, "plan_review")
+        ws.send_text("reject")
+        _drain_until(ws, "message")
+    assert frame["critique"] and "verification" in frame["critique"]
+
+
 def test_ws_slash_plan_triggers_planning_when_mode_off(tmp_path):
     from starlette.testclient import TestClient
 

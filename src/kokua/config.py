@@ -53,6 +53,13 @@ class AssistantConfig:
     # autonomous (plan shown, then it proceeds). A per-message "/plan <task>" invokes planning ad hoc.
     plan_mode: bool = False
     plan_review: bool = False
+    # Adversarial review (deep planning). plan_review_agent: an independent, context-free agent critiques
+    # the plan and Kokua re-plans on rejection. result_review: an independent agent checks the final answer
+    # before it is shown (this runs the executor non-streaming) and Kokua revises on rejection.
+    # review_rounds bounds each replan/revise loop.
+    plan_review_agent: bool = False
+    result_review: bool = False
+    review_rounds: int = 2
     # AIMU built-in tool groups to expose (see assistant._TOOL_GROUPS; "all"/"none" also accepted).
     tools: list[str] = field(default_factory=lambda: ["web", "fs", "compute", "misc"])
     # Remote MCP server URLs to connect at startup; a bearer token (if set) is applied to all.

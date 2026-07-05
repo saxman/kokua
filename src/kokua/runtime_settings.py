@@ -83,7 +83,7 @@ def sanitize(raw: dict) -> dict:
     if isinstance(model, str) and model.strip():
         result["model"] = model.strip()
 
-    for flag in ("show_thinking", "show_tools", "plan_mode", "plan_review"):
+    for flag in ("show_thinking", "show_tools", "plan_mode", "plan_review", "plan_review_agent", "result_review"):
         if isinstance(raw.get(flag), bool):
             result[flag] = raw[flag]
 

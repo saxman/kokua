@@ -66,6 +66,14 @@ installable, modular application.
   with `/plan <task>`. Built on Kokua's existing turn loop and tool-approval round-trip (AIMU already makes
   the agent plan-capable); planning is scratch work kept out of the saved conversation, which stores your
   actual request and the answer. `web-search`-for-MCP relies on the default `web` tools.
+- **Adversarial plan + result review** (deep planning, both off by default): an independent, context-free
+  reviewer agent (fresh client, sees only the request + plan/answer) critiques the plan and/or the final
+  result. `plan_review_agent` re-plans on rejection up to `review_rounds`, surfacing leftover concerns (to
+  the human gate when it's on, else noted with the plan). `result_review` checks the answer before it's
+  shown and revises on rejection; because a result can't be vetted and streamed at once, it runs the
+  executor non-streamed and commits a clean transcript. Reuses AIMU's structured output
+  (`client.chat(schema=Verdict, use_tools=False)`) with no AIMU change; toggles in the settings panel and
+  the `[planning]` config section.
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,

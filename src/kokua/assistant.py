@@ -31,7 +31,7 @@ from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_scri
 from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
-from . import mcp_registry, runtime_settings
+from . import mcp_registry, review, runtime_settings
 from .config import MEMORY_GUIDANCE, AssistantConfig
 from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
@@ -69,6 +69,31 @@ Original request:
 
 Approved plan:
 {plan}"""
+
+# Feedback blocks fed back into a replan / revise round after an adversarial reviewer rejects.
+REPLAN_FEEDBACK = "\n\nAn independent reviewer rejected your previous plan for these reasons:\n{issues}\n\nProduce a new plan that addresses them."
+
+RESULT_REVISE_PROMPT = """\
+Your previous answer was checked by an independent reviewer and rejected. Revise it to fully address the \
+issues, returning the complete corrected answer (not just the changes).
+
+Original request:
+{request}
+
+Approved plan:
+{plan}
+
+Your previous answer:
+{answer}
+
+Reviewer's issues:
+{issues}"""
+
+
+def _bullets(issues: list[str]) -> str:
+    """Render reviewer issues as a markdown bullet list (or a dash if empty)."""
+    return "\n".join(f"- {i}" for i in issues) or "- (no specific issues given)"
+
 
 # AIMU's built-in tool subgroups, selectable by name via the --tools flag / AssistantConfig.tools.
 # The generative groups (image/audio/speech/transcription) need their AIMU_*_MODEL env var set and
@@ -425,7 +450,7 @@ class Assistant:
         base_generate_kwargs = dict(client.default_generate_kwargs)
         _layer_generate_kwargs(client, base_generate_kwargs, config, stored.get("generate_kwargs", {}))
         _apply_show_flags(channel, config, stored)
-        for flag in ("plan_mode", "plan_review"):  # config-only toggles persisted by the settings panel
+        for flag in ("plan_mode", "plan_review", "plan_review_agent", "result_review"):  # config-only toggles
             if flag in stored:
                 setattr(config, flag, stored[flag])
 
@@ -573,6 +598,8 @@ class Assistant:
             "show_tools": getattr(self._channel, "show_tools", self._config.show_tools),
             "plan_mode": self._config.plan_mode,
             "plan_review": self._config.plan_review,
+            "plan_review_agent": self._config.plan_review_agent,
+            "result_review": self._config.result_review,
             "generate_kwargs": dict(self._agent.model_client.default_generate_kwargs),
         }
 
@@ -594,7 +621,7 @@ class Assistant:
             if switching:
                 await self._switch_model(new_model)
             _apply_show_flags(self._channel, self._config, settings)
-            for flag in ("plan_mode", "plan_review"):  # config-only toggles (no channel attribute)
+            for flag in ("plan_mode", "plan_review", "plan_review_agent", "result_review"):  # config-only
                 if flag in settings:
                     setattr(self._config, flag, settings[flag])
             _layer_generate_kwargs(
@@ -741,17 +768,26 @@ class Assistant:
                 await self._maybe_push_conversations()
 
     async def _planned_turn(self, msg: ChannelMessage) -> None:
-        """Deep planning: plan first, show it, optionally await review, then execute the approved plan."""
+        """Deep planning: plan, optionally adversarially review + human review, then execute (optionally
+        with adversarial result review)."""
         plan_text = await self._make_plan(msg)
-        await self._send_plan(plan_text)
+        critique: Optional[list[str]] = None
+        if self._config.plan_review_agent:
+            plan_text, critique = await self._adversarial_plan_review(msg, plan_text)
+        await self._send_plan(plan_text, critique)
         approved = plan_text
         if self._config.plan_review:
-            approved = await self._review_plan(plan_text)
+            approved = await self._review_plan(plan_text, critique)
             if approved is None:  # rejected
                 await self._channel.send("(plan rejected)", reply_to=msg)
                 return
-        # Execute the approved plan. The executor's prompt weaves in the plan; afterwards we rewrite the
-        # synthetic user turn back to the user's own words so the saved conversation stays clean.
+        if self._config.result_review:
+            # Review the answer before showing it -> cannot stream; buffer, vet, then send a plain string.
+            answer = await self._execute_reviewed(msg, approved)
+            await self._channel.send(answer, reply_to=msg)
+            return
+        # Execute the approved plan, streamed. The executor's prompt weaves in the plan; afterwards we
+        # rewrite the synthetic user turn back to the user's own words so the saved conversation stays clean.
         base_len = len(self._agent.model_client.messages)
         stream = await self._agent.run(
             EXECUTE_PROMPT.format(request=msg.text, plan=approved), stream=True, images=msg.images
@@ -761,49 +797,101 @@ class Assistant:
         if len(msgs) > base_len and msgs[base_len].get("role") == "user":
             msgs[base_len]["content"] = msg.text
 
-    async def _make_plan(self, msg: ChannelMessage) -> str:
+    async def _make_plan(self, msg: ChannelMessage, feedback: Optional[list[str]] = None) -> str:
         """Run the agent to produce a plan, keeping the planning exchange out of the saved conversation.
 
         Tools stay enabled so the planner can web-search and consult its skill catalog; the turns it adds
         (planner prompt, tool calls, plan) are rolled back afterwards -- planning is scratch work, and the
-        approved plan is re-supplied to the executor in _planned_turn.
+        approved plan is re-supplied to the executor in _planned_turn. ``feedback`` (reviewer issues) drives
+        a re-plan round.
         """
+        prompt = PLAN_PROMPT.format(request=msg.text)
+        if feedback:
+            prompt += REPLAN_FEEDBACK.format(issues=_bullets(feedback))
         base = list(self._agent.model_client.messages)
         try:
-            plan = await self._agent.run(PLAN_PROMPT.format(request=msg.text), images=msg.images)
+            plan = await self._agent.run(prompt, images=msg.images)
         finally:
             self._agent.model_client.messages = base
         return plan if isinstance(plan, str) else str(plan)
 
-    async def _send_plan(self, plan_text: str) -> None:
-        """Show the plan, as a distinct plan frame if the channel supports it, else as text."""
+    async def _adversarial_plan_review(self, msg: ChannelMessage, plan: str) -> tuple[str, Optional[list[str]]]:
+        """Have an independent, context-free agent critique the plan; re-plan on rejection up to
+        review_rounds. Returns the final plan and any residual issues (None if the reviewer approved)."""
+        rounds = self._config.review_rounds
+        for attempt in range(rounds + 1):
+            verdict = await review.review_plan(self._config.model, msg.text, plan)
+            if verdict.approved:
+                return plan, None
+            if attempt == rounds:  # out of rounds; carry the unresolved issues forward
+                return plan, verdict.issues
+            plan = await self._make_plan(msg, feedback=verdict.issues)
+        return plan, None  # unreachable (rounds >= 0)
+
+    async def _execute_reviewed(self, msg: ChannelMessage, plan: str) -> str:
+        """Execute non-streaming, have an independent agent review the answer, revise on rejection up to
+        review_rounds, then commit a single clean turn (user's words + final answer) and return it."""
+        base = list(self._agent.model_client.messages)
+        rounds = self._config.review_rounds
+        answer = ""
+        try:
+            answer = str(await self._agent.run(EXECUTE_PROMPT.format(request=msg.text, plan=plan), images=msg.images))
+            for attempt in range(rounds + 1):
+                verdict = await review.review_result(self._config.model, msg.text, plan, answer)
+                if verdict.approved:
+                    break
+                if attempt == rounds:
+                    answer += "\n\n---\n_Automated review flagged unresolved issues:_\n" + _bullets(verdict.issues)
+                    break
+                self._agent.model_client.messages = list(base)  # revise from a clean base
+                answer = str(
+                    await self._agent.run(
+                        RESULT_REVISE_PROMPT.format(
+                            request=msg.text, plan=plan, answer=answer, issues=_bullets(verdict.issues)
+                        ),
+                        images=msg.images,
+                    )
+                )
+        finally:
+            # Commit one clean turn; the executor's scratch (and revision rounds) stay out of history.
+            pair = [{"role": "user", "content": msg.text}, {"role": "assistant", "content": answer}]
+            self._agent.model_client.messages = base + (pair if answer else [])
+        return answer
+
+    async def _send_plan(self, plan_text: str, critique: Optional[list[str]] = None) -> None:
+        """Show the plan (with any residual reviewer concerns), as a plan frame if the channel supports it."""
+        text = plan_text
+        if critique:
+            text += "\n\n---\n**Reviewer's remaining concerns:**\n" + _bullets(critique)
         send = getattr(self._channel, "send_plan", None)
         if send is not None:
-            await send(plan_text)
+            await send(text)
         else:
-            await self._channel.send(f"Plan:\n\n{plan_text}")
+            await self._channel.send(f"Plan:\n\n{text}")
 
-    async def _review_plan(self, plan_text: str) -> Optional[str]:
+    async def _review_plan(self, plan_text: str, critique: Optional[list[str]] = None) -> Optional[str]:
         """Await the user's decision on a plan: approve (the plan), edit (their text), or reject (None).
 
-        Mirrors _approve: create a future, prompt the channel, and let the serve loop resolve it.
+        Mirrors _approve: create a future, prompt the channel, and let the serve loop resolve it. Any
+        adversarial-reviewer critique is surfaced with the prompt so the human can weigh it.
         """
         self._pending_plan = asyncio.get_running_loop().create_future()
         self._pending_plan_text = plan_text
         try:
-            await self._prompt_plan_review(plan_text)
+            await self._prompt_plan_review(plan_text, critique)
             return await self._pending_plan
         finally:
             self._pending_plan = None
             self._pending_plan_text = ""
 
-    async def _prompt_plan_review(self, plan_text: str) -> None:
+    async def _prompt_plan_review(self, plan_text: str, critique: Optional[list[str]] = None) -> None:
         """Ask the user to review a plan, however the channel can (web frame vs. plain text)."""
         request = getattr(self._channel, "send_plan_review_request", None)
         if request is not None:
-            await request(plan_text)
+            await request(plan_text, _bullets(critique) if critique else None)
         else:
-            await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'.")
+            note = ("\nReviewer's concerns:\n" + _bullets(critique)) if critique else ""
+            await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'." + note)
 
     async def _proactive(self) -> None:
         """Scheduled callback: produce a message unprompted and push it to the channel."""

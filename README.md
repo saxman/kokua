@@ -83,6 +83,12 @@ skill or connect a new MCP server — then carries it out. Enable *Review the pl
 pause for your Approve / Edit / Reject; otherwise it runs the plan automatically. Toggle both in the
 settings panel (or `[planning]` in the config file), or plan a single request with `/plan <task>`.
 
+For extra rigor, turn on **adversarial review**: an independent reviewer agent with no conversation
+context critiques the plan (*Adversarial plan review* — Kokua re-plans on rejection) and/or the final
+answer before it's shown (*Review the result* — Kokua revises on rejection, up to `review_rounds`).
+Reviewing the result means it can't also stream live, so that turn runs non-streamed. Both are off by
+default and combine with human plan-review (the critique is shown to you before you decide).
+
 List what's installed:
 
 ```bash
