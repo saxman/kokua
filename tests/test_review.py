@@ -19,6 +19,10 @@ class FakeChannel(Channel):
 
     def __init__(self):
         self.sent: list = []  # (kind, text): "str" for a plain send, "stream" for a streamed send
+        self.subagent: list = []  # sub-agent event dicts
+
+    async def send_subagent(self, event) -> None:
+        self.subagent.append(event)
 
     async def receive(self):
         if False:
@@ -131,6 +135,40 @@ async def test_result_review_exhausts_and_notes_issues(tmp_path, monkeypatch):
     await assistant._handle(ChannelMessage(text="do X", channel="fake"))
 
     assert any("unresolved issues" in text.lower() for kind, text in channel.sent if kind == "str")
+
+
+# --- sub-agent display (frames + persistence) -----------------------------------------------
+
+
+async def test_plan_review_emits_and_records_subagent(tmp_path, monkeypatch):
+    _verdicts([REJECT, APPROVE], monkeypatch, "review_plan")
+    channel = FakeChannel()
+    client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])
+    assistant = await Assistant.create(
+        _config(tmp_path, plan_mode=True, plan_review_agent=True), channel, client=client
+    )
+
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+
+    # Each round emits a running card then its verdict: reject (round 0), approve (round 1).
+    assert [e["status"] for e in channel.subagent] == ["running", "rejected", "running", "approved"]
+    assert all(e["role"] == "Plan reviewer" for e in channel.subagent)
+    # Verdicts are recorded under the turn's user-message index for replay (no "running" persisted).
+    recorded = [e for lst in assistant._session.metadata.get("subagent", {}).values() for e in lst]
+    assert [e["status"] for e in recorded] == ["rejected", "approved"]
+
+
+async def test_result_review_emits_and_records_subagent(tmp_path, monkeypatch):
+    _verdicts([REJECT, APPROVE], monkeypatch, "review_result")
+    channel = FakeChannel()
+    client = MockAsyncModelClient(["PLAN", "ANS1", "ANS2"])
+    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, result_review=True), channel, client=client)
+
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+
+    assert [e["status"] for e in channel.subagent] == ["running", "rejected", "running", "approved"]
+    assert all(e["role"] == "Result reviewer" for e in channel.subagent)
+    assert assistant._session.metadata.get("subagent")  # recorded for replay
 
 
 # --- settings -------------------------------------------------------------------------------

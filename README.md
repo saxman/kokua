@@ -86,8 +86,11 @@ settings panel (or `[planning]` in the config file), or plan a single request wi
 For extra rigor, turn on **adversarial review**: an independent reviewer agent with no conversation
 context critiques the plan (*Adversarial plan review* — Kokua re-plans on rejection) and/or the final
 answer before it's shown (*Review the result* — Kokua revises on rejection, up to `review_rounds`).
-Reviewing the result means it can't also stream live, so that turn runs non-streamed. Both are off by
-default and combine with human plan-review (the critique is shown to you before you decide).
+Reviewing the result means the final answer can't stream live; the agentic loop (thinking and tool calls)
+still streams, but the answer appears only after it passes review. Both are off by
+default and combine with human plan-review (the critique is shown to you before you decide). In the web
+UI the reviewers appear as their own cards ("Plan reviewer / Result reviewer — reviewing…" → approved /
+rejected with the issues), and those cards replay in order when you reload the conversation.
 
 List what's installed:
 

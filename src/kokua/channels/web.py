@@ -34,15 +34,20 @@ def _text_of(content: Any) -> str:
     return ""
 
 
-def conversation_to_frames(messages: list[dict], *, show_thinking: bool, show_tools: bool) -> list[dict]:
+def conversation_to_frames(
+    messages: list[dict], *, show_thinking: bool, show_tools: bool, subagent: Optional[dict] = None
+) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
     Mirrors the live stream order per assistant message: reasoning, then tool calls, then the answer,
     each gated by the same ``show_thinking`` / ``show_tools`` flags the live stream uses. Tool results
-    and the system message are omitted (live chat shows neither).
+    and the system message are omitted (live chat shows neither). ``subagent`` maps a user-message index
+    (as a string) to that turn's recorded sub-agent verdicts, interleaved right after the user bubble so
+    reviewer activity replays in place.
     """
+    subagent = subagent or {}
     items: list[dict] = []
-    for message in messages:
+    for index, message in enumerate(messages):
         role = message.get("role")
         provenance = message.get(PROVENANCE_KEY)
         if role == "user":
@@ -54,6 +59,8 @@ def conversation_to_frames(messages: list[dict], *, show_thinking: bool, show_to
             text = _text_of(message.get("content"))
             if text:
                 items.append({"type": "user", "text": text})
+            for event in subagent.get(str(index), []):
+                items.append({"type": "subagent", **event})
         elif role == "assistant":
             if show_thinking and message.get("thinking"):
                 items.append({"type": "thinking", "text": message["thinking"]})
@@ -107,12 +114,18 @@ class WebChannel(BaseWebChannel):
         """Send the conversation list so the page can render the sidebar."""
         await self.send_frame({"type": "conversations", "items": items})
 
-    async def send_history(self, messages: list[dict]) -> None:
+    async def send_history(self, messages: list[dict], metadata: Optional[dict] = None) -> None:
         """Send a conversation as one batched frame the page replays (replacing the current view).
 
         Always sent, even when empty, so switching to a new/empty conversation clears the page.
+        ``metadata`` is the active session's metadata; its ``subagent`` map interleaves reviewer cards.
         """
-        items = conversation_to_frames(messages, show_thinking=self.show_thinking, show_tools=self.show_tools)
+        items = conversation_to_frames(
+            messages,
+            show_thinking=self.show_thinking,
+            show_tools=self.show_tools,
+            subagent=(metadata or {}).get("subagent"),
+        )
         await self.send_frame({"type": "history", "items": items})
 
     async def send_settings(self, values: dict) -> None:
@@ -130,6 +143,11 @@ class WebChannel(BaseWebChannel):
     async def send_plan(self, plan: str) -> None:
         """Show a deep-planning plan as its own bubble (rendered as markdown by the page)."""
         await self.send_frame({"type": "plan", "text": plan})
+
+    async def send_subagent(self, event: dict) -> None:
+        """Show sub-agent (reviewer) activity as its own card. ``event`` carries an ``id`` (so a
+        'running' card updates in place on its verdict), a ``role``, a ``status``, and any ``issues``."""
+        await self.send_frame({"type": "subagent", **event})
 
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
         """Ask the browser to review a plan; the page replies with a normal 'approve'/'reject'/'edit:'

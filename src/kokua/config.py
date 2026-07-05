@@ -55,7 +55,7 @@ class AssistantConfig:
     plan_review: bool = False
     # Adversarial review (deep planning). plan_review_agent: an independent, context-free agent critiques
     # the plan and Kokua re-plans on rejection. result_review: an independent agent checks the final answer
-    # before it is shown (this runs the executor non-streaming) and Kokua revises on rejection.
+    # before it is shown (the loop still streams; only the final answer is withheld) and revises on reject.
     # review_rounds bounds each replan/revise loop.
     plan_review_agent: bool = False
     result_review: bool = False

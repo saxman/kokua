@@ -71,9 +71,15 @@ installable, modular application.
   result. `plan_review_agent` re-plans on rejection up to `review_rounds`, surfacing leftover concerns (to
   the human gate when it's on, else noted with the plan). `result_review` checks the answer before it's
   shown and revises on rejection; because a result can't be vetted and streamed at once, it runs the
-  executor non-streamed and commits a clean transcript. Reuses AIMU's structured output
+  executor with the agentic loop (thinking/tool calls) still streaming live but the final answer withheld
+  until it passes review, and commits a clean transcript. Reuses AIMU's structured output
   (`client.chat(schema=Verdict, use_tools=False)`) with no AIMU change; toggles in the settings panel and
   the `[planning]` config section.
+- **Sub-agent activity in the web UI**: the adversarial reviewers now show up in the chat stream as
+  their own cards -- "Plan reviewer / Result reviewer -- reviewing..." that update in place to
+  approved / rejected (with the issues) -- so the otherwise-silent reviewer pauses are visible. Added
+  via a generic `subagent` WebSocket frame (no change to the model conversation schema); reviewer
+  verdicts are recorded per turn in `session.metadata` and replayed in order on reload.
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,

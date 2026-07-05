@@ -147,6 +147,30 @@ async def test_web_channel_send_settings_emits_frame():
     assert ws.frames == [{"type": "settings", "values": values}]
 
 
+async def test_web_channel_send_subagent_emits_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_subagent({"id": "plan-review-0", "role": "Plan reviewer", "status": "running", "round": 0})
+    assert ws.frames == [
+        {"type": "subagent", "id": "plan-review-0", "role": "Plan reviewer", "status": "running", "round": 0}
+    ]
+
+
+def test_conversation_to_frames_interleaves_subagent_after_user():
+    messages = [{"role": "user", "content": "do X"}, {"role": "assistant", "content": "done"}]
+    subagent = {"0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["x"], "round": 0}]}
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True, subagent=subagent)
+    assert items[0] == {"type": "user", "text": "do X"}
+    assert items[1]["type"] == "subagent" and items[1]["status"] == "rejected"
+    assert items[2]["type"] == "message"
+
+
+def test_conversation_to_frames_omits_subagent_by_default():
+    messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    assert not any(i["type"] == "subagent" for i in items)
+
+
 async def test_web_channel_send_approval_request_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -434,6 +458,35 @@ def test_ws_plan_review_agent_surfaces_critique_to_human(tmp_path, monkeypatch):
         ws.send_text("reject")
         _drain_until(ws, "message")
     assert frame["critique"] and "verification" in frame["critique"]
+
+
+def test_ws_subagent_frames_live_and_replayed(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+
+    from kokua.review import Verdict
+
+    async def reject(*a, **k):
+        return Verdict(approved=False, issues=["needs a verification step"])
+
+    monkeypatch.setattr("kokua.review.review_plan", reject)
+    # review_rounds=0 -> one plan review (rejected), then proceed autonomously and execute.
+    app = build_app(
+        _config(tmp_path, plan_mode=True, plan_review_agent=True, review_rounds=0),
+        client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]),
+    )
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text("do X")
+        running = _drain_until(ws, "subagent")
+        assert running["status"] == "running" and running["role"] == "Plan reviewer"
+        verdict = _drain_until(ws, "subagent")
+        assert verdict["status"] == "rejected" and "verification" in verdict["issues"][0]
+        _drain_until(ws, "done")
+
+    # A fresh connection replays the recorded reviewer card from history.
+    with TestClient(app).websocket_connect("/ws") as ws:
+        hist = _drain_until(ws, "history")
+    subs = [i for i in hist["items"] if i["type"] == "subagent"]
+    assert subs and subs[0]["status"] == "rejected"
 
 
 def test_ws_slash_plan_triggers_planning_when_mode_off(tmp_path):

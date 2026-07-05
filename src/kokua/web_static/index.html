@@ -88,6 +88,9 @@
     .tool::before { content: "\1F527  "; }
     .plan { align-self: flex-start; max-width: 85%; background: var(--approval-bg); border: 1px solid var(--approval-border); border-radius: 12px; padding: 8px 14px; }
     .plan::before { content: "\1F4CB  plan"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; margin-bottom: 4px; }
+    .subagent { align-self: flex-start; max-width: 85%; font-size: 0.9em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 10px; padding: 6px 12px; }
+    .subagent::before { content: "\1F50E  sub-agent"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; margin-bottom: 2px; }
+    .subagent[data-status="running"] { opacity: 0.75; font-style: italic; }
     /* Markdown-rendered bubbles: real block elements, so drop the plain-text pre-wrap. */
     .md { white-space: normal; }
     .md > :first-child { margin-top: 0; }
@@ -198,7 +201,7 @@
           <label class="check"><input id="set-plan_mode" type="checkbox" /> Deep planning mode (plan before acting)</label>
           <label class="check"><input id="set-plan_review" type="checkbox" /> Plan review by you (pause for your Approve / Edit / Reject)</label>
           <label class="check"><input id="set-plan_review_agent" type="checkbox" /> Plan review by an agent (independent critic; re-plans on issues)</label>
-          <label class="check"><input id="set-result_review" type="checkbox" /> Result review by an agent (checks the answer before showing it; runs non-streamed)</label>
+          <label class="check"><input id="set-result_review" type="checkbox" /> Result review by an agent (checks the answer before showing it; answer appears after review)</label>
           <p class="hint">With planning on, each turn drafts a plan first. "By you" pauses for your
             Approve / Edit / Reject; "by an agent" uses an independent reviewer (no human pause). With
             both plan reviews on, the agent's critique is shown to you before you decide. You can also
@@ -324,6 +327,33 @@
     let streamingBubble = null;  // the assistant answer bubble accumulating tokens
     let streamingText = "";      // raw answer text, re-rendered as markdown when the turn completes
     let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
+    let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
+
+    // Build the markdown for a sub-agent (reviewer) card from its frame.
+    function subagentMarkdown(frame) {
+      const label = frame.role || "Sub-agent";
+      if (frame.status === "running") return `**${label}** — reviewing…`;
+      let md = `**${label}** — ${frame.status || "done"}`;
+      if (frame.issues && frame.issues.length) md += "\n\n" + frame.issues.map((i) => "- " + i).join("\n");
+      return md;
+    }
+
+    // Render/update a sub-agent card. Live frames carry an id so the "running" card updates in place on
+    // its verdict; replayed history items have no id and just render a static card.
+    function renderSubagent(frame) {
+      let el = frame.id ? subagentCards[frame.id] : null;
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "bubble md subagent";
+        log.appendChild(el);
+        if (frame.id) subagentCards[frame.id] = el;
+      }
+      const html = renderMarkdown(subagentMarkdown(frame));
+      if (html === null) el.textContent = subagentMarkdown(frame);
+      else el.innerHTML = html;
+      el.dataset.status = frame.status || "";
+      autoscroll();
+    }
 
     // Stop is only meaningful while a reactive turn is being processed: enabled when the user sends,
     // disabled when the turn ends (a `done` frame, or a non-proactive `message` for "(stopped)"/errors).
@@ -446,6 +476,8 @@
         renderApproval(frame.name, frame.arguments);
       } else if (frame.type === "plan") {
         addMarkdownBubble("plan", frame.text);
+      } else if (frame.type === "subagent") {
+        renderSubagent(frame);
       } else if (frame.type === "plan_review") {
         renderPlanReview(frame.plan, frame.critique);
       } else if (frame.type === "settings") {
@@ -455,12 +487,14 @@
       } else if (frame.type === "history") {
         // Replay a conversation (on connect or after switching), reusing the live renderers.
         log.innerHTML = "";  // replace any current transcript
+        subagentCards = {};  // fresh view: drop any live sub-agent card references
         stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
         for (const item of frame.items) {
           if (item.type === "user") addBubble("user", item.text);
           else if (item.type === "thinking") addBubble("thinking", item.text);
           else if (item.type === "tool") addBubble("tool", toolLine(item.name, item.arguments));
           else if (item.type === "loop") addBubble("loop", item.text || "");
+          else if (item.type === "subagent") renderSubagent(item);
           else if (item.type === "message") addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text);
         }
         autoscroll();
@@ -565,6 +599,7 @@
       const text = input.value.trim();
       if (!text || ws.readyState !== WebSocket.OPEN) return;
       stickToBottom = true;  // sending snaps back to the bottom to follow the reply
+      subagentCards = {};  // new turn: reviewer card ids (plan-review-0, ...) start fresh
       addBubble("user", text);
       ws.send(text);
       input.value = "";

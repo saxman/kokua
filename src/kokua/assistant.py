@@ -546,6 +546,11 @@ class Assistant:
         """The active conversation's messages (OpenAI-format), for a front end to display."""
         return self._session.messages
 
+    @property
+    def history_metadata(self) -> dict:
+        """The active conversation's metadata (e.g. the ``subagent`` map), for replay display."""
+        return self._session.metadata
+
     def list_conversations(self) -> list[dict]:
         """All conversations as {id, title, updated_at, active}, most-recently-updated first."""
         items = []
@@ -769,21 +774,24 @@ class Assistant:
 
     async def _planned_turn(self, msg: ChannelMessage) -> None:
         """Deep planning: plan, optionally adversarially review + human review, then execute (optionally
-        with adversarial result review)."""
+        with adversarial result review). Sub-agent (reviewer) activity is shown live and recorded per turn
+        (keyed by the turn's user-message index) so it replays on reload."""
+        events: list[dict] = []  # sub-agent verdicts for this turn (for persistence/replay)
         plan_text = await self._make_plan(msg)
         critique: Optional[list[str]] = None
         if self._config.plan_review_agent:
-            plan_text, critique = await self._adversarial_plan_review(msg, plan_text)
+            plan_text, critique = await self._adversarial_plan_review(msg, plan_text, events)
         await self._send_plan(plan_text, critique)
         approved = plan_text
         if self._config.plan_review:
             approved = await self._review_plan(plan_text, critique)
-            if approved is None:  # rejected
+            if approved is None:  # rejected; no committed turn to anchor the reviewer cards to
                 await self._channel.send("(plan rejected)", reply_to=msg)
                 return
         if self._config.result_review:
             # Review the answer before showing it -> cannot stream; buffer, vet, then send a plain string.
-            answer = await self._execute_reviewed(msg, approved)
+            answer = await self._execute_reviewed(msg, approved, events)
+            self._record_subagent(len(self._agent.model_client.messages) - 2, events)  # [..., user, assistant]
             await self._channel.send(answer, reply_to=msg)
             return
         # Execute the approved plan, streamed. The executor's prompt weaves in the plan; afterwards we
@@ -796,6 +804,21 @@ class Assistant:
         msgs = self._agent.model_client.messages
         if len(msgs) > base_len and msgs[base_len].get("role") == "user":
             msgs[base_len]["content"] = msg.text
+        self._record_subagent(base_len, events)
+
+    def _record_subagent(self, user_index: int, events: list[dict]) -> None:
+        """Record this turn's reviewer verdicts under its user-message index for reload replay.
+
+        Persisted by ``_persist`` (which saves ``session.metadata``). No-op when nothing was reviewed.
+        """
+        if events and user_index >= 0:
+            self._session.metadata.setdefault("subagent", {})[str(user_index)] = events
+
+    async def _send_subagent(self, event: dict) -> None:
+        """Show a sub-agent activity card if the channel supports it (web); other channels ignore it."""
+        send = getattr(self._channel, "send_subagent", None)
+        if send is not None:
+            await send(event)
 
     async def _make_plan(self, msg: ChannelMessage, feedback: Optional[list[str]] = None) -> str:
         """Run the agent to produce a plan, keeping the planning exchange out of the saved conversation.
@@ -815,12 +838,37 @@ class Assistant:
             self._agent.model_client.messages = base
         return plan if isinstance(plan, str) else str(plan)
 
-    async def _adversarial_plan_review(self, msg: ChannelMessage, plan: str) -> tuple[str, Optional[list[str]]]:
+    async def _run_review(self, sid: str, role: str, round_: int, coro) -> "review.Verdict":
+        """Show a running sub-agent card, await the reviewer, then update the card with its verdict."""
+        await self._send_subagent({"id": sid, "role": role, "status": "running", "round": round_})
+        verdict = await coro
+        status = "approved" if verdict.approved else "rejected"
+        await self._send_subagent(
+            {"id": sid, "role": role, "status": status, "issues": list(verdict.issues), "round": round_}
+        )
+        return verdict
+
+    @staticmethod
+    def _verdict_event(role: str, round_: int, verdict: "review.Verdict") -> dict:
+        """The persisted (id-less) form of a reviewer verdict, for replay."""
+        status = "approved" if verdict.approved else "rejected"
+        return {"role": role, "status": status, "issues": list(verdict.issues), "round": round_}
+
+    async def _adversarial_plan_review(
+        self, msg: ChannelMessage, plan: str, events: list[dict]
+    ) -> tuple[str, Optional[list[str]]]:
         """Have an independent, context-free agent critique the plan; re-plan on rejection up to
-        review_rounds. Returns the final plan and any residual issues (None if the reviewer approved)."""
+        review_rounds. Emits reviewer cards, appends verdicts to ``events``, and returns the final plan and
+        any residual issues (None if the reviewer approved)."""
         rounds = self._config.review_rounds
         for attempt in range(rounds + 1):
-            verdict = await review.review_plan(self._config.model, msg.text, plan)
+            verdict = await self._run_review(
+                f"plan-review-{attempt}",
+                "Plan reviewer",
+                attempt,
+                review.review_plan(self._config.model, msg.text, plan),
+            )
+            events.append(self._verdict_event("Plan reviewer", attempt, verdict))
             if verdict.approved:
                 return plan, None
             if attempt == rounds:  # out of rounds; carry the unresolved issues forward
@@ -828,16 +876,23 @@ class Assistant:
             plan = await self._make_plan(msg, feedback=verdict.issues)
         return plan, None  # unreachable (rounds >= 0)
 
-    async def _execute_reviewed(self, msg: ChannelMessage, plan: str) -> str:
+    async def _execute_reviewed(self, msg: ChannelMessage, plan: str, events: list[dict]) -> str:
         """Execute non-streaming, have an independent agent review the answer, revise on rejection up to
-        review_rounds, then commit a single clean turn (user's words + final answer) and return it."""
+        review_rounds, then commit a single clean turn (user's words + final answer) and return it. Emits
+        reviewer cards and appends verdicts to ``events``."""
         base = list(self._agent.model_client.messages)
         rounds = self._config.review_rounds
         answer = ""
         try:
             answer = str(await self._agent.run(EXECUTE_PROMPT.format(request=msg.text, plan=plan), images=msg.images))
             for attempt in range(rounds + 1):
-                verdict = await review.review_result(self._config.model, msg.text, plan, answer)
+                verdict = await self._run_review(
+                    f"result-review-{attempt}",
+                    "Result reviewer",
+                    attempt,
+                    review.review_result(self._config.model, msg.text, plan, answer),
+                )
+                events.append(self._verdict_event("Result reviewer", attempt, verdict))
                 if verdict.approved:
                     break
                 if attempt == rounds:

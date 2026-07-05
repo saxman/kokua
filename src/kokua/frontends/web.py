@@ -103,7 +103,7 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         # Show the conversation list, the active conversation's history, and the current settings on
         # (re)connect, so the sidebar, chat, and settings panel are all populated.
         await channel.send_conversations(assistant.list_conversations())
-        await channel.send_history(assistant.history)
+        await channel.send_history(assistant.history, assistant.history_metadata)
         await channel.send_settings(assistant.current_settings())
 
         async def pump() -> None:
@@ -135,7 +135,7 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
                     elif control["type"] == "select":
                         await assistant.select_conversation(control["id"])
                     await channel.send_conversations(assistant.list_conversations())
-                    await channel.send_history(assistant.history)
+                    await channel.send_history(assistant.history, assistant.history_metadata)
             except WebSocketDisconnect:
                 pass
             finally:
