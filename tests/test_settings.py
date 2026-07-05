@@ -73,12 +73,10 @@ def test_explicit_missing_file_errors(tmp_path):
         settings.load(str(tmp_path / "nope.toml"))
 
 
-def test_unknown_key_warns_and_is_ignored(caplog):
+def test_unknown_key_raises():
     _write_config('[assistant]\nbogus = 1\nmodel = "m"\n')
-    with caplog.at_level(logging.WARNING):
-        cfg = _resolve()
-    assert cfg.model == "m"
-    assert any("bogus" in rec.message for rec in caplog.records)
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[assistant\].bogus"):
+        settings.load()
 
 
 def test_type_mismatch_raises():
@@ -99,9 +97,9 @@ def test_security_confirm_tools_from_file():
 
 
 def test_planning_flags_from_file():
-    _write_config("[planning]\nplan_mode = true\nplan_review = true\n")
+    _write_config("[planning]\nplan_review = true\nresult_review = true\n")
     cfg = _resolve()
-    assert cfg.plan_mode is True and cfg.plan_review is True
+    assert cfg.plan_review is True and cfg.result_review is True
 
 
 def test_generation_section_collects_into_dict():
@@ -109,12 +107,10 @@ def test_generation_section_collects_into_dict():
     assert _resolve().generation == {"temperature": 0.3, "max_tokens": 2048}
 
 
-def test_generation_unknown_key_warns_and_is_ignored(caplog):
+def test_generation_unknown_key_raises():
     _write_config("[generation]\nbogus = 1\ntemperature = 0.5\n")
-    with caplog.at_level(logging.WARNING):
-        cfg = _resolve()
-    assert cfg.generation == {"temperature": 0.5}
-    assert any("generation].bogus" in rec.message for rec in caplog.records)
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[generation\].bogus"):
+        settings.load()
 
 
 def test_generation_type_mismatch_raises():
@@ -129,7 +125,7 @@ def test_data_dir_override_redirects_leaf_paths(tmp_path):
     cfg = _resolve()
     assert cfg.data_dir == target
     assert cfg.skills_dir == target / "skills"
-    assert cfg.history_path == str(target / "history.json")
+    assert cfg.sessions_path == target / "sessions.json"
 
 
 def _init(*argv):

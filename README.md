@@ -60,8 +60,10 @@ lists, etc.) once each turn completes, via vendored `marked` + `DOMPurify` (bund
 is sanitized, so model or tool output can't inject scripts or markup.
 
 The web UI holds multiple conversations: the left sidebar lists them (titled automatically from the first
-message) and has a "+ New conversation" button; click any conversation to continue it. Memory (facts and
-documents) is shared across all conversations. The CLI remains single-conversation for now.
+message) and has a "+ New conversation" button; click any conversation to continue it, or hover a
+conversation and click its `×` to delete it (you are asked to confirm; deleting the current conversation
+drops you into the most recent remaining one). Memory (facts and documents) is shared across all
+conversations. The CLI remains single-conversation for now.
 
 The header's gear button opens a settings panel to change, at runtime, the model generation parameters
 (`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), display prefs
@@ -77,11 +79,13 @@ A built-in `pdf` tool-pack gives the assistant a `markdown_to_pdf` tool: ask it 
 PDF and it writes the file to `data/downloads/`. In the web UI the assistant hands back a download link
 (files are served at `/download/<name>`); from the CLI it reports the file path.
 
-**Deep planning mode.** With it on, the assistant drafts an explicit plan before doing the work — which
-tools, skills, and MCP services it will use, what it will web-search for, and where it needs to build a
-skill or connect a new MCP server — then carries it out. Enable *Review the plan before executing* to
-pause for your Approve / Edit / Reject; otherwise it runs the plan automatically. Toggle both in the
-settings panel (or `[planning]` in the config file), or plan a single request with `/plan <task>`.
+**Deep planning (per request).** When you ask for it, the assistant drafts an explicit plan before doing
+the work — which tools, skills, and MCP services it will use, what it will web-search for, and where it
+needs to build a skill or connect a new MCP server — then carries it out. Planning is per request, not a
+global mode: flip the **Plan** toggle next to the message box (it stays on until you turn it off) or send
+`/plan <task>` (the latter also works in the CLI). Enable *Review the plan before executing* in the
+settings panel (or `[planning]` in the config file) to pause a planned turn for your Approve / Edit /
+Reject; otherwise it runs the plan automatically.
 
 For extra rigor, turn on **adversarial review**: an independent reviewer agent with no conversation
 context critiques the plan (*Adversarial plan review* — Kokua re-plans on rejection) and/or the final
@@ -175,8 +179,7 @@ holds an optional `config.toml` and a single `data/` directory for all transient
 ```
 
 Point `data/` elsewhere with `[paths] data_dir` in the config file. Nothing is written to your working
-directory. A `history.json` from an earlier single-conversation version, if present, is imported once into
-`sessions.json` as your first conversation.
+directory.
 
 ## Security
 

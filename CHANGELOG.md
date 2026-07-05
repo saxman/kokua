@@ -27,8 +27,10 @@ installable, modular application.
   applied before first paint (no flash on load, no new dependencies).
 - **Multiple web conversations**: the web UI lists conversations in a sidebar (auto-titled from the
   first message) and lets you start a new one or select an existing one to continue, backed by AIMU's
-  `sessions` store. Memory stays shared across conversations. An existing single-conversation
-  `history.json` is imported once as the first conversation. CLI multi-conversation is a later change.
+  `sessions` store. Memory stays shared across conversations. CLI multi-conversation is a later change.
+  Each conversation row has a delete (`×`) control (with a confirmation prompt); deleting the active
+  conversation switches to the most-recently-updated remaining one, or a fresh empty one if none remain.
+  Backed by a new `delete(key)` on AIMU's `SessionStore`.
 - **Distinguish agent-loop turns from user input (web)**: the agent loop injects its own continuation
   turns as `user`-role messages; using AIMU's inert `provenance` message key, the web UI now renders these
   as a muted `↻ continuation` marker at each loop-iteration boundary instead of as user bubbles, both live
@@ -59,13 +61,14 @@ installable, modular application.
   `GET /download/<name>`, so the assistant can hand back a download link; the tool also returns the
   absolute path for the CLI. (Downloads live in their own folder, not `data/documents/`, so the binary
   PDFs never disturb the DocumentStore, which scans the documents folder as text.)
-- **Deep planning mode**: when on, a turn first drafts an explicit plan (which tools/skills/MCP services
-  to use, what to web-search for, and where to build a skill via `author_skill` or connect a server via
-  `add_mcp_server`) and then executes it. `plan_review` pauses for Approve / Edit / Reject; off runs the
-  plan autonomously. Toggle it in the settings panel or `[planning]` config, or invoke it for one request
-  with `/plan <task>`. Built on Kokua's existing turn loop and tool-approval round-trip (AIMU already makes
-  the agent plan-capable); planning is scratch work kept out of the saved conversation, which stores your
-  actual request and the answer. `web-search`-for-MCP relies on the default `web` tools.
+- **Deep planning (per request)**: a planned turn first drafts an explicit plan (which tools/skills/MCP
+  services to use, what to web-search for, and where to build a skill via `author_skill` or connect a
+  server via `add_mcp_server`) and then executes it. Planning is invoked per request, not as a global
+  mode: use the web UI's **Plan** toggle next to the message box (a sticky per-request switch), or send
+  `/plan <task>` in either front end. `plan_review` pauses a planned turn for Approve / Edit / Reject; off
+  runs the plan autonomously. Built on Kokua's existing turn loop and tool-approval round-trip (AIMU
+  already makes the agent plan-capable); planning is scratch work kept out of the saved conversation,
+  which stores your actual request and the answer. `web-search`-for-MCP relies on the default `web` tools.
 - **Adversarial plan + result review** (deep planning, both off by default): an independent, context-free
   reviewer agent (fresh client, sees only the request + plan/answer) critiques the plan and/or the final
   result. `plan_review_agent` re-plans on rejection up to `review_rounds`, surfacing leftover concerns (to
@@ -108,5 +111,7 @@ installable, modular application.
   real sources, while still spot-checking with its own tools.
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
+- **Strict config parsing**: an unknown key or non-table section in `config.toml` now fails fast with a
+  `ConfigError` instead of being warned-about and ignored, so typos and removed keys surface immediately.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,
   plugin discovery), with a vendored async mock model client (no reach into the AIMU repo).

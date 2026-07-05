@@ -48,10 +48,10 @@ class AssistantConfig:
     # Surface the model's reasoning and tool calls in the channel, not just the final answer.
     show_thinking: bool = True
     show_tools: bool = True
-    # Deep planning mode: when on, every turn first produces an explicit plan (tools/skills/MCP to use
-    # or build) before executing. plan_review gates execution on the user's Approve/Edit/Reject; off is
-    # autonomous (plan shown, then it proceeds). A per-message "/plan <task>" invokes planning ad hoc.
-    plan_mode: bool = False
+    # Deep planning is invoked per request (the web UI's Plan toggle or a "/plan <task>" message): the
+    # turn first produces an explicit plan (tools/skills/MCP to use or build) before executing.
+    # plan_review gates execution on the user's Approve/Edit/Reject; off is autonomous (plan shown, then
+    # it proceeds).
     plan_review: bool = False
     # Adversarial review (deep planning). plan_review_agent: an independent, context-free agent critiques
     # the plan and Kokua re-plans on rejection. result_review: an independent agent checks the final answer
@@ -90,10 +90,6 @@ class AssistantConfig:
     @property
     def skills_dir(self) -> Path:
         return self.data_dir / "skills"
-
-    @property
-    def history_path(self) -> str:
-        return str(self.data_dir / "history.json")
 
     @property
     def sessions_path(self) -> Path:

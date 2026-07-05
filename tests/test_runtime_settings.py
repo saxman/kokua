@@ -59,8 +59,8 @@ def test_sanitize_model_and_flags():
 
 
 def test_sanitize_keeps_plan_flags():
-    result = runtime_settings.sanitize({"plan_mode": True, "plan_review": False, "plan_bogus": True})
-    assert result["plan_mode"] is True
+    result = runtime_settings.sanitize({"plan_review_agent": True, "plan_review": False, "plan_bogus": True})
+    assert result["plan_review_agent"] is True
     assert result["plan_review"] is False
     assert "plan_bogus" not in result
 

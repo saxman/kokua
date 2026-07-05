@@ -8,7 +8,7 @@ its own directory instead. The state root defaults to ``~/.kokua`` and is overri
     $KOKUA_HOME/
       config.toml          # optional; read if present
       data/
-        history.json
+        sessions.json
         memory/
         documents/
         skills/
@@ -41,10 +41,6 @@ def config_path() -> Path:
 
 def skills_dir() -> Path:
     return data_dir() / "skills"
-
-
-def history_path() -> Path:
-    return data_dir() / "history.json"
 
 
 def sessions_path() -> Path:

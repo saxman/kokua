@@ -59,9 +59,14 @@
     #new-conv { background: var(--accent); color: var(--accent-fg); }
     #conv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
     #conv-list li { padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 0.9em;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      display: flex; align-items: center; gap: 6px; }
     #conv-list li:hover { background: var(--sidebar-active); }
     #conv-list li.active { background: var(--sidebar-active); font-weight: 600; cursor: default; }
+    #conv-list .conv-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #conv-list .conv-delete { flex: none; border: none; background: none; color: inherit; cursor: pointer;
+      font-size: 1.1em; line-height: 1; padding: 0 2px; opacity: 0; }
+    #conv-list li:hover .conv-delete { opacity: 0.6; }
+    #conv-list .conv-delete:hover { opacity: 1; }
     header { padding: 12px 16px; background: var(--header-bg); color: var(--header-fg); font-weight: 600;
       display: flex; align-items: center; justify-content: space-between; }
     header small { font-weight: 400; opacity: 0.7; margin-left: 8px; }
@@ -128,6 +133,9 @@
     #msg { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 1em; background: var(--surface); color: var(--fg); }
     button { padding: 10px 18px; border: none; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-size: 1em; cursor: pointer; }
     button:disabled { opacity: 0.5; cursor: default; }
+    /* Per-request planning toggle in the composer: off looks like a plain outlined button; on is filled. */
+    #plan-toggle { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
+    #plan-toggle.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
     .header-actions { display: flex; gap: 8px; }
     #settings-btn { background: transparent; border: 1px solid rgba(255, 255, 255, 0.3); color: var(--header-fg);
       border-radius: 8px; padding: 4px 10px; font-size: 1em; line-height: 1; cursor: pointer; }
@@ -164,6 +172,7 @@
       <div id="log"></div>
       <form id="form">
         <input id="msg" autocomplete="off" placeholder="Message your assistant..." autofocus />
+        <button id="plan-toggle" type="button" title="Plan this request before acting" aria-pressed="false">Plan</button>
         <button id="send" type="submit">Send</button>
         <button id="stop" type="button" disabled>Stop</button>
       </form>
@@ -203,15 +212,15 @@
         </fieldset>
         <fieldset>
           <legend>Planning</legend>
-          <label class="check"><input id="set-plan_mode" type="checkbox" /> Deep planning mode (plan before acting)</label>
           <label class="check"><input id="set-plan_review" type="checkbox" /> Plan review by you (pause for your Approve / Edit / Reject)</label>
           <label class="check"><input id="set-plan_review_agent" type="checkbox" /> Plan review by an agent (independent critic; re-plans on issues)</label>
           <label class="check"><input id="set-result_review" type="checkbox" /> Result review by an agent (checks the answer before showing it; answer appears after review)</label>
           <label class="check"><input id="set-show_reasoning" type="checkbox" /> Show all reasoning (stream every LLM call: planner, reviewers, executor, each version)</label>
-          <p class="hint">With planning on, each turn drafts a plan first. "By you" pauses for your
-            Approve / Edit / Reject; "by an agent" uses an independent reviewer (no human pause). With
-            both plan reviews on, the agent's critique is shown to you before you decide. You can also
-            send "/plan &lt;task&gt;".</p>
+          <p class="hint">Turn on planning for a single request with the <strong>Plan</strong> toggle next to
+            the message box (or by sending "/plan &lt;task&gt;"); a planned turn drafts a plan first. These
+            options shape a planned turn: "By you" pauses for your Approve / Edit / Reject; "by an agent"
+            uses an independent reviewer (no human pause). With both plan reviews on, the agent's critique
+            is shown to you before you decide.</p>
         </fieldset>
         <div class="modal-actions">
           <button type="submit">Save</button>
@@ -230,6 +239,7 @@
     const input = document.getElementById("msg");
     const sendBtn = document.getElementById("send");
     const stopBtn = document.getElementById("stop");
+    const planToggle = document.getElementById("plan-toggle");
     const convList = document.getElementById("conv-list");
     const newConvBtn = document.getElementById("new-conv");
 
@@ -237,7 +247,10 @@
       convList.innerHTML = "";
       for (const item of items) {
         const li = document.createElement("li");
-        li.textContent = item.title;
+        const title = document.createElement("span");
+        title.className = "conv-title";
+        title.textContent = item.title;
+        li.appendChild(title);
         if (item.active) {
           li.classList.add("active");
         } else {
@@ -245,6 +258,17 @@
             if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "select", id: item.id }));
           });
         }
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "conv-delete";
+        del.textContent = "×";
+        del.title = "Delete conversation";
+        del.addEventListener("click", (e) => {
+          e.stopPropagation();  // don't also trigger switch
+          if (!confirm(`Delete "${item.title}"?`)) return;
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "delete", id: item.id }));
+        });
+        li.appendChild(del);
         convList.appendChild(li);
       }
     }
@@ -272,7 +296,6 @@
       document.getElementById("set-model").value = values.model || "";
       document.getElementById("set-show_thinking").checked = !!values.show_thinking;
       document.getElementById("set-show_tools").checked = !!values.show_tools;
-      document.getElementById("set-plan_mode").checked = !!values.plan_mode;
       document.getElementById("set-plan_review").checked = !!values.plan_review;
       document.getElementById("set-plan_review_agent").checked = !!values.plan_review_agent;
       document.getElementById("set-result_review").checked = !!values.result_review;
@@ -301,7 +324,6 @@
         model: document.getElementById("set-model").value.trim(),
         show_thinking: document.getElementById("set-show_thinking").checked,
         show_tools: document.getElementById("set-show_tools").checked,
-        plan_mode: document.getElementById("set-plan_mode").checked,
         plan_review: document.getElementById("set-plan_review").checked,
         plan_review_agent: document.getElementById("set-plan_review_agent").checked,
         result_review: document.getElementById("set-result_review").checked,
@@ -619,14 +641,26 @@
       setProcessing(false);
     };
 
+    // Plan toggle: a sticky per-request switch. While on, each sent message is planned (drafted, then
+    // executed) by wrapping it as "/plan <text>" -- the same command the server already handles -- while
+    // the chat still shows the user's own words. Stays on across turns until clicked off.
+    let planNext = false;
+    planToggle.addEventListener("click", () => {
+      planNext = !planNext;
+      planToggle.classList.toggle("active", planNext);
+      planToggle.setAttribute("aria-pressed", planNext ? "true" : "false");
+      input.focus();
+    });
+
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = input.value.trim();
       if (!text || ws.readyState !== WebSocket.OPEN) return;
       stickToBottom = true;  // sending snaps back to the bottom to follow the reply
       subagentCards = {};  // new turn: reviewer card ids (plan-review-0, ...) start fresh
-      addBubble("user", text);
-      ws.send(text);
+      addBubble("user", text);  // show the user's own words, not the /plan wrapper
+      const outgoing = planNext && !/^\/plan(\s|$)/i.test(text) ? "/plan " + text : text;
+      ws.send(outgoing);
       input.value = "";
       setProcessing(true);  // a turn is now being processed; allow stopping it
     });

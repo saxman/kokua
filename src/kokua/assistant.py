@@ -2,7 +2,7 @@
 
     Channel.receive()  ->  SkillAgent.run()  ->  Channel.send()
               Scheduler  ->  proactive SkillAgent.run()  ->  Channel.send()
-              ConversationManager persists history across restarts
+              a TinyDBSessionStore persists conversations across restarts
               author_skill / add_skill_script let the assistant grow its own skills
               memory tools give it persistent facts + documents
               tool-pack plugins contribute extra tools
@@ -24,7 +24,6 @@ from typing import Any, Callable, Optional
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE, aio
 from aimu.aio import Channel, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
-from aimu.history import ConversationManager
 from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.sessions import Session, TinyDBSessionStore
 from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_script_tool
@@ -346,26 +345,6 @@ def _derive_title(messages: list[dict]) -> Optional[str]:
     return None
 
 
-def _import_last_history(store: TinyDBSessionStore, config: AssistantConfig) -> None:
-    """One-time migration: import the last single-conversation history.json into the store."""
-    history_path = Path(config.history_path)
-    if not history_path.exists():
-        return
-    manager = ConversationManager(str(history_path), use_last_conversation=True)
-    messages = [dict(m) for m in manager.messages]
-    manager.close()
-    if not messages:
-        return
-    now = datetime.now().isoformat()
-    store.save(
-        Session(
-            key=uuid.uuid4().hex,
-            messages=messages,
-            metadata={"title": _derive_title(messages), "created_at": now, "updated_at": now},
-        )
-    )
-
-
 def _active_session(store: TinyDBSessionStore) -> Session:
     """The most-recently-updated session, creating a fresh empty one if the store is empty."""
     keys = store.list_keys()
@@ -469,7 +448,6 @@ class Assistant:
         _layer_generate_kwargs(client, base_generate_kwargs, config, stored.get("generate_kwargs", {}))
         _apply_show_flags(channel, config, stored)
         for flag in (
-            "plan_mode",
             "plan_review",
             "plan_review_agent",
             "result_review",
@@ -541,13 +519,9 @@ class Assistant:
             except Exception:
                 logger.warning("Could not reconnect MCP server %s; continuing without it.", url, exc_info=True)
 
-        # Multiple conversations live in a session store. On first run (no store yet), import the
-        # last single-conversation history.json so the existing chat is not lost. The active
-        # conversation is the most recently updated (a fresh empty one if there are none).
-        first_run = not config.sessions_path.exists()
+        # Multiple conversations live in a session store. The active conversation is the most
+        # recently updated (a fresh empty one if there are none).
         store = TinyDBSessionStore(str(config.sessions_path))
-        if first_run:
-            _import_last_history(store, config)
         session = _active_session(store)
         if session.messages:
             agent.restore(session.messages)
@@ -619,13 +593,24 @@ class Assistant:
             self._session = self._store.get(conversation_id)
             self._agent.restore(self._session.messages)
 
+    async def delete_conversation(self, conversation_id: str) -> None:
+        """Delete a conversation. If it is the active one, switch to the most-recently-updated
+        remaining conversation (or a fresh empty one if none remain) and restore it into the agent."""
+        deleting_active = conversation_id == self._session.key
+        if deleting_active:
+            await self._cancel_current_turn()
+        async with self._lock:
+            self._store.delete(conversation_id)
+            if deleting_active:
+                self._session = _active_session(self._store)
+                self._agent.restore(self._session.messages)
+
     def current_settings(self) -> dict:
         """The effective runtime settings for the web panel to display: model, prefs, generate kwargs."""
         return {
             "model": str(self._config.model) if self._config.model else "",
             "show_thinking": getattr(self._channel, "show_thinking", self._config.show_thinking),
             "show_tools": getattr(self._channel, "show_tools", self._config.show_tools),
-            "plan_mode": self._config.plan_mode,
             "plan_review": self._config.plan_review,
             "plan_review_agent": self._config.plan_review_agent,
             "result_review": self._config.result_review,
@@ -652,7 +637,6 @@ class Assistant:
                 await self._switch_model(new_model)
             _apply_show_flags(self._channel, self._config, settings)
             for flag in (
-                "plan_mode",
                 "plan_review",
                 "plan_review_agent",
                 "result_review",
@@ -731,8 +715,9 @@ class Assistant:
                     else:
                         plan_pending.set_result(raw.strip())  # any other text is an edited plan
                     continue
-                # `/plan <task>` invokes deep planning for this one turn regardless of the mode toggle.
-                plan_turn = None
+                # `/plan <task>` invokes deep planning for this one turn (the web UI's Plan toggle sends
+                # exactly this). Any other message runs a normal, unplanned turn.
+                plan_turn = False
                 if text == "/plan" or text.startswith("/plan "):
                     task = raw.strip()[len("/plan") :].strip()
                     if not task:
@@ -777,9 +762,9 @@ class Assistant:
         else:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
 
-    async def _handle(self, msg: ChannelMessage, plan: Optional[bool] = None) -> None:
-        # `plan` forces planning on/off for this turn (from `/plan`); None defers to the mode toggle.
-        do_plan = self._config.plan_mode if plan is None else plan
+    async def _handle(self, msg: ChannelMessage, plan: bool = False) -> None:
+        # Planning is opt-in per turn (the web Plan toggle or a `/plan <task>` message sets plan=True).
+        do_plan = plan
         async with self._lock:
             try:
                 if do_plan:

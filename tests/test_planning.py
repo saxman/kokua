@@ -43,9 +43,9 @@ def _config(tmp_path: Path, **overrides) -> AssistantConfig:
 async def test_autonomous_planned_turn_plans_then_executes(tmp_path):
     channel = FakeChannel()
     client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])  # plan phase, then execute phase
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=True), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do the thing", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do the thing", channel="fake"), plan=True)
 
     # The plan was surfaced first (no send_plan on this channel -> plain-text fallback), then the answer.
     assert any("THE PLAN" in s for s in channel.sent)
@@ -58,12 +58,12 @@ async def test_autonomous_planned_turn_plans_then_executes(tmp_path):
     assert not any(PLAN_PROMPT[:30] in str(m.get("content", "")) for m in messages)
 
 
-async def test_plan_mode_off_is_a_single_turn(tmp_path):
+async def test_unplanned_turn_is_a_single_turn(tmp_path):
     channel = FakeChannel()
     client = MockAsyncModelClient(["JUST THE ANSWER"])  # only one response -> only one run happens
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=False), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="hi", channel="fake"))
+    await assistant._handle(ChannelMessage(text="hi", channel="fake"))  # plan defaults off
 
     assert channel.sent == ["JUST THE ANSWER"]  # no plan surfaced, single run
 
@@ -85,9 +85,9 @@ async def _resolve_when_pending(assistant, value, *, approve=False):
 async def test_review_approve_executes(tmp_path):
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN", "ANSWER"])
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, plan_review=True), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
 
-    turn = asyncio.create_task(assistant._handle(ChannelMessage(text="do X", channel="fake")))
+    turn = asyncio.create_task(assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True))
     await _resolve_when_pending(assistant, None, approve=True)
     await turn
 
@@ -97,9 +97,9 @@ async def test_review_approve_executes(tmp_path):
 async def test_review_reject_skips_execution(tmp_path):
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN"])  # only the plan; execution must not run (would need a 2nd)
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, plan_review=True), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
 
-    turn = asyncio.create_task(assistant._handle(ChannelMessage(text="do X", channel="fake")))
+    turn = asyncio.create_task(assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True))
     await _resolve_when_pending(assistant, None)  # reject
     await turn
 
@@ -119,9 +119,9 @@ async def test_review_edit_executes_edited_plan(tmp_path):
 
     RecordingMock.prompts = []
     client = RecordingMock(["PLAN", "ANSWER"])
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, plan_review=True), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
 
-    turn = asyncio.create_task(assistant._handle(ChannelMessage(text="do X", channel="fake")))
+    turn = asyncio.create_task(assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True))
     await _resolve_when_pending(assistant, "MY EDITED PLAN")
     await turn
 
@@ -136,8 +136,9 @@ async def test_current_settings_and_apply_carry_plan_flags(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
     s = assistant.current_settings()
-    assert s["plan_mode"] is False and s["plan_review"] is False
+    assert s["plan_review"] is False
+    assert "plan_mode" not in s  # the global toggle is gone; planning is per-request
 
-    await assistant.apply_settings({"plan_mode": True, "plan_review": True, "generate_kwargs": {}})
-    assert assistant._config.plan_mode is True and assistant._config.plan_review is True
-    assert assistant.current_settings()["plan_mode"] is True
+    await assistant.apply_settings({"plan_review": True, "generate_kwargs": {}})
+    assert assistant._config.plan_review is True
+    assert assistant.current_settings()["plan_review"] is True

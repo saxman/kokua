@@ -53,8 +53,7 @@ TOML file into schema-validated `AssistantConfig` overrides. `cli.py`'s `resolve
 defers to the file/default. `config.example.toml` documents every key at its default.
 
 **State lives under `~/.kokua`** (override with `KOKUA_HOME`); `paths.py` owns all locations. `data/`
-holds `sessions.json` (conversations), `skills/`, `memory/`, `documents/`, and `mcp-servers.json`. A
-legacy `history.json` from the single-conversation era is imported once into `sessions.json`.
+holds `sessions.json` (conversations), `skills/`, `memory/`, `documents/`, and `mcp-servers.json`.
 
 **MCP servers** come from config `[mcp]` at startup or the runtime `add_mcp_server` tool. `mcp_auth.py`
 (`ChatOAuth`) handles OAuth by posting the authorization link into the chat and persisting tokens to

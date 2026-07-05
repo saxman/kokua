@@ -385,6 +385,34 @@ def test_ws_new_then_select_round_trip(tmp_path):
     assert any(item["type"] == "user" and item["text"] == "first message" for item in hist["items"])
 
 
+def test_ws_delete_active_conversation(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient(["reply one", "reply two"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        # Two titled conversations.
+        ws.send_text("first message")
+        _drain_until(ws, "done")
+        _drain_until(ws, "conversations")
+        ws.send_text(json.dumps({"type": "new"}))
+        _drain_until(ws, "history")
+        ws.send_text("second message")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        # Delete the active conversation; the list drops it and history switches to the remaining one.
+        ws.send_text(json.dumps({"type": "delete", "id": active_id}))
+        after = _drain_until(ws, "conversations")
+        hist = _drain_until(ws, "history")
+    ids = [i["id"] for i in after["items"]]
+    assert active_id not in ids
+    assert len(ids) == 1
+    assert any(item["type"] == "user" and item["text"] == "first message" for item in hist["items"])
+
+
 def test_ws_sends_settings_on_connect(tmp_path):
     from starlette.testclient import TestClient
 
@@ -435,9 +463,9 @@ def test_download_route_serves_documents(tmp_path):
 def test_ws_plan_autonomous_emits_plan_then_answer(tmp_path):
     from starlette.testclient import TestClient
 
-    app = build_app(_config(tmp_path, plan_mode=True), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]))
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]))
     with TestClient(app).websocket_connect("/ws") as ws:
-        ws.send_text("do the thing")
+        ws.send_text("/plan do the thing")
         plan = _drain_until(ws, "plan")
         frames = []
         while True:
@@ -452,11 +480,9 @@ def test_ws_plan_autonomous_emits_plan_then_answer(tmp_path):
 def test_ws_plan_review_approve_then_executes(tmp_path):
     from starlette.testclient import TestClient
 
-    app = build_app(
-        _config(tmp_path, plan_mode=True, plan_review=True), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"])
-    )
+    app = build_app(_config(tmp_path, plan_review=True), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]))
     with TestClient(app).websocket_connect("/ws") as ws:
-        ws.send_text("do X")
+        ws.send_text("/plan do X")
         assert _drain_until(ws, "plan")["text"] == "THE PLAN"
         assert _drain_until(ws, "plan_review")["plan"] == "THE PLAN"  # paused for review
         ws.send_text("approve")
@@ -474,9 +500,9 @@ def test_ws_plan_review_reject_skips_execution(tmp_path):
 
     # Only the plan response is queued; if execution ran it would raise (index error), so a clean
     # "(plan rejected)" message proves execution was skipped.
-    app = build_app(_config(tmp_path, plan_mode=True, plan_review=True), client=MockAsyncModelClient(["THE PLAN"]))
+    app = build_app(_config(tmp_path, plan_review=True), client=MockAsyncModelClient(["THE PLAN"]))
     with TestClient(app).websocket_connect("/ws") as ws:
-        ws.send_text("do X")
+        ws.send_text("/plan do X")
         _drain_until(ws, "plan_review")
         ws.send_text("reject")
         msg = _drain_until(ws, "message")
@@ -493,11 +519,11 @@ def test_ws_plan_review_agent_surfaces_critique_to_human(tmp_path, monkeypatch):
 
     monkeypatch.setattr("kokua.review.review_plan", reject)
     app = build_app(
-        _config(tmp_path, plan_mode=True, plan_review=True, plan_review_agent=True, review_rounds=0),
+        _config(tmp_path, plan_review=True, plan_review_agent=True, review_rounds=0),
         client=MockAsyncModelClient(["THE PLAN"]),
     )
     with TestClient(app).websocket_connect("/ws") as ws:
-        ws.send_text("do X")
+        ws.send_text("/plan do X")
         frame = _drain_until(ws, "plan_review")
         ws.send_text("reject")
         _drain_until(ws, "message")
@@ -515,11 +541,11 @@ def test_ws_subagent_frames_live_and_replayed(tmp_path, monkeypatch):
     monkeypatch.setattr("kokua.review.review_plan", reject)
     # review_rounds=0 -> one plan review (rejected), then proceed autonomously and execute.
     app = build_app(
-        _config(tmp_path, plan_mode=True, plan_review_agent=True, review_rounds=0),
+        _config(tmp_path, plan_review_agent=True, review_rounds=0),
         client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]),
     )
     with TestClient(app).websocket_connect("/ws") as ws:
-        ws.send_text("do X")
+        ws.send_text("/plan do X")
         running = _drain_until(ws, "subagent")
         assert running["status"] == "running" and running["role"] == "Plan reviewer"
         verdict = _drain_until(ws, "subagent")
@@ -533,13 +559,13 @@ def test_ws_subagent_frames_live_and_replayed(tmp_path, monkeypatch):
     assert subs and subs[0]["status"] == "rejected"
 
 
-def test_ws_slash_plan_triggers_planning_when_mode_off(tmp_path):
+def test_ws_slash_plan_triggers_planning(tmp_path):
     from starlette.testclient import TestClient
 
-    app = build_app(_config(tmp_path, plan_mode=False), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]))
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]))
     with TestClient(app).websocket_connect("/ws") as ws:
         ws.send_text("/plan do X")
-        assert _drain_until(ws, "plan")["text"] == "THE PLAN"  # planning happened despite mode off
+        assert _drain_until(ws, "plan")["text"] == "THE PLAN"  # the per-request /plan drafts a plan
 
 
 # --- Server round-trip via Starlette TestClient ----------------------------------------------

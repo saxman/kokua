@@ -42,11 +42,11 @@ def _static_js(filename: str) -> str:
     return files("kokua").joinpath(f"web_static/{filename}").read_text(encoding="utf-8")
 
 
-_CONTROL_TYPES = ("new", "select", "settings", "get_settings")
+_CONTROL_TYPES = ("new", "select", "delete", "settings", "get_settings")
 
 
 def _parse_control(raw: str) -> Optional[dict]:
-    """Return a control object ({"type": "new"/"select"/"settings"/"get_settings", ...}), else None.
+    """Return a control object ({"type": "new"/"select"/"delete"/"settings"/"get_settings", ...}), else None.
 
     Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
     approval "y"/"n") and is fed to the channel unchanged.
@@ -107,7 +107,7 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         await channel.send_settings(assistant.current_settings())
 
         async def pump() -> None:
-            # Conversation controls (new/select) are handled here and never reach the channel; all
+            # Conversation controls (new/select/delete) are handled here and never reach the channel; all
             # other frames (chat, "/stop", approval "y"/"n") are fed to the channel as today. On
             # disconnect, the sentinel ends receive(), stopping the scheduler and assistant.run().
             try:
@@ -134,6 +134,8 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
                         await assistant.new_conversation()
                     elif control["type"] == "select":
                         await assistant.select_conversation(control["id"])
+                    elif control["type"] == "delete":
+                        await assistant.delete_conversation(control["id"])
                     await channel.send_conversations(assistant.list_conversations())
                     await channel.send_history(assistant.history, assistant.history_metadata)
             except WebSocketDisconnect:

@@ -16,7 +16,6 @@ from kokua.cli import build_arg_parser, resolve_config
 from kokua.config import AssistantConfig
 
 from aimu.aio.channels.base import Channel, ChannelMessage
-from aimu.history import ConversationManager
 from aimu.models import StreamingContentType
 
 
@@ -66,7 +65,7 @@ def test_default_config_lives_under_state_dir():
     cfg = resolve_config(build_arg_parser().parse_args([]))
     assert cfg.data_dir == kokua.paths.data_dir()
     assert cfg.skills_dir == kokua.paths.skills_dir()
-    assert cfg.history_path == str(kokua.paths.history_path())
+    assert cfg.sessions_path == kokua.paths.sessions_path()
     assert cfg.frontend == "cli"
 
 
@@ -370,27 +369,6 @@ async def test_fresh_start_has_empty_active_session(tmp_path):
     assert assistant._store.list_keys() == [assistant._session.key]
 
 
-async def test_migration_imports_last_history_as_first_conversation(tmp_path):
-    cfg = _config(tmp_path)
-    cm = ConversationManager(cfg.history_path, use_last_conversation=False)
-    cm.update_conversation(
-        [
-            {"role": "user", "content": "remember the budget"},
-            {"role": "assistant", "content": "noted"},
-        ]
-    )
-    cm.close()
-    assert not cfg.sessions_path.exists()
-
-    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
-
-    keys = assistant._store.list_keys()
-    assert len(keys) == 1
-    imported = assistant._store.get(keys[0])
-    assert any(m.get("content") == "remember the budget" for m in imported.messages)
-    assert imported.metadata["title"] == "remember the budget"
-
-
 class _ConvCapturingChannel(FakeChannel):
     def __init__(self):
         super().__init__()
@@ -447,6 +425,46 @@ async def test_select_conversation_restores_messages(tmp_path):
     await assistant.select_conversation(first_id)
     assert assistant._session.key == first_id
     assert any(m.get("content") == "keep me" for m in assistant._agent.model_client.messages)
+
+
+async def test_delete_inactive_conversation_leaves_active(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a", "b"]))
+    await assistant._handle(ChannelMessage(text="old chat", channel="fake"))
+    old_id = assistant._session.key
+    await assistant.new_conversation()
+    await assistant._handle(ChannelMessage(text="current chat", channel="fake"))
+    active_id = assistant._session.key
+
+    await assistant.delete_conversation(old_id)
+    assert old_id not in assistant._store.list_keys()
+    assert assistant._session.key == active_id  # active unchanged
+    assert any(m.get("content") == "current chat" for m in assistant._agent.model_client.messages)
+
+
+async def test_delete_active_switches_to_most_recent_remaining(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a", "b"]))
+    await assistant._handle(ChannelMessage(text="keep me", channel="fake"))
+    keep_id = assistant._session.key
+    await assistant.new_conversation()
+    await assistant._handle(ChannelMessage(text="delete me", channel="fake"))
+    delete_id = assistant._session.key
+
+    await assistant.delete_conversation(delete_id)
+    assert delete_id not in assistant._store.list_keys()
+    assert assistant._session.key == keep_id  # switched to the remaining one
+    assert any(m.get("content") == "keep me" for m in assistant._agent.model_client.messages)
+
+
+async def test_delete_last_conversation_creates_fresh_empty(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a"]))
+    await assistant._handle(ChannelMessage(text="only chat", channel="fake"))
+    only_id = assistant._session.key
+
+    await assistant.delete_conversation(only_id)
+    assert only_id not in assistant._store.list_keys()
+    assert assistant._session.key != only_id  # a fresh, empty active conversation
+    assert assistant._session.messages == []
+    assert assistant._agent.model_client.messages == []
 
 
 # --- Tool approval ----------------------------------------------------------------------------

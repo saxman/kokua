@@ -172,11 +172,9 @@ async def test_plan_review_replans_then_approves(tmp_path, monkeypatch):
     calls = _verdicts([REJECT, APPROVE], monkeypatch, "review_plan")
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])  # plan, replan, execute
-    assistant = await Assistant.create(
-        _config(tmp_path, plan_mode=True, plan_review_agent=True), channel, client=client
-    )
+    assistant = await Assistant.create(_config(tmp_path, plan_review_agent=True), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     assert calls["n"] == 2  # reviewed twice (reject then approve)
     # The re-planned plan (PLAN2) was shown and executed; the answer came through.
@@ -189,10 +187,10 @@ async def test_plan_review_exhausts_and_surfaces_critique(tmp_path, monkeypatch)
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])
     assistant = await Assistant.create(
-        _config(tmp_path, plan_mode=True, plan_review_agent=True, review_rounds=1), channel, client=client
+        _config(tmp_path, plan_review_agent=True, review_rounds=1), channel, client=client
     )
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     # review_rounds=1 -> one replan, then proceed with the best plan plus surfaced concerns.
     assert any("remaining concerns" in text.lower() for kind, text in channel.sent if kind == "str")
@@ -206,9 +204,9 @@ async def test_result_review_revises_then_approves(tmp_path, monkeypatch):
     _verdicts([REJECT, APPROVE], monkeypatch, "review_result")
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN", "ANS1", "ANS2"])  # plan, execute, revise
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, result_review=True), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path, result_review=True), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     # Result review disables streaming: the answer arrives as a plain-string send, and it's the revised one.
     answer_sends = [text for kind, text in channel.sent if kind == "str" and "ANS" in text]
@@ -223,11 +221,9 @@ async def test_result_review_exhausts_and_notes_issues(tmp_path, monkeypatch):
     _verdicts([REJECT], monkeypatch, "review_result")  # never approves
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN", "ANS1", "ANS2"])
-    assistant = await Assistant.create(
-        _config(tmp_path, plan_mode=True, result_review=True, review_rounds=1), channel, client=client
-    )
+    assistant = await Assistant.create(_config(tmp_path, result_review=True, review_rounds=1), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     assert any("unresolved issues" in text.lower() for kind, text in channel.sent if kind == "str")
 
@@ -244,9 +240,9 @@ async def test_result_review_receives_executor_evidence(tmp_path, monkeypatch):
     channel = FakeChannel()
     # planning: PLAN; executor does a tool round ("tool" -> "ANS") then a continuation turn ("FINAL").
     client = MockAsyncModelClient(["PLAN", "tool", "ANS", "FINAL"])
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, result_review=True), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path, result_review=True), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     # The evidence carries the executor's tool result (the mock's tool round), not just the final answer.
     assert "tool result" in captured["evidence"] and "mock_tool" in captured["evidence"]
@@ -259,11 +255,9 @@ async def test_plan_review_emits_and_records_subagent(tmp_path, monkeypatch):
     _verdicts([REJECT, APPROVE], monkeypatch, "review_plan")
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])
-    assistant = await Assistant.create(
-        _config(tmp_path, plan_mode=True, plan_review_agent=True), channel, client=client
-    )
+    assistant = await Assistant.create(_config(tmp_path, plan_review_agent=True), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     # Each round emits a running card then its verdict: reject (round 0), approve (round 1).
     assert [e["status"] for e in channel.subagent] == ["running", "rejected", "running", "approved"]
@@ -277,9 +271,9 @@ async def test_result_review_emits_and_records_subagent(tmp_path, monkeypatch):
     _verdicts([REJECT, APPROVE], monkeypatch, "review_result")
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN", "ANS1", "ANS2"])
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, result_review=True), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path, result_review=True), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     assert [e["status"] for e in channel.subagent] == ["running", "rejected", "running", "approved"]
     assert all(e["role"] == "Result reviewer" for e in channel.subagent)

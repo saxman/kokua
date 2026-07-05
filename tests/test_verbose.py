@@ -89,9 +89,9 @@ APPROVE = Verdict(approved=True)
 async def test_verbose_no_reviewers_streams_phases_and_commits(tmp_path):
     channel = VerboseChannel()
     client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])  # planner, executor
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, show_reasoning=True), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     assert [label for label, _ in channel.phases] == ["Planner", "Executor"]
     assert all(show for show, _ in channel.streamed)  # every call streamed visibly (show_answer=True)
@@ -107,10 +107,10 @@ async def test_verbose_plan_review_streams_and_replans(tmp_path, monkeypatch):
     channel = VerboseChannel()
     client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])  # plan, replan, executor
     assistant = await Assistant.create(
-        _config(tmp_path, plan_mode=True, plan_review_agent=True, show_reasoning=True), channel, client=client
+        _config(tmp_path, plan_review_agent=True, show_reasoning=True), channel, client=client
     )
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     labels = [label for label, _ in channel.phases]
     assert labels.count("Plan reviewer") == 2  # reject then approve
@@ -126,10 +126,10 @@ async def test_verbose_result_review_streams_every_version(tmp_path, monkeypatch
     channel = VerboseChannel()
     client = MockAsyncModelClient(["PLAN", "ANS1", "ANS2"])  # plan, execute, revise
     assistant = await Assistant.create(
-        _config(tmp_path, plan_mode=True, result_review=True, show_reasoning=True), channel, client=client
+        _config(tmp_path, result_review=True, show_reasoning=True), channel, client=client
     )
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     labels = [label for label, _ in channel.phases]
     assert labels.count("Result reviewer") == 2
@@ -148,9 +148,9 @@ async def test_show_reasoning_without_phase_channel_uses_normal_path(tmp_path):
 
     channel = PlainChannel()
     client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])
-    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, show_reasoning=True), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
 
     assert channel.phases == []  # verbose path skipped
     assert any("THE ANSWER" in s for s in channel.sent)  # answer still delivered via the normal path

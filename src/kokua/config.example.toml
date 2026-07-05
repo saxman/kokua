@@ -56,10 +56,10 @@ host = "127.0.0.1"
 port = 8000
 
 [planning]
-# Deep planning mode: draft an explicit plan (which tools/skills/MCP services to use or build) before
-# doing the work. plan_review pauses for your Approve/Edit/Reject; off runs the plan autonomously. Both
-# are also toggleable at runtime in the web settings panel, and "/plan <task>" plans a single request.
-# plan_mode = false
+# Deep planning is invoked per request -- the web UI's Plan toggle, or a "/plan <task>" message -- and
+# drafts an explicit plan (which tools/skills/MCP services to use or build) before doing the work.
+# plan_review pauses that planned turn for your Approve/Edit/Reject; off runs the plan autonomously.
+# plan_review is toggleable at runtime in the web settings panel.
 # plan_review = false
 # Adversarial review (both off by default). plan_review_agent: an independent, context-free agent critiques
 # the plan and Kokua re-plans on rejection. result_review: an independent agent checks the final answer
