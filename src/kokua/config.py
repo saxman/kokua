@@ -60,6 +60,10 @@ class AssistantConfig:
     plan_review_agent: bool = False
     result_review: bool = False
     review_rounds: int = 2
+    # Verbose trace (deep planning): stream every LLM call in a planned turn -- planner, each reviewer
+    # (prose reasoning + verdict), executor, and every revision -- under labeled phase headers, showing
+    # every intermediate version. Overrides result_review's "hide until vetted" gate. Off by default.
+    show_reasoning: bool = False
     # AIMU built-in tool groups to expose (see assistant._TOOL_GROUPS; "all"/"none" also accepted).
     tools: list[str] = field(default_factory=lambda: ["web", "fs", "compute", "misc"])
     # Remote MCP server URLs to connect at startup; a bearer token (if set) is applied to all.

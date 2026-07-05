@@ -75,6 +75,13 @@ installable, modular application.
   until it passes review, and commits a clean transcript. Reuses AIMU's structured output
   (`client.chat(schema=Verdict, use_tools=False)`) with no AIMU change; toggles in the settings panel and
   the `[planning]` config section.
+- **Verbose trace ("Show all reasoning")**: an opt-in planning toggle (default off) that turns a planned
+  turn into a labeled, streamed trace -- planner, each plan reviewer, executor, each result reviewer, and
+  every revision stream their thinking + output live under phase headers, and every intermediate plan and
+  result version is shown. Reviewers stream a free-text prose assessment (readable, and their thinking when
+  the model emits it) and then a typed verdict card. It overrides result review's "hide until vetted" gate
+  (you see every version); only the final approved answer is committed to the transcript. Thinking is
+  model-dependent (adaptive models may skip it on easy prompts).
 - **Sub-agent activity in the web UI**: the adversarial reviewers now show up in the chat stream as
   their own cards -- "Plan reviewer / Result reviewer -- reviewing..." that update in place to
   approved / rejected (with the issues) -- so the otherwise-silent reviewer pauses are visible. Added

@@ -24,8 +24,8 @@ class FakeChannel(Channel):
     async def send_subagent(self, event) -> None:
         self.subagent.append(event)
 
-    async def stream_activity(self, chunks) -> str:
-        # Mirror WebChannel: withhold GENERATING (the answer) and return it; loop frames are display-only.
+    async def stream_activity(self, chunks, *, show_answer=False) -> str:
+        # Mirror WebChannel: accumulate GENERATING (the answer) and return it; loop frames are display-only.
         parts = []
         async for chunk in chunks:
             if chunk.phase == StreamingContentType.GENERATING and isinstance(chunk.content, str):

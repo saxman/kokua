@@ -164,6 +164,33 @@ async def test_web_channel_stream_activity_shows_loop_withholds_answer():
     assert "token" not in types and "done" not in types  # answer withheld, no terminator
 
 
+async def test_web_channel_stream_activity_show_answer_emits_tokens():
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.THINKING, "hmm")
+        yield StreamChunk(StreamingContentType.GENERATING, "the ")
+        yield StreamChunk(StreamingContentType.GENERATING, "answer")
+
+    text = await channel.stream_activity(gen(), show_answer=True)
+    assert text == "the answer"  # still captured
+    types = [f["type"] for f in ws.frames]
+    assert types.count("token") == 2 and "thinking" in types  # answer shown live (verbose)
+    assert "done" not in types  # no terminator; caller ends the turn
+
+
+async def test_web_channel_send_phase_and_done():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_phase("Planner", "drafting a plan")
+    await channel.send_done()
+    assert ws.frames == [
+        {"type": "phase", "label": "Planner", "detail": "drafting a plan"},
+        {"type": "done"},
+    ]
+
+
 async def test_web_channel_send_subagent_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)

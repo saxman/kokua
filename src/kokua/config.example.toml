@@ -68,6 +68,10 @@ port = 8000
 # plan_review_agent = false
 # result_review = false
 # review_rounds = 2
+# Verbose trace: stream every LLM call in a planned turn (planner, each reviewer's prose reasoning +
+# verdict, executor, every revision) under labeled phase headers, showing each intermediate version.
+# Overrides result_review's "hide until vetted" gate. Off by default.
+# show_reasoning = false
 
 [generation]
 # Baseline model generation kwargs. The web settings panel overrides these at runtime and persists

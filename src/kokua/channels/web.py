@@ -94,14 +94,15 @@ class WebChannel(BaseWebChannel):
             return
         await super().send(self._mark_loop_boundaries(content), reply_to=reply_to)
 
-    async def stream_activity(self, chunks: AsyncIterator[StreamChunk]) -> str:
-        """Stream the agentic loop live but withhold the answer for review; return the answer text.
+    async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
+        """Stream the agentic loop live and return the accumulated GENERATING text.
 
         Mirrors the base ``send()`` per-chunk mapping (thinking / tool / loop-boundary frames, gated by
-        ``show_thinking`` / ``show_tools``) so the loop stays visible, but accumulates ``GENERATING``
-        content instead of emitting ``token`` frames, and emits no ``done`` terminator. The caller shows
-        the returned text once it's ready (a reviewed answer, or a plan bubble), so the turn keeps its
-        processing state (``/stop`` still works) until that final frame arrives.
+        ``show_thinking`` / ``show_tools``) but emits no ``done`` terminator, so the turn keeps its
+        processing state (``/stop`` still works) until the caller sends the final frame. ``GENERATING`` is
+        withheld by default (the caller shows the returned text once it's ready -- a reviewed answer or a
+        plan bubble); with ``show_answer=True`` it is also streamed as ``token`` frames (verbose trace,
+        where every version and each reviewer's prose is shown live).
         """
         from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
 
@@ -113,7 +114,9 @@ class WebChannel(BaseWebChannel):
                 last_iteration = chunk.iteration
             if chunk.phase == StreamingContentType.GENERATING:
                 if isinstance(chunk.content, str):
-                    parts.append(chunk.content)  # withheld until reviewed
+                    parts.append(chunk.content)
+                    if show_answer and chunk.content:
+                        await self.send_frame({"type": "token", "text": chunk.content})
             elif chunk.phase == StreamingContentType.THINKING and self.show_thinking and chunk.content:
                 await self.send_frame({"type": "thinking", "text": chunk.content})
             elif chunk.phase == StreamingContentType.TOOL_CALLING and self.show_tools:
@@ -171,6 +174,18 @@ class WebChannel(BaseWebChannel):
     async def send_plan(self, plan: str) -> None:
         """Show a deep-planning plan as its own bubble (rendered as markdown by the page)."""
         await self.send_frame({"type": "plan", "text": plan})
+
+    async def send_done(self) -> None:
+        """Emit a terminal ``done`` frame (verbose trace): finalize the last streamed bubble and clear the
+        page's processing state, since the streamed answer isn't followed by a ``message``."""
+        await self.send_frame({"type": "done"})
+
+    async def send_phase(self, label: str, detail: str = "") -> None:
+        """Mark the start of a labeled phase in a verbose planned turn (planner / reviewer / executor).
+
+        The page finalizes any open streaming bubble and starts a fresh one under this header, so each
+        LLM call's streamed output reads as its own labeled block."""
+        await self.send_frame({"type": "phase", "label": label, "detail": detail})
 
     async def send_subagent(self, event: dict) -> None:
         """Show sub-agent (reviewer) activity as its own card. ``event`` carries an ``id`` (so a

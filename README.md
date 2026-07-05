@@ -92,6 +92,12 @@ default and combine with human plan-review (the critique is shown to you before 
 UI the reviewers appear as their own cards ("Plan reviewer / Result reviewer — reviewing…" → approved /
 rejected with the issues), and those cards replay in order when you reload the conversation.
 
+Turn on **Show all reasoning** for the full trace: every LLM call in a planned turn (planner, each
+reviewer, executor, and each revision) streams its reasoning + output live under a labeled phase header,
+and every intermediate plan and result version is shown (reviewers stream a prose assessment, then a
+verdict). This overrides result review's gate — you see every version — and only the final answer is
+saved. Thinking is shown when the model emits it (adaptive models may skip it on simple requests).
+
 List what's installed:
 
 ```bash
