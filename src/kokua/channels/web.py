@@ -18,6 +18,7 @@ from aimu.models import (
     PROVENANCE_KEY,
     PROVENANCE_PROACTIVE,
     StreamChunk,
+    StreamingContentType,
 )
 
 # User-role turns the agent loop injects between tool-calling iterations. They are byte-for-byte
@@ -92,6 +93,33 @@ class WebChannel(BaseWebChannel):
             await super().send(content, reply_to=reply_to)
             return
         await super().send(self._mark_loop_boundaries(content), reply_to=reply_to)
+
+    async def stream_activity(self, chunks: AsyncIterator[StreamChunk]) -> str:
+        """Stream the agentic loop live but withhold the answer for review; return the answer text.
+
+        Mirrors the base ``send()`` per-chunk mapping (thinking / tool / loop-boundary frames, gated by
+        ``show_thinking`` / ``show_tools``) so the loop stays visible, but accumulates ``GENERATING``
+        content instead of emitting ``token`` frames, and emits no ``done`` terminator. The caller shows
+        the returned text once it's ready (a reviewed answer, or a plan bubble), so the turn keeps its
+        processing state (``/stop`` still works) until that final frame arrives.
+        """
+        from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
+
+        parts: list[str] = []
+        last_iteration = 0
+        async for chunk in chunks:
+            if chunk.iteration > last_iteration:
+                await self.send_frame({"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT})
+                last_iteration = chunk.iteration
+            if chunk.phase == StreamingContentType.GENERATING:
+                if isinstance(chunk.content, str):
+                    parts.append(chunk.content)  # withheld until reviewed
+            elif chunk.phase == StreamingContentType.THINKING and self.show_thinking and chunk.content:
+                await self.send_frame({"type": "thinking", "text": chunk.content})
+            elif chunk.phase == StreamingContentType.TOOL_CALLING and self.show_tools:
+                call = chunk.content if isinstance(chunk.content, dict) else {}
+                await self.send_frame({"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")})
+        return "".join(parts)
 
     async def _mark_loop_boundaries(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
         """Yield ``chunks`` unchanged, emitting a ``loop`` frame just before each iteration increment.

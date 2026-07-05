@@ -147,6 +147,23 @@ async def test_web_channel_send_settings_emits_frame():
     assert ws.frames == [{"type": "settings", "values": values}]
 
 
+async def test_web_channel_stream_activity_shows_loop_withholds_answer():
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.THINKING, "pondering", iteration=0)
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 1}}, iteration=0)
+        yield StreamChunk(StreamingContentType.GENERATING, "the ", iteration=1)  # withheld; iteration bump -> loop
+        yield StreamChunk(StreamingContentType.GENERATING, "answer", iteration=1)
+
+    answer = await channel.stream_activity(gen())
+    assert answer == "the answer"  # accumulated, not streamed
+    types = [f["type"] for f in ws.frames]
+    assert "thinking" in types and "tool" in types and "loop" in types  # the loop stays visible
+    assert "token" not in types and "done" not in types  # answer withheld, no terminator
+
+
 async def test_web_channel_send_subagent_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)

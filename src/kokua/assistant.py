@@ -833,10 +833,22 @@ class Assistant:
             prompt += REPLAN_FEEDBACK.format(issues=_bullets(feedback))
         base = list(self._agent.model_client.messages)
         try:
-            plan = await self._agent.run(prompt, images=msg.images)
+            plan = await self._run_and_capture(prompt, msg.images)
         finally:
             self._agent.model_client.messages = base
-        return plan if isinstance(plan, str) else str(plan)
+        return plan
+
+    async def _run_and_capture(self, prompt: str, images) -> str:
+        """Run the agent, showing its agentic loop (thinking/tool calls) live but withholding the final
+        text for review, and return that text. Channels without ``stream_activity`` (e.g. the CLI) fall
+        back to a plain non-streaming run.
+        """
+        stream_activity = getattr(self._channel, "stream_activity", None)
+        if stream_activity is None:
+            result = await self._agent.run(prompt, images=images)
+            return result if isinstance(result, str) else str(result)
+        stream = await self._agent.run(prompt, stream=True, images=images)
+        return await stream_activity(stream)
 
     async def _run_review(self, sid: str, role: str, round_: int, coro) -> "review.Verdict":
         """Show a running sub-agent card, await the reviewer, then update the card with its verdict."""
@@ -884,7 +896,7 @@ class Assistant:
         rounds = self._config.review_rounds
         answer = ""
         try:
-            answer = str(await self._agent.run(EXECUTE_PROMPT.format(request=msg.text, plan=plan), images=msg.images))
+            answer = await self._run_and_capture(EXECUTE_PROMPT.format(request=msg.text, plan=plan), msg.images)
             for attempt in range(rounds + 1):
                 verdict = await self._run_review(
                     f"result-review-{attempt}",
@@ -899,13 +911,11 @@ class Assistant:
                     answer += "\n\n---\n_Automated review flagged unresolved issues:_\n" + _bullets(verdict.issues)
                     break
                 self._agent.model_client.messages = list(base)  # revise from a clean base
-                answer = str(
-                    await self._agent.run(
-                        RESULT_REVISE_PROMPT.format(
-                            request=msg.text, plan=plan, answer=answer, issues=_bullets(verdict.issues)
-                        ),
-                        images=msg.images,
-                    )
+                answer = await self._run_and_capture(
+                    RESULT_REVISE_PROMPT.format(
+                        request=msg.text, plan=plan, answer=answer, issues=_bullets(verdict.issues)
+                    ),
+                    msg.images,
                 )
         finally:
             # Commit one clean turn; the executor's scratch (and revision rounds) stay out of history.
