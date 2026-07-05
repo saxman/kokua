@@ -196,12 +196,13 @@
         <fieldset>
           <legend>Planning</legend>
           <label class="check"><input id="set-plan_mode" type="checkbox" /> Deep planning mode (plan before acting)</label>
-          <label class="check"><input id="set-plan_review" type="checkbox" /> Review the plan before executing</label>
-          <label class="check"><input id="set-plan_review_agent" type="checkbox" /> Adversarial plan review (independent agent critiques + replans)</label>
-          <label class="check"><input id="set-result_review" type="checkbox" /> Review the result before showing it (runs non-streamed)</label>
-          <p class="hint">With planning on, each turn drafts a plan first. Review pauses for your
-            Approve / Edit / Reject; off runs the plan automatically. You can also send "/plan &lt;task&gt;".
-            Adversarial review adds an independent critic for the plan and/or the final answer.</p>
+          <label class="check"><input id="set-plan_review" type="checkbox" /> Plan review by you (pause for your Approve / Edit / Reject)</label>
+          <label class="check"><input id="set-plan_review_agent" type="checkbox" /> Plan review by an agent (independent critic; re-plans on issues)</label>
+          <label class="check"><input id="set-result_review" type="checkbox" /> Result review by an agent (checks the answer before showing it; runs non-streamed)</label>
+          <p class="hint">With planning on, each turn drafts a plan first. "By you" pauses for your
+            Approve / Edit / Reject; "by an agent" uses an independent reviewer (no human pause). With
+            both plan reviews on, the agent's critique is shown to you before you decide. You can also
+            send "/plan &lt;task&gt;".</p>
         </fieldset>
         <div class="modal-actions">
           <button type="submit">Save</button>
