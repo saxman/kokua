@@ -98,6 +98,14 @@ installable, modular application.
   (see README): the toolset includes `execute_python` for calculations, and unlike the main agent the
   reviewer has no approval gate, so it can run code unattended during a review -- an intentional
   short-term tradeoff to revisit (sandbox the reviewer, or drop to `calculate`-only).
+- **Reviewers grounded in fresh information**: two changes so reviewers stop rejecting correct answers as
+  "hallucinated" by trusting their own stale training knowledge. (1) Both reviewer prompts now warn that
+  the reviewer's built-in knowledge may be outdated, that disagreement with memory is not evidence of
+  fabrication, and that it must verify a suspected inaccuracy with its tools before flagging (and note
+  unverifiable claims as such rather than rejecting on suspicion). (2) The result reviewer is now shown an
+  Evidence section -- the tool results the agent actually retrieved to produce its answer (extracted by
+  `assistant._tool_evidence` from the executor transcript, each result truncated) -- so it judges against
+  real sources, while still spot-checking with its own tools.
 - **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
   on `aimu.paths.output`.
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,

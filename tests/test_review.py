@@ -6,7 +6,7 @@ from pathlib import Path
 
 from helpers import MockAsyncModelClient
 from kokua import review, runtime_settings
-from kokua.assistant import Assistant
+from kokua.assistant import Assistant, _tool_evidence
 from kokua.config import AssistantConfig
 from kokua.review import Verdict
 
@@ -87,6 +87,42 @@ def test_reviewer_toolset_boundary():
     # Absent: the user's memory/documents, skill authoring, and MCP mutation.
     assert not (names & {"store_memory", "search_memories", "save_document", "search_documents"})
     assert not any(n in names for n in ("author_skill", "add_skill_script", "add_mcp_server", "remove_mcp_server"))
+
+
+def test_reviewer_prompts_warn_about_stale_knowledge():
+    """Both reviewers are told to verify with tools before flagging; only the result reviewer sees evidence."""
+    assert "out of date" in review.PLAN_REVIEW_SYSTEM and "verify" in review.PLAN_REVIEW_SYSTEM.lower()
+    assert "out of date" in review.RESULT_REVIEW_SYSTEM
+    assert "Evidence section" in review.RESULT_REVIEW_SYSTEM  # evidence guidance
+    assert "Evidence section" not in review.PLAN_REVIEW_SYSTEM
+
+
+def test_tool_evidence_renders_and_truncates():
+    """_tool_evidence renders tool results (labeled by call name), truncates long ones, and skips no-tool runs."""
+    messages = [
+        {"role": "assistant", "tool_calls": [{"function": {"name": "web_search", "arguments": {}}, "id": "a1"}]},
+        {"role": "tool", "content": "FRESH-DATA", "tool_call_id": "a1"},  # name resolved via the call id
+        {"role": "assistant", "content": "the answer"},
+    ]
+    evidence = _tool_evidence(messages)
+    assert evidence == "- web_search: FRESH-DATA"
+    assert _tool_evidence([{"role": "assistant", "content": "no tools used"}]) == ""
+    truncated = _tool_evidence([{"role": "tool", "name": "t", "content": "y" * 100}], max_chars=10)
+    assert truncated == "- t: " + "y" * 10 + " ...[truncated]"
+
+
+async def test_review_result_includes_evidence_in_prompt(monkeypatch):
+    """review_result threads evidence into the reviewer's user message; the default omits the block."""
+    for evidence, expect in [("SRC-XYZ", True), ("", False)]:
+        client = MockAsyncModelClient(["assessment", '{"approved": true, "issues": [], "suggestions": ""}'])
+        client.model.supports_structured_output = False
+        monkeypatch.setattr(
+            "kokua.review._reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
+        )
+        await review.review_result("mock", "do X", "PLAN", "ANSWER", evidence)
+        first_user = client.messages[0]["content"]
+        assert ("Evidence the agent gathered" in first_user) is expect
+        assert ("SRC-XYZ" in first_user) is expect
 
 
 async def test_reviewer_runs_tool_loop_then_extracts_verdict(monkeypatch):
@@ -194,6 +230,26 @@ async def test_result_review_exhausts_and_notes_issues(tmp_path, monkeypatch):
     await assistant._handle(ChannelMessage(text="do X", channel="fake"))
 
     assert any("unresolved issues" in text.lower() for kind, text in channel.sent if kind == "str")
+
+
+async def test_result_review_receives_executor_evidence(tmp_path, monkeypatch):
+    """The executor's tool transcript is extracted and passed to the result reviewer as evidence."""
+    captured = {}
+
+    async def fake_review_result(model, request, plan, answer, evidence=""):
+        captured["evidence"] = evidence
+        return APPROVE
+
+    monkeypatch.setattr("kokua.review.review_result", fake_review_result)
+    channel = FakeChannel()
+    # planning: PLAN; executor does a tool round ("tool" -> "ANS") then a continuation turn ("FINAL").
+    client = MockAsyncModelClient(["PLAN", "tool", "ANS", "FINAL"])
+    assistant = await Assistant.create(_config(tmp_path, plan_mode=True, result_review=True), channel, client=client)
+
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"))
+
+    # The evidence carries the executor's tool result (the mock's tool round), not just the final answer.
+    assert "tool result" in captured["evidence"] and "mock_tool" in captured["evidence"]
 
 
 # --- sub-agent display (frames + persistence) -----------------------------------------------

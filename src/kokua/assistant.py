@@ -95,6 +95,24 @@ def _bullets(issues: list[str]) -> str:
     return "\n".join(f"- {i}" for i in issues) or "- (no specific issues given)"
 
 
+def _tool_evidence(messages: list[dict], max_chars: int = 2000) -> str:
+    """Render the tool results in ``messages`` (an executor transcript slice) as a compact evidence block
+    for the result reviewer, so it judges against what the agent actually retrieved rather than its own
+    (possibly stale) memory. Each tool result is truncated to ``max_chars``. Returns "" if no tools ran."""
+    names: dict = {}  # tool_call_id -> tool name, to label results that lack a "name" of their own
+    lines: list[str] = []
+    for msg in messages:
+        for call in msg.get("tool_calls") or []:
+            names[call.get("id")] = call.get("function", {}).get("name")
+        if msg.get("role") == "tool":
+            name = msg.get("name") or names.get(msg.get("tool_call_id")) or "tool"
+            content = str(msg.get("content", ""))
+            if len(content) > max_chars:
+                content = content[:max_chars] + " ...[truncated]"
+            lines.append(f"- {name}: {content}")
+    return "\n".join(lines)
+
+
 # AIMU's built-in tool subgroups, selectable by name via the --tools flag / AssistantConfig.tools.
 # The generative groups (image/audio/speech/transcription) need their AIMU_*_MODEL env var set and
 # raise at call time otherwise, so they are not in the default set. The default tools are sync; the
@@ -879,11 +897,12 @@ class Assistant:
             if self._config.result_review:
                 for attempt in range(rounds + 1):
                     await self._send_phase("Result reviewer", f"round {attempt + 1}")
+                    evidence = _tool_evidence(self._agent.model_client.messages[len(base) :])
                     verdict = await self._stream_review(
                         f"result-review-{attempt}",
                         "Result reviewer",
                         attempt,
-                        review.stream_result_review(self._config.model, msg.text, plan, answer),
+                        review.stream_result_review(self._config.model, msg.text, plan, answer, evidence),
                     )
                     events.append(self._verdict_event("Result reviewer", attempt, verdict))
                     if verdict.approved or attempt == rounds:
@@ -1026,11 +1045,12 @@ class Assistant:
         try:
             answer = await self._run_and_capture(EXECUTE_PROMPT.format(request=msg.text, plan=plan), msg.images)
             for attempt in range(rounds + 1):
+                evidence = _tool_evidence(self._agent.model_client.messages[len(base) :])
                 verdict = await self._run_review(
                     f"result-review-{attempt}",
                     "Result reviewer",
                     attempt,
-                    review.review_result(self._config.model, msg.text, plan, answer),
+                    review.review_result(self._config.model, msg.text, plan, answer, evidence),
                 )
                 events.append(self._verdict_event("Result reviewer", attempt, verdict))
                 if verdict.approved:
