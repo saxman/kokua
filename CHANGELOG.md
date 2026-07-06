@@ -22,7 +22,11 @@ installable, modular application.
   replies render as GitHub-flavored markdown when a turn completes (tables, nested lists, code, task
   lists, strikethrough, links), via vendored `marked` + `DOMPurify` (bundled in `web_static/`, served
   locally, no CDN); the rendered HTML is sanitized so model/tool output cannot inject scripts or markup,
-  and links open with `rel="noopener"`. Light and dark themes: a theme selector in the settings panel
+  and links open with `rel="noopener"`. LaTeX math (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`, common in
+  Gemini output) is typeset with vendored KaTeX (JS + CSS + woff2 fonts bundled in `web_static/`, served
+  locally); it runs after DOMPurify with `trust:false` + a `maxExpand` cap, so untrusted output stays
+  safe, and `throwOnError:false` leaves a malformed expression as source text instead of breaking the
+  bubble. Light and dark themes: a theme selector in the settings panel
   (auto / light / dark; auto follows the OS preference) sets a per-browser choice remembered locally and
   applied before first paint (no flash on load, no new dependencies).
 - **Multiple web conversations**: the web UI lists conversations in a sidebar (auto-titled from the

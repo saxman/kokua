@@ -606,3 +606,31 @@ def test_vendored_js_served(tmp_path):
         assert "javascript" in resp.headers["content-type"]
         assert marker in resp.text  # the library's own name appears in its source/header
     assert client.get("/nope.js").status_code == 404
+
+
+def test_vendored_katex_js_css_and_fonts_served(tmp_path):
+    import re
+
+    from starlette.testclient import TestClient
+
+    client = TestClient(build_app(_config(tmp_path), client=MockAsyncModelClient([])))
+
+    js = client.get("/katex.min.js")
+    assert js.status_code == 200 and "javascript" in js.headers["content-type"]
+    assert client.get("/auto-render.min.js").status_code == 200
+
+    css = client.get("/katex.min.css")
+    assert css.status_code == 200 and css.headers["content-type"].startswith("text/css")
+
+    # Every woff2 the CSS references must resolve from the /fonts/ route as a real woff2 file.
+    fonts = sorted(set(re.findall(r"fonts/(KaTeX_[A-Za-z0-9-]+\.woff2)", css.text)))
+    assert fonts, "expected the KaTeX CSS to reference woff2 fonts"
+    for name in fonts:
+        resp = client.get(f"/fonts/{name}")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "font/woff2"
+        assert resp.content[:4] == b"wOF2"  # woff2 magic bytes
+
+    # The allowlist rejects anything that is not a vendored KaTeX font.
+    assert client.get("/fonts/evil.woff2").status_code == 404
+    assert client.get("/fonts/KaTeX_Main-Regular.ttf").status_code == 404

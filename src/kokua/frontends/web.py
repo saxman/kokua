@@ -34,11 +34,18 @@ def _index_html() -> str:
     return files("kokua").joinpath("web_static/index.html").read_text(encoding="utf-8")
 
 
-# Vendored browser libraries served at the page's root (the page loads them by relative URL).
-_STATIC_JS = ("marked.min.js", "purify.min.js")
+# Vendored browser libraries served at the page's root (the page loads them by relative URL). Text
+# assets map filename -> media type; the KaTeX fonts (binary woff2) are served from the /fonts/ subpath.
+_STATIC_ASSETS = {
+    "marked.min.js": "text/javascript",
+    "purify.min.js": "text/javascript",
+    "katex.min.js": "text/javascript",
+    "auto-render.min.js": "text/javascript",
+    "katex.min.css": "text/css",
+}
 
 
-def _static_js(filename: str) -> str:
+def _static_text(filename: str) -> str:
     return files("kokua").joinpath(f"web_static/{filename}").read_text(encoding="utf-8")
 
 
@@ -71,11 +78,23 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
     async def index(request):
         return HTMLResponse(_index_html())
 
-    async def static_js(request):
+    async def static_asset(request):
         name = request.path_params["name"]
-        if name not in _STATIC_JS:  # only serve the known vendored files
+        media = _STATIC_ASSETS.get(name)  # allowlist -> only the known vendored files
+        if media is None:
             return Response(status_code=404)
-        return Response(_static_js(name), media_type="text/javascript")
+        return Response(_static_text(name), media_type=media)
+
+    async def static_font(request):
+        # Serve a vendored KaTeX woff2 font referenced by katex.min.css (url(fonts/KaTeX_*.woff2)).
+        # The name must be a bare KaTeX woff2 filename; the allowlist pattern blocks any traversal.
+        name = request.path_params["name"]
+        if name != Path(name).name or not (name.startswith("KaTeX_") and name.endswith(".woff2")):
+            return Response(status_code=404)
+        resource = files("kokua").joinpath(f"web_static/fonts/{name}")
+        if not resource.is_file():
+            return Response(status_code=404)
+        return Response(resource.read_bytes(), media_type="font/woff2")
 
     async def download(request):
         # Serve a file from the downloads folder (e.g. a PDF from the markdown_to_pdf tool). The
@@ -155,7 +174,8 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         routes=[
             Route("/", index),
             Route("/download/{name:str}", download),  # generated files (e.g. markdown_to_pdf PDFs)
-            Route("/{name:str}", static_js),  # vendored marked.min.js / purify.min.js
+            Route("/fonts/{name:str}", static_font),  # vendored KaTeX woff2 fonts
+            Route("/{name:str}", static_asset),  # vendored marked / purify / katex js + css
             WebSocketRoute("/ws", ws_endpoint),
         ]
     )

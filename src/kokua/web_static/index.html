@@ -16,6 +16,9 @@
       } catch (e) {}
     })();
   </script>
+  <!-- Vendored KaTeX styles (math typesetting; fonts served from /fonts/). Loaded before the page's
+       own styles so those win on any conflict. -->
+  <link rel="stylesheet" href="katex.min.css" />
   <style>
     /* Light theme (default). The dark override below only changes these variables. */
     :root {
@@ -230,9 +233,12 @@
     </div>
   </div>
 
-  <!-- Vendored markdown renderer + sanitizer (offline; see web_static/*.js for pinned versions). -->
+  <!-- Vendored markdown renderer + sanitizer + math typesetter (offline; see web_static/*.js for
+       pinned versions). katex.min.js must load before auto-render.min.js (which reads window.katex). -->
   <script src="marked.min.js"></script>
   <script src="purify.min.js"></script>
+  <script src="katex.min.js"></script>
+  <script src="auto-render.min.js"></script>
   <script>
     const log = document.getElementById("log");
     const form = document.getElementById("form");
@@ -380,7 +386,10 @@
       }
       const html = renderMarkdown(subagentMarkdown(frame));
       if (html === null) el.textContent = subagentMarkdown(frame);
-      else el.innerHTML = html;
+      else {
+        el.innerHTML = html;
+        typesetMath(el);
+      }
       el.dataset.status = frame.status || "";
       autoscroll();
     }
@@ -433,12 +442,41 @@
       return DOMPurify.sanitize(marked.parse(src || ""));
     }
 
+    // Typeset LaTeX math ($...$, $$...$$, \(...\), \[...\]) in an element that already holds sanitized
+    // HTML. KaTeX runs AFTER DOMPurify and builds its own DOM from each delimiter's TeX; trust:false
+    // blocks \href/\includegraphics and maxExpand bounds macro expansion, so untrusted model/tool
+    // output can neither inject markup nor hang the renderer. throwOnError:false leaves a bad
+    // expression as red source text rather than breaking the bubble. KaTeX's default ignoredTags keep
+    // any $...$ inside <code>/<pre> literal. No-op if the KaTeX libs failed to load.
+    const mathReady = typeof renderMathInElement !== "undefined";
+    function typesetMath(el) {
+      if (!mathReady || !el) return;
+      try {
+        renderMathInElement(el, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "\\[", right: "\\]", display: true },
+            { left: "\\(", right: "\\)", display: false },
+            { left: "$", right: "$", display: false },
+          ],
+          throwOnError: false,
+          trust: false,
+          maxExpand: 1000,
+        });
+      } catch (e) {
+        /* never let a math error break rendering */
+      }
+    }
+
     function addMarkdownBubble(cls, text) {
       const el = document.createElement("div");
       el.className = "bubble md " + cls;
       const html = renderMarkdown(text);
       if (html === null) el.textContent = text || "";
-      else el.innerHTML = html;
+      else {
+        el.innerHTML = html;
+        typesetMath(el);
+      }
       log.appendChild(el);
       autoscroll();
       return el;
@@ -453,6 +491,7 @@
         if (html !== null) {
           streamingBubble.classList.add("md");
           streamingBubble.innerHTML = html;
+          typesetMath(streamingBubble);
         }
       }
       streamingBubble = null;

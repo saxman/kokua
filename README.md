@@ -57,7 +57,9 @@ Reloading the page replays the prior conversation (the assistant already keeps i
 reconnects; this makes it visible again), including reasoning and tool calls when `show_thinking` /
 `show_tools` are on. Assistant replies are rendered as GitHub-flavored markdown (tables, nested lists, code, links, task
 lists, etc.) once each turn completes, via vendored `marked` + `DOMPurify` (bundled, no CDN); the HTML
-is sanitized, so model or tool output can't inject scripts or markup.
+is sanitized, so model or tool output can't inject scripts or markup. LaTeX math (`$...$`, `$$...$$`) is
+typeset with vendored KaTeX, applied after sanitization with `trust` disabled so untrusted output stays
+safe.
 
 The web UI holds multiple conversations: the left sidebar lists them (titled automatically from the first
 message) and has a "+ New conversation" button; click any conversation to continue it, or hover a

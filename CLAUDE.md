@@ -65,7 +65,10 @@ reconnect across restarts.
 (`token`/`thinking`/`tool`/`done` frames and `send()`) lives in AIMU's base; Kokua's subclass adds the
 `conversations`, `history`, and `approval` frames its richer page needs. The UI is a single
 self-contained `web_static/index.html` served as package data, plus vendored `marked` + `DOMPurify`
-(GitHub-flavored markdown, sanitized, rendered client-side on turn completion).
+(GitHub-flavored markdown, sanitized, rendered client-side on turn completion) and vendored KaTeX
+(`katex.min.*` + `auto-render.min.js` + `fonts/*.woff2`) for LaTeX math, typeset after sanitization
+with `trust:false`. The web server allowlists these assets: JS/CSS by name, the woff2 fonts under
+`/fonts/`.
 
 ## Testing notes
 

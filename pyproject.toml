@@ -78,7 +78,13 @@ where = ["src"]
 include = ["kokua*"]
 
 [tool.setuptools.package-data]
-kokua = ["web_static/*.html", "web_static/*.js", "config.example.toml"]
+kokua = [
+    "web_static/*.html",
+    "web_static/*.js",
+    "web_static/*.css",
+    "web_static/fonts/*.woff2",
+    "config.example.toml",
+]
 
 [tool.ruff]
 line-length = 120
