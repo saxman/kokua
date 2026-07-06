@@ -36,17 +36,28 @@ def _text_of(content: Any) -> str:
 
 
 def conversation_to_frames(
-    messages: list[dict], *, show_thinking: bool, show_tools: bool, subagent: Optional[dict] = None
+    messages: list[dict],
+    *,
+    show_thinking: bool,
+    show_tools: bool,
+    subagent: Optional[dict] = None,
+    trace: Optional[dict] = None,
 ) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
     Mirrors the live stream order per assistant message: reasoning, then tool calls, then the answer,
     each gated by the same ``show_thinking`` / ``show_tools`` flags the live stream uses. Tool results
-    and the system message are omitted (live chat shows neither). ``subagent`` maps a user-message index
-    (as a string) to that turn's recorded sub-agent verdicts, interleaved right after the user bubble so
-    reviewer activity replays in place.
+    and the system message are omitted (live chat shows neither).
+
+    Two per-turn maps key a user-message index (as a string) to that turn's recorded reviewer activity,
+    interleaved right after the user bubble so it replays in place:
+      - ``subagent``: summary verdict cards (non-verbose turns).
+      - ``trace``: the full raw verbose trace as ``phase`` + ``reasoning`` items. A traced turn shows
+        the raw output instead of cards, and its trace already ends with the final answer, so the
+        committed assistant message for that turn is skipped to avoid showing the answer twice.
     """
     subagent = subagent or {}
+    trace = trace or {}
     items: list[dict] = []
     for index, message in enumerate(messages):
         role = message.get("role")
@@ -60,9 +71,21 @@ def conversation_to_frames(
             text = _text_of(message.get("content"))
             if text:
                 items.append({"type": "user", "text": text})
-            for event in subagent.get(str(index), []):
-                items.append({"type": "subagent", **event})
+            if str(index) in trace:  # verbose turn: replay the raw trace, not cards
+                for segment in trace[str(index)]:
+                    items.append(
+                        {"type": "phase", "label": segment.get("label", ""), "detail": segment.get("detail", "")}
+                    )
+                    if segment.get("text"):
+                        items.append({"type": "reasoning", "text": segment["text"]})
+            else:
+                for event in subagent.get(str(index), []):
+                    items.append({"type": "subagent", **event})
         elif role == "assistant":
+            if str(index - 1) in trace:
+                # The preceding user turn was verbose; its trace already contains this final answer
+                # (in its last Executor phase), so don't emit it again as a separate message.
+                continue
             if show_thinking and message.get("thinking"):
                 items.append({"type": "thinking", "text": message["thinking"]})
             if show_tools:
@@ -149,13 +172,16 @@ class WebChannel(BaseWebChannel):
         """Send a conversation as one batched frame the page replays (replacing the current view).
 
         Always sent, even when empty, so switching to a new/empty conversation clears the page.
-        ``metadata`` is the active session's metadata; its ``subagent`` map interleaves reviewer cards.
+        ``metadata`` is the active session's metadata; its ``subagent`` map interleaves reviewer cards
+        (non-verbose turns) and its ``trace`` map replays the raw verbose trace (verbose turns).
         """
+        meta = metadata or {}
         items = conversation_to_frames(
             messages,
             show_thinking=self.show_thinking,
             show_tools=self.show_tools,
-            subagent=(metadata or {}).get("subagent"),
+            subagent=meta.get("subagent"),
+            trace=meta.get("trace"),
         )
         await self.send_frame({"type": "history", "items": items})
 

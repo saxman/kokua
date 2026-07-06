@@ -424,6 +424,10 @@ class Assistant:
         # True while a proactive (unprompted) turn runs, so _approve auto-denies gated tools (no
         # user is waiting to confirm).
         self._in_proactive = False
+        # The raw trace of the in-flight verbose turn: a list of {label, detail, text} phase segments,
+        # accumulated by _send_phase / _run_and_capture / _stream_review and persisted for reload.
+        # None outside a verbose turn (so shared helpers used by non-verbose turns don't capture).
+        self._trace: Optional[list[dict]] = None
         # The active model client's provider built-in generate kwargs, snapshotted before any override
         # is layered on, so a settings change (or a cleared field) can rebuild from a clean base.
         # Assigned by create() and refreshed on a runtime model switch.
@@ -826,40 +830,38 @@ class Assistant:
         self._record_subagent(base_len, events)
 
     async def _verbose_planned_turn(self, msg: ChannelMessage) -> None:
-        """Deep planning with the full trace visible: every LLM call streams under a labeled phase, every
-        plan/result version is shown, and reviewers stream their prose reasoning then a verdict card. Only
-        the final answer is committed (intermediate trace is live-only); this overrides result_review's gate.
+        """Deep planning with the full trace visible: every LLM call streams under a labeled phase and
+        every plan/result version is shown, including each reviewer's prose reasoning. The whole raw
+        trace is captured (self._trace) and persisted for reload -- verbose turns show the raw output,
+        not summary cards. Only the final answer is committed to the conversation; this overrides
+        result_review's gate.
         """
-        events: list[dict] = []
-        await self._send_phase("Planner", "drafting a plan")
-        plan = await self._make_plan(msg, show_answer=True)
-        critique: Optional[list[str]] = None
-        if self._config.plan_review_agent:
-            plan, critique = await self._verbose_plan_review(msg, plan, events)
-        approved = plan
-        if self._config.plan_review:  # optional human gate still applies
-            approved = await self._review_plan(plan, critique)
-            if approved is None:
-                await self._channel.send("(plan rejected)", reply_to=msg)
-                return
-        await self._verbose_execute(msg, approved, events)  # streams + commits the final answer
-        self._record_subagent(len(self._agent.model_client.messages) - 2, events)  # [..., user, assistant]
-        await self._send_done()
+        self._trace = []  # active trace: phase segments captured by the streaming helpers below
+        try:
+            await self._send_phase("Planner", "drafting a plan")
+            plan = await self._make_plan(msg, show_answer=True)
+            critique: Optional[list[str]] = None
+            if self._config.plan_review_agent:
+                plan, critique = await self._verbose_plan_review(msg, plan)
+            approved = plan
+            if self._config.plan_review:  # optional human gate still applies
+                approved = await self._review_plan(plan, critique)
+                if approved is None:
+                    await self._channel.send("(plan rejected)", reply_to=msg)
+                    return
+            await self._verbose_execute(msg, approved)  # streams + commits the final answer
+            self._record_trace(len(self._agent.model_client.messages) - 2, self._trace)  # [..., user, asst]
+            await self._send_done()
+        finally:
+            self._trace = None
 
-    async def _verbose_plan_review(
-        self, msg: ChannelMessage, plan: str, events: list[dict]
-    ) -> tuple[str, Optional[list[str]]]:
-        """Stream each plan-review round's reasoning + verdict; re-plan visibly on rejection."""
+    async def _verbose_plan_review(self, msg: ChannelMessage, plan: str) -> tuple[str, Optional[list[str]]]:
+        """Stream each plan-review round's prose reasoning; re-plan visibly on rejection. No summary
+        card -- the streamed reasoning (and a following 'revising' phase on rejection) is the output."""
         rounds = self._config.review_rounds
         for attempt in range(rounds + 1):
             await self._send_phase("Plan reviewer", f"round {attempt + 1}")
-            verdict = await self._stream_review(
-                f"plan-review-{attempt}",
-                "Plan reviewer",
-                attempt,
-                review.stream_plan_review(self._config.model, msg.text, plan),
-            )
-            events.append(self._verdict_event("Plan reviewer", attempt, verdict))
+            verdict = await self._stream_review(review.stream_plan_review(self._config.model, msg.text, plan))
             if verdict.approved:
                 return plan, None
             if attempt == rounds:
@@ -868,7 +870,7 @@ class Assistant:
             plan = await self._make_plan(msg, feedback=verdict.issues, show_answer=True)
         return plan, None
 
-    async def _verbose_execute(self, msg: ChannelMessage, plan: str, events: list[dict]) -> str:
+    async def _verbose_execute(self, msg: ChannelMessage, plan: str) -> str:
         """Stream the executor and each result-review round visibly; every version is shown. Commits only
         the final answer to a clean transcript."""
         base = list(self._agent.model_client.messages)
@@ -884,12 +886,8 @@ class Assistant:
                     await self._send_phase("Result reviewer", f"round {attempt + 1}")
                     evidence = _tool_evidence(self._agent.model_client.messages[len(base) :])
                     verdict = await self._stream_review(
-                        f"result-review-{attempt}",
-                        "Result reviewer",
-                        attempt,
                         review.stream_result_review(self._config.model, msg.text, plan, answer, evidence),
                     )
-                    events.append(self._verdict_event("Result reviewer", attempt, verdict))
                     if verdict.approved or attempt == rounds:
                         break
                     await self._send_phase("Executor", "revising the answer")
@@ -906,21 +904,20 @@ class Assistant:
             self._agent.model_client.messages = base + (pair if answer else [])
         return answer
 
-    async def _stream_review(self, sid: str, role: str, round_: int, open_coro) -> "review.Verdict":
-        """Stream a reviewer's prose reasoning live (under the current phase), then show + return its verdict."""
+    async def _stream_review(self, open_coro) -> "review.Verdict":
+        """Stream a reviewer's prose reasoning live (captured into the current phase segment for replay),
+        then finalize and return its verdict. Emits no summary card -- the prose is the output."""
         client, stream = await open_coro
         stream_activity = getattr(self._channel, "stream_activity", None)
         if stream_activity is not None:
-            await stream_activity(stream, show_answer=True)
+            text = await stream_activity(stream, show_answer=True)
         else:  # no streaming channel: drain so the reviewer call completes
+            text = ""
             async for _ in stream:
                 pass
-        verdict = await review.finalize_verdict(client)
-        status = "approved" if verdict.approved else "rejected"
-        await self._send_subagent(
-            {"id": sid, "role": role, "status": status, "issues": list(verdict.issues), "round": round_}
-        )
-        return verdict
+        if self._trace:  # attach the reviewer's prose to the current phase segment
+            self._trace[-1]["text"] = text
+        return await review.finalize_verdict(client)
 
     async def _send_done(self) -> None:
         """End a verbose turn: finalize the last streamed bubble and clear the processing state."""
@@ -935,6 +932,15 @@ class Assistant:
         """
         if events and user_index >= 0:
             self._session.metadata.setdefault("subagent", {})[str(user_index)] = events
+
+    def _record_trace(self, user_index: int, trace: list[dict]) -> None:
+        """Record a verbose turn's full raw trace (phase label/detail + streamed text) under its
+        user-message index, so reload replays the same raw output instead of summary cards.
+
+        Persisted by ``_persist`` (which saves ``session.metadata``). No-op when the trace is empty.
+        """
+        if trace and user_index >= 0:
+            self._session.metadata.setdefault("trace", {})[str(user_index)] = trace
 
     async def _send_subagent(self, event: dict) -> None:
         """Show a sub-agent activity card if the channel supports it (web); other channels ignore it."""
@@ -972,12 +978,22 @@ class Assistant:
         stream_activity = getattr(self._channel, "stream_activity", None)
         if stream_activity is None:
             result = await self._agent.run(prompt, images=images)
-            return result if isinstance(result, str) else str(result)
-        stream = await self._agent.run(prompt, stream=True, images=images)
-        return await stream_activity(stream, show_answer=show_answer)
+            text = result if isinstance(result, str) else str(result)
+        else:
+            stream = await self._agent.run(prompt, stream=True, images=images)
+            text = await stream_activity(stream, show_answer=show_answer)
+        if self._trace:  # verbose trace: attach this call's output to the current phase segment
+            self._trace[-1]["text"] = text
+        return text
 
     async def _send_phase(self, label: str, detail: str = "") -> None:
-        """Announce a labeled phase (verbose trace) if the channel supports it; others ignore it."""
+        """Announce a labeled phase (verbose trace) if the channel supports it; others ignore it.
+
+        Also opens a new segment in the in-flight trace (self._trace) so the streamed output that
+        follows is captured under this phase for reload replay.
+        """
+        if self._trace is not None:
+            self._trace.append({"label": label, "detail": detail, "text": ""})
         send = getattr(self._channel, "send_phase", None)
         if send is not None:
             await send(label, detail)

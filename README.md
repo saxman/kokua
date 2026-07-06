@@ -96,7 +96,8 @@ Reviewing the result means the final answer can't stream live; the agentic loop 
 still streams, but the answer appears only after it passes review. Both are off by
 default and combine with human plan-review (the critique is shown to you before you decide). In the web
 UI the reviewers appear as their own cards ("Plan reviewer / Result reviewer — reviewing…" → approved /
-rejected with the issues), and those cards replay in order when you reload the conversation.
+rejected with the issues), and those cards replay in order when you reload the conversation. (With **Show
+all reasoning** on, these cards are replaced by the reviewers' full streamed reasoning — see below.)
 
 The reviewers are tool-using agents: each runs a bounded tool-calling assessment over a curated
 verification toolset (the current date/time, web lookup, and computation) before returning its verdict,
@@ -108,9 +109,11 @@ access to your state. See [Security](#security) for a known limitation of this t
 
 Turn on **Show all reasoning** for the full trace: every LLM call in a planned turn (planner, each
 reviewer, executor, and each revision) streams its reasoning + output live under a labeled phase header,
-and every intermediate plan and result version is shown (reviewers stream a prose assessment, then a
-verdict). This overrides result review's gate — you see every version — and only the final answer is
-saved. Thinking is shown when the model emits it (adaptive models may skip it on simple requests).
+and every intermediate plan and result version is shown (reviewers stream a prose assessment). This
+overrides result review's gate — you see every version — and only the final answer is saved to the
+conversation. The whole raw trace is recorded per turn, so reloading a verbose turn replays the same raw
+output you saw live (not a summary); in this mode the summary reviewer cards are not shown. Thinking is
+shown when the model emits it (adaptive models may skip it on simple requests).
 
 List what's installed:
 

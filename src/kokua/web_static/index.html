@@ -511,6 +511,19 @@
       return `${name || "tool"}(${argStr})`;
     }
 
+    // Verbose-trace phase header: a labeled divider (e.g. "Planner · drafting a plan"). Shared by the
+    // live `phase` frame and history replay so both render the raw trace identically.
+    function renderPhase(label, detail) {
+      const el = addBubble("phase", label || "");
+      if (detail) {
+        const d = document.createElement("span");
+        d.className = "phase-detail";
+        d.textContent = " · " + detail;
+        el.appendChild(d);
+      }
+      return el;
+    }
+
     ws.onmessage = (event) => {
       const frame = JSON.parse(event.data);
       // Blocks are appended in arrival order (thinking -> tool -> answer, possibly several
@@ -548,13 +561,7 @@
       } else if (frame.type === "phase") {
         // Verbose trace: close the previous phase's streamed bubble and start a labeled section.
         finalizeStreaming();
-        const el = addBubble("phase", frame.label || "");
-        if (frame.detail) {
-          const d = document.createElement("span");
-          d.className = "phase-detail";
-          d.textContent = " · " + frame.detail;
-          el.appendChild(d);
-        }
+        renderPhase(frame.label, frame.detail);
       } else if (frame.type === "message") {
         addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text);
         if (!frame.proactive) setProcessing(false);  // a reactive message ends the turn (e.g. "(stopped)" / error)
@@ -581,6 +588,8 @@
           else if (item.type === "tool") addBubble("tool", toolLine(item.name, item.arguments));
           else if (item.type === "loop") addBubble("loop", item.text || "");
           else if (item.type === "subagent") renderSubagent(item);
+          else if (item.type === "phase") renderPhase(item.label, item.detail);
+          else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text);
           else if (item.type === "message") addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text);
         }
         autoscroll();

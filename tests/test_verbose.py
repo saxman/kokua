@@ -96,13 +96,16 @@ async def test_verbose_no_reviewers_streams_phases_and_commits(tmp_path):
     assert [label for label, _ in channel.phases] == ["Planner", "Executor"]
     assert all(show for show, _ in channel.streamed)  # every call streamed visibly (show_answer=True)
     assert channel.done == 1
-    # Clean transcript: the user's words + the final answer (intermediate trace not persisted).
+    # Clean transcript: the user's words + the final answer (only the final pair is committed).
     msgs = assistant._agent.model_client.messages
     assert msgs[-2] == {"role": "user", "content": "do X"}
     assert msgs[-1] == {"role": "assistant", "content": "THE ANSWER"}
+    # The raw trace is persisted for reload: each phase with its streamed text.
+    segments = next(iter(assistant._session.metadata["trace"].values()))
+    assert [(s["label"], s["text"]) for s in segments] == [("Planner", "THE PLAN"), ("Executor", "THE ANSWER")]
 
 
-async def test_verbose_plan_review_streams_and_replans(tmp_path, monkeypatch):
+async def test_verbose_plan_review_streams_and_records_trace(tmp_path, monkeypatch):
     _patch_reviewer(monkeypatch, "plan_review", [REJECT, APPROVE])
     channel = VerboseChannel()
     client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])  # plan, replan, executor
@@ -115,10 +118,16 @@ async def test_verbose_plan_review_streams_and_replans(tmp_path, monkeypatch):
     labels = [label for label, _ in channel.phases]
     assert labels.count("Plan reviewer") == 2  # reject then approve
     assert labels.count("Planner") == 2  # initial + one replan
-    assert [e["status"] for e in channel.subagent] == ["rejected", "approved"]
+    assert channel.subagent == []  # verbose mode shows the raw prose, not summary cards
     assert channel.done == 1
-    # Verdicts recorded for reload replay.
-    assert assistant._session.metadata.get("subagent")
+    # The full raw trace is persisted for reload (no summary verdicts).
+    assert "subagent" not in assistant._session.metadata
+    segments = next(iter(assistant._session.metadata["trace"].values()))
+    assert [s["label"] for s in segments] == ["Planner", "Plan reviewer", "Planner", "Plan reviewer", "Executor"]
+    # Each reviewer's streamed prose is captured (not just a verdict); the last phase holds the answer.
+    reviewer_texts = [s["text"] for s in segments if s["label"] == "Plan reviewer"]
+    assert reviewer_texts == ["plan_review review reasoning", "plan_review review reasoning"]
+    assert segments[-1] == {"label": "Executor", "detail": "carrying out the plan", "text": "ANSWER"}
 
 
 async def test_verbose_result_review_streams_every_version(tmp_path, monkeypatch):
@@ -139,6 +148,11 @@ async def test_verbose_result_review_streams_every_version(tmp_path, monkeypatch
     assert "ANS1" in streamed_texts and "ANS2" in streamed_texts
     msgs = assistant._agent.model_client.messages
     assert msgs[-1] == {"role": "assistant", "content": "ANS2"}
+    # The persisted trace captures both executor versions and both reviewer rounds, so reload shows all.
+    segments = next(iter(assistant._session.metadata["trace"].values()))
+    assert [s["label"] for s in segments] == ["Planner", "Executor", "Result reviewer", "Executor", "Result reviewer"]
+    assert [s["text"] for s in segments if s["label"] == "Executor"] == ["ANS1", "ANS2"]
+    assert channel.subagent == []  # no summary cards in verbose mode
 
 
 async def test_show_reasoning_without_phase_channel_uses_normal_path(tmp_path):

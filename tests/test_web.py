@@ -215,6 +215,31 @@ def test_conversation_to_frames_omits_subagent_by_default():
     assert not any(i["type"] == "subagent" for i in items)
 
 
+def test_conversation_to_frames_replays_verbose_trace_not_committed_answer():
+    # A verbose turn persists its raw trace; reload replays phase + reasoning items and must NOT also
+    # emit the committed assistant message (the trace's last Executor phase already holds the answer).
+    messages = [{"role": "user", "content": "do X"}, {"role": "assistant", "content": "THE ANSWER"}]
+    trace = {
+        "0": [
+            {"label": "Planner", "detail": "drafting a plan", "text": "THE PLAN"},
+            {"label": "Plan reviewer", "detail": "round 1", "text": "looks good"},
+            {"label": "Executor", "detail": "carrying out the plan", "text": "THE ANSWER"},
+        ]
+    }
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True, trace=trace)
+    assert items == [
+        {"type": "user", "text": "do X"},
+        {"type": "phase", "label": "Planner", "detail": "drafting a plan"},
+        {"type": "reasoning", "text": "THE PLAN"},
+        {"type": "phase", "label": "Plan reviewer", "detail": "round 1"},
+        {"type": "reasoning", "text": "looks good"},
+        {"type": "phase", "label": "Executor", "detail": "carrying out the plan"},
+        {"type": "reasoning", "text": "THE ANSWER"},
+    ]
+    # No summary card and no duplicated final-answer message.
+    assert not any(i["type"] in ("subagent", "message") for i in items)
+
+
 async def test_web_channel_send_approval_request_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)

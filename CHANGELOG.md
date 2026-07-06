@@ -86,14 +86,18 @@ installable, modular application.
   turn into a labeled, streamed trace -- planner, each plan reviewer, executor, each result reviewer, and
   every revision stream their thinking + output live under phase headers, and every intermediate plan and
   result version is shown. Reviewers stream a free-text prose assessment (readable, and their thinking when
-  the model emits it) and then a typed verdict card. It overrides result review's "hide until vetted" gate
-  (you see every version); only the final approved answer is committed to the transcript. Thinking is
-  model-dependent (adaptive models may skip it on easy prompts).
-- **Sub-agent activity in the web UI**: the adversarial reviewers now show up in the chat stream as
-  their own cards -- "Plan reviewer / Result reviewer -- reviewing..." that update in place to
+  the model emits it). It overrides result review's "hide until vetted" gate (you see every version); only
+  the final approved answer is committed to the transcript. Thinking is model-dependent (adaptive models
+  may skip it on easy prompts). The whole raw trace (each phase's label + streamed text) is now recorded
+  per turn in `session.metadata["trace"]` and replayed on reload, so a reloaded verbose turn shows the
+  same raw output it did live -- not a summary. Verbose turns show only this raw trace; they do not emit
+  the summary reviewer cards below.
+- **Sub-agent activity in the web UI** (non-verbose turns): the adversarial reviewers show up in the chat
+  stream as their own cards -- "Plan reviewer / Result reviewer -- reviewing..." that update in place to
   approved / rejected (with the issues) -- so the otherwise-silent reviewer pauses are visible. Added
   via a generic `subagent` WebSocket frame (no change to the model conversation schema); reviewer
-  verdicts are recorded per turn in `session.metadata` and replayed in order on reload.
+  verdicts are recorded per turn in `session.metadata` and replayed in order on reload. (With the verbose
+  trace on, the raw streamed reasoning replaces these cards.)
 - **Tool-using reviewers**: the adversarial reviewers are now tool-enabled agents rather than a single
   tool-less call. Each runs a bounded tool-calling assessment over a curated verification toolset
   (`review.REVIEWER_TOOLS`: current date/time, web lookup, and computation) and then extracts the typed
