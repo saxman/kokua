@@ -103,6 +103,13 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         "user-provided documents. Default: on (use --no-memory to disable).",
     )
     parser.add_argument(
+        "--subagents",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Let the assistant delegate independent subtasks to fresh, isolated sub-agents via a "
+        "spawn_subagent tool. Default: on (use --no-subagents to disable for this run).",
+    )
+    parser.add_argument(
         "--confirm-tools",
         default=None,
         metavar="NAMES",
@@ -150,6 +157,7 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
     take("mcp_bearer", args.mcp_bearer)
     take("memory", args.memory)
     take("load_plugins", args.plugins)
+    take("subagents", args.subagents)
     take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
     take("frontend", args.frontend)
     take("host", args.host)

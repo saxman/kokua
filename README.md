@@ -3,7 +3,8 @@
 **Help, assistance** (Hawaiian). A hackable, modular personal-assistant application (OpenClaw / Hermes Agent
 style) built on the [AIMU](https://github.com/saxman/aimu) library. Kokua runs an always-on assistant
 that chats with you, takes proactive actions on a schedule, authors and runs its own skills, connects to
-remote tool services, and remembers facts and documents across conversations. Front ends and tool-packs
+remote tool services, delegates independent subtasks to isolated sub-agents, and remembers facts and
+documents across conversations. Front ends and tool-packs
 are **plugins**: you extend Kokua by installing modules, not by editing the core.
 
 Kokua began as AIMU's `examples/personal-assistant/` and grows it into a real application.
@@ -123,7 +124,7 @@ kokua --list-tool-packs    # example, pdf, + any installed plugins
 ```
 
 Useful flags: `--tools web,fs,compute,misc` (AIMU built-in tool groups), `--mcp <url>` (repeatable, connect
-a remote MCP server; `--mcp-bearer` for auth), `--no-memory`, `--no-plugins`, `--system`, `--config <path>`,
+a remote MCP server; `--mcp-bearer` for auth), `--no-memory`, `--no-plugins`, `--no-subagents`, `--system`, `--config <path>`,
 `--host` / `--port` (web).
 
 ### Configuration file

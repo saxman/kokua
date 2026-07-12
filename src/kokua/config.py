@@ -25,6 +25,17 @@ DEFAULT_SYSTEM_MESSAGE = (
     "machine, so only automate what the user asked for."
 )
 
+# Appended to the system message when sub-agents are enabled, so the model actually delegates (without
+# explicit direction the tool sits unused). Each spawn is a fresh, context-free agent, so the guidance
+# stresses giving it a complete, self-contained task.
+SUBAGENT_GUIDANCE = (
+    " For a request that splits into independent subtasks, call `spawn_subagent` to delegate each to a "
+    "fresh sub-agent with its own isolated context, then synthesize their answers. A sub-agent shares no "
+    "history with you, so give it a complete, self-contained task. Emit several `spawn_subagent` calls "
+    "when subtasks are independent. Do the work yourself when it is small or must build on the "
+    "conversation so far."
+)
+
 DEFAULT_REMINDER_TEXT = "Proactively check in with the user with one short, useful suggestion for their day."
 
 # Appended to the system message when memory is enabled, so the model actually uses the two stores
@@ -77,6 +88,9 @@ class AssistantConfig:
     memory: bool = True
     # Load tool-pack plugins discovered via the "kokua.tools" entry-point group.
     load_plugins: bool = True
+    # Sub-agents: give the assistant a spawn_subagent tool so it can delegate an independent subtask to
+    # a fresh, isolated agent (its own context/history) and get back a single answer. On by default.
+    subagents: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
     confirm_tools: list[str] = field(default_factory=lambda: ["add_skill_script", "add_mcp_server", "execute_python"])

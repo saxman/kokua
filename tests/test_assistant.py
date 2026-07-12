@@ -130,6 +130,20 @@ async def test_assistant_tools_none_omits_builtins(tmp_path):
     assert {"author_skill", "add_skill_script", "add_mcp_server"} <= names
 
 
+async def test_assistant_wires_subagent_tool_by_default(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    names = {fn.__name__ for fn in assistant._agent.tools}
+    assert "spawn_subagent" in names
+
+
+async def test_assistant_subagents_flag_omits_tool(tmp_path):
+    assistant = await Assistant.create(
+        _config(tmp_path, subagents=False), FakeChannel(), client=MockAsyncModelClient([])
+    )
+    names = {fn.__name__ for fn in assistant._agent.tools}
+    assert "spawn_subagent" not in names
+
+
 async def test_assistant_unknown_tool_group_raises(tmp_path):
     with pytest.raises(ValueError, match="unknown tool group"):
         await Assistant.create(_config(tmp_path, tools=["bogus"]), FakeChannel(), client=MockAsyncModelClient([]))

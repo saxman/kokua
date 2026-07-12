@@ -26,12 +26,13 @@ from aimu.aio import Channel, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
 from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.sessions import Session, TinyDBSessionStore
+from aimu.aio.tools.builtin import make_async_subagent_tool
 from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_script_tool
 from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
 from . import mcp_registry, review, runtime_settings
-from .config import MEMORY_GUIDANCE, AssistantConfig
+from .config import MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, AssistantConfig
 from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
 
@@ -444,6 +445,7 @@ class Assistant:
             if stored.get("model"):
                 config.model = stored["model"]
             system = config.system_message + (MEMORY_GUIDANCE if config.memory else "")
+            system += SUBAGENT_GUIDANCE if config.subagents else ""
             client = aio.client(config.model, system=system)
 
         # Snapshot the provider's built-in generate kwargs, then layer config.toml + persisted runtime
@@ -482,6 +484,16 @@ class Assistant:
         # the SkillAgent re-appends its skills-server tools each run.
         connections: list[_ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
+        builtin_tools = _resolve_builtin_tools(config.tools)
+
+        # Sub-agents (on by default): a spawn_subagent tool the assistant can call to delegate an
+        # independent subtask to a fresh, isolated agent and get back a single answer. Each spawn clones
+        # the active model and gets the same built-in tool groups (web/fs/compute/misc) so it can do real
+        # work; the parent-only stateful tools (memory, skills, MCP management) are deliberately withheld.
+        # The parent tool loop stays sequential (concurrent_tool_calls off) because the approval gate
+        # tracks one pending approval at a time; multiple spawns in a single turn therefore run serially.
+        subagent_tools = [make_async_subagent_tool(client.model, tools=builtin_tools)] if config.subagents else []
+
         agent.tools = [
             author_skill,
             make_skill_script_tool(agent, manager, config.skills_dir),
@@ -494,7 +506,8 @@ class Assistant:
             ),
             *memory_tools,
             *plugin_tools,
-            *_resolve_builtin_tools(config.tools),
+            *subagent_tools,
+            *builtin_tools,
         ]
 
         # Reconnect MCP servers at boot so their tools are available without re-adding them: first
@@ -660,6 +673,7 @@ class Assistant:
         client on the next run. Raises (leaving the old client in place) if the model can't be built.
         """
         system = self._config.system_message + (MEMORY_GUIDANCE if self._config.memory else "")
+        system += SUBAGENT_GUIDANCE if self._config.subagents else ""
         new_client = aio.client(model, system=system)  # build first; only swap on success
         self._agent.model_client = new_client
         self._agent.restore(self._session.messages)

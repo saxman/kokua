@@ -19,6 +19,9 @@ memory = true
 # Discover tool-pack plugins via the "kokua.tools" entry-point group.
 load_plugins = true
 
+# Let the assistant delegate independent subtasks to fresh, isolated sub-agents (spawn_subagent tool).
+subagents = true
+
 [display]
 # Stream the model's reasoning / tool calls into the channel. The web settings panel toggles these
 # at runtime; a change there persists to data/runtime-settings.json and overrides these defaults.
