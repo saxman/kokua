@@ -31,7 +31,7 @@ from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_scri
 from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
-from . import mcp_registry, review, runtime_settings
+from . import images, mcp_registry, review, runtime_settings
 from .config import MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, AssistantConfig
 from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
@@ -346,6 +346,62 @@ def _derive_title(messages: list[dict]) -> Optional[str]:
     return None
 
 
+def _map_image_block_urls(messages: list[dict], transform) -> list[dict]:
+    """Return a copy of *messages* with each ``image_url`` block's url passed through *transform*.
+
+    ``transform`` returns a replacement url, or ``None`` to leave the block unchanged. Only messages that
+    actually contain an image_url block are copied; the rest are shared by reference (cheap, safe: the
+    caller never mutates in place)."""
+    out: list[dict] = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list) or not any(
+            isinstance(b, dict) and b.get("type") == "image_url" for b in content
+        ):
+            out.append(message)
+            continue
+        new_content = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "image_url":
+                url = block.get("image_url", {}).get("url", "")
+                replacement = transform(url)
+                if replacement is not None:
+                    block = {**block, "image_url": {**block["image_url"], "url": replacement}}
+            new_content.append(block)
+        out.append({**message, "content": new_content})
+    return out
+
+
+def _compact_message_images(messages: list[dict], images_path) -> list[dict]:
+    """Rewrite inline base64 image data URLs to on-disk ``/images/<hash>`` references (for persistence).
+
+    Keeps ``sessions.json`` small: the bytes are written under ``images_path`` (content-addressed) and the
+    stored message keeps only the short reference. A url that is already a reference or an http URL is left
+    as-is."""
+
+    def to_reference(url: str):
+        if url.startswith("data:"):
+            return images.save_data_url(images_path, url)
+        return None
+
+    return _map_image_block_urls(messages, to_reference)
+
+
+def _expand_message_images(messages: list[dict], images_path) -> list[dict]:
+    """Rewrite ``/images/<name>`` references back to base64 data URLs (before restoring into the agent).
+
+    The model request must carry pixels (a localhost /images URL is not fetchable by the provider), so a
+    reference is re-read from disk here. A reference whose file is missing is left unchanged rather than
+    crashing the restore."""
+
+    def to_data_url(url: str):
+        if images.is_reference(url):
+            return images.reference_to_data_url(images_path, url)
+        return None
+
+    return _map_image_block_urls(messages, to_data_url)
+
+
 def _active_session(store: TinyDBSessionStore) -> Session:
     """The most-recently-updated session, creating a fresh empty one if the store is empty."""
     keys = store.list_keys()
@@ -541,7 +597,7 @@ class Assistant:
         store = TinyDBSessionStore(str(config.sessions_path))
         session = _active_session(store)
         if session.messages:
-            agent.restore(session.messages)
+            agent.restore(_expand_message_images(session.messages, config.images_path))
 
         scheduler = Scheduler()
         assistant = cls(agent, channel, scheduler, store, session, config)
@@ -600,7 +656,7 @@ class Assistant:
             session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
             self._store.save(session)
             self._session = session
-            self._agent.restore(session.messages)
+            self._agent.restore(_expand_message_images(session.messages, self._config.images_path))
         return session.key
 
     async def select_conversation(self, conversation_id: str) -> None:
@@ -608,7 +664,7 @@ class Assistant:
         await self._cancel_current_turn()
         async with self._lock:
             self._session = self._store.get(conversation_id)
-            self._agent.restore(self._session.messages)
+            self._agent.restore(_expand_message_images(self._session.messages, self._config.images_path))
 
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation. If it is the active one, switch to the most-recently-updated
@@ -620,7 +676,7 @@ class Assistant:
             self._store.delete(conversation_id)
             if deleting_active:
                 self._session = _active_session(self._store)
-                self._agent.restore(self._session.messages)
+                self._agent.restore(_expand_message_images(self._session.messages, self._config.images_path))
 
     def current_settings(self) -> dict:
         """The effective runtime settings for the web panel to display: model, prefs, generate kwargs."""
@@ -676,7 +732,7 @@ class Assistant:
         system += SUBAGENT_GUIDANCE if self._config.subagents else ""
         new_client = aio.client(model, system=system)  # build first; only swap on success
         self._agent.model_client = new_client
-        self._agent.restore(self._session.messages)
+        self._agent.restore(_expand_message_images(self._session.messages, self._config.images_path))
         self._config.model = model
         self._base_generate_kwargs = dict(new_client.default_generate_kwargs)
 
@@ -1142,7 +1198,9 @@ class Assistant:
     def _persist(self) -> bool:
         """Snapshot the agent's messages onto the active session and save. Returns True if a title
         was just derived (first user message), so a caller can refresh the conversation list."""
-        messages = [dict(m) for m in self._agent.model_client.messages]
+        messages = _compact_message_images(
+            [dict(m) for m in self._agent.model_client.messages], self._config.images_path
+        )
         self._session.messages = messages
         title_set = False
         if not self._session.metadata.get("title"):

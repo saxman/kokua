@@ -124,6 +124,14 @@ class AssistantConfig:
         return self.data_dir / "downloads"
 
     @property
+    def images_path(self) -> Path:
+        """Uploaded and generated images the web UI serves at /images. Sessions store only a
+        ``/images/<name>`` reference into this folder (never inline base64), so ``sessions.json`` stays
+        small; the bytes are re-read here and base64-inlined only when a turn is sent to the model. Kept
+        out of ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at startup."""
+        return self.data_dir / "images"
+
+    @property
     def mcp_servers_path(self) -> Path:
         """Where runtime-added MCP servers are recorded so they reconnect across restarts."""
         return self.data_dir / "mcp-servers.json"

@@ -33,6 +33,12 @@ show_tools = true
 # (image, audio, speech, transcription) require their AIMU_*_MODEL env var.
 groups = ["web", "fs", "compute", "misc"]
 
+# Images: the assistant reads images you attach (web upload / paste, or the CLI `/attach <path>`
+# command); a vision-capable model is needed (Claude models qualify). It can also generate images when
+# the AIMU_IMAGE_MODEL env var is set (e.g. "gemini:nano-banana" or a HuggingFace diffusers "hf:<repo>");
+# without it, no image-generation tool is offered. Uploaded and generated images are stored under
+# data/images and served by the web UI at /images; sessions keep only a small reference, not inline data.
+
 [mcp]
 # Remote MCP server URLs to connect at startup.
 servers = []

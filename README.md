@@ -82,6 +82,13 @@ A built-in `pdf` tool-pack gives the assistant a `markdown_to_pdf` tool: ask it 
 PDF and it writes the file to `data/downloads/`. In the web UI the assistant hands back a download link
 (files are served at `/download/<name>`); from the CLI it reports the file path.
 
+**Images.** Attach an image and the assistant reads it (needs a vision-capable model; Claude models
+qualify). In the web UI, use the composer's paperclip or paste an image; from the CLI, run
+`/attach <path>` before your message. The assistant can also generate images when the `AIMU_IMAGE_MODEL`
+env var is set (e.g. `gemini:nano-banana` or a HuggingFace diffusers `hf:<repo>`); without it, no image
+generation tool is offered. Images are stored under `data/images/` and served at `/images/<name>`; a
+conversation keeps only a small reference, so `sessions.json` stays compact.
+
 **Deep planning (per request).** When you ask for it, the assistant drafts an explicit plan before doing
 the work — which tools, skills, and MCP services it will use, what it will web-search for, and where it
 needs to build a skill or connect a new MCP server — then carries it out. Planning is per request, not a
@@ -120,7 +127,7 @@ List what's installed:
 
 ```bash
 kokua --list-frontends     # cli, web, + any installed plugins
-kokua --list-tool-packs    # example, pdf, + any installed plugins
+kokua --list-tool-packs    # example, pdf, image, + any installed plugins
 ```
 
 Useful flags: `--tools web,fs,compute,misc` (AIMU built-in tool groups), `--mcp <url>` (repeatable, connect
@@ -181,6 +188,7 @@ holds an optional `config.toml` and a single `data/` directory for all transient
     memory/            # semantic facts
     documents/         # saved documents (text; scanned by the DocumentStore)
     downloads/         # generated files (e.g. PDFs), served by the web UI at /download
+    images/            # uploaded + generated images, served by the web UI at /images
     runtime-settings.json  # runtime model settings from the web settings panel
 ```
 

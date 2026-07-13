@@ -139,6 +139,15 @@
     /* Per-request planning toggle in the composer: off looks like a plain outlined button; on is filled. */
     #plan-toggle { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
     #plan-toggle.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+    #attach-btn { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
+    /* An inline image, in the composer preview row or a chat bubble. */
+    .bubble.image { padding: 0; background: transparent; border: none; overflow: hidden; }
+    .bubble.image img { max-width: 100%; border-radius: 12px; display: block; }
+    .attach-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px 0; }
+    .attach-previews .chip { position: relative; }
+    .attach-previews img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }
+    .attach-previews .remove { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0;
+      border-radius: 50%; font-size: 0.8em; line-height: 20px; background: var(--muted); color: var(--accent-fg); }
     .header-actions { display: flex; gap: 8px; }
     #settings-btn { background: transparent; border: 1px solid rgba(255, 255, 255, 0.3); color: var(--header-fg);
       border-radius: 8px; padding: 4px 10px; font-size: 1em; line-height: 1; cursor: pointer; }
@@ -173,7 +182,10 @@
         </span>
       </header>
       <div id="log"></div>
+      <div id="attach-previews" class="attach-previews hidden"></div>
       <form id="form">
+        <input id="image-input" type="file" accept="image/*" multiple hidden />
+        <button id="attach-btn" type="button" title="Attach image">📎</button>
         <input id="msg" autocomplete="off" placeholder="Message your assistant..." autofocus />
         <button id="plan-toggle" type="button" title="Plan this request before acting" aria-pressed="false">Plan</button>
         <button id="send" type="submit">Send</button>
@@ -246,6 +258,9 @@
     const sendBtn = document.getElementById("send");
     const stopBtn = document.getElementById("stop");
     const planToggle = document.getElementById("plan-toggle");
+    const attachBtn = document.getElementById("attach-btn");
+    const imageInput = document.getElementById("image-input");
+    const attachPreviews = document.getElementById("attach-previews");
     const convList = document.getElementById("conv-list");
     const newConvBtn = document.getElementById("new-conv");
 
@@ -422,6 +437,20 @@
 
     function notice(text) { addBubble("notice", text); }
 
+    // An image in the chat: an uploaded image echoed under the user's turn, or one the assistant
+    // produced/surfaced. `src` is a /images/<name> reference (server route) or a data: URL (local echo).
+    function addImageBubble(src, cls) {
+      const el = document.createElement("div");
+      el.className = "bubble image " + (cls || "assistant");
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = "image";
+      el.appendChild(img);
+      log.appendChild(el);
+      autoscroll();
+      return el;
+    }
+
     // --- Markdown rendering (vendored marked + DOMPurify) -------------------------------------
     // marked parses full GFM (incl. tables); DOMPurify sanitizes its HTML, since the assistant and
     // tool output are untrusted. Force links to open safely. If the libs failed to load, fall back
@@ -562,6 +591,10 @@
         // Verbose trace: close the previous phase's streamed bubble and start a labeled section.
         finalizeStreaming();
         renderPhase(frame.label, frame.detail);
+      } else if (frame.type === "image") {
+        // A generated image finished (or the assistant surfaced one). Float it below any open answer.
+        thinkingBlock = null;
+        addImageBubble(frame.url, "assistant");
       } else if (frame.type === "message") {
         addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text);
         if (!frame.proactive) setProcessing(false);  // a reactive message ends the turn (e.g. "(stopped)" / error)
@@ -584,6 +617,7 @@
         stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
         for (const item of frame.items) {
           if (item.type === "user") addBubble("user", item.text);
+          else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user");
           else if (item.type === "thinking") addBubble("thinking", item.text);
           else if (item.type === "tool") addBubble("tool", toolLine(item.name, item.arguments));
           else if (item.type === "loop") addBubble("loop", item.text || "");
@@ -700,15 +734,64 @@
       input.focus();
     });
 
+    // Images staged for the next message, each {name, dataUrl}. Read client-side, sent inline in an
+    // "input" frame; the server saves them to disk and hands the model the files.
+    let attached = [];
+    attachBtn.addEventListener("click", () => imageInput.click());
+    imageInput.addEventListener("change", () => { addFiles(imageInput.files); imageInput.value = ""; });
+    // Pasting an image into the message box attaches it too (screenshots, copied images).
+    input.addEventListener("paste", (e) => {
+      const files = [...(e.clipboardData?.items || [])].filter(i => i.type.startsWith("image/")).map(i => i.getAsFile());
+      if (files.length) { e.preventDefault(); addFiles(files); }
+    });
+
+    function addFiles(fileList) {
+      for (const file of fileList) {
+        if (!file || !file.type.startsWith("image/")) continue;
+        const reader = new FileReader();
+        reader.onload = (ev) => { attached.push({ name: file.name, dataUrl: ev.target.result }); renderPreviews(); };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function renderPreviews() {
+      attachPreviews.innerHTML = "";
+      attachPreviews.classList.toggle("hidden", attached.length === 0);
+      attached.forEach((item, i) => {
+        const chip = document.createElement("div");
+        chip.className = "chip";
+        const img = document.createElement("img");
+        img.src = item.dataUrl;
+        img.alt = item.name;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "remove";
+        remove.textContent = "×";
+        remove.title = "Remove";
+        remove.addEventListener("click", () => { attached.splice(i, 1); renderPreviews(); });
+        chip.appendChild(img);
+        chip.appendChild(remove);
+        attachPreviews.appendChild(chip);
+      });
+    }
+
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       const text = input.value.trim();
-      if (!text || ws.readyState !== WebSocket.OPEN) return;
+      if ((!text && attached.length === 0) || ws.readyState !== WebSocket.OPEN) return;
       stickToBottom = true;  // sending snaps back to the bottom to follow the reply
       subagentCards = {};  // new turn: reviewer card ids (plan-review-0, ...) start fresh
-      addBubble("user", text);  // show the user's own words, not the /plan wrapper
-      const outgoing = planNext && !/^\/plan(\s|$)/i.test(text) ? "/plan " + text : text;
-      ws.send(outgoing);
+      if (text) addBubble("user", text);  // show the user's own words, not the /plan wrapper
+      for (const item of attached) addImageBubble(item.dataUrl, "user");  // echo attachments locally
+      if (attached.length) {
+        // An image turn carries its own frame shape (text + data URLs); /plan wrapping doesn't apply.
+        ws.send(JSON.stringify({ type: "input", text, images: attached.map(a => a.dataUrl) }));
+        attached = [];
+        renderPreviews();
+      } else {
+        const outgoing = planNext && !/^\/plan(\s|$)/i.test(text) ? "/plan " + text : text;
+        ws.send(outgoing);
+      }
       input.value = "";
       setProcessing(true);  // a turn is now being processed; allow stopping it
     });

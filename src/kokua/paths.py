@@ -53,3 +53,7 @@ def memory_dir() -> Path:
 
 def documents_dir() -> Path:
     return data_dir() / "documents"
+
+
+def images_dir() -> Path:
+    return data_dir() / "images"

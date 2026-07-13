@@ -21,6 +21,7 @@ from starlette.responses import FileResponse, HTMLResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from .. import images
 from ..assistant import Assistant
 from ..channels.web import WebChannel
 from ..config import AssistantConfig
@@ -67,6 +68,24 @@ def _parse_control(raw: str) -> Optional[dict]:
     return None
 
 
+def _parse_image_input(raw: str) -> Optional[tuple[str, list[str]]]:
+    """Return ``(text, image_data_urls)`` for an ``{"type": "input", ...}`` frame carrying images, else None.
+
+    An input frame without images returns None so it falls through to the ordinary text path (the page
+    only sends this frame shape when at least one image is attached)."""
+    try:
+        obj = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not (isinstance(obj, dict) and obj.get("type") == "input"):
+        return None
+    images_field = obj.get("images")
+    if not isinstance(images_field, list) or not images_field:
+        return None
+    urls = [u for u in images_field if isinstance(u, str)]
+    return str(obj.get("text", "")), urls
+
+
 def build_app(config: AssistantConfig, *, client=None) -> Starlette:
     """Build the Starlette app serving the chat page (``/``) and the WebSocket (``/ws``).
 
@@ -108,6 +127,17 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
             return Response(status_code=404)
         return FileResponse(path, filename=name)
 
+    async def image(request):
+        # Serve an uploaded or generated image from the images folder. Same traversal guard as
+        # download; nothing outside images_path is reachable. Referenced by the page as /images/<name>.
+        name = request.path_params["name"]
+        if name != Path(name).name:
+            return Response(status_code=404)
+        path = config.images_path / name
+        if not path.is_file():
+            return Response(status_code=404)
+        return FileResponse(path)
+
     async def ws_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
         if busy["active"]:
@@ -126,12 +156,26 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         await channel.send_settings(assistant.current_settings())
 
         async def pump() -> None:
-            # Conversation controls (new/select/delete) are handled here and never reach the channel; all
+            # Conversation controls (new/select/delete) are handled here and never reach the channel; an
+            # "input" frame carrying attached images is decoded to on-disk files and fed with its text; all
             # other frames (chat, "/stop", approval "y"/"n") are fed to the channel as today. On
             # disconnect, the sentinel ends receive(), stopping the scheduler and assistant.run().
             try:
                 while True:
                     raw = await websocket.receive_text()
+                    image_input = _parse_image_input(raw)
+                    if image_input is not None:
+                        text, data_urls = image_input
+                        # Save each upload to disk, then hand the agent the filesystem paths (AIMU
+                        # base64-inlines them for the model; persistence later compacts them back to the
+                        # same /images/<hash> reference). Undecodable data URLs are dropped.
+                        paths = []
+                        for data_url in data_urls:
+                            reference = images.save_data_url(config.images_path, data_url)
+                            if reference:
+                                paths.append(str(images.reference_to_path(config.images_path, reference)))
+                        await channel.feed_input(text, paths)
+                        continue
                     control = _parse_control(raw)
                     if control is None:
                         await channel.feed(raw)
@@ -174,6 +218,7 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         routes=[
             Route("/", index),
             Route("/download/{name:str}", download),  # generated files (e.g. markdown_to_pdf PDFs)
+            Route("/images/{name:str}", image),  # uploaded + generated images
             Route("/fonts/{name:str}", static_font),  # vendored KaTeX woff2 fonts
             Route("/{name:str}", static_asset),  # vendored marked / purify / katex js + css
             WebSocketRoute("/ws", ws_endpoint),

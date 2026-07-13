@@ -53,7 +53,15 @@ TOML file into schema-validated `AssistantConfig` overrides. `cli.py`'s `resolve
 defers to the file/default. `config.example.toml` documents every key at its default.
 
 **State lives under `~/.kokua`** (override with `KOKUA_HOME`); `paths.py` owns all locations. `data/`
-holds `sessions.json` (conversations), `skills/`, `memory/`, `documents/`, and `mcp-servers.json`.
+holds `sessions.json` (conversations), `skills/`, `memory/`, `documents/`, `downloads/`, `images/`, and
+`mcp-servers.json`.
+
+**Images.** `images.py` owns the on-disk store and the `/images/<name>` reference. Input images (web
+upload/paste, or CLI `/attach`) and generated images (the `image` tool-pack, gated on `AIMU_IMAGE_MODEL`)
+live under `images_path`; the web server serves them at `/images/<name>`. Non-obvious: AIMU inlines a
+base64 data URL into stored message content, but a persisted session must stay small and a localhost URL
+isn't fetchable by the provider, so `assistant._compact_message_images` rewrites data URLs to references
+on persist and `_expand_message_images` re-inlines them before each `agent.restore`.
 
 **MCP servers** come from config `[mcp]` at startup or the runtime `add_mcp_server` tool. `mcp_auth.py`
 (`ChatOAuth`) handles OAuth by posting the authorization link into the chat and persisting tokens to

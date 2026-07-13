@@ -8,6 +8,8 @@ replay, and tool-call approval prompts. Each is sent through the inherited publi
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Union
 
 from aimu.aio.channels.base import ChannelMessage
@@ -21,6 +23,8 @@ from aimu.models import (
     StreamingContentType,
 )
 
+from ..images import ROUTE_PREFIX
+
 # User-role turns the agent loop injects between tool-calling iterations. They are byte-for-byte
 # ordinary user messages except for this provenance tag, so display keys off the tag alone.
 _LOOP_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
@@ -33,6 +37,41 @@ def _text_of(content: Any) -> str:
     if isinstance(content, list):
         return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
     return ""
+
+
+# A stored image reference: our own /images/<name> route, the compacted form persisted in place of inline
+# base64 (see images.py / assistant._compact_images). Bounded to a bare filename (no slashes) so the match
+# can't run past the reference into surrounding prose.
+_IMAGE_REF_RE = re.compile(r"/images/[\w.\-]+")
+
+
+def _image_frame_for(chunk: StreamChunk) -> Optional[dict]:
+    """Return an ``image`` frame for a final IMAGE_GENERATING chunk, else None.
+
+    The chunk's ``result`` is the absolute path the image client wrote (the image toolpack directs it into
+    ``images_path``); the page loads it by its /images/<name> reference."""
+    if chunk.phase != StreamingContentType.IMAGE_GENERATING:
+        return None
+    content = chunk.content if isinstance(chunk.content, dict) else {}
+    if not content.get("final"):
+        return None
+    result = content.get("result")
+    if not isinstance(result, str):
+        return None
+    return {"type": "image", "url": ROUTE_PREFIX + Path(result).name}
+
+
+def _image_refs_of(content: Any) -> list[str]:
+    """Return the image references in a message's content: image_url block urls plus any /images/ refs in text."""
+    refs: list[str] = []
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "image_url":
+                url = block.get("image_url", {}).get("url")
+                if url:
+                    refs.append(url)
+    refs.extend(_IMAGE_REF_RE.findall(_text_of(content)))
+    return list(dict.fromkeys(refs))  # de-dupe, preserving order
 
 
 def conversation_to_frames(
@@ -71,6 +110,8 @@ def conversation_to_frames(
             text = _text_of(message.get("content"))
             if text:
                 items.append({"type": "user", "text": text})
+            for url in _image_refs_of(message.get("content")):  # uploaded images, replayed under the bubble
+                items.append({"type": "image", "url": url, "from": "user"})
             if str(index) in trace:  # verbose turn: replay the raw trace, not cards
                 for segment in trace[str(index)]:
                     items.append(
@@ -95,11 +136,39 @@ def conversation_to_frames(
             text = _text_of(message.get("content"))
             if text:
                 items.append({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE})
+        elif role == "tool":
+            # Tool results are otherwise not replayed, but a generate_image result carries an /images/
+            # reference the user asked to see, so surface it as an image (regardless of show_tools).
+            for url in _image_refs_of(message.get("content")):
+                items.append({"type": "image", "url": url, "from": "assistant"})
     return items
 
 
 class WebChannel(BaseWebChannel):
     """AIMU's ``WebChannel`` plus Kokua's conversation-sidebar, history-replay, and approval frames."""
+
+    async def feed_input(self, text: str, image_paths: list[str]) -> None:
+        """Enqueue a user turn carrying attached image file paths (the web pump's ``input`` frame).
+
+        Plain chat / ``/stop`` / approval replies still arrive through the base string ``feed``; only a
+        turn with images uses this richer path, so ``receive`` can populate ``ChannelMessage.images``."""
+        await self._inbound.put({"text": text, "images": image_paths})
+
+    async def receive(self) -> AsyncIterator[ChannelMessage]:
+        """Yield inbound turns; a dict item carries attached image paths, a string is a plain text turn.
+
+        Overrides the base (string-only) receive so uploaded images reach the agent. ``None`` remains the
+        socket-closed sentinel."""
+        while True:
+            item = await self._inbound.get()
+            if item is None:
+                return
+            if isinstance(item, dict):
+                yield ChannelMessage(
+                    text=item.get("text", ""), images=item.get("images") or None, sender="web", channel=self.name
+                )
+            else:
+                yield ChannelMessage(text=item, sender="web", channel=self.name)
 
     async def send(
         self,
@@ -145,6 +214,10 @@ class WebChannel(BaseWebChannel):
             elif chunk.phase == StreamingContentType.TOOL_CALLING and self.show_tools:
                 call = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame({"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")})
+            else:
+                image = _image_frame_for(chunk)
+                if image is not None:
+                    await self.send_frame(image)
         return "".join(parts)
 
     async def _mark_loop_boundaries(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
@@ -162,6 +235,9 @@ class WebChannel(BaseWebChannel):
             if chunk.iteration > last_iteration:
                 await self.send_frame({"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT})
                 last_iteration = chunk.iteration
+            image = _image_frame_for(chunk)
+            if image is not None:
+                await self.send_frame(image)
             yield chunk
 
     async def send_conversations(self, items: list[dict]) -> None:

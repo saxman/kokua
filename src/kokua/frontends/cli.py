@@ -1,13 +1,12 @@
-"""The terminal front end: AIMU's `CLIChannel` driving the assistant in the shell."""
+"""The terminal front end: Kokua's `CLIChannel` driving the assistant in the shell."""
 
 from __future__ import annotations
 
 import argparse
 import sys
 
-from aimu.aio import CLIChannel
-
 from ..assistant import Assistant
+from ..channels.cli import CLIChannel
 from ..config import AssistantConfig
 from ..plugins import FrontEnd
 

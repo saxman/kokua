@@ -68,6 +68,17 @@ installable, modular application.
   `GET /download/<name>`, so the assistant can hand back a download link; the tool also returns the
   absolute path for the CLI. (Downloads live in their own folder, not `data/documents/`, so the binary
   PDFs never disturb the DocumentStore, which scans the documents folder as text.)
+- **Image input and output**: attach images and the assistant reads them (vision), and it can generate
+  images. In the web UI, attach via the composer's paperclip or by pasting; thumbnails preview before
+  send and images render inline in the chat (live and on reload). In the CLI, `/attach <path>` stages a
+  local image onto the next message. Vision needs a vision-capable model (Claude models qualify);
+  generation needs the `AIMU_IMAGE_MODEL` env var (e.g. `gemini:nano-banana` or a HuggingFace diffusers
+  `hf:<repo>`), and the built-in `image` tool-pack contributes `generate_image` only when it is set.
+  Uploaded and generated images are stored under `data/images/` (content-addressed) and served at
+  `GET /images/<name>`; a conversation keeps only a short `/images/<name>` reference, so `sessions.json`
+  stays small (the bytes are re-inlined as base64 only when a turn is sent to the model, since a
+  localhost URL is not fetchable by the provider). Like downloads, images live in their own folder so the
+  binary files never disturb the DocumentStore.
 - **Deep planning (per request)**: a planned turn first drafts an explicit plan (which tools/skills/MCP
   services to use, what to web-search for, and where to build a skill via `author_skill` or connect a
   server via `add_mcp_server`) and then executes it. Planning is invoked per request, not as a global
