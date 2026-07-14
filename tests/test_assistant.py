@@ -640,7 +640,15 @@ async def test_denied_gated_tool_does_not_run(tmp_path):
 
 
 async def test_approve_serializes_concurrent_gated_calls(tmp_path):
-    """Two concurrent gated approvals must not clobber each other's pending future."""
+    """Two concurrent gated approvals must not clobber each other's pending future.
+
+    Without the lock the interleaved coroutines both call asyncio.gather concurrently. The first
+    call creates self._pending_approval and yields at the sleep; the second then overwrites it with
+    a fresh future before the first has resolved. When the first finally resolves the original
+    future it set its result on, the second future is never resolved -- deadlock. With the lock the
+    second call waits until the first has fully completed (future resolved, pending_approval cleared)
+    before it acquires the lock, creates its own future, and resolves it safely.
+    """
     cfg = _config(tmp_path, confirm_tools=["execute_python"])
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
@@ -649,7 +657,11 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
 
     async def fake_prompt(name, arguments):
         prompts.append(name)
-        # Resolve the pending approval as soon as it is prompted, approving it.
+        # Yield to the event loop before resolving so the two gathered coroutines can interleave.
+        # Without the lock the second call overwrites self._pending_approval here, causing the
+        # first call to resolve the wrong future and the second to deadlock (or raise
+        # InvalidStateError if its future is resolved twice).
+        await asyncio.sleep(0)
         assistant._pending_approval.set_result(True)
 
     assistant._prompt_approval = fake_prompt
@@ -659,7 +671,7 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
         order.append(tag)
         return result
 
-    results = await asyncio.gather(call("a"), call("b"))
+    results = await asyncio.wait_for(asyncio.gather(call("a"), call("b")), timeout=2.0)
 
     assert results == [True, True]
     assert prompts == ["execute_python", "execute_python"]  # both prompted, one at a time
