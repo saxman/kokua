@@ -639,6 +639,33 @@ async def test_denied_gated_tool_does_not_run(tmp_path):
     assert not (cfg.skills_dir / "disk" / "scripts" / "u.py").exists()
 
 
+async def test_approve_serializes_concurrent_gated_calls(tmp_path):
+    """Two concurrent gated approvals must not clobber each other's pending future."""
+    cfg = _config(tmp_path, confirm_tools=["execute_python"])
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    prompts: list[str] = []
+    order: list[str] = []
+
+    async def fake_prompt(name, arguments):
+        prompts.append(name)
+        # Resolve the pending approval as soon as it is prompted, approving it.
+        assistant._pending_approval.set_result(True)
+
+    assistant._prompt_approval = fake_prompt
+
+    async def call(tag):
+        result = await assistant._approve("execute_python", {"code": tag})
+        order.append(tag)
+        return result
+
+    results = await asyncio.gather(call("a"), call("b"))
+
+    assert results == [True, True]
+    assert prompts == ["execute_python", "execute_python"]  # both prompted, one at a time
+    assert set(order) == {"a", "b"}
+
+
 # --- /stop cancellation -----------------------------------------------------------------------
 
 

@@ -490,6 +490,10 @@ class Assistant:
         # Tool-approval coordination. At most one approval is pending at a time (turns are
         # serialized by self._lock); the serve loop resolves the future with the user's answer.
         self._pending_approval: Optional[asyncio.Future] = None
+        # Serializes the gated-tool approval path so concurrent tool calls (concurrent_tool_calls) can
+        # never have two approvals pending at once (which would clobber self._pending_approval). Only
+        # gated tools acquire it; ungated tools and proactive auto-deny never touch it.
+        self._approval_lock = asyncio.Lock()
         # Plan-review coordination (deep planning mode): while a plan awaits the user's
         # approve/edit/reject, the serve loop resolves the future. Mirrors the approval gate.
         self._pending_plan: Optional[asyncio.Future] = None
@@ -839,19 +843,24 @@ class Assistant:
         Ungated tools pass. A proactive (unprompted) turn auto-denies a gated tool, since no user is
         waiting to confirm and an unprompted full-access call is what approval guards against.
         Otherwise prompt over the channel and await the answer, which the serve loop routes here.
+
+        Gated approvals are serialized by ``self._approval_lock``: with concurrent tool calls a round can
+        invoke several tools at once, but only one approval is ever pending, so the single
+        ``self._pending_approval`` future the serve loop resolves is never clobbered.
         """
         if name not in self._config.confirm_tools:
             return True
         if self._in_proactive:
             return False
-        self._pending_approval = asyncio.get_running_loop().create_future()
-        try:
-            await self._prompt_approval(name, arguments)
-            return await self._pending_approval
-        finally:
-            # Cleared here so a `/stop` that cancels the turn mid-await (raising CancelledError out
-            # of the await) still leaves no stale pending approval.
-            self._pending_approval = None
+        async with self._approval_lock:
+            self._pending_approval = asyncio.get_running_loop().create_future()
+            try:
+                await self._prompt_approval(name, arguments)
+                return await self._pending_approval
+            finally:
+                # Cleared here so a `/stop` that cancels the turn mid-await (raising CancelledError out
+                # of the await) still leaves no stale pending approval.
+                self._pending_approval = None
 
     async def _prompt_approval(self, name: str, arguments: dict) -> None:
         """Ask the user to approve a tool call, however the channel can (web frame vs. plain text)."""
