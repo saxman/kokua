@@ -32,7 +32,7 @@ from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
 from . import images, mcp_registry, runtime_settings
-from .planning import PlanResult, PlanRunner, _bullets
+from .planning import PlanResult, PlanRunner
 from .config import DEFAULT_SUBAGENT_ROLES, MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, AssistantConfig
 from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
@@ -843,11 +843,12 @@ class Assistant:
 
     async def _prompt_plan_review(self, plan_text: str, critique: Optional[list[str]] = None) -> None:
         """Ask the user to review a plan, however the channel can (web frame vs. plain text)."""
+        concerns = "\n".join(f"- {i}" for i in critique) if critique else None
         request = getattr(self._channel, "send_plan_review_request", None)
         if request is not None:
-            await request(plan_text, _bullets(critique) if critique else None)
+            await request(plan_text, concerns)
         else:
-            note = ("\nReviewer's concerns:\n" + _bullets(critique)) if critique else ""
+            note = ("\nReviewer's concerns:\n" + concerns) if concerns else ""
             await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'." + note)
 
     async def _proactive(self) -> None:
