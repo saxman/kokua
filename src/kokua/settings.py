@@ -41,6 +41,27 @@ def _str_list(section: str, key: str, value: list) -> list[str]:
     return list(value)
 
 
+_SUBAGENT_ROLE_KEYS = {"description": str, "groups": list, "system_message": str}
+
+
+def _parse_subagent_role(name: str, spec: Any) -> dict:
+    """Validate one [subagents.roles.<name>] table into a role dict."""
+    if not isinstance(spec, dict):
+        raise ConfigError(f"[subagents.roles.{name}] must be a table")
+    role: dict = {}
+    for key, value in spec.items():
+        expected = _SUBAGENT_ROLE_KEYS.get(key)
+        if expected is None:
+            raise ConfigError(f"unknown config key [subagents.roles.{name}].{key}")
+        if key == "groups":
+            role[key] = _str_list(f"subagents.roles.{name}", key, value)
+        elif not isinstance(value, expected):
+            raise ConfigError(f"[subagents.roles.{name}].{key} must be a {expected.__name__}")
+        else:
+            role[key] = value
+    return role
+
+
 # (section, key) -> (AssistantConfig field, accepted TOML types, human label, optional converter).
 # `bool` is an int subclass, so it is rejected for numeric fields unless explicitly accepted.
 _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
@@ -104,6 +125,23 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
                     raise ConfigError(f"[generation].{key} must be a number, got {type(value).__name__}")
                 overrides.setdefault("generation", {})[key] = value
+            continue
+        # The [subagents] table maps to two fields: `concurrent` (bool) and a nested `roles` table of
+        # role definitions, so it is handled specially like [generation] rather than via _SCHEMA.
+        if section == "subagents":
+            for key, value in entries.items():
+                if key == "concurrent":
+                    if not isinstance(value, bool):
+                        raise ConfigError(f"[subagents].concurrent must be a boolean, got {type(value).__name__}")
+                    overrides["subagents_concurrent"] = value
+                elif key == "roles":
+                    if not isinstance(value, dict):
+                        raise ConfigError("[subagents.roles] must be a table of role definitions")
+                    overrides["subagent_roles"] = {
+                        name: _parse_subagent_role(name, spec) for name, spec in value.items()
+                    }
+                else:
+                    raise ConfigError(f"unknown config key [subagents].{key}")
             continue
         for key, value in entries.items():
             spec = _SCHEMA.get((section, key))

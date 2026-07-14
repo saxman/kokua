@@ -156,6 +156,43 @@ def test_config_init_custom_path(tmp_path):
     assert target.read_text(encoding="utf-8") == settings.example_text()
 
 
+def test_subagents_section_parses_concurrent_and_roles(tmp_path):
+    from kokua import settings
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[subagents]\n"
+        "concurrent = false\n\n"
+        "[subagents.roles.researcher]\n"
+        'groups = ["web"]\n'
+        'description = "Custom researcher."\n\n'
+        "[subagents.roles.dba]\n"
+        'groups = ["compute"]\n'
+        'description = "Database helper."\n'
+        'system_message = "You manage databases."\n',
+        encoding="utf-8",
+    )
+    overrides = settings.load(str(path))
+    assert overrides["subagents_concurrent"] is False
+    roles = overrides["subagent_roles"]
+    assert roles["researcher"] == {"groups": ["web"], "description": "Custom researcher."}
+    assert roles["dba"]["system_message"] == "You manage databases."
+
+
+def test_subagents_unknown_role_key_raises(tmp_path):
+    import pytest
+
+    from kokua import settings
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[subagents.roles.bad]\ngroups = ["web"]\nbogus = 1\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(settings.ConfigError, match="bogus"):
+        settings.load(str(path))
+
+
 def test_shipped_example_loads_cleanly(caplog):
     """The example's active keys must parse without unknown-key or type warnings/errors."""
     _init()
