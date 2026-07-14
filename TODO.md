@@ -37,3 +37,23 @@ Watch-out: CI and mock-only tests run without `../aimu` or a local model availab
 no strictness dial. Expose reviewer `max_iterations` and a `strictness` setting (adjusting the
 reviewer prompt / verdict threshold) through `AssistantConfig` + `config.example.toml`, and thread
 them into `_reviewer_agent` and the plan/result review loops.
+
+## 6. Continue slimming assistant.py: extract MCP connection management
+Follow-up to the PlanRunner extraction (deep-planning moved to `planning.py`). The remaining MCP
+helpers in `assistant.py` (`_ServerConnection`, `_connect_mcp`, `_attach_server`, `make_mcp_tools`,
+`_looks_like_auth_required`) are already free functions but live in the core. Move them to a dedicated
+`mcp.py` module alongside `mcp_auth.py` / `mcp_registry.py`. Near-mechanical: they touch only the
+passed-in agent/connections list, not `Assistant` state.
+
+## 7. Continue slimming assistant.py: extract message/image transcript helpers
+Move the transcript/image helpers out of `assistant.py` into a `messages.py` module (or fold the
+image ones into `images.py`): `_map_image_block_urls`, `_compact_message_images`,
+`_expand_message_images`, `_message_text`, `_derive_title`. These are pure functions with no
+`Assistant` coupling; `tests/test_images.py` already imports `_compact_message_images` /
+`_expand_message_images` directly, so update those imports as part of the move.
+
+## 8. Slim Assistant.create() into builder functions
+`Assistant.create()` still does ~130 lines of tool/MCP/subagent assembly inline. Extract that wiring
+into free builder functions (e.g. a `build.py` with `build_tools(config, agent, ...)` and
+`reconnect_mcp_servers(...)`) so `create()` reads as a short orchestrator and the assembly is testable
+in isolation. Do this after items 6 and 7, since the builders will call into the relocated `mcp.py`.
