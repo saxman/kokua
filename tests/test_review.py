@@ -6,7 +6,8 @@ from pathlib import Path
 
 from helpers import MockAsyncModelClient
 from kokua import review, runtime_settings
-from kokua.assistant import Assistant, _tool_evidence
+from kokua.assistant import Assistant
+from kokua.planning import _tool_evidence
 from kokua.config import AssistantConfig
 from kokua.review import Verdict
 
