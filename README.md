@@ -37,7 +37,7 @@ normal `uv add kokua` / `pip install kokua`.)
 ## Quick Start
 
 ```bash
-kokua --model anthropic:claude-sonnet-4-6 --reminder-seconds 30
+kokua --model ollama:qwen3:8b --reminder-seconds 30
 ```
 
 Omit `--model` to use `AIMU_LANGUAGE_MODEL` or a locally available model. Chat at the prompt; Ctrl-D exits.

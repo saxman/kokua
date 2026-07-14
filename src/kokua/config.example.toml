@@ -4,8 +4,8 @@
 # set here. An unknown key or wrong-typed value is a hard error (startup fails and names the key).
 
 [assistant]
-# Model string, e.g. "anthropic:claude-sonnet-4-6". Unset -> $AIMU_LANGUAGE_MODEL / a local model.
-# model = "anthropic:claude-sonnet-4-6"
+# Model string, e.g. "ollama:qwen3:8b". Unset -> $AIMU_LANGUAGE_MODEL / a local model.
+# model = "ollama:qwen3:8b"
 
 # system_message = "You are a personal assistant running on the user's own machine. ..."
 

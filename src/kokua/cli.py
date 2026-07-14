@@ -48,7 +48,7 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default=None,
-        help="Model string (e.g. 'anthropic:claude-sonnet-4-6'). Defaults to AIMU_LANGUAGE_MODEL "
+        help="Model string (e.g. 'ollama:qwen3:8b'). Defaults to AIMU_LANGUAGE_MODEL "
         "/ a locally available model.",
     )
     parser.add_argument("--system", default=None, help="Override the assistant's system message.")
