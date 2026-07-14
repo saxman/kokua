@@ -467,6 +467,35 @@ def test_ws_get_and_apply_settings(tmp_path):
     assert echoed["values"]["show_tools"] is False
 
 
+def test_ws_reports_model_client_error_and_releases_busy(tmp_path, monkeypatch):
+    import kokua.assistant as assistant_mod
+    from starlette.testclient import TestClient
+
+    def boom(*args, **kwargs):
+        raise ValueError("No model specified and no default could be resolved.")
+
+    # client=None makes each connection build its own via Assistant.create, so it hits aio.client.
+    monkeypatch.setattr(assistant_mod.aio, "client", boom)
+    app = build_app(_config(tmp_path))
+
+    def first_message(ws):
+        while True:
+            frame = ws.receive_json()
+            if frame["type"] == "message":
+                return frame["text"]
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        text = first_message(ws)
+    assert "no default could be resolved" in text
+
+    # The busy guard was released on the failed build, so a second connection is not refused; it
+    # reaches the build path again rather than being told the assistant is busy in another tab.
+    with TestClient(app).websocket_connect("/ws") as ws:
+        text = first_message(ws)
+    assert "busy in another tab" not in text
+    assert "no default could be resolved" in text
+
+
 def test_download_route_serves_documents(tmp_path):
     from starlette.testclient import TestClient
 

@@ -39,6 +39,13 @@ from .plugins import discover_tool_packs
 
 logger = logging.getLogger(__name__)
 
+
+class ModelClientError(RuntimeError):
+    """The model client could not be built: no model resolved (no `AIMU_LANGUAGE_MODEL`, no
+    running local provider) or an invalid model string. Carries AIMU's actionable message so a
+    front end can present it instead of a traceback."""
+
+
 # AIMU's built-in tool subgroups, selectable by name via the --tools flag / AssistantConfig.tools.
 # The generative groups (image/audio/speech/transcription) need their AIMU_*_MODEL env var set and
 # raise at call time otherwise, so they are not in the default set. The default tools are sync; the
@@ -449,7 +456,10 @@ class Assistant:
                 config.model = stored["model"]
             system = config.system_message + (MEMORY_GUIDANCE if config.memory else "")
             system += SUBAGENT_GUIDANCE if config.subagents else ""
-            client = aio.client(config.model, system=system)
+            try:
+                client = aio.client(config.model, system=system)
+            except (ValueError, TypeError) as e:
+                raise ModelClientError(str(e)) from e
 
         # Snapshot the provider's built-in generate kwargs, then layer config.toml + persisted runtime
         # values on top, and apply persisted display prefs. Runs for injected clients (tests) too.

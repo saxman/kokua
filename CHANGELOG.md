@@ -142,5 +142,11 @@ installable, modular application.
   on `aimu.paths.output`.
 - **Strict config parsing**: an unknown key or non-table section in `config.toml` now fails fast with a
   `ConfigError` instead of being warned-about and ignored, so typos and removed keys surface immediately.
+- **Model resolution failures surface cleanly**: with no `model` set, AIMU resolves `AIMU_LANGUAGE_MODEL`,
+  else the first already-running local model (Ollama, then a local OpenAI-compatible server), and never a
+  cloud model. When nothing resolves (or the model string is invalid), `Assistant.create` now raises a
+  `ModelClientError` carrying AIMU's actionable message; the CLI prints it and exits non-zero and the web
+  UI shows it in the chat, instead of a traceback. The web build failure also releases the single-connection
+  guard, so a later connection is not wrongly refused as "busy in another tab".
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,
   plugin discovery), with a vendored async mock model client (no reach into the AIMU repo).

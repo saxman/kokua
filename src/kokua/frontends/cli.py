@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ..assistant import Assistant
+from ..assistant import Assistant, ModelClientError
 from ..channels.cli import CLIChannel
 from ..config import AssistantConfig
 from ..plugins import FrontEnd
@@ -20,7 +20,11 @@ _STARTUP_NOTICE = (
 async def run(config: AssistantConfig, args: argparse.Namespace) -> None:
     print(_STARTUP_NOTICE, file=sys.stderr)
     channel = CLIChannel(show_thinking=config.show_thinking, show_tools=config.show_tools)
-    assistant = await Assistant.create(config, channel)
+    try:
+        assistant = await Assistant.create(config, channel)
+    except ModelClientError as e:
+        print(f"[error] {e}", file=sys.stderr)
+        raise SystemExit(1)
     await assistant.run()
 
 

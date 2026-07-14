@@ -1066,3 +1066,30 @@ async def test_current_settings_reports_effective(tmp_path):
     assert s["model"] == "m1"
     assert s["generate_kwargs"]["temperature"] == 0.7
     assert "show_thinking" in s and "show_tools" in s
+
+
+async def test_create_wraps_unbuildable_client_as_model_client_error(tmp_path, monkeypatch):
+    import kokua.assistant as assistant_mod
+    from kokua.assistant import ModelClientError
+
+    def boom(*args, **kwargs):
+        raise ValueError("No model specified and no default could be resolved.")
+
+    monkeypatch.setattr(assistant_mod.aio, "client", boom)
+    with pytest.raises(ModelClientError, match="no default could be resolved"):
+        await Assistant.create(_config(tmp_path), FakeChannel())
+
+
+def test_cli_frontend_reports_model_client_error(tmp_path, monkeypatch, capsys):
+    from kokua.assistant import ModelClientError
+    from kokua.frontends import cli as cli_frontend
+
+    async def boom(*args, **kwargs):
+        raise ModelClientError("no default could be resolved; set AIMU_LANGUAGE_MODEL")
+
+    monkeypatch.setattr(cli_frontend.Assistant, "create", boom)
+    args = build_arg_parser().parse_args([])
+    with pytest.raises(SystemExit) as exc:
+        asyncio.run(cli_frontend.run(_config(tmp_path), args))
+    assert exc.value.code == 1
+    assert "no default could be resolved" in capsys.readouterr().err

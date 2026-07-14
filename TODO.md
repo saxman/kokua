@@ -23,14 +23,21 @@ first-class key to `AssistantConfig` + `config.example.toml` instead of a bare e
 
 Note: fix may belong upstream in the editable `../aimu` sibling rather than Kokua.
 
-## 4. Change the default model to a local model
-`config.example.toml` already documents the fallback as "$AIMU_LANGUAGE_MODEL / a local model", but
-`AssistantConfig.model` defaults to `None`. Verify what `None` actually resolves to at agent-build
-time, then make a concrete local model the effective default. Update `config.example.toml`, README,
-and tests/mocks.
+## 4. Change the default model to a local model — DONE (2026-07-14)
+Verified that `None` already resolves to a local model, never to Anthropic/cloud: `config.model`
+(default `None`) is passed to `aio.client(None)` (`assistant.py`), which calls AIMU's
+`resolve_default_text_model(include_hf_cache=False)` — `AIMU_LANGUAGE_MODEL` env var, else a running
+Ollama then a local OpenAI-compatible server, else raise; never a cloud provider, never downloads
+weights. So the original "stop defaulting to cloud" concern was unfounded.
 
-Watch-out: CI and mock-only tests run without `../aimu` or a local model available
-(see CLAUDE.md). A local default must not cause a real client to be instantiated at import/build time.
+Chose to keep AIMU's probe-or-raise behavior (a hardcoded default would break whenever that exact
+model is not pulled) and instead (a) document the real resolution order in `config.example.toml`,
+`README.md`, and the `--model` help, and (b) surface the resolution failure cleanly: `Assistant.create`
+wraps the build in `ModelClientError`, the CLI prints it + exits non-zero, and the web UI shows it in
+chat and releases the busy guard, all instead of a traceback. See
+`docs/superpowers/specs/2026-07-14-todo4-local-model-default-design.md`.
+
+Left for item 1: general routing of all config/settings/build errors to the channel.
 
 ## 5. Add strictness and max-iterations controls to reviewers
 `review.py` hardcodes `max_iterations=6`; `AssistantConfig.review_rounds` defaults to 2 and there is

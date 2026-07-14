@@ -22,7 +22,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from .. import images
-from ..assistant import Assistant
+from ..assistant import Assistant, ModelClientError
 from ..channels.web import WebChannel
 from ..config import AssistantConfig
 from ..plugins import FrontEnd
@@ -148,7 +148,16 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
             return
         busy["active"] = True
         channel = WebChannel(websocket, show_thinking=config.show_thinking, show_tools=config.show_tools)
-        assistant = await Assistant.create(config, channel, client=client)
+        try:
+            assistant = await Assistant.create(config, channel, client=client)
+        except ModelClientError as e:
+            # Building the model client failed (no model resolved, or a bad model string). Show the
+            # actionable message in the browser and release the busy guard so a later connection (after
+            # the user fixes their config) is not refused as "busy in another tab".
+            await channel.send(str(e))
+            await websocket.close()
+            busy["active"] = False
+            return
         # Show the conversation list, the active conversation's history, and the current settings on
         # (re)connect, so the sidebar, chat, and settings panel are all populated.
         await channel.send_conversations(assistant.list_conversations())

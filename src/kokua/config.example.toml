@@ -4,7 +4,9 @@
 # set here. An unknown key or wrong-typed value is a hard error (startup fails and names the key).
 
 [assistant]
-# Model string, e.g. "ollama:qwen3:8b". Unset -> $AIMU_LANGUAGE_MODEL / a local model.
+# Model string, e.g. "ollama:qwen3:8b". Unset -> $AIMU_LANGUAGE_MODEL, else the first already-running
+# local model found (a running Ollama server, then a local OpenAI-compatible server). A cloud model is
+# never auto-selected. Startup fails with an actionable message if nothing can be resolved.
 # model = "ollama:qwen3:8b"
 
 # system_message = "You are a personal assistant running on the user's own machine. ..."

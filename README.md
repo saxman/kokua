@@ -40,7 +40,9 @@ normal `uv add kokua` / `pip install kokua`.)
 kokua --model ollama:qwen3:8b --reminder-seconds 30
 ```
 
-Omit `--model` to use `AIMU_LANGUAGE_MODEL` or a locally available model. Chat at the prompt; Ctrl-D exits.
+Omit `--model` to use `AIMU_LANGUAGE_MODEL`, or else the first already-running local model found (Ollama,
+then a local OpenAI-compatible server); a cloud model is never auto-selected, and startup fails with an
+actionable message if none is found. Chat at the prompt; Ctrl-D exits.
 After ~30s a proactive message appears. Send `/stop` to cancel a reply that's still streaming (the partial
 turn is kept, so the conversation continues); the web UI has a Stop button for the same.
 
