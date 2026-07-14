@@ -144,6 +144,41 @@ async def test_assistant_subagents_flag_omits_tool(tmp_path):
     assert "spawn_subagent" not in names
 
 
+async def test_subagent_tool_is_typed_with_default_roles(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    spawn = next(t for t in assistant._agent.tools if t.__name__ == "spawn_subagent")
+    # Typed mode takes (agent_type, task); the docstring lists the default roles.
+    import inspect
+
+    params = list(inspect.signature(spawn).parameters)
+    assert params[:2] == ["agent_type", "task"]
+    assert "researcher" in spawn.__doc__ and "coder" in spawn.__doc__
+
+
+def test_build_subagent_agent_types_clamps_to_enabled_groups(tmp_path):
+    from kokua.assistant import _build_subagent_agent_types
+
+    # coder wants fs+compute; only web enabled globally -> coder ends up with no tools.
+    cfg = _config(tmp_path, tools=["web"])
+    types = _build_subagent_agent_types(cfg)
+    assert types["coder"]["tools"] == []
+    researcher_names = {fn.__name__ for fn in types["researcher"]["tools"]}
+    assert "web_search" in researcher_names  # web group survived
+    # The description is the first line of the built system_message (AIMU's menu line).
+    assert types["researcher"]["system_message"].splitlines()[0] == (
+        "Research specialist: gather and verify information from the web."
+    )
+
+
+async def test_subagent_concurrent_flag_reaches_agent(tmp_path):
+    on = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert on._agent.concurrent_tool_calls is True
+    off = await Assistant.create(
+        _config(tmp_path, subagents_concurrent=False), FakeChannel(), client=MockAsyncModelClient([])
+    )
+    assert off._agent.concurrent_tool_calls is False
+
+
 async def test_assistant_unknown_tool_group_raises(tmp_path):
     with pytest.raises(ValueError, match="unknown tool group"):
         await Assistant.create(_config(tmp_path, tools=["bogus"]), FakeChannel(), client=MockAsyncModelClient([]))

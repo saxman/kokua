@@ -32,7 +32,7 @@ from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
 from . import images, mcp_registry, review, runtime_settings
-from .config import MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, AssistantConfig
+from .config import DEFAULT_SUBAGENT_ROLES, MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, AssistantConfig
 from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
 
@@ -152,6 +152,30 @@ def _resolve_builtin_tools(names: list[str]) -> list:
                 seen.add(fn.__name__)
                 resolved.append(fn)
     return resolved
+
+
+def _effective_subagent_roles(config: AssistantConfig) -> dict[str, dict]:
+    """Built-in roles with the user's config roles merged over them by name."""
+    return {**DEFAULT_SUBAGENT_ROLES, **config.subagent_roles}
+
+
+def _build_subagent_agent_types(config: AssistantConfig) -> dict[str, dict]:
+    """Build AIMU ``agent_types`` from the effective roles.
+
+    Each role's tools are its groups intersected with the assistant's enabled tool groups
+    (``config.tools``), so a role can narrow within what is enabled but never exceed it. The role's
+    ``description`` is made the first line of the built ``system_message`` (AIMU shows that line in the
+    tool's role menu); an omitted ``system_message`` body defaults to just the description.
+    """
+    enabled = set(config.tools)
+    agent_types: dict[str, dict] = {}
+    for name, role in _effective_subagent_roles(config).items():
+        groups = [g for g in role.get("groups", []) if g in enabled]
+        body = role.get("system_message", "")
+        description = role.get("description", name)
+        system_message = f"{description}\n\n{body}" if body else description
+        agent_types[name] = {"system_message": system_message, "tools": _resolve_builtin_tools(groups)}
+    return agent_types
 
 
 def _looks_like_auth_required(exc: BaseException) -> bool:
@@ -526,7 +550,13 @@ class Assistant:
 
         manager = SkillManager(skill_dirs=[str(config.skills_dir)])
         author_skill = make_skill_authoring_tool(manager, config.skills_dir)
-        agent = aio.SkillAgent(client, tools=[author_skill], skill_manager=manager, name="assistant")
+        agent = aio.SkillAgent(
+            client,
+            tools=[author_skill],
+            skill_manager=manager,
+            name="assistant",
+            concurrent_tool_calls=config.subagents_concurrent,
+        )
         # add_skill_script and the MCP tools need the agent (to surface new tools this turn), so
         # they are built after it. Built-in tools, memory tools, and plugin tools are appended too;
         # the SkillAgent re-appends its skills-server tools each run.
@@ -534,13 +564,16 @@ class Assistant:
         oauth_storage_dir = config.data_dir / "mcp-oauth"
         builtin_tools = _resolve_builtin_tools(config.tools)
 
-        # Sub-agents (on by default): a spawn_subagent tool the assistant can call to delegate an
-        # independent subtask to a fresh, isolated agent and get back a single answer. Each spawn clones
-        # the active model and gets the same built-in tool groups (web/fs/compute/misc) so it can do real
-        # work; the parent-only stateful tools (memory, skills, MCP management) are deliberately withheld.
-        # The parent tool loop stays sequential (concurrent_tool_calls off) because the approval gate
-        # tracks one pending approval at a time; multiple spawns in a single turn therefore run serially.
-        subagent_tools = [make_async_subagent_tool(client.model, tools=builtin_tools)] if config.subagents else []
+        # Sub-agents (on by default): a typed spawn_subagent(agent_type, task) tool. Each spawn clones the
+        # active model and gets its role's tool subset (role groups intersected with config.tools); the
+        # parent-only stateful tools (memory, skills, MCP management) are deliberately withheld. Concurrent
+        # spawns overlap under the parent's concurrent_tool_calls (set on the SkillAgent below); the
+        # approval gate stays correct because _approve serializes only the gated-tool path (see _approve).
+        subagent_tools = (
+            [make_async_subagent_tool(client.model, agent_types=_build_subagent_agent_types(config))]
+            if config.subagents
+            else []
+        )
 
         agent.tools = [
             author_skill,
