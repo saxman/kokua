@@ -258,7 +258,7 @@ class PlanRunner:
 
         Tools stay enabled so the planner can web-search and consult its skill catalog; the turns it adds
         (planner prompt, tool calls, plan) are rolled back afterwards -- planning is scratch work, and the
-        approved plan is re-supplied to the executor in _planned_turn. ``feedback`` (reviewer issues) drives
+        approved plan is re-supplied to the executor in ``run``. ``feedback`` (reviewer issues) drives
         a re-plan round; ``show_answer`` streams the plan text live (verbose trace).
         """
         prompt = PLAN_PROMPT.format(request=msg.text)
