@@ -559,20 +559,48 @@ async def test_serve_loop_routes_message_to_pending_approval(tmp_path):
     assert assistant._current is None  # the answer did not start a new turn
 
 
+class _RequestsToolOnce(MockAsyncModelClient):
+    """Requests one gated tool call on the first turn (single-turn: the Agent's engine dispatches it),
+    then answers plainly. Lets a real run exercise the approval gate instead of the mock's faked round."""
+
+    def __init__(self, name: str, arguments: dict):
+        super().__init__([])
+        self._name = name
+        self._arguments = arguments
+        self._requested = False
+
+    async def _chat(
+        self, user_message=None, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None
+    ):
+        if user_message is not None:
+            self.messages.append({"role": "user", "content": user_message})
+        if not self._requested:
+            self._requested = True
+            self.messages.append(
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"type": "function", "function": {"name": self._name, "arguments": self._arguments}, "id": "x"}
+                    ],
+                }
+            )
+            return ""
+        self.messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+
 async def test_denied_gated_tool_does_not_run(tmp_path):
     cfg = _config(tmp_path, confirm_tools=["add_skill_script"])
-    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    client = _RequestsToolOnce("add_skill_script", {"skill_name": "disk", "filename": "u.py", "content": "print(1)\n"})
+    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
     # Proactive context makes _approve auto-deny without an interactive prompt, so the real dispatch
-    # path can be exercised synchronously.
+    # path (the Agent's tool-loop engine + approval gate) can be exercised by a normal run.
     assistant._in_proactive = True
-    agent = assistant._agent
-    agent._prepare_run()  # publish tool_approval + tools onto the client (as a run would)
 
-    await agent.model_client._handle_tool_calls(
-        [{"name": "add_skill_script", "arguments": {"skill_name": "disk", "filename": "u.py", "content": "print(1)\n"}}]
-    )
+    await assistant._agent.run("go")
 
-    assert agent.model_client.messages[-1]["content"] == "Tool 'add_skill_script' was not approved."
+    denied = [m for m in client.messages if m.get("role") == "tool"]
+    assert denied and denied[-1]["content"] == "Tool 'add_skill_script' was not approved."
     assert not (cfg.skills_dir / "disk" / "scripts" / "u.py").exists()
 
 
@@ -657,8 +685,9 @@ async def test_assistant_authors_and_registers_runnable_script(tmp_path):
 
     assert "disk__usage" in msg
     assert (cfg.skills_dir / "disk" / "scripts" / "usage.py").exists()
-    # reload_skills() ran, so the new script tool is callable on the live client.
-    assert "disk__usage" in [fn.__name__ for fn in assistant._agent.model_client.tools]
+    # reload_skills() re-snapshotted the skill tools; the tool-loop engine reads them via
+    # _effective_tools each round, so the new script tool is dispatchable on the next run.
+    assert "disk__usage" in [fn.__name__ for fn in assistant._agent._effective_tools()]
 
 
 async def test_add_mcp_server_auto_oauth_on_auth_challenge(tmp_path, monkeypatch):

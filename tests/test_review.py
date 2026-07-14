@@ -127,9 +127,10 @@ async def test_review_result_includes_evidence_in_prompt(monkeypatch):
 
 async def test_reviewer_runs_tool_loop_then_extracts_verdict(monkeypatch):
     """A reviewer runs a bounded tool-calling assessment, then finalize_verdict parses the typed verdict."""
-    # A simulated tool round ("tool" -> follow-up prose), a continuation turn, then the structured verdict.
+    # The mock's "tool" entry is one tool round: the tool call plus the follow-up prose. finalize_verdict
+    # then makes one more (structured) call for the typed verdict.
     client = MockAsyncModelClient(
-        ["tool", "prose after the tool call", "final assessment", '{"approved": true, "issues": [], "suggestions": ""}']
+        ["tool", "prose after the tool call", '{"approved": true, "issues": [], "suggestions": ""}']
     )
     client.model.supports_structured_output = False  # route the verdict through the parse path
 
@@ -151,7 +152,7 @@ async def test_streamed_reviewer_streams_then_extracts_verdict(monkeypatch):
     Guards the two-phase streamed path (``stream_*`` must ``await agent.run(stream=True)`` to get an
     async iterator, then ``finalize_verdict`` on the same client)."""
     client = MockAsyncModelClient(
-        ["tool", "streamed assessment", "final", '{"approved": false, "issues": ["stale date"], "suggestions": ""}']
+        ["tool", "streamed assessment", '{"approved": false, "issues": ["stale date"], "suggestions": ""}']
     )
     client.model.supports_structured_output = False
     monkeypatch.setattr("kokua.review._reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[]))
