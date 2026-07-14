@@ -125,7 +125,7 @@ class AssistantConfig:
     subagents: bool = True
     # Sub-agent roles (AIMU agent_types). User definitions here merge over DEFAULT_SUBAGENT_ROLES by
     # name (override an existing role or add a new one); empty means "just the defaults".
-    subagent_roles: dict = field(default_factory=dict)
+    subagent_roles: dict[str, dict] = field(default_factory=dict)
     # Run independent tool calls in one turn concurrently (so several spawn_subagent calls overlap).
     subagents_concurrent: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These

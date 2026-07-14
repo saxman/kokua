@@ -193,6 +193,7 @@ async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
             return "ok"
 
         spawn_subagent.__name__ = "spawn_subagent"
+        # AIMU's tool machinery inspects these attributes; the fake must carry them to survive Assistant.create.
         spawn_subagent.__tool_is_async__ = True
         spawn_subagent.__tool_is_streaming__ = False
         spawn_subagent.__tool_spec__ = {"function": {"name": "spawn_subagent"}}
@@ -678,10 +679,11 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
 
     Without the lock the interleaved coroutines both call asyncio.gather concurrently. The first
     call creates self._pending_approval and yields at the sleep; the second then overwrites it with
-    a fresh future before the first has resolved. When the first finally resolves the original
-    future it set its result on, the second future is never resolved -- deadlock. With the lock the
-    second call waits until the first has fully completed (future resolved, pending_approval cleared)
-    before it acquires the lock, creates its own future, and resolves it safely.
+    a fresh future before the first has resolved. The first call then calls set_result on the
+    already-cleared (None) reference, raising AttributeError ('NoneType' has no attribute
+    'set_result'). With the lock the second call waits until the first has fully completed (future
+    resolved, pending_approval cleared) before it acquires the lock, creates its own future, and
+    resolves it safely.
     """
     cfg = _config(tmp_path, confirm_tools=["execute_python"])
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))

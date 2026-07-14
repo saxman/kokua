@@ -491,8 +491,9 @@ class Assistant:
         # cancels); `_turns` keeps task refs alive until they finish.
         self._current: Optional[RunHandle] = None
         self._turns: set = set()
-        # Tool-approval coordination. At most one approval is pending at a time (turns are
-        # serialized by self._lock); the serve loop resolves the future with the user's answer.
+        # Tool-approval coordination. At most one approval is pending at a time (enforced by
+        # self._approval_lock in _approve, not self._lock); the serve loop resolves the future
+        # with the user's answer.
         self._pending_approval: Optional[asyncio.Future] = None
         # Serializes the gated-tool approval path so concurrent tool calls (concurrent_tool_calls) can
         # never have two approvals pending at once (which would clobber self._pending_approval). Only

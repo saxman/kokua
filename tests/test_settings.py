@@ -157,8 +157,6 @@ def test_config_init_custom_path(tmp_path):
 
 
 def test_subagents_section_parses_concurrent_and_roles(tmp_path):
-    from kokua import settings
-
     path = tmp_path / "config.toml"
     path.write_text(
         "[subagents]\n"
@@ -180,15 +178,18 @@ def test_subagents_section_parses_concurrent_and_roles(tmp_path):
 
 
 def test_subagents_unknown_role_key_raises(tmp_path):
-    import pytest
-
-    from kokua import settings
-
     path = tmp_path / "config.toml"
     path.write_text(
         '[subagents.roles.bad]\ngroups = ["web"]\nbogus = 1\n',
         encoding="utf-8",
     )
+    with pytest.raises(settings.ConfigError, match="bogus"):
+        settings.load(str(path))
+
+
+def test_subagents_unknown_top_level_key_raises(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[subagents]\nbogus = 1\n", encoding="utf-8")
     with pytest.raises(settings.ConfigError, match="bogus"):
         settings.load(str(path))
 
