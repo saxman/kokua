@@ -31,87 +31,13 @@ from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_scri
 from aimu.tools import builtin, tool
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
-from . import images, mcp_registry, review, runtime_settings
+from . import images, mcp_registry, runtime_settings
+from .planning import PlanResult, PlanRunner, _bullets
 from .config import DEFAULT_SUBAGENT_ROLES, MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, AssistantConfig
 from .mcp_auth import Notify, build_chat_oauth
 from .plugins import discover_tool_packs
 
 logger = logging.getLogger(__name__)
-
-# Deep planning mode prompts. The plan phase runs the agent (tools enabled, so it can web-search and
-# consult its skill catalog) to produce an explicit plan without doing the work; the execute phase then
-# carries out the approved plan. Planning is scratch work kept out of the saved conversation (see
-# _make_plan), and the executor's synthetic turn is rewritten back to the user's words (see _planned_turn).
-PLAN_PROMPT = """\
-Before doing any work, produce an explicit plan for how you will accomplish the request below. Do NOT \
-carry out the work or produce the final deliverable yet -- only plan.
-
-Request:
-{request}
-
-Your plan should:
-- State the goal and what a complete, correct answer looks like.
-- Give the concrete steps you will take, in order, as a numbered markdown list.
-- For each step, name the specific tool, skill, or MCP service you will use. Where a needed capability \
-is missing, say so and how you will get it: build a new skill (author_skill), connect an MCP service \
-(add_mcp_server), and web-search to find a suitable MCP service or documentation when that helps.
-- Note what you will verify before finishing.
-
-You may use read-only tools (e.g. web search) to inform the plan, but make no changes yet. Respond with \
-just the plan."""
-
-EXECUTE_PROMPT = """\
-Carry out the following approved plan to fully answer the original request. Follow the plan, adapting if \
-you discover something that requires it, and use the tools/skills it names.
-
-Original request:
-{request}
-
-Approved plan:
-{plan}"""
-
-# Feedback blocks fed back into a replan / revise round after an adversarial reviewer rejects.
-REPLAN_FEEDBACK = "\n\nAn independent reviewer rejected your previous plan for these reasons:\n{issues}\n\nProduce a new plan that addresses them."
-
-RESULT_REVISE_PROMPT = """\
-Your previous answer was checked by an independent reviewer and rejected. Revise it to fully address the \
-issues, returning the complete corrected answer (not just the changes).
-
-Original request:
-{request}
-
-Approved plan:
-{plan}
-
-Your previous answer:
-{answer}
-
-Reviewer's issues:
-{issues}"""
-
-
-def _bullets(issues: list[str]) -> str:
-    """Render reviewer issues as a markdown bullet list (or a dash if empty)."""
-    return "\n".join(f"- {i}" for i in issues) or "- (no specific issues given)"
-
-
-def _tool_evidence(messages: list[dict], max_chars: int = 2000) -> str:
-    """Render the tool results in ``messages`` (an executor transcript slice) as a compact evidence block
-    for the result reviewer, so it judges against what the agent actually retrieved rather than its own
-    (possibly stale) memory. Each tool result is truncated to ``max_chars``. Returns "" if no tools ran."""
-    names: dict = {}  # tool_call_id -> tool name, to label results that lack a "name" of their own
-    lines: list[str] = []
-    for msg in messages:
-        for call in msg.get("tool_calls") or []:
-            names[call.get("id")] = call.get("function", {}).get("name")
-        if msg.get("role") == "tool":
-            name = msg.get("name") or names.get(msg.get("tool_call_id")) or "tool"
-            content = str(msg.get("content", ""))
-            if len(content) > max_chars:
-                content = content[:max_chars] + " ...[truncated]"
-            lines.append(f"- {name}: {content}")
-    return "\n".join(lines)
-
 
 # AIMU's built-in tool subgroups, selectable by name via the --tools flag / AssistantConfig.tools.
 # The generative groups (image/audio/speech/transcription) need their AIMU_*_MODEL env var set and
@@ -506,10 +432,6 @@ class Assistant:
         # True while a proactive (unprompted) turn runs, so _approve auto-denies gated tools (no
         # user is waiting to confirm).
         self._in_proactive = False
-        # The raw trace of the in-flight verbose turn: a list of {label, detail, text} phase segments,
-        # accumulated by _send_phase / _run_and_capture / _stream_review and persisted for reload.
-        # None outside a verbose turn (so shared helpers used by non-verbose turns don't capture).
-        self._trace: Optional[list[dict]] = None
         # The active model client's provider built-in generate kwargs, snapshotted before any override
         # is layered on, so a settings change (or a cleared field) can rebuild from a clean base.
         # Assigned by create() and refreshed on a runtime model switch.
@@ -883,7 +805,8 @@ class Assistant:
         async with self._lock:
             try:
                 if do_plan:
-                    await self._planned_turn(msg)
+                    runner = PlanRunner(self._agent, self._channel, self._config, self._review_plan)
+                    self._apply_plan_result(await runner.run(msg))
                 else:
                     stream = await self._agent.run(msg.text, stream=True, images=msg.images)
                     await self._channel.send(stream, reply_to=msg)
@@ -902,297 +825,6 @@ class Assistant:
                 await self._channel.send("Sorry, something went wrong handling that.", reply_to=msg)
             if self._persist():
                 await self._maybe_push_conversations()
-
-    async def _planned_turn(self, msg: ChannelMessage) -> None:
-        """Deep planning: plan, optionally adversarially review + human review, then execute (optionally
-        with adversarial result review). Sub-agent (reviewer) activity is shown live and recorded per turn
-        (keyed by the turn's user-message index) so it replays on reload."""
-        if self._config.show_reasoning and getattr(self._channel, "send_phase", None) is not None:
-            await self._verbose_planned_turn(msg)  # verbose trace needs a phase-capable channel (web)
-            return
-        events: list[dict] = []  # sub-agent verdicts for this turn (for persistence/replay)
-        plan_text = await self._make_plan(msg)
-        critique: Optional[list[str]] = None
-        if self._config.plan_review_agent:
-            plan_text, critique = await self._adversarial_plan_review(msg, plan_text, events)
-        await self._send_plan(plan_text, critique)
-        approved = plan_text
-        if self._config.plan_review:
-            approved = await self._review_plan(plan_text, critique)
-            if approved is None:  # rejected; no committed turn to anchor the reviewer cards to
-                await self._channel.send("(plan rejected)", reply_to=msg)
-                return
-        if self._config.result_review:
-            # Review the answer before showing it -> cannot stream; buffer, vet, then send a plain string.
-            answer = await self._execute_reviewed(msg, approved, events)
-            self._record_subagent(len(self._agent.model_client.messages) - 2, events)  # [..., user, assistant]
-            await self._channel.send(answer, reply_to=msg)
-            return
-        # Execute the approved plan, streamed. The executor's prompt weaves in the plan; afterwards we
-        # rewrite the synthetic user turn back to the user's own words so the saved conversation stays clean.
-        base_len = len(self._agent.model_client.messages)
-        stream = await self._agent.run(
-            EXECUTE_PROMPT.format(request=msg.text, plan=approved), stream=True, images=msg.images
-        )
-        await self._channel.send(stream, reply_to=msg)
-        msgs = self._agent.model_client.messages
-        if len(msgs) > base_len and msgs[base_len].get("role") == "user":
-            msgs[base_len]["content"] = msg.text
-        self._record_subagent(base_len, events)
-
-    async def _verbose_planned_turn(self, msg: ChannelMessage) -> None:
-        """Deep planning with the full trace visible: every LLM call streams under a labeled phase and
-        every plan/result version is shown, including each reviewer's prose reasoning. The whole raw
-        trace is captured (self._trace) and persisted for reload -- verbose turns show the raw output,
-        not summary cards. Only the final answer is committed to the conversation; this overrides
-        result_review's gate.
-        """
-        self._trace = []  # active trace: phase segments captured by the streaming helpers below
-        try:
-            await self._send_phase("Planner", "drafting a plan")
-            plan = await self._make_plan(msg, show_answer=True)
-            critique: Optional[list[str]] = None
-            if self._config.plan_review_agent:
-                plan, critique = await self._verbose_plan_review(msg, plan)
-            approved = plan
-            if self._config.plan_review:  # optional human gate still applies
-                approved = await self._review_plan(plan, critique)
-                if approved is None:
-                    await self._channel.send("(plan rejected)", reply_to=msg)
-                    return
-            await self._verbose_execute(msg, approved)  # streams + commits the final answer
-            self._record_trace(len(self._agent.model_client.messages) - 2, self._trace)  # [..., user, asst]
-            await self._send_done()
-        finally:
-            self._trace = None
-
-    async def _verbose_plan_review(self, msg: ChannelMessage, plan: str) -> tuple[str, Optional[list[str]]]:
-        """Stream each plan-review round's prose reasoning; re-plan visibly on rejection. No summary
-        card -- the streamed reasoning (and a following 'revising' phase on rejection) is the output."""
-        rounds = self._config.review_rounds
-        for attempt in range(rounds + 1):
-            await self._send_phase("Plan reviewer", f"round {attempt + 1}")
-            verdict = await self._stream_review(review.stream_plan_review(self._config.model, msg.text, plan))
-            if verdict.approved:
-                return plan, None
-            if attempt == rounds:
-                return plan, verdict.issues
-            await self._send_phase("Planner", "revising the plan")
-            plan = await self._make_plan(msg, feedback=verdict.issues, show_answer=True)
-        return plan, None
-
-    async def _verbose_execute(self, msg: ChannelMessage, plan: str) -> str:
-        """Stream the executor and each result-review round visibly; every version is shown. Commits only
-        the final answer to a clean transcript."""
-        base = list(self._agent.model_client.messages)
-        rounds = self._config.review_rounds
-        answer = ""
-        try:
-            await self._send_phase("Executor", "carrying out the plan")
-            answer = await self._run_and_capture(
-                EXECUTE_PROMPT.format(request=msg.text, plan=plan), msg.images, show_answer=True
-            )
-            if self._config.result_review:
-                for attempt in range(rounds + 1):
-                    await self._send_phase("Result reviewer", f"round {attempt + 1}")
-                    evidence = _tool_evidence(self._agent.model_client.messages[len(base) :])
-                    verdict = await self._stream_review(
-                        review.stream_result_review(self._config.model, msg.text, plan, answer, evidence),
-                    )
-                    if verdict.approved or attempt == rounds:
-                        break
-                    await self._send_phase("Executor", "revising the answer")
-                    self._agent.model_client.messages = list(base)  # revise from a clean base
-                    answer = await self._run_and_capture(
-                        RESULT_REVISE_PROMPT.format(
-                            request=msg.text, plan=plan, answer=answer, issues=_bullets(verdict.issues)
-                        ),
-                        msg.images,
-                        show_answer=True,
-                    )
-        finally:
-            pair = [{"role": "user", "content": msg.text}, {"role": "assistant", "content": answer}]
-            self._agent.model_client.messages = base + (pair if answer else [])
-        return answer
-
-    async def _stream_review(self, open_coro) -> "review.Verdict":
-        """Stream a reviewer's prose reasoning live (captured into the current phase segment for replay),
-        then finalize and return its verdict. Emits no summary card -- the prose is the output."""
-        client, stream = await open_coro
-        stream_activity = getattr(self._channel, "stream_activity", None)
-        if stream_activity is not None:
-            text = await stream_activity(stream, show_answer=True)
-        else:  # no streaming channel: drain so the reviewer call completes
-            text = ""
-            async for _ in stream:
-                pass
-        if self._trace:  # attach the reviewer's prose to the current phase segment
-            self._trace[-1]["text"] = text
-        return await review.finalize_verdict(client)
-
-    async def _send_done(self) -> None:
-        """End a verbose turn: finalize the last streamed bubble and clear the processing state."""
-        send = getattr(self._channel, "send_done", None)
-        if send is not None:
-            await send()
-
-    def _record_subagent(self, user_index: int, events: list[dict]) -> None:
-        """Record this turn's reviewer verdicts under its user-message index for reload replay.
-
-        Persisted by ``_persist`` (which saves ``session.metadata``). No-op when nothing was reviewed.
-        """
-        if events and user_index >= 0:
-            self._session.metadata.setdefault("subagent", {})[str(user_index)] = events
-
-    def _record_trace(self, user_index: int, trace: list[dict]) -> None:
-        """Record a verbose turn's full raw trace (phase label/detail + streamed text) under its
-        user-message index, so reload replays the same raw output instead of summary cards.
-
-        Persisted by ``_persist`` (which saves ``session.metadata``). No-op when the trace is empty.
-        """
-        if trace and user_index >= 0:
-            self._session.metadata.setdefault("trace", {})[str(user_index)] = trace
-
-    async def _send_subagent(self, event: dict) -> None:
-        """Show a sub-agent activity card if the channel supports it (web); other channels ignore it."""
-        send = getattr(self._channel, "send_subagent", None)
-        if send is not None:
-            await send(event)
-
-    async def _make_plan(
-        self, msg: ChannelMessage, feedback: Optional[list[str]] = None, *, show_answer: bool = False
-    ) -> str:
-        """Run the agent to produce a plan, keeping the planning exchange out of the saved conversation.
-
-        Tools stay enabled so the planner can web-search and consult its skill catalog; the turns it adds
-        (planner prompt, tool calls, plan) are rolled back afterwards -- planning is scratch work, and the
-        approved plan is re-supplied to the executor in _planned_turn. ``feedback`` (reviewer issues) drives
-        a re-plan round; ``show_answer`` streams the plan text live (verbose trace).
-        """
-        prompt = PLAN_PROMPT.format(request=msg.text)
-        if feedback:
-            prompt += REPLAN_FEEDBACK.format(issues=_bullets(feedback))
-        base = list(self._agent.model_client.messages)
-        try:
-            plan = await self._run_and_capture(prompt, msg.images, show_answer=show_answer)
-        finally:
-            self._agent.model_client.messages = base
-        return plan
-
-    async def _run_and_capture(self, prompt: str, images, *, show_answer: bool = False) -> str:
-        """Run the agent, showing its agentic loop (thinking/tool calls) live, and return the final text.
-
-        By default the final text is withheld (the caller shows it once it's ready). With
-        ``show_answer=True`` (verbose trace) the text is streamed live too. Channels without
-        ``stream_activity`` (e.g. the CLI) fall back to a plain non-streaming run.
-        """
-        stream_activity = getattr(self._channel, "stream_activity", None)
-        if stream_activity is None:
-            result = await self._agent.run(prompt, images=images)
-            text = result if isinstance(result, str) else str(result)
-        else:
-            stream = await self._agent.run(prompt, stream=True, images=images)
-            text = await stream_activity(stream, show_answer=show_answer)
-        if self._trace:  # verbose trace: attach this call's output to the current phase segment
-            self._trace[-1]["text"] = text
-        return text
-
-    async def _send_phase(self, label: str, detail: str = "") -> None:
-        """Announce a labeled phase (verbose trace) if the channel supports it; others ignore it.
-
-        Also opens a new segment in the in-flight trace (self._trace) so the streamed output that
-        follows is captured under this phase for reload replay.
-        """
-        if self._trace is not None:
-            self._trace.append({"label": label, "detail": detail, "text": ""})
-        send = getattr(self._channel, "send_phase", None)
-        if send is not None:
-            await send(label, detail)
-
-    async def _run_review(self, sid: str, role: str, round_: int, coro) -> "review.Verdict":
-        """Show a running sub-agent card, await the reviewer, then update the card with its verdict."""
-        await self._send_subagent({"id": sid, "role": role, "status": "running", "round": round_})
-        verdict = await coro
-        status = "approved" if verdict.approved else "rejected"
-        await self._send_subagent(
-            {"id": sid, "role": role, "status": status, "issues": list(verdict.issues), "round": round_}
-        )
-        return verdict
-
-    @staticmethod
-    def _verdict_event(role: str, round_: int, verdict: "review.Verdict") -> dict:
-        """The persisted (id-less) form of a reviewer verdict, for replay."""
-        status = "approved" if verdict.approved else "rejected"
-        return {"role": role, "status": status, "issues": list(verdict.issues), "round": round_}
-
-    async def _adversarial_plan_review(
-        self, msg: ChannelMessage, plan: str, events: list[dict]
-    ) -> tuple[str, Optional[list[str]]]:
-        """Have an independent, context-free agent critique the plan; re-plan on rejection up to
-        review_rounds. Emits reviewer cards, appends verdicts to ``events``, and returns the final plan and
-        any residual issues (None if the reviewer approved)."""
-        rounds = self._config.review_rounds
-        for attempt in range(rounds + 1):
-            verdict = await self._run_review(
-                f"plan-review-{attempt}",
-                "Plan reviewer",
-                attempt,
-                review.review_plan(self._config.model, msg.text, plan),
-            )
-            events.append(self._verdict_event("Plan reviewer", attempt, verdict))
-            if verdict.approved:
-                return plan, None
-            if attempt == rounds:  # out of rounds; carry the unresolved issues forward
-                return plan, verdict.issues
-            plan = await self._make_plan(msg, feedback=verdict.issues)
-        return plan, None  # unreachable (rounds >= 0)
-
-    async def _execute_reviewed(self, msg: ChannelMessage, plan: str, events: list[dict]) -> str:
-        """Execute non-streaming, have an independent agent review the answer, revise on rejection up to
-        review_rounds, then commit a single clean turn (user's words + final answer) and return it. Emits
-        reviewer cards and appends verdicts to ``events``."""
-        base = list(self._agent.model_client.messages)
-        rounds = self._config.review_rounds
-        answer = ""
-        try:
-            answer = await self._run_and_capture(EXECUTE_PROMPT.format(request=msg.text, plan=plan), msg.images)
-            for attempt in range(rounds + 1):
-                evidence = _tool_evidence(self._agent.model_client.messages[len(base) :])
-                verdict = await self._run_review(
-                    f"result-review-{attempt}",
-                    "Result reviewer",
-                    attempt,
-                    review.review_result(self._config.model, msg.text, plan, answer, evidence),
-                )
-                events.append(self._verdict_event("Result reviewer", attempt, verdict))
-                if verdict.approved:
-                    break
-                if attempt == rounds:
-                    answer += "\n\n---\n_Automated review flagged unresolved issues:_\n" + _bullets(verdict.issues)
-                    break
-                self._agent.model_client.messages = list(base)  # revise from a clean base
-                answer = await self._run_and_capture(
-                    RESULT_REVISE_PROMPT.format(
-                        request=msg.text, plan=plan, answer=answer, issues=_bullets(verdict.issues)
-                    ),
-                    msg.images,
-                )
-        finally:
-            # Commit one clean turn; the executor's scratch (and revision rounds) stay out of history.
-            pair = [{"role": "user", "content": msg.text}, {"role": "assistant", "content": answer}]
-            self._agent.model_client.messages = base + (pair if answer else [])
-        return answer
-
-    async def _send_plan(self, plan_text: str, critique: Optional[list[str]] = None) -> None:
-        """Show the plan (with any residual reviewer concerns), as a plan frame if the channel supports it."""
-        text = plan_text
-        if critique:
-            text += "\n\n---\n**Reviewer's remaining concerns:**\n" + _bullets(critique)
-        send = getattr(self._channel, "send_plan", None)
-        if send is not None:
-            await send(text)
-        else:
-            await self._channel.send(f"Plan:\n\n{text}")
 
     async def _review_plan(self, plan_text: str, critique: Optional[list[str]] = None) -> Optional[str]:
         """Await the user's decision on a plan: approve (the plan), edit (their text), or reject (None).
@@ -1235,6 +867,17 @@ class Assistant:
                     await self._maybe_push_conversations()
             finally:
                 self._in_proactive = False
+
+    def _apply_plan_result(self, result: "PlanResult") -> None:
+        """Record a planned turn's reviewer verdicts and verbose trace under the turn's user-message
+        index, so reload replays them. Persisted by _persist (which saves session.metadata). No-op when
+        the turn did not commit (e.g. plan rejected)."""
+        if not result.committed or result.user_index < 0:
+            return
+        if result.subagent_events:
+            self._session.metadata.setdefault("subagent", {})[str(result.user_index)] = result.subagent_events
+        if result.trace:
+            self._session.metadata.setdefault("trace", {})[str(result.user_index)] = result.trace
 
     def _persist(self) -> bool:
         """Snapshot the agent's messages onto the active session and save. Returns True if a title
