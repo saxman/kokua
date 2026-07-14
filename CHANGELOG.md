@@ -16,7 +16,11 @@ installable, modular application.
   tool subset (role groups intersected with the enabled `[tools]` groups; parent-only memory/skills/MCP
   withheld). Override or add roles under `[subagents.roles.*]`. Independent spawns in one turn run
   concurrently (`[subagents] concurrent`, default on); the tool-approval gate serializes only the gated
-  `confirm_tools`, so gated calls still prompt one at a time.
+  `confirm_tools`, so gated calls still prompt one at a time. A sub-agent's gated-tool calls (the
+  `confirm_tools`, e.g. `execute_python`) are routed to the parent for approval and are not run
+  unattended. Fixed: `[tools] groups = ["all"]` now correctly enables all tool groups for sub-agent
+  roles (previously the clamping logic treated `"all"` as a literal group name, leaving roles with no
+  tools).
 - **Plugin system** (`kokua.plugins`): front ends and tool-packs discovered via the `kokua.frontends` and
   `kokua.tools` entry-point groups. Built-in `cli` and `web` front ends and an `example` tool-pack are
   registered as plugins; third parties add their own by publishing a package. `--list-frontends`,

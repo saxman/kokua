@@ -95,7 +95,8 @@ roles — built-in `researcher` (web lookups), `coder` (files + code), and `gene
 cloning the active model with its own tool subset (a role's tools are its groups intersected with the
 enabled `[tools]` groups; parent-only memory/skills/MCP tools are withheld). Define or override roles
 under `[subagents.roles.*]` in the config. Independent spawns in one turn run concurrently
-(`[subagents] concurrent`, on by default).
+(`[subagents] concurrent`, on by default). A sub-agent's gated-tool calls (the `confirm_tools`, e.g.
+`execute_python`) are routed to the parent for your approval and are not run unattended.
 
 **Deep planning (per request).** When you ask for it, the assistant drafts an explicit plan before doing
 the work — which tools, skills, and MCP services it will use, what it will web-search for, and where it

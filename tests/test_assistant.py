@@ -170,6 +170,40 @@ def test_build_subagent_agent_types_clamps_to_enabled_groups(tmp_path):
     )
 
 
+def test_subagent_roles_nonempty_when_tools_all(tmp_path):
+    from kokua.assistant import _build_subagent_agent_types
+
+    cfg = _config(tmp_path, tools=["all"])
+    types = _build_subagent_agent_types(cfg)
+    assert types["coder"]["tools"]  # non-empty: fs+compute groups now enabled
+    assert any(fn.__name__ == "execute_python" for fn in types["coder"]["tools"])
+    assert types["generalist"]["tools"]  # non-empty: all groups enabled
+
+
+async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
+    import kokua.assistant as assistant_mod
+
+    captured = {}
+
+    def fake_make_async_subagent_tool(model, *, agent_types, tool_approval, **kwargs):
+        captured["tool_approval"] = tool_approval
+
+        async def spawn_subagent(agent_type: str, task: str) -> str:
+            """researcher: research. coder: code."""
+            return "ok"
+
+        spawn_subagent.__name__ = "spawn_subagent"
+        spawn_subagent.__tool_is_async__ = True
+        spawn_subagent.__tool_is_streaming__ = False
+        spawn_subagent.__tool_spec__ = {"function": {"name": "spawn_subagent"}}
+        return spawn_subagent
+
+    monkeypatch.setattr(assistant_mod, "make_async_subagent_tool", fake_make_async_subagent_tool)
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert captured["tool_approval"] == assistant._approve
+
+
 async def test_subagent_concurrent_flag_reaches_agent(tmp_path):
     on = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     assert on._agent.concurrent_tool_calls is True

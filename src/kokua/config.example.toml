@@ -20,6 +20,8 @@ memory = true
 load_plugins = true
 
 # Let the assistant delegate independent subtasks to fresh, isolated sub-agents (spawn_subagent tool).
+# A sub-agent's gated-tool calls (the confirm_tools, e.g. execute_python) are routed to the parent
+# for approval and are not run unattended.
 subagents = true
 
 [display]

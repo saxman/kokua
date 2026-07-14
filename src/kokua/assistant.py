@@ -167,7 +167,11 @@ def _build_subagent_agent_types(config: AssistantConfig) -> dict[str, dict]:
     ``description`` is made the first line of the built ``system_message`` (AIMU shows that line in the
     tool's role menu); an omitted ``system_message`` body defaults to just the description.
     """
-    enabled = set(config.tools)
+    # "all" expands to every group; "none" and unknown/disabled groups are dropped silently.
+    if "all" in config.tools:
+        enabled = set(_TOOL_GROUPS)
+    else:
+        enabled = {g for g in config.tools if g != "none"}
     agent_types: dict[str, dict] = {}
     for name, role in _effective_subagent_roles(config).items():
         groups = [g for g in role.get("groups", []) if g in enabled]
@@ -568,17 +572,6 @@ class Assistant:
         oauth_storage_dir = config.data_dir / "mcp-oauth"
         builtin_tools = _resolve_builtin_tools(config.tools)
 
-        # Sub-agents (on by default): a typed spawn_subagent(agent_type, task) tool. Each spawn clones the
-        # active model and gets its role's tool subset (role groups intersected with config.tools); the
-        # parent-only stateful tools (memory, skills, MCP management) are deliberately withheld. Concurrent
-        # spawns overlap under the parent's concurrent_tool_calls (set on the SkillAgent below); the
-        # approval gate stays correct because _approve serializes only the gated-tool path (see _approve).
-        subagent_tools = (
-            [make_async_subagent_tool(client.model, agent_types=_build_subagent_agent_types(config))]
-            if config.subagents
-            else []
-        )
-
         agent.tools = [
             author_skill,
             make_skill_script_tool(agent, manager, config.skills_dir),
@@ -591,7 +584,6 @@ class Assistant:
             ),
             *memory_tools,
             *plugin_tools,
-            *subagent_tools,
             *builtin_tools,
         ]
 
@@ -637,6 +629,20 @@ class Assistant:
         # Gate configured "risky" tools behind interactive approval (see _approve). Published to the
         # model client on every run by the agent's _prepare_run; an empty confirm_tools is a no-op.
         agent.tool_approval = assistant._approve
+        # Sub-agents (on by default): a typed spawn_subagent(agent_type, task) tool. Each spawn clones the
+        # active model and gets its role's tool subset (role groups intersected with config.tools); the
+        # parent-only stateful tools (memory, skills, MCP management) are deliberately withheld. Concurrent
+        # spawns overlap under the parent's concurrent_tool_calls (set on the SkillAgent below); the
+        # approval gate is forwarded so a sub-agent's gated-tool calls (e.g. execute_python) prompt via
+        # the parent rather than running unattended.
+        if config.subagents:
+            agent.tools.append(
+                make_async_subagent_tool(
+                    agent.model_client.model,
+                    agent_types=_build_subagent_agent_types(config),
+                    tool_approval=assistant._approve,
+                )
+            )
         if config.reminder_seconds is not None:
             scheduler.at(config.reminder_seconds, assistant._proactive, name="reminder")
         return assistant
