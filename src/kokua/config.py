@@ -36,6 +36,38 @@ SUBAGENT_GUIDANCE = (
     "conversation so far."
 )
 
+# Built-in sub-agent roles (AIMU agent_types). Each role's tools are its groups intersected with the
+# assistant's enabled tool groups (see assistant._build_subagent_tool), so a role never grants a tool
+# the user disabled globally. `description` becomes the role's menu line shown to the model; the
+# `system_message` body guides the sub-agent. Users override or extend these via [subagents.roles.*].
+DEFAULT_SUBAGENT_ROLES: dict[str, dict] = {
+    "researcher": {
+        "description": "Research specialist: gather and verify information from the web.",
+        "groups": ["web", "misc"],
+        "system_message": (
+            "You are a research sub-agent. Investigate the task with web search and page lookups, "
+            "verify claims against sources rather than memory, and return a concise, well-organized "
+            "findings summary that names its sources."
+        ),
+    },
+    "coder": {
+        "description": "Coding specialist: read/write files and run code to complete a task.",
+        "groups": ["fs", "compute"],
+        "system_message": (
+            "You are a coding sub-agent. Complete the task by reading and writing files and running "
+            "code (Python, shell, or calculations). Report exactly what you did and the concrete result."
+        ),
+    },
+    "generalist": {
+        "description": "General-purpose helper with the full built-in toolset; use when no specialist fits.",
+        "groups": ["web", "fs", "compute", "misc"],
+        "system_message": (
+            "You are a general-purpose sub-agent. Complete the self-contained task you are given and "
+            "return a single, complete answer."
+        ),
+    },
+}
+
 DEFAULT_REMINDER_TEXT = "Proactively check in with the user with one short, useful suggestion for their day."
 
 # Appended to the system message when memory is enabled, so the model actually uses the two stores
@@ -91,6 +123,11 @@ class AssistantConfig:
     # Sub-agents: give the assistant a spawn_subagent tool so it can delegate an independent subtask to
     # a fresh, isolated agent (its own context/history) and get back a single answer. On by default.
     subagents: bool = True
+    # Sub-agent roles (AIMU agent_types). User definitions here merge over DEFAULT_SUBAGENT_ROLES by
+    # name (override an existing role or add a new one); empty means "just the defaults".
+    subagent_roles: dict = field(default_factory=dict)
+    # Run independent tool calls in one turn concurrently (so several spawn_subagent calls overlap).
+    subagents_concurrent: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
     confirm_tools: list[str] = field(default_factory=lambda: ["add_skill_script", "add_mcp_server", "execute_python"])
