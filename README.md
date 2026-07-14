@@ -4,15 +4,12 @@
 style) built on the [AIMU](https://github.com/saxman/aimu) library. Kokua runs an always-on assistant
 that chats with you, takes proactive actions on a schedule, authors and runs its own skills, connects to
 remote tool services, delegates independent subtasks to isolated sub-agents, and remembers facts and
-documents across conversations. Front ends and tool-packs
-are **plugins**: you extend Kokua by installing modules, not by editing the core.
+documents across conversations. Front ends and tool-packs are **plugins**: you extend Kokua by installing
+modules, not by editing the core.
 
-Kokua began as AIMU's `examples/personal-assistant/` and grows it into a real application.
-
-## Status
-
-Alpha. Single user, single process. The assistant can run code and connect to remote services with your
-privileges (see [Security](#security)).
+Kokua began as AIMU's `examples/personal-assistant/` and grows it into a real application. It runs as a
+single user in a single process, and can run code and connect to remote services with your privileges
+(see [Security](#security)).
 
 ## Install
 
@@ -37,7 +34,7 @@ aimu = { git = "https://github.com/saxman/aimu", branch = "main" }
 (Once AIMU publishes a release with the needed features, the source override goes away and this becomes a
 normal `uv add kokua` / `pip install kokua`.)
 
-## Run
+## Quick Start
 
 ```bash
 kokua --model anthropic:claude-sonnet-4-6 --reminder-seconds 30
@@ -53,6 +50,8 @@ Run the **web** front end instead (needs the `web` extra):
 kokua --frontend web              # or: kokua-web
 # then open http://127.0.0.1:8000
 ```
+
+## Using Kokua
 
 Reloading the page replays the prior conversation (the assistant already keeps its context across
 reconnects; this makes it visible again), including reasoning and tool calls when `show_thinking` /
@@ -77,6 +76,58 @@ that thinking models ignore `top_p`/`top_k` and force `temperature`, and Anthrop
 penalty parameters. The panel also has a theme selector (auto / light / dark; auto follows your OS
 preference); the theme is a per-browser choice remembered locally, applied before first paint to avoid a
 flash.
+
+List what's installed:
+
+```bash
+kokua --list-frontends     # cli, web, + any installed plugins
+kokua --list-tool-packs    # example, pdf, image, + any installed plugins
+```
+
+Useful flags: `--tools web,fs,compute,misc` (AIMU built-in tool groups), `--mcp <url>` (repeatable, connect
+a remote MCP server; `--mcp-bearer` for auth), `--no-memory`, `--no-plugins`, `--no-subagents`, `--system`, `--config <path>`,
+`--host` / `--port` (web).
+
+### Configuration file
+
+Settings can also come from a TOML config file, so you don't have to repeat flags. Resolution order,
+highest precedence first: **command-line flag > config file > built-in default**. The file is read from
+`--config <path>`, else `$KOKUA_CONFIG`, else `$KOKUA_HOME/config.toml` (default `~/.kokua/config.toml`); a
+missing default-location file is fine. Every setting has a built-in default, so the file is entirely
+optional and you only set what you want to change. See
+[`config.example.toml`](src/kokua/config.example.toml) for the full set of keys with their defaults.
+
+Scaffold a starter file at the default location with:
+
+```bash
+kokua config init           # writes $KOKUA_CONFIG or $KOKUA_HOME/config.toml; --force to overwrite
+```
+
+It writes the same documented example shown above (every key commented at its default), so changing a
+built-in default in a later release still takes effect for keys you leave commented.
+
+### State
+
+All state lives under `~/.kokua` (override the root with the `KOKUA_HOME` environment variable). The root
+holds an optional `config.toml` and a single `data/` directory for all transient and user-provided content:
+
+```
+~/.kokua/
+  config.toml          # optional (see Configuration file)
+  data/
+    skills/            # authored skills
+    sessions.json      # conversations (web UI can hold several)
+    memory/            # semantic facts
+    documents/         # saved documents (text; scanned by the DocumentStore)
+    downloads/         # generated files (e.g. PDFs), served by the web UI at /download
+    images/            # uploaded + generated images, served by the web UI at /images
+    runtime-settings.json  # runtime model settings from the web settings panel
+```
+
+Point `data/` elsewhere with `[paths] data_dir` in the config file. Nothing is written to your working
+directory.
+
+## Features
 
 A built-in `pdf` tool-pack gives the assistant a `markdown_to_pdf` tool: ask it to turn something into a
 PDF and it writes the file to `data/downloads/`. In the web UI the assistant hands back a download link
@@ -132,35 +183,6 @@ conversation. The whole raw trace is recorded per turn, so reloading a verbose t
 output you saw live (not a summary); in this mode the summary reviewer cards are not shown. Thinking is
 shown when the model emits it (adaptive models may skip it on simple requests).
 
-List what's installed:
-
-```bash
-kokua --list-frontends     # cli, web, + any installed plugins
-kokua --list-tool-packs    # example, pdf, image, + any installed plugins
-```
-
-Useful flags: `--tools web,fs,compute,misc` (AIMU built-in tool groups), `--mcp <url>` (repeatable, connect
-a remote MCP server; `--mcp-bearer` for auth), `--no-memory`, `--no-plugins`, `--no-subagents`, `--system`, `--config <path>`,
-`--host` / `--port` (web).
-
-### Configuration file
-
-Settings can also come from a TOML config file, so you don't have to repeat flags. Resolution order,
-highest precedence first: **command-line flag > config file > built-in default**. The file is read from
-`--config <path>`, else `$KOKUA_CONFIG`, else `$KOKUA_HOME/config.toml` (default `~/.kokua/config.toml`); a
-missing default-location file is fine. Every setting has a built-in default, so the file is entirely
-optional and you only set what you want to change. See
-[`config.example.toml`](src/kokua/config.example.toml) for the full set of keys with their defaults.
-
-Scaffold a starter file at the default location with:
-
-```bash
-kokua config init           # writes $KOKUA_CONFIG or $KOKUA_HOME/config.toml; --force to overwrite
-```
-
-It writes the same documented example shown above (every key commented at its default), so changing a
-built-in default in a later release still takes effect for keys you leave commented.
-
 ## Modules (plugins)
 
 Kokua discovers two kinds of plugin at runtime via Python entry points, so a third party adds capability by
@@ -183,27 +205,6 @@ weather = "my_weather_pack:TOOL_PACK"
 `pip install` it and `kokua --list-tool-packs` shows it; its tools appear on the agent next run. See
 `src/kokua/toolpacks/example.py` for the template.
 
-## State
-
-All state lives under `~/.kokua` (override the root with the `KOKUA_HOME` environment variable). The root
-holds an optional `config.toml` and a single `data/` directory for all transient and user-provided content:
-
-```
-~/.kokua/
-  config.toml          # optional (see Configuration file)
-  data/
-    skills/            # authored skills
-    sessions.json      # conversations (web UI can hold several)
-    memory/            # semantic facts
-    documents/         # saved documents (text; scanned by the DocumentStore)
-    downloads/         # generated files (e.g. PDFs), served by the web UI at /download
-    images/            # uploaded + generated images, served by the web UI at /images
-    runtime-settings.json  # runtime model settings from the web settings panel
-```
-
-Point `data/` elsewhere with `[paths] data_dir` in the config file. Nothing is written to your working
-directory.
-
 ## Security
 
 Kokua can author and run Python/shell scripts as **real subprocesses with your user privileges (no
@@ -219,7 +220,7 @@ name1,name2` (an empty value disables it). Proactive (unprompted) turns auto-den
 assistant never runs a full-access tool on its own schedule without you.
 
 **Known limitation -- reviewer tools bypass the approval gate.** When adversarial review is on (the
-deep planning mode described under [Run](#run)), the reviewer is a tool-using agent, and its
+deep planning mode described under [Features](#features)), the reviewer is a tool-using agent, and its
 verification toolset includes `execute_python` (so it can run calculations to check numeric claims). Unlike the main
 agent, the reviewer has **no** approval gate -- an autonomous critic can't pause to ask you mid-review --
 so it can run arbitrary Python unattended while reviewing. This is an intentional short-term tradeoff we
