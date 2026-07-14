@@ -39,6 +39,22 @@ groups = ["web", "fs", "compute", "misc"]
 # without it, no image-generation tool is offered. Uploaded and generated images are stored under
 # data/images and served by the web UI at /images; sessions keep only a small reference, not inline data.
 
+[subagents]
+# Run independent tool calls in one turn concurrently, so several spawn_subagent calls overlap.
+concurrent = true
+
+# Sub-agent roles the model can pick via spawn_subagent(agent_type, task). These merge over the
+# built-in defaults (researcher, coder, generalist) by name: reuse a name to override it, or add a
+# new name. Each role's tools are its groups intersected with [tools] groups above, so a role can
+# narrow within the enabled tools but never exceed them. `system_message` is optional.
+# [subagents.roles.researcher]
+# description = "Research specialist: gather and verify information from the web."
+# groups = ["web", "misc"]
+# [subagents.roles.dba]
+# description = "Database helper."
+# groups = ["compute"]
+# system_message = "You manage and query databases."
+
 [mcp]
 # Remote MCP server URLs to connect at startup.
 servers = []

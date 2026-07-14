@@ -11,9 +11,12 @@ installable, modular application.
   with skill authoring + runnable skill scripts, persistent conversation history, a proactive scheduler,
   remote MCP servers (startup `--mcp` + runtime `add_mcp_server`), and persistent memory (a
   `SemanticMemoryStore` for facts + a `DocumentStore` for documents, on by default).
-- **Sub-agents** (on by default): a `spawn_subagent` tool lets the assistant delegate an independent
-  subtask to a fresh, isolated agent (its own context/history, cloning the active model and the built-in
-  tool groups) and get back a single answer. Disable with `--no-subagents` or `[assistant] subagents`.
+- **Typed, concurrent sub-agents**: `spawn_subagent` is now typed — `spawn_subagent(agent_type, task)`
+  with built-in `researcher` / `coder` / `generalist` roles, each cloning the active model with its own
+  tool subset (role groups intersected with the enabled `[tools]` groups; parent-only memory/skills/MCP
+  withheld). Override or add roles under `[subagents.roles.*]`. Independent spawns in one turn run
+  concurrently (`[subagents] concurrent`, default on); the tool-approval gate serializes only the gated
+  `confirm_tools`, so gated calls still prompt one at a time.
 - **Plugin system** (`kokua.plugins`): front ends and tool-packs discovered via the `kokua.frontends` and
   `kokua.tools` entry-point groups. Built-in `cli` and `web` front ends and an `example` tool-pack are
   registered as plugins; third parties add their own by publishing a package. `--list-frontends`,

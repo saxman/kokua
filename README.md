@@ -89,6 +89,14 @@ env var is set (e.g. `gemini:nano-banana` or a HuggingFace diffusers `hf:<repo>`
 generation tool is offered. Images are stored under `data/images/` and served at `/images/<name>`; a
 conversation keeps only a small reference, so `sessions.json` stays compact.
 
+**Sub-agents.** The assistant can delegate an independent subtask to a fresh, isolated sub-agent via a
+`spawn_subagent(agent_type, task)` tool (on by default; `--no-subagents` to disable). Sub-agents come in
+roles — built-in `researcher` (web lookups), `coder` (files + code), and `generalist` (everything) — each
+cloning the active model with its own tool subset (a role's tools are its groups intersected with the
+enabled `[tools]` groups; parent-only memory/skills/MCP tools are withheld). Define or override roles
+under `[subagents.roles.*]` in the config. Independent spawns in one turn run concurrently
+(`[subagents] concurrent`, on by default).
+
 **Deep planning (per request).** When you ask for it, the assistant drafts an explicit plan before doing
 the work — which tools, skills, and MCP services it will use, what it will web-search for, and where it
 needs to build a skill or connect a new MCP server — then carries it out. Planning is per request, not a
