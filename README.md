@@ -1,12 +1,10 @@
-<div align="center">
-
+<p>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kokua-horizontal-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/kokua-horizontal-light.svg">
   <img alt="Kokua — a personal AI assistant that extends itself" src="docs/assets/kokua-horizontal-light.svg" width="360">
 </picture>
-
-</div>
+</p>
 
 **Help, assistance** (Hawaiian). A hackable, modular personal-assistant application (OpenClaw / Hermes Agent
 style) built on the [AIMU](https://github.com/saxman/aimu) library. Kokua runs an always-on assistant
