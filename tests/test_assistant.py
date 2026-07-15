@@ -58,7 +58,6 @@ def test_arg_parser_defaults():
     assert args.model is None
     assert args.config is None
     assert args.frontend is None  # resolve_config falls back to the "cli" default
-    assert args.reminder_seconds is None
 
 
 def test_default_config_lives_under_state_dir():
@@ -74,8 +73,6 @@ def test_arg_parser_overrides():
         [
             "--model",
             "anthropic:claude-sonnet-4-6",
-            "--reminder-seconds",
-            "5",
             "--frontend",
             "web",
             "--host",
@@ -86,7 +83,6 @@ def test_arg_parser_overrides():
     )
     cfg = resolve_config(args)
     assert cfg.model == "anthropic:claude-sonnet-4-6"
-    assert cfg.reminder_seconds == 5.0
     assert cfg.frontend == "web"
     assert cfg.host == "0.0.0.0"
     assert cfg.port == 9000
@@ -233,9 +229,9 @@ async def test_assistant_handles_message(tmp_path):
 async def test_assistant_proactive_message(tmp_path):
     channel = FakeChannel()
     client = MockAsyncModelClient(["Don't forget lunch."])
-    assistant = await Assistant.create(_config(tmp_path, reminder_text="remind"), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
-    await assistant._proactive()
+    await assistant._proactive("remind")
 
     assert channel.sent == ["Don't forget lunch."]
 
@@ -245,9 +241,9 @@ async def test_assistant_proactive_tags_turn_provenance(tmp_path):
 
     channel = FakeChannel()
     client = MockAsyncModelClient(["Time for a walk."])
-    assistant = await Assistant.create(_config(tmp_path, reminder_text="remind"), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
-    await assistant._proactive()
+    await assistant._proactive("remind")
 
     tagged = [m.get(PROVENANCE_KEY) for m in assistant._agent.model_client.messages]
     assert PROVENANCE_PROACTIVE in tagged

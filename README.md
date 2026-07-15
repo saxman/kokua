@@ -2,9 +2,8 @@
 
 **Help, assistance** (Hawaiian). A hackable, modular personal-assistant application (OpenClaw / Hermes Agent
 style) built on the [AIMU](https://github.com/saxman/aimu) library. Kokua runs an always-on assistant
-that chats with you, takes proactive actions on a schedule, authors and runs its own skills, connects to
-remote tool services, delegates independent subtasks to isolated sub-agents, and remembers facts and
-documents across conversations. Front ends and tool-packs are **plugins**: you extend Kokua by installing
+that chats with you, authors and runs its own skills, connects to remote tool services, delegates
+independent subtasks to isolated sub-agents, and remembers facts and documents across conversations. Front ends and tool-packs are **plugins**: you extend Kokua by installing
 modules, not by editing the core.
 
 Kokua began as AIMU's `examples/personal-assistant/` and grows it into a real application. It runs as a
@@ -37,14 +36,14 @@ normal `uv add kokua` / `pip install kokua`.)
 ## Quick Start
 
 ```bash
-kokua --model ollama:qwen3:8b --reminder-seconds 30
+kokua --model ollama:qwen3:8b
 ```
 
 Omit `--model` to use `AIMU_LANGUAGE_MODEL`, or else the first already-running local model found (Ollama,
 then a local OpenAI-compatible server); a cloud model is never auto-selected, and startup fails with an
 actionable message if none is found. Chat at the prompt; Ctrl-D exits.
-After ~30s a proactive message appears. Send `/stop` to cancel a reply that's still streaming (the partial
-turn is kept, so the conversation continues); the web UI has a Stop button for the same.
+Send `/stop` to cancel a reply that's still streaming (the partial turn is kept, so the conversation
+continues); the web UI has a Stop button for the same.
 
 Run the **web** front end instead (needs the `web` extra):
 

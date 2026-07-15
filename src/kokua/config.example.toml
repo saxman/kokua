@@ -11,10 +11,6 @@
 
 # system_message = "You are a personal assistant running on the user's own machine. ..."
 
-# Send a proactive reminder this many seconds after startup. Unset -> no reminder.
-# reminder_seconds = 1800.0
-# reminder_text = "Proactively check in with the user with one short, useful suggestion for their day."
-
 # Persistent memory across conversations (facts + user documents).
 memory = true
 

@@ -29,7 +29,14 @@ no strictness dial. Expose reviewer `max_iterations` and a `strictness` setting 
 reviewer prompt / verdict threshold) through `AssistantConfig` + `config.example.toml`, and thread
 them into `_reviewer_agent` and the plan/result review loops.
 
-## 5. Determine if and how to build a hierarchy for the kokua package
+## 5. Add "run a named skill script" as a scheduled-task action
+The scheduled-task system (see the spec under `docs/superpowers/specs/`) fires a natural-language
+prompt at the agent when a task is due (via `Assistant._proactive`). Add a second action type that
+runs an existing `SkillAgent` skill script by name instead of a free-form prompt, so a task can invoke
+authored, deterministic behavior rather than a generated turn. Decide how a task record distinguishes
+the two actions and how a missing/renamed skill is handled at fire time.
+
+## 6. Determine if and how to build a hierarchy for the kokua package
 The `src/kokua` package is currently flat: core, front ends, channels, tool packs, and helper modules
 all sit near the top level. Assess whether growth (recent extractions like `mcp.py`, `messages.py`,
 `build.py`) warrants grouping modules into subpackages (e.g. by concern or layer), and if so, decide

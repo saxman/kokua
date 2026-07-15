@@ -108,7 +108,7 @@ class Assistant:
         self._memory_store: Optional[SemanticMemoryStore] = None
         self._document_store: Optional[DocumentStore] = None
         # The reactive turn and a proactive turn share one agent/client; serialize them so
-        # a reminder firing mid-conversation can't interleave on shared message state.
+        # a proactive turn firing mid-conversation can't interleave on shared message state.
         self._lock = asyncio.Lock()
         # Each reactive turn runs as a background task (a RunHandle) so the serve loop stays free to
         # receive a `/stop` while a turn is in flight. `_current` is the latest turn (the one `/stop`
@@ -190,8 +190,6 @@ class Assistant:
         # model client on every run by the agent's _prepare_run; an empty confirm_tools is a no-op.
         agent.tool_approval = assistant._approve
         add_subagent_tool(agent, config, assistant._approve)
-        if config.reminder_seconds is not None:
-            scheduler.at(config.reminder_seconds, assistant._proactive, name="reminder")
         return assistant
 
     @property
@@ -380,7 +378,7 @@ class Assistant:
                     msg = replace(msg, text=task)
                     plan_turn = True
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
-                # arrive mid-turn. Turns stay serialized by self._lock (a reminder can't interleave).
+                # arrive mid-turn. Turns stay serialized by self._lock (a proactive turn can't interleave).
                 handle = RunHandle.start(self._handle(msg, plan=plan_turn))
                 self._current = handle
                 self._turns.add(handle.task)
@@ -473,8 +471,13 @@ class Assistant:
             note = ("\nReviewer's concerns:\n" + concerns) if concerns else ""
             await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'." + note)
 
-    async def _proactive(self) -> None:
-        """Scheduled callback: produce a message unprompted and push it to the channel."""
+    async def _proactive(self, prompt: str) -> None:
+        """Run an unprompted turn with ``prompt`` and push the reply to the channel.
+
+        The substrate for scheduled tasks: a caller (the scheduler) fires this with the task's
+        instruction. Gated tools auto-deny while it runs (see ``_approve``), since no user is present
+        to approve them.
+        """
         async with self._lock:
             self._in_proactive = True
             try:
@@ -482,7 +485,7 @@ class Assistant:
                 # from a user-driven turn. The agent doesn't reset on run (system prompt lives on the
                 # client), so the pre-run length is a stable start index for the exchange.
                 start = len(self._agent.model_client.messages)
-                reply = await self._agent.run(self._config.reminder_text)
+                reply = await self._agent.run(prompt)
                 for message in self._agent.model_client.messages[start:]:
                     message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
                 await self._channel.send(reply)

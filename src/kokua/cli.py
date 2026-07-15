@@ -53,17 +53,6 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
     )
     parser.add_argument("--system", default=None, help="Override the assistant's system message.")
     parser.add_argument(
-        "--reminder-seconds",
-        type=float,
-        default=None,
-        help="If set, send a proactive reminder this many seconds after startup.",
-    )
-    parser.add_argument(
-        "--reminder-text",
-        default=None,
-        help="Override the prompt used to generate the proactive reminder.",
-    )
-    parser.add_argument(
         "--show-thinking",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -148,8 +137,6 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
 
     take("model", args.model)
     take("system_message", args.system)
-    take("reminder_seconds", args.reminder_seconds)
-    take("reminder_text", args.reminder_text)
     take("show_thinking", args.show_thinking)
     take("show_tools", args.show_tools)
     take("tools", args.tools, lambda v: [group.strip() for group in v.split(",") if group.strip()])

@@ -8,7 +8,7 @@ installable, modular application.
 - **Package**: `src`-layout `kokua` package with console scripts `kokua` (runs the selected front end) and
   `kokua-web`. Apache-2.0, Python 3.11+.
 - **Assistant core** (`kokua.assistant`): the transport-agnostic `Assistant` wiring an AIMU `SkillAgent`
-  with skill authoring + runnable skill scripts, persistent conversation history, a proactive scheduler,
+  with skill authoring + runnable skill scripts, persistent conversation history,
   remote MCP servers (startup `--mcp` + runtime `add_mcp_server`), and persistent memory (a
   `SemanticMemoryStore` for facts + a `DocumentStore` for documents, on by default).
 - **Typed, concurrent sub-agents**: `spawn_subagent` is now typed — `spawn_subagent(agent_type, task)`

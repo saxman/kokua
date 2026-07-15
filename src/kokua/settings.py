@@ -67,8 +67,6 @@ def _parse_subagent_role(name: str, spec: Any) -> dict:
 _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
     ("assistant", "model"): ("model", (str,), "a string", None),
     ("assistant", "system_message"): ("system_message", (str,), "a string", None),
-    ("assistant", "reminder_seconds"): ("reminder_seconds", (int, float), "a number", lambda s, k, v: float(v)),
-    ("assistant", "reminder_text"): ("reminder_text", (str,), "a string", None),
     ("display", "show_thinking"): ("show_thinking", (bool,), "a boolean", None),
     ("display", "show_tools"): ("show_tools", (bool,), "a boolean", None),
     ("planning", "plan_review"): ("plan_review", (bool,), "a boolean", None),

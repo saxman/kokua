@@ -68,8 +68,6 @@ DEFAULT_SUBAGENT_ROLES: dict[str, dict] = {
     },
 }
 
-DEFAULT_REMINDER_TEXT = "Proactively check in with the user with one short, useful suggestion for their day."
-
 # Appended to the system message when memory is enabled, so the model actually uses the two stores
 # (without explicit direction the tools sit unused). Two distinct stores: short facts about the user
 # (semantic recall) vs. longer reference documents.
@@ -86,8 +84,6 @@ MEMORY_GUIDANCE = (
 class AssistantConfig:
     model: Optional[str] = None
     system_message: str = DEFAULT_SYSTEM_MESSAGE
-    reminder_seconds: Optional[float] = None
-    reminder_text: str = DEFAULT_REMINDER_TEXT
     # Surface the model's reasoning and tool calls in the channel, not just the final answer.
     show_thinking: bool = True
     show_tools: bool = True
