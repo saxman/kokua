@@ -16,343 +16,34 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Optional
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE, aio
 from aimu.aio import Channel, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
 from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.sessions import Session, TinyDBSessionStore
-from aimu.aio.tools.builtin import make_async_subagent_tool
-from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_script_tool
-from aimu.tools import builtin, tool
-from aimu.tools.builtin import make_document_tools, make_memory_tools
 
-from . import images, mcp_registry, runtime_settings
+from . import runtime_settings
+from .build import (
+    ModelClientError,
+    add_subagent_tool,
+    build_agent,
+    build_memory,
+    build_model_client,
+    resolve_system_message,
+)
 from .planning import PlanResult, PlanRunner
-from .config import DEFAULT_SUBAGENT_ROLES, MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, AssistantConfig
-from .mcp_auth import Notify, build_chat_oauth
-from .plugins import discover_tool_packs
+from .config import AssistantConfig
+from .mcp import ServerConnection, reconnect_mcp_servers
+from .messages import compact_message_images, derive_title, expand_message_images
 
 logger = logging.getLogger(__name__)
 
-
-class ModelClientError(RuntimeError):
-    """The model client could not be built: no model resolved (no `AIMU_LANGUAGE_MODEL`, no
-    running local provider) or an invalid model string. Carries AIMU's actionable message so a
-    front end can present it instead of a traceback."""
-
-
-# AIMU's built-in tool subgroups, selectable by name via the --tools flag / AssistantConfig.tools.
-# The generative groups (image/audio/speech/transcription) need their AIMU_*_MODEL env var set and
-# raise at call time otherwise, so they are not in the default set. The default tools are sync; the
-# async agent dispatches them via asyncio.to_thread, so no wrapping is needed.
-_TOOL_GROUPS = {
-    "web": builtin.web,
-    "fs": builtin.fs,
-    "compute": builtin.compute,
-    "misc": builtin.misc,
-    "image": builtin.image,
-    "audio": builtin.audio,
-    "speech": builtin.speech,
-    "transcription": builtin.transcription,
-}
-
-
-def _resolve_builtin_tools(names: list[str]) -> list:
-    """Map tool-group names to built-in tool callables (deduped by name).
-
-    ``"all"`` expands to ``builtin.ALL_TOOLS``; ``"none"`` contributes nothing. An unknown name
-    raises ``ValueError`` listing the valid groups.
-    """
-    resolved: list = []
-    seen: set[str] = set()
-    for name in names:
-        if name == "none":
-            continue
-        if name == "all":
-            group = builtin.ALL_TOOLS
-        elif name in _TOOL_GROUPS:
-            group = _TOOL_GROUPS[name]
-        else:
-            valid = ", ".join(sorted(_TOOL_GROUPS)) + ", all, none"
-            raise ValueError(f"unknown tool group {name!r}; choose from: {valid}")
-        for fn in group:
-            if fn.__name__ not in seen:
-                seen.add(fn.__name__)
-                resolved.append(fn)
-    return resolved
-
-
-def _effective_subagent_roles(config: AssistantConfig) -> dict[str, dict]:
-    """Built-in roles with the user's config roles merged over them by name."""
-    return {**DEFAULT_SUBAGENT_ROLES, **config.subagent_roles}
-
-
-def _build_subagent_agent_types(config: AssistantConfig) -> dict[str, dict]:
-    """Build AIMU ``agent_types`` from the effective roles.
-
-    Each role's tools are its groups intersected with the assistant's enabled tool groups
-    (``config.tools``), so a role can narrow within what is enabled but never exceed it. The role's
-    ``description`` is made the first line of the built ``system_message`` (AIMU shows that line in the
-    tool's role menu); an omitted ``system_message`` body defaults to just the description.
-    """
-    # "all" expands to every group; "none" and unknown/disabled groups are dropped silently.
-    if "all" in config.tools:
-        enabled = set(_TOOL_GROUPS)
-    else:
-        enabled = {g for g in config.tools if g != "none"}
-    agent_types: dict[str, dict] = {}
-    for name, role in _effective_subagent_roles(config).items():
-        groups = [g for g in role.get("groups", []) if g in enabled]
-        body = role.get("system_message", "")
-        description = role.get("description", name)
-        system_message = f"{description}\n\n{body}" if body else description
-        agent_types[name] = {"system_message": system_message, "tools": _resolve_builtin_tools(groups)}
-    return agent_types
-
-
-def _looks_like_auth_required(exc: BaseException) -> bool:
-    """Heuristic: did this connection failure come from an auth challenge (so OAuth should run)?
-
-    Matches the failure text against common auth signals (401/403, "unauthorized", a
-    WWW-Authenticate / OAuth hint). Deliberately narrow so a plain unreachable host (DNS,
-    connection refused) does not trigger an OAuth attempt.
-    """
-    text = f"{exc} {getattr(exc, '__cause__', '') or ''}".lower()
-    return any(s in text for s in ("401", "403", "unauthor", "forbidden", "www-authenticate", "oauth"))
-
-
-@dataclass
-class _ServerConnection:
-    """A live remote-MCP connection and the tools it contributed (for teardown and removal)."""
-
-    url: str
-    client: Any  # aio.MCPClient
-    tools: list[str]  # __name__ of each tool this server added to agent.tools
-    auth_mode: str  # "none" | "oauth" | "bearer"
-
-
-async def _connect_mcp(
-    url: str,
-    *,
-    bearer_token: Optional[str] = None,
-    auth_mode: Optional[str] = None,
-    notify: Notify,
-    oauth_storage_dir: Path,
-) -> tuple[Any, str]:
-    """Connect to a remote MCP server, returning ``(client, auth_mode_used)``.
-
-    With ``auth_mode`` known (a boot reconnect) the connection uses that mode directly. With it
-    ``None`` (a runtime add) the connection tries unauthenticated first and falls back to the OAuth
-    flow on an auth challenge. A ``bearer_token`` always takes precedence. OAuth posts an
-    authorization link via ``notify`` and persists tokens under ``oauth_storage_dir`` (so a cached
-    token reconnects silently).
-    """
-    if bearer_token:
-        return await aio.MCPClient.connect(url=url, auth=bearer_token), "bearer"
-    if auth_mode == "oauth":
-        provider = build_chat_oauth(url, notify=notify, token_storage_dir=oauth_storage_dir)
-        return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
-    if auth_mode == "none":
-        return await aio.MCPClient.connect(url=url), "none"
-    # Unknown (runtime add): try unauthenticated, fall back to OAuth on an auth challenge.
-    try:
-        return await aio.MCPClient.connect(url=url), "none"
-    except Exception as exc:
-        if not _looks_like_auth_required(exc):
-            raise
-        logger.info("MCP server %s requires authorization; starting OAuth flow.", url)
-        provider = build_chat_oauth(url, notify=notify, token_storage_dir=oauth_storage_dir)
-        return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
-
-
-async def _attach_server(agent: aio.SkillAgent, connections: list, url: str, client: Any, auth_mode: str) -> list[str]:
-    """Add a connected server's tools to the agent (deduped) and record the connection.
-
-    Returns the names of the tools newly added. Tools land on ``agent.tools``; the tool-loop engine
-    re-reads the agent's effective tools each round, so a server added mid-turn is dispatchable in the
-    same turn without touching the model client.
-    """
-    new_tools = await client.as_tools()
-    existing = {getattr(fn, "__name__", None) for fn in agent.tools}
-    added = [fn for fn in new_tools if fn.__name__ not in existing]
-    agent.tools.extend(added)
-    names = [fn.__name__ for fn in added]
-    connections.append(_ServerConnection(url=url, client=client, tools=names, auth_mode=auth_mode))
-    return names
-
-
-def make_mcp_tools(
-    agent: aio.SkillAgent,
-    connections: list,
-    *,
-    notify: Notify,
-    oauth_storage_dir: Path,
-    registry_path: Path,
-) -> list[Callable]:
-    """Build the ``add_mcp_server`` / ``remove_mcp_server`` tools bound to one connection registry.
-
-    Lets the assistant connect to (and disconnect from) a remote MCP service by URL mid-session.
-    A reconnectable server (unauthenticated or OAuth) is recorded in ``registry_path`` so it
-    reconnects on the next restart; bearer-token servers are session-only (their secret is not
-    written to disk). ``connections`` is the live list shared with the boot path and teardown.
-    """
-
-    @tool
-    async def add_mcp_server(url: str, bearer_token: Optional[str] = None) -> str:
-        """Connect to a remote MCP server by URL and add its tools to this assistant.
-
-        The server's tools become callable immediately, even in this same turn, and the connection
-        is remembered so it is restored automatically the next time the assistant starts. Returns
-        the names of the newly available tools.
-
-        Authentication is handled for you: just pass the URL. If the server is unprotected it
-        connects directly. If it requires OAuth, you post an authorization link into the chat and
-        open a browser window for the user to approve; once they do, the connection completes and
-        the token is saved for future sessions. Do not claim you cannot authenticate or that this
-        is impossible from here, that flow is built in. Pass bearer_token only when the user gives
-        you a static token to use instead of the OAuth flow.
-        """
-        if any(conn.url == url for conn in connections):
-            return f"Already connected to {url}; its tools are available. Use remove_mcp_server to disconnect first."
-        try:
-            client, auth_mode = await _connect_mcp(
-                url, bearer_token=bearer_token, notify=notify, oauth_storage_dir=oauth_storage_dir
-            )
-            added = await _attach_server(agent, connections, url, client, auth_mode)
-        except Exception as exc:
-            return f"Failed to connect to MCP server {url!r}: {exc}"
-        # Persist reconnectable servers (no secret on disk); a bearer server stays session-only.
-        if auth_mode in mcp_registry.RECONNECTABLE:
-            mcp_registry.add(registry_path, url, auth_mode)
-            note = ""
-        else:
-            note = " (session only; add it to config.toml [mcp] to keep a bearer-token server across restarts)"
-        names = ", ".join(added) if added else "(no new tools)"
-        return f"Connected to {url}. Tools now available: {names}.{note}"
-
-    @tool
-    async def remove_mcp_server(url: str) -> str:
-        """Disconnect a remote MCP server added earlier and remove its tools.
-
-        Drops the server's tools, closes the connection, and forgets it so it is not reconnected on
-        the next restart. Pass the same URL that was used to add it.
-        """
-        entry = next((c for c in connections if c.url == url), None)
-        if entry is None:
-            return f"No MCP server is connected at {url!r}."
-        removed = set(entry.tools)
-        # Drop from agent.tools; the engine re-reads the effective tools each round, so the tools
-        # stop being advertised and dispatchable from the next round on (this turn included).
-        agent.tools[:] = [fn for fn in agent.tools if getattr(fn, "__name__", None) not in removed]
-        connections.remove(entry)
-        try:
-            await entry.client.aclose()
-        except Exception:
-            logger.debug("Error closing MCP client for %s", url, exc_info=True)
-        mcp_registry.remove(registry_path, url)
-        names = ", ".join(sorted(removed)) if removed else "(none)"
-        return f"Disconnected {url}. Removed tools: {names}."
-
-    return [add_mcp_server, remove_mcp_server]
-
-
-def _load_plugin_tools(config: AssistantConfig) -> list:
-    """Build the tools contributed by installed tool-pack plugins (deduped by name)."""
-    tools: list = []
-    seen: set[str] = set()
-    for name, pack in discover_tool_packs().items():
-        try:
-            pack_tools = pack.build(config)
-        except Exception:
-            logger.warning("Tool-pack %r failed to build; skipping.", name, exc_info=True)
-            continue
-        for fn in pack_tools:
-            fname = getattr(fn, "__name__", None)
-            if fname and fname not in seen:
-                seen.add(fname)
-                tools.append(fn)
-        logger.info("Loaded tool-pack %r (%d tools).", name, len(pack_tools))
-    return tools
-
-
-def _message_text(content) -> str:
-    """Plain text of a message's content (a string, or the text blocks of a multimodal list)."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
-    return ""
-
-
-def _derive_title(messages: list[dict]) -> Optional[str]:
-    """A conversation title from the first user message (stripped, truncated), or None."""
-    for message in messages:
-        if message.get("role") == "user":
-            text = _message_text(message.get("content")).strip()
-            if text:
-                return text[:40]
-    return None
-
-
-def _map_image_block_urls(messages: list[dict], transform) -> list[dict]:
-    """Return a copy of *messages* with each ``image_url`` block's url passed through *transform*.
-
-    ``transform`` returns a replacement url, or ``None`` to leave the block unchanged. Only messages that
-    actually contain an image_url block are copied; the rest are shared by reference (cheap, safe: the
-    caller never mutates in place)."""
-    out: list[dict] = []
-    for message in messages:
-        content = message.get("content")
-        if not isinstance(content, list) or not any(
-            isinstance(b, dict) and b.get("type") == "image_url" for b in content
-        ):
-            out.append(message)
-            continue
-        new_content = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "image_url":
-                url = block.get("image_url", {}).get("url", "")
-                replacement = transform(url)
-                if replacement is not None:
-                    block = {**block, "image_url": {**block["image_url"], "url": replacement}}
-            new_content.append(block)
-        out.append({**message, "content": new_content})
-    return out
-
-
-def _compact_message_images(messages: list[dict], images_path) -> list[dict]:
-    """Rewrite inline base64 image data URLs to on-disk ``/images/<hash>`` references (for persistence).
-
-    Keeps ``sessions.json`` small: the bytes are written under ``images_path`` (content-addressed) and the
-    stored message keeps only the short reference. A url that is already a reference or an http URL is left
-    as-is."""
-
-    def to_reference(url: str):
-        if url.startswith("data:"):
-            return images.save_data_url(images_path, url)
-        return None
-
-    return _map_image_block_urls(messages, to_reference)
-
-
-def _expand_message_images(messages: list[dict], images_path) -> list[dict]:
-    """Rewrite ``/images/<name>`` references back to base64 data URLs (before restoring into the agent).
-
-    The model request must carry pixels (a localhost /images URL is not fetchable by the provider), so a
-    reference is re-read from disk here. A reference whose file is missing is left unchanged rather than
-    crashing the restore."""
-
-    def to_data_url(url: str):
-        if images.is_reference(url):
-            return images.reference_to_data_url(images_path, url)
-        return None
-
-    return _map_image_block_urls(messages, to_data_url)
+# Re-exported so front ends can keep catching `assistant.ModelClientError`; the class lives in build.
+__all__ = ["Assistant", "ModelClientError"]
 
 
 def _active_session(store: TinyDBSessionStore) -> Session:
@@ -411,7 +102,7 @@ class Assistant:
         self._config = config
         # Live remote-MCP connections (startup + runtime-added) kept alive for their lifetime
         # and closed on shutdown. Assigned by create().
-        self._mcp_servers: list[_ServerConnection] = []
+        self._mcp_servers: list[ServerConnection] = []
         # Persistent memory stores (None when --no-memory). Assigned by create(); persistence is
         # automatic (Chroma PersistentClient / DocumentStore disk writes), so no teardown needed.
         self._memory_store: Optional[SemanticMemoryStore] = None
@@ -450,16 +141,7 @@ class Assistant:
         # active model. Layered over config.toml (which is never rewritten); see runtime_settings.
         stored = runtime_settings.load(config.runtime_settings_path)
         if client is None:
-            # A persisted model choice wins over config.model, and config.model is kept in sync so
-            # current_settings() and the panel reflect the model actually running.
-            if stored.get("model"):
-                config.model = stored["model"]
-            system = config.system_message + (MEMORY_GUIDANCE if config.memory else "")
-            system += SUBAGENT_GUIDANCE if config.subagents else ""
-            try:
-                client = aio.client(config.model, system=system)
-            except (ValueError, TypeError) as e:
-                raise ModelClientError(str(e)) from e
+            client = build_model_client(config, stored)
 
         # Snapshot the provider's built-in generate kwargs, then layer config.toml + persisted runtime
         # values on top, and apply persisted display prefs. Runs for injected clients (tests) too.
@@ -475,83 +157,28 @@ class Assistant:
             if flag in stored:
                 setattr(config, flag, stored[flag])
 
-        # Persistent memory: a SemanticMemoryStore for facts about the user and a DocumentStore for
-        # longer reference documents. Both live under the app state dir, so they survive restarts and
-        # span conversations (unlike per-conversation history). Tools have distinct names, so both
-        # sets coexist on the one agent.
-        memory_store: Optional[SemanticMemoryStore] = None
-        document_store: Optional[DocumentStore] = None
-        memory_tools: list = []
-        if config.memory:
-            memory_store = SemanticMemoryStore(persist_path=str(config.memory_path))
-            document_store = DocumentStore(persist_path=str(config.documents_path))
-            memory_tools = make_memory_tools(memory_store) + make_document_tools(document_store)
+        memory_store, document_store, memory_tools = build_memory(config)
 
-        plugin_tools = _load_plugin_tools(config) if config.load_plugins else []
-
-        manager = SkillManager(skill_dirs=[str(config.skills_dir)])
-        author_skill = make_skill_authoring_tool(manager, config.skills_dir)
-        agent = aio.SkillAgent(
-            client,
-            tools=[author_skill],
-            skill_manager=manager,
-            name="assistant",
-            concurrent_tool_calls=config.subagents_concurrent,
-        )
-        # add_skill_script and the MCP tools need the agent (to surface new tools this turn), so
-        # they are built after it. Built-in tools, memory tools, and plugin tools are appended too;
-        # the SkillAgent re-appends its skills-server tools each run.
-        connections: list[_ServerConnection] = []
+        connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
-        builtin_tools = _resolve_builtin_tools(config.tools)
-
-        agent.tools = [
-            author_skill,
-            make_skill_script_tool(agent, manager, config.skills_dir),
-            *make_mcp_tools(
-                agent,
-                connections,
-                notify=channel.send,
-                oauth_storage_dir=oauth_storage_dir,
-                registry_path=config.mcp_servers_path,
-            ),
-            *memory_tools,
-            *plugin_tools,
-            *builtin_tools,
-        ]
-
-        # Reconnect MCP servers at boot so their tools are available without re-adding them: first
-        # the ones declared in config (--mcp / [mcp] servers), then the ones added at runtime and
-        # recorded in the registry (deduped by URL). A connect failure logs and continues so one
-        # unreachable server can't stop the assistant from starting.
-        for url in config.mcp_servers:
-            try:
-                client_, mode = await _connect_mcp(
-                    url, bearer_token=config.mcp_bearer, notify=channel.send, oauth_storage_dir=oauth_storage_dir
-                )
-                await _attach_server(agent, connections, url, client_, mode)
-            except Exception:
-                logger.warning("Could not connect MCP server %s; continuing without it.", url, exc_info=True)
-
-        connected_urls = {conn.url for conn in connections}
-        for record in mcp_registry.load(config.mcp_servers_path):
-            url = record["url"]
-            if url in connected_urls:
-                continue
-            try:
-                client_, mode = await _connect_mcp(
-                    url, auth_mode=record.get("auth_mode"), notify=channel.send, oauth_storage_dir=oauth_storage_dir
-                )
-                await _attach_server(agent, connections, url, client_, mode)
-            except Exception:
-                logger.warning("Could not reconnect MCP server %s; continuing without it.", url, exc_info=True)
+        agent = build_agent(
+            config,
+            client,
+            notify=channel.send,
+            oauth_storage_dir=oauth_storage_dir,
+            connections=connections,
+            memory_tools=memory_tools,
+        )
+        await reconnect_mcp_servers(
+            agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
+        )
 
         # Multiple conversations live in a session store. The active conversation is the most
         # recently updated (a fresh empty one if there are none).
         store = TinyDBSessionStore(str(config.sessions_path))
         session = _active_session(store)
         if session.messages:
-            agent.restore(_expand_message_images(session.messages, config.images_path))
+            agent.restore(expand_message_images(session.messages, config.images_path))
 
         scheduler = Scheduler()
         assistant = cls(agent, channel, scheduler, store, session, config)
@@ -562,20 +189,7 @@ class Assistant:
         # Gate configured "risky" tools behind interactive approval (see _approve). Published to the
         # model client on every run by the agent's _prepare_run; an empty confirm_tools is a no-op.
         agent.tool_approval = assistant._approve
-        # Sub-agents (on by default): a typed spawn_subagent(agent_type, task) tool. Each spawn clones the
-        # active model and gets its role's tool subset (role groups intersected with config.tools); the
-        # parent-only stateful tools (memory, skills, MCP management) are deliberately withheld. Concurrent
-        # spawns overlap under the parent's concurrent_tool_calls (set on the SkillAgent below); the
-        # approval gate is forwarded so a sub-agent's gated-tool calls (e.g. execute_python) prompt via
-        # the parent rather than running unattended.
-        if config.subagents:
-            agent.tools.append(
-                make_async_subagent_tool(
-                    agent.model_client.model,
-                    agent_types=_build_subagent_agent_types(config),
-                    tool_approval=assistant._approve,
-                )
-            )
+        add_subagent_tool(agent, config, assistant._approve)
         if config.reminder_seconds is not None:
             scheduler.at(config.reminder_seconds, assistant._proactive, name="reminder")
         return assistant
@@ -624,7 +238,7 @@ class Assistant:
             session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
             self._store.save(session)
             self._session = session
-            self._agent.restore(_expand_message_images(session.messages, self._config.images_path))
+            self._agent.restore(expand_message_images(session.messages, self._config.images_path))
         return session.key
 
     async def select_conversation(self, conversation_id: str) -> None:
@@ -632,7 +246,7 @@ class Assistant:
         await self._cancel_current_turn()
         async with self._lock:
             self._session = self._store.get(conversation_id)
-            self._agent.restore(_expand_message_images(self._session.messages, self._config.images_path))
+            self._agent.restore(expand_message_images(self._session.messages, self._config.images_path))
 
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation. If it is the active one, switch to the most-recently-updated
@@ -644,7 +258,7 @@ class Assistant:
             self._store.delete(conversation_id)
             if deleting_active:
                 self._session = _active_session(self._store)
-                self._agent.restore(_expand_message_images(self._session.messages, self._config.images_path))
+                self._agent.restore(expand_message_images(self._session.messages, self._config.images_path))
 
     def current_settings(self) -> dict:
         """The effective runtime settings for the web panel to display: model, prefs, generate kwargs."""
@@ -696,11 +310,9 @@ class Assistant:
         Tools bind the agent (not the client), so they survive the swap and are republished to the new
         client on the next run. Raises (leaving the old client in place) if the model can't be built.
         """
-        system = self._config.system_message + (MEMORY_GUIDANCE if self._config.memory else "")
-        system += SUBAGENT_GUIDANCE if self._config.subagents else ""
-        new_client = aio.client(model, system=system)  # build first; only swap on success
+        new_client = aio.client(model, system=resolve_system_message(self._config))  # build first; only swap on success
         self._agent.model_client = new_client
-        self._agent.restore(_expand_message_images(self._session.messages, self._config.images_path))
+        self._agent.restore(expand_message_images(self._session.messages, self._config.images_path))
         self._config.model = model
         self._base_generate_kwargs = dict(new_client.default_generate_kwargs)
 
@@ -893,13 +505,13 @@ class Assistant:
     def _persist(self) -> bool:
         """Snapshot the agent's messages onto the active session and save. Returns True if a title
         was just derived (first user message), so a caller can refresh the conversation list."""
-        messages = _compact_message_images(
+        messages = compact_message_images(
             [dict(m) for m in self._agent.model_client.messages], self._config.images_path
         )
         self._session.messages = messages
         title_set = False
         if not self._session.metadata.get("title"):
-            title = _derive_title(messages)
+            title = derive_title(messages)
             if title:
                 self._session.metadata["title"] = title
                 title_set = True

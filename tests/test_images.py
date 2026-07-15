@@ -8,7 +8,7 @@ import json
 
 from helpers import MockAsyncModelClient
 from kokua import images
-from kokua.assistant import _compact_message_images, _expand_message_images
+from kokua.messages import compact_message_images, expand_message_images
 from kokua.channels.cli import CLIChannel
 from kokua.channels.web import WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
@@ -66,26 +66,26 @@ def _image_message(url: str) -> dict:
 
 
 def test_compact_then_expand_round_trip(tmp_path):
-    compacted = _compact_message_images([_image_message(_PNG_DATA_URL)], tmp_path)
+    compacted = compact_message_images([_image_message(_PNG_DATA_URL)], tmp_path)
     stored_url = compacted[0]["content"][1]["image_url"]["url"]
     assert stored_url.startswith("/images/")  # small reference, not base64
     assert "base64" not in json.dumps(compacted)
 
-    expanded = _expand_message_images(compacted, tmp_path)
+    expanded = expand_message_images(compacted, tmp_path)
     assert expanded[0]["content"][1]["image_url"]["url"] == _PNG_DATA_URL
 
 
 def test_compact_leaves_non_data_urls_and_text_only(tmp_path):
     http_msg = _image_message("https://example.com/x.png")
     text_msg = {"role": "user", "content": "plain text"}
-    out = _compact_message_images([http_msg, text_msg], tmp_path)
+    out = compact_message_images([http_msg, text_msg], tmp_path)
     assert out[0]["content"][1]["image_url"]["url"] == "https://example.com/x.png"
     assert out[1] is text_msg  # untouched messages are shared, not copied
 
 
 def test_expand_missing_file_left_as_reference(tmp_path):
     msg = _image_message("/images/deadbeef.png")
-    out = _expand_message_images([msg], tmp_path)
+    out = expand_message_images([msg], tmp_path)
     assert out[0]["content"][1]["image_url"]["url"] == "/images/deadbeef.png"
 
 

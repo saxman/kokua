@@ -107,7 +107,7 @@ class AssistantConfig:
     # (prose reasoning + verdict), executor, and every revision -- under labeled phase headers, showing
     # every intermediate version. Overrides result_review's "hide until vetted" gate. Off by default.
     show_reasoning: bool = False
-    # AIMU built-in tool groups to expose (see assistant._TOOL_GROUPS; "all"/"none" also accepted).
+    # AIMU built-in tool groups to expose (see build._TOOL_GROUPS; "all"/"none" also accepted).
     tools: list[str] = field(default_factory=lambda: ["web", "fs", "compute", "misc"])
     # Remote MCP server URLs to connect at startup; a bearer token (if set) is applied to all.
     mcp_servers: list[str] = field(default_factory=list)

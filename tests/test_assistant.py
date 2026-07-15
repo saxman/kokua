@@ -156,7 +156,7 @@ async def test_subagent_tool_is_typed_with_default_roles(tmp_path):
 
 
 def test_build_subagent_agent_types_clamps_to_enabled_groups(tmp_path):
-    from kokua.assistant import _build_subagent_agent_types
+    from kokua.build import _build_subagent_agent_types
 
     # coder wants fs+compute; only web enabled globally -> coder ends up with no tools.
     cfg = _config(tmp_path, tools=["web"])
@@ -171,7 +171,7 @@ def test_build_subagent_agent_types_clamps_to_enabled_groups(tmp_path):
 
 
 def test_subagent_roles_nonempty_when_tools_all(tmp_path):
-    from kokua.assistant import _build_subagent_agent_types
+    from kokua.build import _build_subagent_agent_types
 
     cfg = _config(tmp_path, tools=["all"])
     types = _build_subagent_agent_types(cfg)
@@ -181,7 +181,7 @@ def test_subagent_roles_nonempty_when_tools_all(tmp_path):
 
 
 async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
-    import kokua.assistant as assistant_mod
+    import kokua.build as build_mod
 
     captured = {}
 
@@ -199,7 +199,7 @@ async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
         spawn_subagent.__tool_spec__ = {"function": {"name": "spawn_subagent"}}
         return spawn_subagent
 
-    monkeypatch.setattr(assistant_mod, "make_async_subagent_tool", fake_make_async_subagent_tool)
+    monkeypatch.setattr(build_mod, "make_async_subagent_tool", fake_make_async_subagent_tool)
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     assert captured["tool_approval"] == assistant._approve
