@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Kokua">
+  <title>Kokua</title>
+  <rect x="0" y="0" width="128" height="128" rx="28" fill="#0f172a"/>
+  <rect x="32.85" y="29.38" width="15.23" height="69.23" rx="5.538" fill="#818cf8"/>
+  <path d="M 88.23 34.92 L 60.54 64 L 88.23 93.08" fill="none" stroke="#2dd4bf" stroke-width="13.85" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="104" viewBox="0 0 90 104" role="img" aria-label="Kokua">
+  <title>Kokua</title>
+  <!-- inherits CSS `color`; defaults to black -->
+  <rect x="0" y="2" width="22" height="100" rx="8" fill="currentColor"/>
+  <path d="M 80 10 L 40 52 L 80 94" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

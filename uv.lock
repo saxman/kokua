@@ -51,6 +51,7 @@ requires-dist = [
     { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.0" },
     { name = "gradio", marker = "extra == 'web'" },
     { name = "jupyter", marker = "extra == 'notebooks'" },
+    { name = "jupytext", marker = "extra == 'notebooks'" },
     { name = "kernels", marker = "extra == 'hf'", specifier = ">=0.12,<0.13" },
     { name = "llama-cpp-python", marker = "extra == 'llamacpp'" },
     { name = "mistral-common", marker = "extra == 'hf'" },

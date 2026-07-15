@@ -1,14 +1,23 @@
-# Kokua
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kokua-horizontal-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/kokua-horizontal-light.svg">
+  <img alt="Kokua — a personal AI assistant that extends itself" src="docs/assets/kokua-horizontal-light.svg" width="360">
+</picture>
+
+</div>
 
 **Help, assistance** (Hawaiian). A hackable, modular personal-assistant application (OpenClaw / Hermes Agent
 style) built on the [AIMU](https://github.com/saxman/aimu) library. Kokua runs an always-on assistant
 that chats with you, authors and runs its own skills, connects to remote tool services, delegates
-independent subtasks to isolated sub-agents, and remembers facts and documents across conversations. Front ends and tool-packs are **plugins**: you extend Kokua by installing
-modules, not by editing the core.
+independent subtasks to isolated sub-agents, and remembers facts and documents across conversations.
+Kokua **extends itself**: it writes and runs new skills to take on capabilities it didn't ship with, and
+grows its reach by connecting to remote MCP services on its own. And where it can't extend itself, you
+extend it: front ends and tool-packs are **plugins** you add by installing modules, not by editing the core.
 
-Kokua began as AIMU's `examples/personal-assistant/` and grows it into a real application. It runs as a
-single user in a single process, and can run code and connect to remote services with your privileges
-(see [Security](#security)).
+It runs as a single user in a single process, and can run code and connect to remote services with your
+privileges (see [Security](#security)).
 
 ## Install
 
