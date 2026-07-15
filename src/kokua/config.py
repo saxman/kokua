@@ -170,6 +170,10 @@ class AssistantConfig:
         return self.data_dir / "mcp-servers.json"
 
     @property
+    def scheduled_tasks_path(self) -> Path:
+        return self.data_dir / "scheduled_tasks.json"
+
+    @property
     def runtime_settings_path(self) -> Path:
         """Where the web settings panel persists runtime model settings across restarts."""
         return self.data_dir / "runtime-settings.json"

@@ -57,3 +57,7 @@ def documents_dir() -> Path:
 
 def images_dir() -> Path:
     return data_dir() / "images"
+
+
+def scheduled_tasks_path() -> Path:
+    return data_dir() / "scheduled_tasks.json"
