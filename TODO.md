@@ -28,3 +28,10 @@ Note: fix may belong upstream in the editable `../aimu` sibling rather than Koku
 no strictness dial. Expose reviewer `max_iterations` and a `strictness` setting (adjusting the
 reviewer prompt / verdict threshold) through `AssistantConfig` + `config.example.toml`, and thread
 them into `_reviewer_agent` and the plan/result review loops.
+
+## 5. Determine if and how to build a hierarchy for the kokua package
+The `src/kokua` package is currently flat: core, front ends, channels, tool packs, and helper modules
+all sit near the top level. Assess whether growth (recent extractions like `mcp.py`, `messages.py`,
+`build.py`) warrants grouping modules into subpackages (e.g. by concern or layer), and if so, decide
+the structure and migration path. Weigh the churn to imports and entry-point paths against the
+navigability gain; keep the core small either way.
