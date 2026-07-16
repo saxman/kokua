@@ -108,6 +108,17 @@ class AssistantConfig:
     # Remote MCP server URLs to connect at startup; a bearer token (if set) is applied to all.
     mcp_servers: list[str] = field(default_factory=list)
     mcp_bearer: Optional[str] = None
+    # Email (SMTP send). Recipients are LOCKED to email_to: the send_email tool takes no recipient, so
+    # the assistant can only ever email the user. The password is read from KOKUA_EMAIL_PASSWORD (env),
+    # never TOML. The email tool-pack self-gates: it offers no tool unless host + email_to are set and
+    # that env var is present.
+    email_host: Optional[str] = None
+    email_port: int = 587
+    email_username: Optional[str] = None  # SMTP login user; falls back to email_from, then email_to
+    email_from: Optional[str] = None  # From: header; falls back to email_to
+    email_to: Optional[str] = None  # the ONLY recipient the tool will ever send to
+    # True -> SMTP_SSL (implicit TLS, usually port 465); False -> plain connect + STARTTLS (usually 587).
+    email_use_ssl: bool = False
     # Baseline model generation kwargs seeded from the [generation] TOML section. At runtime the web
     # settings panel overrides these (persisted separately to runtime-settings.json); see the
     # layering note there. Kept as a plain dict so provider-specific keys pass through untouched.

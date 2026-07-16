@@ -80,6 +80,21 @@ name = "cli"
 host = "127.0.0.1"
 port = 8000
 
+[email]
+# Let the assistant email information to you (digests, summaries, reports) via SMTP. The assistant can
+# ONLY email `to` below; the send_email tool takes no recipient, so it can never mail arbitrary people.
+# Sending is UNGATED (no per-send confirmation) so scheduled/proactive turns can send. The email tool is
+# offered only when `host` and `to` are set AND the KOKUA_EMAIL_PASSWORD environment variable is present.
+#
+# The password is read from KOKUA_EMAIL_PASSWORD, NEVER from this file (adding it here is a config error).
+# For Gmail / Google Workspace, use an App Password. Leave everything unset to disable email.
+# host = "smtp.gmail.com"
+# port = 587                    # 587 with STARTTLS (default), or 465 with use_ssl = true
+# username = "you@example.com"  # SMTP login user; defaults to `from`, then `to`
+# from = "you@example.com"      # From: header; defaults to `to`
+# to = "you@example.com"        # the ONLY address the assistant can send to
+# use_ssl = false               # false -> STARTTLS on connect; true -> implicit TLS (SMTP_SSL)
+
 [planning]
 # Deep planning is invoked per request -- the web UI's Plan toggle, or a "/plan <task>" message -- and
 # drafts an explicit plan (which tools/skills/MCP services to use or build) before doing the work.

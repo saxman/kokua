@@ -79,6 +79,14 @@ installable, modular application.
   `GET /download/<name>`, so the assistant can hand back a download link; the tool also returns the
   absolute path for the CLI. (Downloads live in their own folder, not `data/documents/`, so the binary
   PDFs never disturb the DocumentStore, which scans the documents folder as text.)
+- **Email tool**: a built-in `email` tool-pack contributes `send_email`, letting the assistant email
+  information to you (digests, summaries, reports) over SMTP (stdlib `smtplib`, no extra dependency). The
+  recipient is locked to your configured `[email] to` address, so the tool takes no recipient and can only
+  ever email you. The body is written in Markdown and delivered as HTML with a plain-text fallback;
+  attachments are limited to files already in `data/downloads/` or `data/images/` (traversal-safe). The
+  tool is offered only when `[email] host` and `to` are set and the `KOKUA_EMAIL_PASSWORD` env var is
+  present (the password is never read from the config file). Sending is ungated, so scheduled/proactive
+  turns can send (e.g. a daily digest).
 - **Image input and output**: attach images and the assistant reads them (vision), and it can generate
   images. In the web UI, attach via the composer's paperclip or by pasting; thumbnails preview before
   send and images render inline in the chat (live and on reload). In the CLI, `/attach <path>` stages a

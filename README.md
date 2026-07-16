@@ -89,7 +89,7 @@ List what's installed:
 
 ```bash
 kokua --list-frontends     # cli, web, + any installed plugins
-kokua --list-tool-packs    # example, pdf, image, + any installed plugins
+kokua --list-tool-packs    # example, pdf, image, email, + any installed plugins
 ```
 
 Useful flags: `--tools web,fs,compute,misc` (AIMU built-in tool groups), `--mcp <url>` (repeatable, connect
@@ -148,6 +148,16 @@ qualify). In the web UI, use the composer's paperclip or paste an image; from th
 env var is set (e.g. `gemini:nano-banana` or a HuggingFace diffusers `hf:<repo>`); without it, no image
 generation tool is offered. Images are stored under `data/images/` and served at `/images/<name>`; a
 conversation keeps only a small reference, so `sessions.json` stays compact.
+
+**Email.** A built-in `email` tool-pack gives the assistant a `send_email` tool so it can email
+information to you (digests, summaries, reports). It can only email *you*: the recipient is fixed to the
+`[email] to` address, so the tool takes no recipient and cannot mail anyone else. The body is written in
+Markdown and delivered as formatted HTML with a plain-text fallback; the assistant can attach files that
+already live in `data/downloads/` or `data/images/`. Configure the `[email]` section (SMTP `host`, `port`,
+`from`, `to`, `use_ssl`) and set the password in the `KOKUA_EMAIL_PASSWORD` environment variable, never in
+the config file (for Gmail / Google Workspace, use an App Password). The tool appears only once host, `to`,
+and the password are all present. Sending is ungated, so scheduled/proactive turns can send too, e.g. a
+daily digest.
 
 **Scheduled tasks.** Ask the assistant to do something on a schedule ("every weekday at 9am, summarize
 my calendar") and it uses its `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` tools
