@@ -53,8 +53,7 @@ TOML file into schema-validated `AssistantConfig` overrides. `cli.py`'s `resolve
 defers to the file/default. `config.example.toml` documents every key at its default.
 
 **State lives under `~/.kokua`** (override with `KOKUA_HOME`); `paths.py` owns all locations. `data/`
-holds `sessions.json` (conversations), `skills/`, `memory/`, `documents/`, `downloads/`, `images/`, and
-`mcp-servers.json`.
+holds `sessions.json` (conversations), `skills/`, `memory/`, `documents/`, `downloads/`, `images/`, `mcp-servers.json`, and `scheduled_tasks.json` (durable scheduled tasks).
 
 **Images.** `images.py` owns the on-disk store and the `/images/<name>` reference. Input images (web
 upload/paste, or CLI `/attach`) and generated images (the `image` tool-pack, gated on `AIMU_IMAGE_MODEL`)

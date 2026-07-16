@@ -21,6 +21,10 @@ installable, modular application.
   unattended. Fixed: `[tools] groups = ["all"]` now correctly enables all tool groups for sub-agent
   roles (previously the clamping logic treated `"all"` as a literal group name, leaving roles with no
   tools).
+- **Scheduled tasks**: the assistant can schedule durable, agent-managed tasks (`schedule_task` /
+  `list_scheduled_tasks` / `cancel_scheduled_task`) that fire an unprompted turn when due, persisted to
+  `data/scheduled_tasks.json` and re-armed at startup. Schedules are one-shot, interval, daily, or
+  weekly (no cron dependency). A per-task `new_session` flag runs each firing in a fresh conversation.
 - **Plugin system** (`kokua.plugins`): front ends and tool-packs discovered via the `kokua.frontends` and
   `kokua.tools` entry-point groups. Built-in `cli` and `web` front ends and an `example` tool-pack are
   registered as plugins; third parties add their own by publishing a package. `--list-frontends`,

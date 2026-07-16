@@ -130,6 +130,7 @@ holds an optional `config.toml` and a single `data/` directory for all transient
     downloads/         # generated files (e.g. PDFs), served by the web UI at /download
     images/            # uploaded + generated images, served by the web UI at /images
     runtime-settings.json  # runtime model settings from the web settings panel
+    scheduled_tasks.json   # durable scheduled tasks (agent-managed)
 ```
 
 Point `data/` elsewhere with `[paths] data_dir` in the config file. Nothing is written to your working
@@ -147,6 +148,14 @@ qualify). In the web UI, use the composer's paperclip or paste an image; from th
 env var is set (e.g. `gemini:nano-banana` or a HuggingFace diffusers `hf:<repo>`); without it, no image
 generation tool is offered. Images are stored under `data/images/` and served at `/images/<name>`; a
 conversation keeps only a small reference, so `sessions.json` stays compact.
+
+**Scheduled tasks.** Ask the assistant to do something on a schedule ("every weekday at 9am, summarize
+my calendar") and it uses its `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` tools
+to persist the task to `data/scheduled_tasks.json`; it survives restarts. Schedules can be one-shot, an
+interval, daily at a time, or weekly on a weekday. When a task is due it runs an unprompted turn (shown
+with the amber "proactive" styling); ask for a task to run in its own conversation and each run lands in
+a fresh chat you can review and follow up on. Scheduled runs auto-deny the approval-gated tools, since
+no one is present to approve them.
 
 **Sub-agents.** The assistant can delegate an independent subtask to a fresh, isolated sub-agent via a
 `spawn_subagent(agent_type, task)` tool (on by default; `--no-subagents` to disable). Sub-agents come in
