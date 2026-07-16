@@ -527,10 +527,11 @@ class Assistant:
         finally:
             self._session = previous
             self._agent.restore(expand_message_images(previous.messages, self._config.images_path))
-        await self._maybe_push_conversations()
-        await self._channel.send(
-            f"Scheduled task '{task_name or title}' finished; open the '{title}' conversation to review."
-        )
+        try:
+            await self._maybe_push_conversations()
+            await self._channel.send(f"Scheduled task '{title}' finished; open the '{title}' conversation to review.")
+        except Exception:
+            logger.warning("Scheduled task '%s' ran; its notification could not be delivered", title, exc_info=True)
 
     def _apply_plan_result(self, result: "PlanResult") -> None:
         """Record a planned turn's reviewer verdicts and verbose trace under the turn's user-message
