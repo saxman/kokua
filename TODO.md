@@ -42,3 +42,14 @@ all sit near the top level. Assess whether growth (recent extractions like `mcp.
 `build.py`) warrants grouping modules into subpackages (e.g. by concern or layer), and if so, decide
 the structure and migration path. Weigh the churn to imports and entry-point paths against the
 navigability gain; keep the core small either way.
+
+## 7. Consider upstreaming `next_fire` recurrence math to AIMU
+`scheduling.next_fire(schedule, now)` is pure, stateless, provider-agnostic scheduler math (seconds
+until the next once/interval/daily/weekly occurrence). It's the one piece of the scheduling stack that
+could reasonably live beside AIMU's `aio.Scheduler` as a generic helper (or a small `Recurrence` type).
+The rest stays in kokua by AIMU's own boundary: the `Scheduler` docstring puts persistence and durable
+cron-like scheduling in "a wrapper above the library," so the JSON registry, `make_scheduler_tools`,
+and the `_proactive` firing (all app policy, coupled to kokua's `Assistant`) belong here. Defer until a
+second AIMU consumer actually needs durable scheduling; upstreaming for one consumer is speculative
+generality. `next_fire` bakes in opinions (four schedule types, local tz, `None` for a past one-shot,
+weekly semantics), so any upstream move is a judgment call about whether AIMU wants that shape.
