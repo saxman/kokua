@@ -53,3 +53,20 @@ and the `_proactive` firing (all app policy, coupled to kokua's `Assistant`) bel
 second AIMU consumer actually needs durable scheduling; upstreaming for one consumer is speculative
 generality. `next_fire` bakes in opinions (four schedule types, local tz, `None` for a past one-shot,
 weekly semantics), so any upstream move is a judgment call about whether AIMU wants that shape.
+
+## 8. Add a model-client request timeout (deferred pending recurrence)
+The model client is built with no request timeout: `build.build_model_client` calls
+`aio.client(config.model, ...)` without `timeout=`, and the async providers only apply a timeout when
+one is passed (e.g. `AsyncOllamaClient` at `aimu/aio/providers/ollama.py`). A stalled backend can
+therefore block a turn indefinitely; if the process is killed mid-turn the transcript persists nothing,
+leaving a conversation that ends on a `user` message with no assistant reply and no error (the shape
+seen once in session 1 during the 2026-07-16 empty-turn investigation, but never reproduced).
+
+Deferred by decision until it recurs and can be diagnosed live, rather than fixing an inferred symptom.
+Design already scoped: a single `AssistantConfig.request_timeout` (seconds) threaded into `aio.client`
+covers all network providers (Ollama, Anthropic, OpenAI + the openai-compat family, Gemini all accept
+`timeout`); it must be withheld from the in-process `hf:` / `llamacpp:` providers, which take no
+`timeout`. Because Kokua streams, an httpx `timeout` acts as a per-chunk *stall* timeout, so mind large
+local-model cold-start (time to first token) when picking a default. Open question left for diagnosis:
+default value vs. opt-in `None`. When it recurs, capture (before restart) what was on screen (was a
+tool call streaming? which one?) and whether the backend was responsive, plus the persisted state.
