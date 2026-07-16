@@ -135,31 +135,54 @@ def _make(tmp_path, fire=_noop_fire):
 
 async def test_schedule_task_persists_and_arms(tmp_path):
     scheduler, path, tools, _ = _make(tmp_path)
-    out = await tools["schedule_task"]("do it", {"type": "daily", "at": "09:00"}, name="brief")
+    out = await tools["schedule_task"]("do it", "daily", time_of_day="09:00", name="brief")
     records = scheduling.load(path)
     assert len(records) == 1 and records[0]["name"] == "brief" and records[0]["new_session"] is False
+    assert records[0]["schedule"] == {"type": "daily", "at": "09:00"}
     assert records[0]["id"] in scheduler.jobs
     assert "brief" in out
 
 
+async def test_schedule_task_flat_daily_call(tmp_path):
+    # The exact shape the model failed to produce before: a flat "daily" + time, no nested dict.
+    scheduler, path, tools, _ = _make(tmp_path)
+    out = await tools["schedule_task"]("summarize the day", "daily", time_of_day="20:00")
+    records = scheduling.load(path)
+    assert len(records) == 1 and records[0]["schedule"] == {"type": "daily", "at": "20:00"}
+    assert "Scheduled task" in out
+
+
+async def test_schedule_task_weekday_is_normalized(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("x", "weekly", weekday="Monday", time_of_day="09:00", name="w")
+    assert scheduling.load(path)[0]["schedule"] == {"type": "weekly", "day": "mon", "at": "09:00"}
+
+
+async def test_schedule_task_rejects_unknown_type(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    out = await tools["schedule_task"]("x", "cron", time_of_day="20:00")
+    assert "Invalid schedule" in out and "once, interval, daily, weekly" in out
+    assert scheduling.load(path) == []
+
+
 async def test_schedule_task_rejects_bad_schedule_and_dupe_name(tmp_path):
     scheduler, path, tools, _ = _make(tmp_path)
-    bad = await tools["schedule_task"]("x", {"type": "daily", "at": "99:99"})
+    bad = await tools["schedule_task"]("x", "daily", time_of_day="99:99")
     assert "Invalid schedule" in bad and scheduling.load(path) == []
-    await tools["schedule_task"]("x", {"type": "interval", "seconds": 60}, name="dupe")
-    again = await tools["schedule_task"]("y", {"type": "interval", "seconds": 60}, name="dupe")
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="dupe")
+    again = await tools["schedule_task"]("y", "interval", interval_seconds=60, name="dupe")
     assert "already exists" in again and len(scheduling.load(path)) == 1
 
 
 async def test_schedule_task_rejects_past_once(tmp_path):
     scheduler, path, tools, _ = _make(tmp_path)
-    out = await tools["schedule_task"]("x", {"type": "once", "at": "2000-01-01T00:00:00"})
+    out = await tools["schedule_task"]("x", "once", at_datetime="2000-01-01T00:00:00")
     assert "past" in out.lower() and scheduling.load(path) == []
 
 
 async def test_cancel_removes_record_and_job(tmp_path):
     scheduler, path, tools, _ = _make(tmp_path)
-    await tools["schedule_task"]("x", {"type": "interval", "seconds": 60}, name="k")
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="k")
     task_id = scheduling.load(path)[0]["id"]
     out = await tools["cancel_scheduled_task"]("k")
     assert task_id not in scheduler.jobs and scheduling.load(path) == [] and "Cancelled" in out
@@ -169,7 +192,7 @@ async def test_cancel_removes_record_and_job(tmp_path):
 async def test_list_scheduled_tasks(tmp_path):
     scheduler, path, tools, _ = _make(tmp_path)
     assert "No scheduled tasks" in await tools["list_scheduled_tasks"]()
-    await tools["schedule_task"]("summarize inbox", {"type": "daily", "at": "09:00"}, name="brief")
+    await tools["schedule_task"]("summarize inbox", "daily", time_of_day="09:00", name="brief")
     listing = await tools["list_scheduled_tasks"]()
     assert "brief" in listing and "summarize inbox" in listing
 
@@ -177,7 +200,7 @@ async def test_list_scheduled_tasks(tmp_path):
 async def test_fire_job_recurring_rearms(tmp_path):
     _noop_fire.calls = []
     scheduler, path, tools, _ = _make(tmp_path)
-    await tools["schedule_task"]("ping", {"type": "interval", "seconds": 60}, name="r", new_session=True)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", new_session=True)
     task_id = scheduling.load(path)[0]["id"]
     _delay, job = scheduler.jobs[task_id]
     await job()  # simulate the scheduler firing
@@ -189,7 +212,7 @@ async def test_fire_job_recurring_rearms(tmp_path):
 async def test_fire_job_once_removes(tmp_path):
     scheduler, path, tools, _ = _make(tmp_path)
     future = "2999-01-01T00:00:00"
-    await tools["schedule_task"]("later", {"type": "once", "at": future}, name="o")
+    await tools["schedule_task"]("later", "once", at_datetime=future, name="o")
     task_id = scheduling.load(path)[0]["id"]
     _delay, job = scheduler.jobs[task_id]
     await job()
@@ -201,7 +224,7 @@ async def test_fire_job_skips_rearm_if_cancelled_during_run(tmp_path):
         scheduling.remove(path, scheduling.load(path)[0]["id"])  # user cancelled mid-run
 
     scheduler, path, tools, _ = _make(tmp_path, fire=cancelling_fire)
-    await tools["schedule_task"]("x", {"type": "interval", "seconds": 60}, name="c")
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="c")
     task_id = scheduling.load(path)[0]["id"]
     _delay, job = scheduler.jobs[task_id]
     await job()

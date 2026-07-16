@@ -126,6 +126,32 @@ def _write(path: Path, records: list[dict]) -> None:
     path.write_text(json.dumps(records, indent=2), encoding="utf-8")
 
 
+def _build_schedule(
+    schedule_type: str,
+    time_of_day: Optional[str],
+    at_datetime: Optional[str],
+    interval_seconds: Optional[float],
+    weekday: Optional[str],
+) -> dict:
+    """Assemble the persisted schedule dict from the flat ``schedule_task`` tool arguments.
+
+    Splitting the schedule into named scalar arguments (rather than one opaque ``dict``) is what lets
+    the model fill it reliably: the tool schema advertises each field by name. Raises ``ValueError`` on
+    an unknown ``schedule_type`` (missing per-type fields are caught later by ``next_fire``).
+    """
+    kind = (schedule_type or "").strip().lower()
+    if kind == "once":
+        return {"type": "once", "at": at_datetime}
+    if kind == "interval":
+        return {"type": "interval", "seconds": interval_seconds}
+    if kind == "daily":
+        return {"type": "daily", "at": time_of_day}
+    if kind == "weekly":
+        day = weekday.strip().lower()[:3] if isinstance(weekday, str) else weekday
+        return {"type": "weekly", "day": day, "at": time_of_day}
+    raise ValueError(f"schedule_type must be one of once, interval, daily, weekly; got {schedule_type!r}")
+
+
 def make_scheduler_tools(
     scheduler,
     registry_path: Path,
@@ -168,20 +194,31 @@ def make_scheduler_tools(
                 logger.info("Dropped past-due one-shot scheduled task %s", record["id"])
 
     @tool
-    async def schedule_task(prompt: str, schedule: dict, name: Optional[str] = None, new_session: bool = False) -> str:
-        """Schedule a task that will run an unprompted assistant turn with ``prompt`` when it is due.
-
-        ``schedule`` is a dict of exactly one of these shapes:
-          - {"type": "once", "at": "2026-07-15T17:00:00"}   (ISO-8601 local datetime, one time)
-          - {"type": "interval", "seconds": 3600}            (every N seconds, N >= 1)
-          - {"type": "daily", "at": "09:00"}                 (every day at HH:MM, 24h local time)
-          - {"type": "weekly", "day": "mon", "at": "09:00"}  (day is mon/tue/wed/thu/fri/sat/sun)
-
-        ``name`` is an optional unique handle for cancelling later. Set ``new_session`` to run each
-        firing in its own new conversation (so the user can review the output and follow up on it)
-        instead of the currently-active conversation. Returns a confirmation with the task id.
+    async def schedule_task(
+        prompt: str,
+        schedule_type: str,
+        time_of_day: Optional[str] = None,
+        at_datetime: Optional[str] = None,
+        interval_seconds: Optional[float] = None,
+        weekday: Optional[str] = None,
+        name: Optional[str] = None,
+        new_session: bool = False,
+    ) -> str:
+        # Keep this docstring a single paragraph (no blank line): the tool decorator sends only the
+        # first paragraph as the model-facing description and drops per-parameter descriptions/enums,
+        # so every field's meaning must be spelled out here in prose.
+        """Schedule a task that runs an unprompted assistant turn with the given prompt when it is due.
+        schedule_type must be exactly one of "once", "interval", "daily", or "weekly".
+        For "once", set at_datetime to an ISO-8601 local datetime, e.g. "2026-07-16T17:00:00".
+        For "interval", set interval_seconds to a number of seconds (>= 1).
+        For "daily", set time_of_day to a 24-hour "HH:MM", e.g. "20:00".
+        For "weekly", set weekday to one of mon/tue/wed/thu/fri/sat/sun and time_of_day to "HH:MM".
+        Optionally set name as a unique handle to cancel the task later, and new_session=true to run
+        each firing in its own new conversation so the user can review it and follow up.
+        Example: to run every day at 8pm, call with schedule_type="daily" and time_of_day="20:00".
         """
         try:
+            schedule = _build_schedule(schedule_type, time_of_day, at_datetime, interval_seconds, weekday)
             delay = next_fire(schedule, datetime.now())
         except ValueError as exc:
             return f"Invalid schedule: {exc}"
