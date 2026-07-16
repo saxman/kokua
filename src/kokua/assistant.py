@@ -39,6 +39,7 @@ from .planning import PlanResult, PlanRunner
 from .config import AssistantConfig
 from .mcp import ServerConnection, reconnect_mcp_servers
 from .messages import compact_message_images, derive_title, expand_message_images
+from .scheduling import make_scheduler_tools
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,9 @@ class Assistant:
         # model client on every run by the agent's _prepare_run; an empty confirm_tools is a no-op.
         agent.tool_approval = assistant._approve
         add_subagent_tool(agent, config, assistant._approve)
+        scheduler_tools, arm_tasks = make_scheduler_tools(scheduler, config.scheduled_tasks_path, assistant._proactive)
+        agent.tools.extend(scheduler_tools)
+        arm_tasks()
         return assistant
 
     @property
