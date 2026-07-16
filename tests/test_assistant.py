@@ -1076,6 +1076,45 @@ async def test_create_wraps_unbuildable_client_as_model_client_error(tmp_path, m
         await Assistant.create(_config(tmp_path), FakeChannel())
 
 
+async def test_proactive_new_session_runs_in_fresh_conversation(tmp_path):
+    channel = _ConvCapturingChannel()
+    client = MockAsyncModelClient(["seed", "task output"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    # Establish an active conversation with one real turn.
+    await assistant._handle(ChannelMessage(text="hello there", channel="fake"))
+    active_key = assistant._session.key
+    active_len = len(assistant._session.messages)
+
+    await assistant._proactive("run the report", new_session=True, task_name="report")
+
+    # Active conversation is restored and untouched.
+    assert assistant._session.key == active_key
+    assert len(assistant._session.messages) == active_len
+    # A new conversation exists, titled from the task, holding the task's turn.
+    keys = assistant._store.list_keys()
+    assert len(keys) == 2
+    new_key = next(k for k in keys if k != active_key)
+    new_session = assistant._store.get(new_key)
+    assert new_session.metadata["title"] == "report"
+    assert any(m.get("content") == "task output" for m in new_session.messages)
+    # Sidebar refreshed and a notice was sent.
+    assert channel.conversation_pushes
+    assert any("report" in s for s in channel.sent)
+
+
+async def test_proactive_new_session_degrades_on_single_conversation_channel(tmp_path):
+    channel = FakeChannel()  # no send_conversations
+    client = MockAsyncModelClient(["task output"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    active_key = assistant._session.key
+
+    await assistant._proactive("run the report", new_session=True, task_name="report")
+
+    # No extra conversation; ran in place and pushed the reply.
+    assert assistant._store.list_keys() == [active_key]
+    assert channel.sent == ["task output"]
+
+
 def test_cli_frontend_reports_model_client_error(tmp_path, monkeypatch, capsys):
     from kokua.assistant import ModelClientError
     from kokua.frontends import cli as cli_frontend

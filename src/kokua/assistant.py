@@ -471,28 +471,62 @@ class Assistant:
             note = ("\nReviewer's concerns:\n" + concerns) if concerns else ""
             await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'." + note)
 
-    async def _proactive(self, prompt: str) -> None:
-        """Run an unprompted turn with ``prompt`` and push the reply to the channel.
+    async def _proactive(self, prompt: str, *, new_session: bool = False, task_name: Optional[str] = None) -> None:
+        """Run an unprompted turn with ``prompt`` and surface the reply.
 
         The substrate for scheduled tasks: a caller (the scheduler) fires this with the task's
         instruction. Gated tools auto-deny while it runs (see ``_approve``), since no user is present
-        to approve them.
+        to approve them. With ``new_session`` set (and a multi-conversation channel), the turn runs in
+        a fresh conversation and the user's active conversation is restored afterward, so a scheduled
+        run does not hijack whatever the user is currently viewing.
         """
+        multi_conversation = getattr(self._channel, "send_conversations", None) is not None
         async with self._lock:
             self._in_proactive = True
             try:
-                # Tag every message this unprompted run appends so replayed history can distinguish it
-                # from a user-driven turn. The agent doesn't reset on run (system prompt lives on the
-                # client), so the pre-run length is a stable start index for the exchange.
-                start = len(self._agent.model_client.messages)
-                reply = await self._agent.run(prompt)
-                for message in self._agent.model_client.messages[start:]:
-                    message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
-                await self._channel.send(reply)
-                if self._persist():
-                    await self._maybe_push_conversations()
+                if new_session and multi_conversation:
+                    await self._run_in_new_session(prompt, task_name)
+                else:
+                    # Tag every message this unprompted run appends so replayed history can distinguish
+                    # it from a user-driven turn. The agent doesn't reset on run (system prompt lives on
+                    # the client), so the pre-run length is a stable start index for the exchange.
+                    start = len(self._agent.model_client.messages)
+                    reply = await self._agent.run(prompt)
+                    for message in self._agent.model_client.messages[start:]:
+                        message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
+                    await self._channel.send(reply)
+                    if self._persist():
+                        await self._maybe_push_conversations()
             finally:
                 self._in_proactive = False
+
+    async def _run_in_new_session(self, prompt: str, task_name: Optional[str]) -> None:
+        """Run a proactive turn in a fresh conversation, then restore the active one.
+
+        Runs under the caller's hold of ``self._lock``. The active session is snapshotted first and
+        restored in a ``finally`` so the agent's context is never left pointing at the task's session.
+        """
+        self._persist()  # snapshot the currently-active session before swapping away
+        previous = self._session
+        now = datetime.now().isoformat()
+        title = task_name or derive_title([{"role": "user", "content": prompt}]) or "Scheduled task"
+        new_session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now, "title": title})
+        self._store.save(new_session)
+        self._session = new_session
+        self._agent.restore([])
+        try:
+            start = len(self._agent.model_client.messages)
+            await self._agent.run(prompt)
+            for message in self._agent.model_client.messages[start:]:
+                message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
+            self._persist()
+        finally:
+            self._session = previous
+            self._agent.restore(expand_message_images(previous.messages, self._config.images_path))
+        await self._maybe_push_conversations()
+        await self._channel.send(
+            f"Scheduled task '{task_name or title}' finished; open the '{title}' conversation to review."
+        )
 
     def _apply_plan_result(self, result: "PlanResult") -> None:
         """Record a planned turn's reviewer verdicts and verbose trace under the turn's user-message
