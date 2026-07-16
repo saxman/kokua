@@ -15,7 +15,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Literal, Optional
 
 from aimu.tools import tool
 
@@ -196,7 +196,7 @@ def make_scheduler_tools(
     @tool
     async def schedule_task(
         prompt: str,
-        schedule_type: str,
+        schedule_type: Literal["once", "interval", "daily", "weekly"],
         time_of_day: Optional[str] = None,
         at_datetime: Optional[str] = None,
         interval_seconds: Optional[float] = None,
@@ -204,18 +204,17 @@ def make_scheduler_tools(
         name: Optional[str] = None,
         new_session: bool = False,
     ) -> str:
-        # Keep this docstring a single paragraph (no blank line): the tool decorator sends only the
-        # first paragraph as the model-facing description and drops per-parameter descriptions/enums,
-        # so every field's meaning must be spelled out here in prose.
         """Schedule a task that runs an unprompted assistant turn with the given prompt when it is due.
-        schedule_type must be exactly one of "once", "interval", "daily", or "weekly".
-        For "once", set at_datetime to an ISO-8601 local datetime, e.g. "2026-07-16T17:00:00".
-        For "interval", set interval_seconds to a number of seconds (>= 1).
-        For "daily", set time_of_day to a 24-hour "HH:MM", e.g. "20:00".
-        For "weekly", set weekday to one of mon/tue/wed/thu/fri/sat/sun and time_of_day to "HH:MM".
-        Optionally set name as a unique handle to cancel the task later, and new_session=true to run
-        each firing in its own new conversation so the user can review it and follow up.
-        Example: to run every day at 8pm, call with schedule_type="daily" and time_of_day="20:00".
+
+        Args:
+            prompt: The instruction to run when the task fires.
+            schedule_type: One of "once", "interval", "daily", or "weekly".
+            time_of_day: For "daily" or "weekly", a 24-hour "HH:MM", e.g. "20:00".
+            at_datetime: For "once", an ISO-8601 local datetime, e.g. "2026-07-16T17:00:00".
+            interval_seconds: For "interval", the number of seconds between runs (>= 1).
+            weekday: For "weekly", one of mon/tue/wed/thu/fri/sat/sun.
+            name: Optional unique handle to cancel the task later.
+            new_session: If true, run each firing in its own new conversation so the user can review it.
         """
         try:
             schedule = _build_schedule(schedule_type, time_of_day, at_datetime, interval_seconds, weekday)
