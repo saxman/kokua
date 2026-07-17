@@ -109,9 +109,11 @@ class FakeScheduler:
 
     def __init__(self):
         self.jobs: dict[str, tuple[float, object]] = {}
+        self.at_count: dict[str, int] = {}
 
     def at(self, delay, job, *, name):
         self.jobs[name] = (delay, job)
+        self.at_count[name] = self.at_count.get(name, 0) + 1
         return name
 
     def cancel(self, name):
@@ -229,6 +231,111 @@ async def test_fire_job_skips_rearm_if_cancelled_during_run(tmp_path):
     _delay, job = scheduler.jobs[task_id]
     await job()
     assert scheduling.load(path) == []  # not re-added
+
+
+async def test_disable_cancels_job_and_clears_flag(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="d")
+    task_id = scheduling.load(path)[0]["id"]
+    out = await tools["disable_scheduled_task"]("d")
+    assert task_id not in scheduler.jobs  # live job cancelled
+    record = scheduling.load(path)[0]
+    assert record["enabled"] is False and record["id"] == task_id  # kept in registry
+    assert "Disabled" in out
+
+
+async def test_disable_already_disabled_reports(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="d")
+    await tools["disable_scheduled_task"]("d")
+    out = await tools["disable_scheduled_task"]("d")
+    assert "already disabled" in out.lower()
+
+
+async def test_enable_rearms_and_sets_flag(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="e")
+    task_id = scheduling.load(path)[0]["id"]
+    await tools["disable_scheduled_task"]("e")
+    out = await tools["enable_scheduled_task"]("e")
+    assert task_id in scheduler.jobs  # re-armed
+    assert scheduling.load(path)[0]["enabled"] is True
+    assert "Enabled" in out
+
+
+async def test_enable_already_enabled_reports(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="e")
+    out = await tools["enable_scheduled_task"]("e")
+    assert "already enabled" in out.lower()
+
+
+async def test_enable_past_due_once_reports_wont_fire(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    # Persist a disabled, past-due one-shot directly (schedule_task rejects past times).
+    scheduling.add(
+        path,
+        {
+            "id": "past",
+            "name": "p",
+            "prompt": "x",
+            "schedule": {"type": "once", "at": "2000-01-01T00:00:00"},
+            "new_session": False,
+            "created_at": "x",
+            "enabled": False,
+        },
+    )
+    out = await tools["enable_scheduled_task"]("p")
+    assert "past" in out.lower() and "past" not in scheduler.jobs  # not armed
+    assert scheduling.load(path)[0]["enabled"] is True  # flag still flipped
+
+
+async def test_enable_disable_unknown_reports(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    assert "No scheduled task" in await tools["enable_scheduled_task"]("nope")
+    assert "No scheduled task" in await tools["disable_scheduled_task"]("nope")
+
+
+async def test_arm_all_skips_disabled(tmp_path):
+    scheduler, path, tools, arm_all = _make(tmp_path)
+    scheduling.add(
+        path,
+        {
+            "id": "off",
+            "name": "off",
+            "prompt": "p",
+            "schedule": {"type": "interval", "seconds": 60},
+            "new_session": False,
+            "created_at": "x",
+            "enabled": False,
+        },
+    )
+    arm_all()
+    assert "off" not in scheduler.jobs  # not armed
+    assert {r["id"] for r in scheduling.load(path)} == {"off"}  # but kept
+
+
+async def test_fire_job_skips_rearm_when_disabled_during_run(tmp_path):
+    async def disabling_fire(prompt, *, new_session=False, task_name=None):
+        record = scheduling.load(path)[0]
+        record["enabled"] = False
+        scheduling.add(path, record)  # user disabled mid-run
+
+    scheduler, path, tools, _ = _make(tmp_path, fire=disabling_fire)
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="r")
+    task_id = scheduling.load(path)[0]["id"]
+    _delay, job = scheduler.jobs[task_id]
+    await job()
+    assert scheduler.at_count[task_id] == 1  # armed once at schedule time, not re-armed after firing
+    assert scheduling.load(path)[0]["enabled"] is False  # kept, still disabled
+
+
+async def test_list_shows_disabled_state(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("summarize inbox", "daily", time_of_day="09:00", name="brief")
+    await tools["disable_scheduled_task"]("brief")
+    listing = await tools["list_scheduled_tasks"]()
+    assert "disabled" in listing.lower()
 
 
 async def test_arm_all_arms_and_drops_past_once(tmp_path):

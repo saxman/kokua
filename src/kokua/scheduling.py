@@ -184,11 +184,13 @@ def make_scheduler_tools(
             if current is not None:
                 if current["schedule"].get("type") == "once":
                     remove(registry_path, task_id)
-                else:
+                elif current.get("enabled", True):  # a disable during the run wins over the re-arm
                     _arm(current)
 
     def arm_all() -> None:
         for record in load(registry_path):
+            if not record.get("enabled", True):
+                continue
             if not _arm(record) and record["schedule"].get("type") == "once":
                 remove(registry_path, record["id"])
                 logger.info("Dropped past-due one-shot scheduled task %s", record["id"])
@@ -248,11 +250,14 @@ def make_scheduler_tools(
         now = datetime.now()
         lines = []
         for record in records:
-            try:
-                delay = next_fire(record["schedule"], now)
-            except ValueError:
-                delay = None
-            when = "past" if delay is None else f"~{int(delay)}s"
+            if not record.get("enabled", True):
+                when = "disabled"
+            else:
+                try:
+                    delay = next_fire(record["schedule"], now)
+                except ValueError:
+                    delay = None
+                when = "past" if delay is None else f"~{int(delay)}s"
             preview = record["prompt"][:60]
             lines.append(
                 f"- {record['id']} [{record.get('name') or 'unnamed'}] {record['schedule']} "
@@ -270,4 +275,41 @@ def make_scheduler_tools(
         remove(registry_path, record["id"])
         return f"Cancelled scheduled task {record['id']} ({record.get('name') or 'unnamed'})."
 
-    return [schedule_task, list_scheduled_tasks, cancel_scheduled_task], arm_all
+    @tool
+    async def disable_scheduled_task(id_or_name: str) -> str:
+        """Disable a scheduled task by id or name: it stops firing but stays in the registry.
+
+        Re-enable it later with ``enable_scheduled_task``. Use ``cancel_scheduled_task`` to remove it.
+        """
+        record = find(load(registry_path), id_or_name)
+        if record is None:
+            return f"No scheduled task matches {id_or_name!r}."
+        if not record.get("enabled", True):
+            return f"Scheduled task {record['id']} ({record.get('name') or 'unnamed'}) is already disabled."
+        scheduler.cancel(record["id"])
+        record["enabled"] = False
+        add(registry_path, record)
+        return f"Disabled scheduled task {record['id']} ({record.get('name') or 'unnamed'})."
+
+    @tool
+    async def enable_scheduled_task(id_or_name: str) -> str:
+        """Re-enable a disabled scheduled task by id or name so it resumes firing on its schedule."""
+        record = find(load(registry_path), id_or_name)
+        if record is None:
+            return f"No scheduled task matches {id_or_name!r}."
+        if record.get("enabled", True):
+            return f"Scheduled task {record['id']} ({record.get('name') or 'unnamed'}) is already enabled."
+        record["enabled"] = True
+        add(registry_path, record)
+        handle = f"{record['id']} ({record.get('name') or 'unnamed'})"
+        if not _arm(record):  # past-due one-shot: flag flipped, but nothing to schedule
+            return f"Enabled scheduled task {handle}, but its scheduled time is in the past, so it will not fire."
+        return f"Enabled scheduled task {handle}."
+
+    return [
+        schedule_task,
+        list_scheduled_tasks,
+        cancel_scheduled_task,
+        disable_scheduled_task,
+        enable_scheduled_task,
+    ], arm_all
