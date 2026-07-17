@@ -67,7 +67,10 @@ kokua --frontend web              # or: kokua-web
 
 Reloading the page replays the prior conversation (the assistant already keeps its context across
 reconnects; this makes it visible again), including reasoning and tool calls when `show_thinking` /
-`show_tools` are on. Assistant replies are rendered as GitHub-flavored markdown (tables, nested lists, code, links, task
+`show_tools` are on. The transcript's auxiliary blocks (thinking, tool calls, continuation markers,
+phases, sub-agent cards, drafted plans) render collapsed; each has a header showing its label (e.g. the
+tool name) that you click to expand the detail. Direct messages and the approval / plan-review prompts
+stay open. Assistant replies are rendered as GitHub-flavored markdown (tables, nested lists, code, links, task
 lists, etc.) once each turn completes, via vendored `marked` + `DOMPurify` (bundled, no CDN); the HTML
 is sanitized, so model or tool output can't inject scripts or markup. LaTeX math (`$...$`, `$$...$$`) is
 typeset with vendored KaTeX, applied after sanitization with `trust` disabled so untrusted output stays

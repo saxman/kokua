@@ -61,6 +61,12 @@ installable, modular application.
   (keyed off `StreamChunk.iteration`) and on history replay. The marker shows the injected prompt text for
   inspection. Proactive turns are tagged and replay with their existing amber styling. Real user turns are
   unaffected.
+- **Foldable auxiliary blocks (web)**: the non-direct blocks in the chat transcript (thinking, tool
+  calls, `↻ continuation` markers, verbose-trace phases, sub-agent cards, and drafted plans) now render
+  collapsed, each with a click-to-expand header. The header keeps the identifying label (tool name,
+  phase name) so the transcript stays scannable; expanding reveals the verbose detail. Direct user and
+  assistant messages and the interactive approval / plan-review prompts are unaffected. Fold state is
+  per-block and not persisted across reloads. Client-side only; no protocol change.
 - **Stop an in-flight reply**: send `/stop` (the web UI also has a Stop button, enabled only while a reply
   is being processed) to cancel the current turn;
   the partial turn is kept so the conversation can continue. Built on AIMU's `aio.RunHandle`; reactive

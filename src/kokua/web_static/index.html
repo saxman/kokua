@@ -86,24 +86,28 @@
       align-self: flex-start; max-width: 70%; font-size: 0.8em; color: var(--muted);
       background: transparent; border-left: 2px solid var(--thinking-border); padding: 2px 10px; white-space: pre-wrap;
     }
-    .loop::before { content: "\21BB  continuation"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; }
     .thinking {
       align-self: flex-start; max-width: 70%; font-size: 0.85em; font-style: italic;
       color: var(--thinking-fg); background: transparent; border-left: 2px solid var(--thinking-border); padding: 2px 10px; white-space: pre-wrap;
     }
-    .thinking::before { content: "thinking"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; font-style: normal; opacity: 0.7; }
-    .tool { align-self: flex-start; font-family: ui-monospace, monospace; font-size: 0.8em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 4px 10px; }
-    .tool::before { content: "\1F527  "; }
+    .tool { align-self: flex-start; max-width: 70%; font-family: ui-monospace, monospace; font-size: 0.8em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 4px 10px; word-break: break-word; }
     .plan { align-self: flex-start; max-width: 85%; background: var(--approval-bg); border: 1px solid var(--approval-border); border-radius: 12px; padding: 8px 14px; }
-    .plan::before { content: "\1F4CB  plan"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; margin-bottom: 4px; }
     .subagent { align-self: flex-start; max-width: 85%; font-size: 0.9em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 10px; padding: 6px 12px; }
-    .subagent::before { content: "\1F50E  sub-agent"; display: block; font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; margin-bottom: 2px; }
     .subagent[data-status="running"] { opacity: 0.75; font-style: italic; }
     .phase { align-self: stretch; max-width: 100%; background: transparent; border: none; border-top: 1px solid var(--border);
       border-radius: 0; padding: 10px 2px 2px; margin-top: 6px; font-size: 0.72em; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--muted); }
-    .phase::before { content: "\25B8  "; }
-    .phase .phase-detail { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 0.8; }
+    .phase .fold-body { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 0.8; }
+    /* Foldable auxiliary blocks (thinking, tool, loop, phase, subagent, plan): a click-to-expand
+       header carrying the identifying label over a body holding the verbose detail. Collapsed by
+       default; the disclosure triangle lives in .fold-tri. The header inherits the block's font so
+       tool stays monospace and phase stays uppercase, but never italic. */
+    .foldable .fold-header { display: block; width: 100%; text-align: left; background: none; border: none;
+      color: inherit; font: inherit; font-style: normal; cursor: pointer; padding: 0; }
+    .foldable .fold-header:hover .fold-label { text-decoration: underline; }
+    .fold-tri { display: inline-block; width: 1em; opacity: 0.7; }
+    .foldable .fold-body { margin-top: 4px; }
+    .foldable.collapsed .fold-body { display: none; }
     /* Markdown-rendered bubbles: real block elements, so drop the plain-text pre-wrap. */
     .md { white-space: normal; }
     .md > :first-child { margin-top: 0; }
@@ -380,32 +384,28 @@
     let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
     let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
 
-    // Build the markdown for a sub-agent (reviewer) card from its frame.
-    function subagentMarkdown(frame) {
-      const label = frame.role || "Sub-agent";
-      if (frame.status === "running") return `**${label}** — reviewing…`;
-      let md = `**${label}** — ${frame.status || "done"}`;
-      if (frame.issues && frame.issues.length) md += "\n\n" + frame.issues.map((i) => "- " + i).join("\n");
-      return md;
-    }
-
-    // Render/update a sub-agent card. Live frames carry an id so the "running" card updates in place on
-    // its verdict; replayed history items have no id and just render a static card.
+    // Render/update a sub-agent (reviewer) card as a foldable block: the header shows role + status,
+    // the body lists the reviewer's issues (markdown). Live frames carry an id so the "running" card
+    // updates in place on its verdict; replayed history items have no id and just render a static card.
     function renderSubagent(frame) {
-      let el = frame.id ? subagentCards[frame.id] : null;
-      if (!el) {
-        el = document.createElement("div");
-        el.className = "bubble md subagent";
-        log.appendChild(el);
-        if (frame.id) subagentCards[frame.id] = el;
+      let card = frame.id ? subagentCards[frame.id] : null;
+      if (!card) {
+        card = addFoldable("subagent", "", { md: true });
+        if (frame.id) subagentCards[frame.id] = card;
       }
-      const html = renderMarkdown(subagentMarkdown(frame));
-      if (html === null) el.textContent = subagentMarkdown(frame);
+      const role = frame.role || "Sub-agent";
+      const status = frame.status === "running" ? "reviewing…" : (frame.status || "done");
+      card.label.textContent = "🔎 " + role + " — " + status;
+      const issuesMd = (frame.status !== "running" && frame.issues && frame.issues.length)
+        ? frame.issues.map((i) => "- " + i).join("\n")
+        : "";
+      const html = renderMarkdown(issuesMd);
+      if (html === null) card.body.textContent = issuesMd;
       else {
-        el.innerHTML = html;
-        typesetMath(el);
+        card.body.innerHTML = html;
+        typesetMath(card.body);
       }
-      el.dataset.status = frame.status || "";
+      card.outer.dataset.status = frame.status || "";
       autoscroll();
     }
 
@@ -436,6 +436,40 @@
     }
 
     function notice(text) { addBubble("notice", text); }
+
+    // A foldable auxiliary block: a header (identifying label, always visible) over a body (verbose
+    // detail, hidden until expanded). Starts collapsed. Returns handles so callers can populate/stream
+    // into `body` and update `label` (e.g. a sub-agent card whose status changes). `opts.md` marks the
+    // body as markdown-rendered content (drops plain-text pre-wrap; see the .md rules).
+    function addFoldable(cls, headerText, opts) {
+      const outer = document.createElement("div");
+      outer.className = "bubble foldable collapsed " + cls;
+      const header = document.createElement("button");
+      header.type = "button";
+      header.className = "fold-header";
+      header.setAttribute("aria-expanded", "false");
+      const tri = document.createElement("span");
+      tri.className = "fold-tri";
+      tri.textContent = "▸";
+      const label = document.createElement("span");
+      label.className = "fold-label";
+      label.textContent = headerText || "";
+      header.appendChild(tri);
+      header.appendChild(document.createTextNode(" "));
+      header.appendChild(label);
+      const body = document.createElement("div");
+      body.className = "fold-body" + (opts && opts.md ? " md" : "");
+      header.addEventListener("click", () => {
+        const collapsed = outer.classList.toggle("collapsed");
+        header.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        tri.textContent = collapsed ? "▸" : "▾";
+      });
+      outer.appendChild(header);
+      outer.appendChild(body);
+      log.appendChild(outer);
+      autoscroll();
+      return { outer, header, body, label };
+    }
 
     // An image in the chat: an uploaded image echoed under the user's turn, or one the assistant
     // produced/surfaced. `src` is a /images/<name> reference (server route) or a data: URL (local echo).
@@ -530,27 +564,40 @@
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
 
-    function toolLine(name, args) {
-      let argStr = "";
+    // The argument portion of a tool call, as a single line. Used as a foldable tool block's body and
+    // (wrapped by toolLine) in the approval prompt.
+    function toolArgs(args) {
       if (args && typeof args === "object") {
-        argStr = Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
+        return Object.entries(args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
       } else if (args != null) {
-        argStr = String(args);
+        return String(args);
       }
-      return `${name || "tool"}(${argStr})`;
+      return "";
+    }
+
+    function toolLine(name, args) {
+      return `${name || "tool"}(${toolArgs(args)})`;
+    }
+
+    // Foldable tool / continuation blocks. Header carries the identifying name; body holds the verbose
+    // detail (arguments, injected prompt). Shared by live frames and history replay.
+    function renderTool(name, args) {
+      const f = addFoldable("tool", "🔧 " + (name || "tool"));
+      f.body.textContent = toolArgs(args);
+      return f;
+    }
+    function renderLoop(text) {
+      const f = addFoldable("loop", "↻ continuation");
+      f.body.textContent = text || "";
+      return f;
     }
 
     // Verbose-trace phase header: a labeled divider (e.g. "Planner · drafting a plan"). Shared by the
     // live `phase` frame and history replay so both render the raw trace identically.
     function renderPhase(label, detail) {
-      const el = addBubble("phase", label || "");
-      if (detail) {
-        const d = document.createElement("span");
-        d.className = "phase-detail";
-        d.textContent = " · " + detail;
-        el.appendChild(d);
-      }
-      return el;
+      const f = addFoldable("phase", label || "");
+      if (detail) f.body.textContent = "· " + detail;
+      return f.outer;
     }
 
     ws.onmessage = (event) => {
@@ -558,17 +605,19 @@
       // Blocks are appended in arrival order (thinking -> tool -> answer, possibly several
       // rounds per turn). A tool call or answer token closes any open thinking block.
       if (frame.type === "thinking") {
-        if (!thinkingBlock) thinkingBlock = addBubble("thinking", "");
+        // thinkingBlock points at the foldable body so streamed tokens accumulate inside it (collapsed
+        // by default; the user expands to watch it).
+        if (!thinkingBlock) thinkingBlock = addFoldable("thinking", "thinking").body;
         thinkingBlock.appendChild(document.createTextNode(frame.text));
         autoscroll();
       } else if (frame.type === "tool") {
         thinkingBlock = null;
-        addBubble("tool", toolLine(frame.name, frame.arguments));
+        renderTool(frame.name, frame.arguments);
       } else if (frame.type === "loop") {
         // Agent-loop continuation boundary. Leave streamingBubble open so the answer keeps
         // accumulating and floats below this marker (same float-to-bottom rule as tool blocks).
         thinkingBlock = null;
-        addBubble("loop", frame.text || "");
+        renderLoop(frame.text);
       } else if (frame.type === "token") {
         thinkingBlock = null;
         if (!streamingBubble) {
@@ -601,7 +650,13 @@
       } else if (frame.type === "approval") {
         renderApproval(frame.name, frame.arguments);
       } else if (frame.type === "plan") {
-        addMarkdownBubble("plan", frame.text);
+        const f = addFoldable("plan", "📋 plan", { md: true });
+        const html = renderMarkdown(frame.text);
+        if (html === null) f.body.textContent = frame.text || "";
+        else {
+          f.body.innerHTML = html;
+          typesetMath(f.body);
+        }
       } else if (frame.type === "subagent") {
         renderSubagent(frame);
       } else if (frame.type === "plan_review") {
@@ -618,9 +673,9 @@
         for (const item of frame.items) {
           if (item.type === "user") addBubble("user", item.text);
           else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user");
-          else if (item.type === "thinking") addBubble("thinking", item.text);
-          else if (item.type === "tool") addBubble("tool", toolLine(item.name, item.arguments));
-          else if (item.type === "loop") addBubble("loop", item.text || "");
+          else if (item.type === "thinking") addFoldable("thinking", "thinking").body.textContent = item.text || "";
+          else if (item.type === "tool") renderTool(item.name, item.arguments);
+          else if (item.type === "loop") renderLoop(item.text);
           else if (item.type === "subagent") renderSubagent(item);
           else if (item.type === "phase") renderPhase(item.label, item.detail);
           else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text);
