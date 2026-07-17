@@ -607,7 +607,7 @@
       if (frame.type === "thinking") {
         // thinkingBlock points at the foldable body so streamed tokens accumulate inside it (collapsed
         // by default; the user expands to watch it).
-        if (!thinkingBlock) thinkingBlock = addFoldable("thinking", "thinking").body;
+        if (!thinkingBlock) thinkingBlock = addFoldable("thinking", "💭 thinking").body;
         thinkingBlock.appendChild(document.createTextNode(frame.text));
         autoscroll();
       } else if (frame.type === "tool") {
@@ -673,7 +673,7 @@
         for (const item of frame.items) {
           if (item.type === "user") addBubble("user", item.text);
           else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user");
-          else if (item.type === "thinking") addFoldable("thinking", "thinking").body.textContent = item.text || "";
+          else if (item.type === "thinking") addFoldable("thinking", "💭 thinking").body.textContent = item.text || "";
           else if (item.type === "tool") renderTool(item.name, item.arguments);
           else if (item.type === "loop") renderLoop(item.text);
           else if (item.type === "subagent") renderSubagent(item);
