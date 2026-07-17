@@ -14,7 +14,9 @@ unchanged. The CLI/web entry points live in `kokua.cli` / `kokua.frontends`.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import time
 import uuid
 from dataclasses import replace
 from datetime import datetime
@@ -116,6 +118,11 @@ class Assistant:
         # cancels); `_turns` keeps task refs alive until they finish.
         self._current: Optional[RunHandle] = None
         self._turns: set = set()
+        # Diagnostics for the /diag command: when the latest turn started (monotonic) and a preview of
+        # the message that triggered it, plus a per-turn sequence id for the lifecycle log lines.
+        self._current_started: Optional[float] = None
+        self._current_preview: str = ""
+        self._turn_seq: int = 0
         # Tool-approval coordination. At most one approval is pending at a time (enforced by
         # self._approval_lock in _approve, not self._lock); the serve loop resolves the future
         # with the user's answer.
@@ -353,6 +360,11 @@ class Assistant:
                     if self._current is not None and not self._current.done:
                         self._current.cancel()
                     continue
+                # /diag reports live state (and the wedged turn's async stack) without touching the
+                # turn lock, so it still answers when a hung turn is holding it. Handled here, like /stop.
+                if text == "/diag":
+                    await self._channel.send(self._diag_report())
+                    continue
                 # While an approval is pending, the next message is the answer, not a new turn.
                 # (A `/stop` above still takes priority, cancelling the turn that is awaiting it.)
                 pending = self._pending_approval
@@ -383,8 +395,14 @@ class Assistant:
                     plan_turn = True
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. Turns stay serialized by self._lock (a proactive turn can't interleave).
-                handle = RunHandle.start(self._handle(msg, plan=plan_turn))
+                tid = self._turn_seq
+                self._turn_seq += 1
+                preview = (msg.text or "").strip()[:120]
+                logger.info("turn %d submitted: %r", tid, preview)
+                handle = RunHandle.start(self._handle(msg, plan=plan_turn, tid=tid))
                 self._current = handle
+                self._current_started = time.monotonic()
+                self._current_preview = preview
                 self._turns.add(handle.task)
                 handle.task.add_done_callback(self._turns.discard)
         finally:
@@ -423,10 +441,12 @@ class Assistant:
         else:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
 
-    async def _handle(self, msg: ChannelMessage, plan: bool = False) -> None:
+    async def _handle(self, msg: ChannelMessage, plan: bool = False, tid: Optional[int] = None) -> None:
         # Planning is opt-in per turn (the web Plan toggle or a `/plan <task>` message sets plan=True).
         do_plan = plan
+        started = time.monotonic()
         async with self._lock:
+            logger.info("turn %s lock acquired", tid)
             try:
                 if do_plan:
                     runner = PlanRunner(self._agent, self._channel, self._config, self._review_plan)
@@ -437,6 +457,7 @@ class Assistant:
             except asyncio.CancelledError:
                 # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
                 # agent snapshots it in a finally), and return so the daemon keeps serving.
+                logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                 try:
                     await self._channel.send("(stopped)", reply_to=msg)
                 except Exception:
@@ -445,10 +466,53 @@ class Assistant:
                     await self._maybe_push_conversations()
                 return
             except Exception:
-                logger.exception("Error handling message")
+                logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                 await self._channel.send("Sorry, something went wrong handling that.", reply_to=msg)
+            else:
+                logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
             if self._persist():
                 await self._maybe_push_conversations()
+
+    def _diag_report(self) -> str:
+        """A snapshot of live turn/lock state for the `/diag` command, plus the wedged turn's async
+        stack. Reads only in-memory state and never acquires ``self._lock``, so it answers even while a
+        hung turn holds the lock (the case it exists to diagnose)."""
+        turn = self._current
+        running = turn is not None and not turn.done
+        lines = ["Diagnostics:"]
+        if running:
+            elapsed = time.monotonic() - (self._current_started or time.monotonic())
+            lines.append(f"- turn in flight: yes (elapsed {elapsed:.1f}s)")
+            lines.append(f"- message: {self._current_preview!r}")
+        else:
+            lines.append("- turn in flight: no")
+        lines.append(f"- lock held: {'yes' if self._lock.locked() else 'no'}")
+        lines.append(f"- live turns: {len(self._turns)}")
+        approval = self._pending_approval is not None and not self._pending_approval.done()
+        plan = self._pending_plan is not None and not self._pending_plan.done()
+        lines.append(
+            f"- pending approval: {'yes' if approval else 'no'} | "
+            f"pending plan: {'yes' if plan else 'no'} | proactive: {'yes' if self._in_proactive else 'no'}"
+        )
+        if running:
+            stack = self._format_task_stack(turn.task)
+            if stack:
+                lines.append(
+                    "\nStuck turn stack (async only; run `kill -USR1 <pid>` for full thread stacks):\n"
+                    f"```\n{stack}\n```"
+                )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_task_stack(task) -> str:
+        """Render an asyncio task's current async stack in-process (a sudo-free py-spy). Best-effort:
+        returns '' if the task finished or the dump fails."""
+        try:
+            buffer = io.StringIO()
+            task.print_stack(file=buffer)
+            return buffer.getvalue().strip()
+        except Exception:
+            return ""
 
     async def _review_plan(self, plan_text: str, critique: Optional[list[str]] = None) -> Optional[str]:
         """Await the user's decision on a plan: approve (the plan), edit (their text), or reject (None).

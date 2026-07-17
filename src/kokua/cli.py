@@ -16,6 +16,7 @@ import asyncio
 
 from . import plugins, settings
 from .config import AssistantConfig
+from .logging_setup import configure_logging
 
 
 def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
@@ -193,6 +194,7 @@ def main() -> None:
         return
 
     config = resolve_config(args)
+    configure_logging(config)  # rotating file log + faulthandler, before the assistant starts
     frontend = plugins.get_frontend(config.frontend)
     try:
         asyncio.run(frontend.run(config, args))

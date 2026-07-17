@@ -142,6 +142,8 @@ class AssistantConfig:
     frontend: str = "cli"
     host: str = "127.0.0.1"
     port: int = 8000
+    # Logging level for the rotating file log under logs_path (configure_logging in logging_setup.py).
+    log_level: str = "INFO"
     # Single root for all transient and user-provided content; the leaf paths below derive from it.
     data_dir: Path = field(default_factory=paths.data_dir)
 
@@ -183,6 +185,11 @@ class AssistantConfig:
     @property
     def scheduled_tasks_path(self) -> Path:
         return self.data_dir / "scheduled_tasks.json"
+
+    @property
+    def logs_path(self) -> Path:
+        """Directory for the rotating diagnostic log (kokua.log). See logging_setup.configure_logging."""
+        return self.data_dir / "logs"
 
     @property
     def runtime_settings_path(self) -> Path:

@@ -47,6 +47,16 @@ def test_file_overrides_built_in_defaults():
     assert cfg.port == 9100
 
 
+def test_logging_level_parses_from_file():
+    _write_config(
+        """
+        [logging]
+        level = "DEBUG"
+        """
+    )
+    assert _resolve().log_level == "DEBUG"
+
+
 def test_cli_overrides_file():
     _write_config(
         """

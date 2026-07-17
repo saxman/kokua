@@ -93,6 +93,7 @@ _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callab
     ("frontend", "name"): ("frontend", (str,), "a string", None),
     ("web", "host"): ("host", (str,), "a string", None),
     ("web", "port"): ("port", (int,), "an integer", None),
+    ("logging", "level"): ("log_level", (str,), "a string", None),
 }
 
 

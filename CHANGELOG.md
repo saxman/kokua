@@ -11,6 +11,12 @@ installable, modular application.
   with skill authoring + runnable skill scripts, persistent conversation history,
   remote MCP servers (startup `--mcp` + runtime `add_mcp_server`), and persistent memory (a
   `SemanticMemoryStore` for facts + a `DocumentStore` for documents, on by default).
+- **Hang observability**: a `/diag` chat command reports the in-flight turn, elapsed time, whether the
+  turn lock is held, and dumps a wedged turn's async stack — handled in the serve loop without the lock,
+  so it answers even when a hung turn holds it (`Assistant._diag_report`). Diagnostic logs now go to a
+  rotating `data/logs/kokua.log` (5 × 2 MB) with turn-lifecycle lines (submitted / lock acquired /
+  done / error), configured via `configure_logging` (`kokua.logging_setup`) at startup and the
+  `[logging] level` config key. `faulthandler` is enabled so `kill -USR1 <pid>` dumps all thread stacks.
 - **Typed, concurrent sub-agents**: `spawn_subagent` is now typed — `spawn_subagent(agent_type, task)`
   with built-in `researcher` / `coder` / `generalist` roles, each cloning the active model with its own
   tool subset (role groups intersected with the enabled `[tools]` groups; parent-only memory/skills/MCP

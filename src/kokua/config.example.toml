@@ -80,6 +80,13 @@ name = "cli"
 host = "127.0.0.1"
 port = 8000
 
+[logging]
+# Level for the rotating diagnostic log at $KOKUA_HOME/data/logs/kokua.log (5 files x 2 MB). Records
+# turn lifecycle (submitted / lock acquired / done / error) so a hung turn is visible after the fact.
+# The `/diag` chat command reports live turn + lock state and dumps a wedged turn's async stack;
+# `kill -USR1 <pid>` dumps all thread stacks. One of DEBUG, INFO, WARNING, ERROR.
+level = "INFO"
+
 [email]
 # Let the assistant email information to you (digests, summaries, reports) via SMTP. The assistant can
 # ONLY email `to` below; the send_email tool takes no recipient, so it can never mail arbitrary people.

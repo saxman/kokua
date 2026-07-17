@@ -50,7 +50,11 @@ Omit `--model` to use `AIMU_LANGUAGE_MODEL`, or else the first already-running l
 then a local OpenAI-compatible server); a cloud model is never auto-selected, and startup fails with an
 actionable message if none is found. Chat at the prompt; Ctrl-D exits.
 Send `/stop` to cancel a reply that's still streaming (the partial turn is kept, so the conversation
-continues); the web UI has a Stop button for the same.
+continues); the web UI has a Stop button for the same. Send `/diag` if the assistant ever stops
+responding: it reports the in-flight turn, whether the turn lock is held, and dumps a stuck turn's
+async stack (it is handled without the lock, so it answers even when a hung turn holds it). Diagnostic
+logs are written to `$KOKUA_HOME/data/logs/kokua.log` (rotating); `kill -USR1 <pid>` dumps all thread
+stacks there.
 
 Run the **web** front end instead (needs the `web` extra):
 

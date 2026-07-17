@@ -777,6 +777,120 @@ async def test_stop_with_no_active_turn_is_noop(tmp_path):
     assert assistant._current is None
 
 
+# --- /diag command + logging ------------------------------------------------------------------
+
+
+def test_logs_path_under_data_dir(tmp_path):
+    cfg = AssistantConfig(data_dir=tmp_path, memory=False)
+    assert cfg.logs_path == tmp_path / "logs"
+
+
+async def test_diag_command_does_not_start_a_turn(tmp_path):
+    class _DiagOnly(Channel):
+        name = "fake"
+
+        def __init__(self):
+            self.sent: list[str] = []
+
+        async def receive(self):
+            yield ChannelMessage(text="/diag", channel="fake")
+
+        async def send(self, content, *, reply_to=None):
+            if isinstance(content, str):
+                self.sent.append(content)
+            else:
+                async for _ in content:
+                    pass
+
+    channel = _DiagOnly()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    await assistant._serve_channel()
+    assert assistant._current is None  # /diag must not dispatch a turn
+    assert any("turn in flight: no" in s.lower() for s in channel.sent)
+
+
+class _DiagChannel(Channel):
+    """Yields a normal message, waits until the turn is running, then yields '/diag'."""
+
+    name = "fake"
+
+    def __init__(self, started):
+        self._started = started
+        self.sent: list[str] = []
+
+    async def receive(self):
+        yield ChannelMessage(text="long task", channel="fake")
+        await self._started.wait()
+        yield ChannelMessage(text="/diag", channel="fake")
+
+    async def send(self, content, *, reply_to=None):
+        if isinstance(content, str):
+            self.sent.append(content)
+            return
+        async for _ in content:
+            pass
+
+
+async def test_diag_reports_wedged_turn_with_stack(tmp_path):
+    client = _BlockingStreamClient()
+    channel = _DiagChannel(client.started)
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+
+    await assistant._serve_channel()  # starts the hung turn, then answers /diag while it is wedged
+    report = "\n".join(channel.sent)
+    assert "turn in flight: yes" in report.lower()
+    assert "lock held: yes" in report.lower()
+    assert "stuck turn stack" in report.lower()
+
+    # cleanup: cancel the hung turn
+    if assistant._current is not None:
+        assistant._current.cancel()
+        await asyncio.gather(assistant._current.task, return_exceptions=True)
+
+
+def test_configure_logging_writes_to_log_file(tmp_path):
+    import logging as _logging
+    from logging.handlers import RotatingFileHandler
+
+    from kokua.logging_setup import configure_logging
+
+    cfg = _config(tmp_path)
+    try:
+        configure_logging(cfg)
+        _logging.getLogger("kokua").info("hello-diag-test-line")
+        logfile = cfg.logs_path / "kokua.log"
+        assert logfile.exists()
+        assert "hello-diag-test-line" in logfile.read_text()
+    finally:
+        for name in ("kokua", "aimu"):
+            lg = _logging.getLogger(name)
+            for h in list(lg.handlers):
+                if isinstance(h, RotatingFileHandler):
+                    lg.removeHandler(h)
+                    h.close()
+
+
+def test_configure_logging_is_idempotent(tmp_path):
+    import logging as _logging
+    from logging.handlers import RotatingFileHandler
+
+    from kokua.logging_setup import configure_logging
+
+    cfg = _config(tmp_path)
+    try:
+        configure_logging(cfg)
+        configure_logging(cfg)
+        handlers = [h for h in _logging.getLogger("kokua").handlers if isinstance(h, RotatingFileHandler)]
+        assert len(handlers) == 1
+    finally:
+        for name in ("kokua", "aimu"):
+            lg = _logging.getLogger(name)
+            for h in list(lg.handlers):
+                if isinstance(h, RotatingFileHandler):
+                    lg.removeHandler(h)
+                    h.close()
+
+
 async def test_assistant_authors_and_registers_runnable_script(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
