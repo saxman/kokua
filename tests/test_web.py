@@ -388,7 +388,7 @@ def test_ws_new_then_select_round_trip(tmp_path):
 
     from starlette.testclient import TestClient
 
-    app = build_app(_config(tmp_path), client=MockAsyncModelClient(["reply one"]))
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
     with TestClient(app).websocket_connect("/ws") as ws:
         _drain_until(ws, "conversations")
         # Chat in the first conversation.
@@ -415,7 +415,7 @@ def test_ws_delete_active_conversation(tmp_path):
 
     from starlette.testclient import TestClient
 
-    app = build_app(_config(tmp_path), client=MockAsyncModelClient(["reply one", "reply two"]))
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
     with TestClient(app).websocket_connect("/ws") as ws:
         _drain_until(ws, "conversations")
         # Two titled conversations.

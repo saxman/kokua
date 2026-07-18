@@ -593,6 +593,27 @@ async def test_persist_writes_active_conversation(tmp_path):
     assert any(m.get("content") == "hi there" for m in reloaded.messages)
 
 
+async def test_model_switch_applies_to_all_live_agents(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    first = assistant._active_id
+    second = await assistant.new_conversation()  # noqa: F841
+    await assistant.select_conversation(first)
+
+    built = []
+
+    def fake_client(model, system=None):
+        c = MockAsyncModelClient([])
+        c.model = MagicMock(supports_tools=True, supports_thinking=False, supports_vision=False)
+        built.append(model)
+        return c
+
+    monkeypatch.setattr("kokua.assistant.aio.client", fake_client)
+    await assistant._switch_model("anthropic:claude-x")
+    # Both cached agents got a rebuilt client for the new model.
+    assert built.count("anthropic:claude-x") == len(assistant._registry.live_agents())
+
+
 # --- Tool approval ----------------------------------------------------------------------------
 
 
@@ -1238,8 +1259,9 @@ async def test_create_wraps_unbuildable_client_as_model_client_error(tmp_path, m
 
 async def test_proactive_new_session_runs_in_fresh_conversation(tmp_path):
     channel = _ConvCapturingChannel()
-    client = MockAsyncModelClient(["seed", "task output"])
-    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["task output"])
+    )
     # Establish an active conversation with one real turn.
     await assistant._handle(ChannelMessage(text="hello there", channel="fake"))
     active_key = assistant._session.key

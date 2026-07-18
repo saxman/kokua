@@ -86,11 +86,12 @@ def _parse_image_input(raw: str) -> Optional[tuple[str, list[str]]]:
     return str(obj.get("text", "")), urls
 
 
-def build_app(config: AssistantConfig, *, client=None) -> Starlette:
+def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> Starlette:
     """Build the Starlette app serving the chat page (``/``) and the WebSocket (``/ws``).
 
-    ``client`` injects a model client (tests pass a mock); production leaves it None so each
-    connection builds its own via ``Assistant.create``.
+    ``client`` injects a single model client (single-conversation tests pass a mock);
+    ``client_factory`` injects a per-conversation client factory (multi-conversation tests);
+    production leaves both None so each conversation builds its own via ``Assistant.create``.
     """
     busy = {"active": False}  # one-active-connection guard (single user, single process)
 
@@ -149,7 +150,7 @@ def build_app(config: AssistantConfig, *, client=None) -> Starlette:
         busy["active"] = True
         channel = WebChannel(websocket, show_thinking=config.show_thinking, show_tools=config.show_tools)
         try:
-            assistant = await Assistant.create(config, channel, client=client)
+            assistant = await Assistant.create(config, channel, client=client, client_factory=client_factory)
         except ModelClientError as e:
             # Building the model client failed (no model resolved, or a bad model string). Show the
             # actionable message in the browser and release the busy guard so a later connection (after

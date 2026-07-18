@@ -345,22 +345,29 @@ class Assistant:
             ):  # config-only
                 if flag in settings:
                     setattr(self._config, flag, settings[flag])
-            _layer_generate_kwargs(
-                self._agent.model_client, self._base_generate_kwargs, self._config, settings["generate_kwargs"]
-            )
+            for agent in self._registry.live_agents():
+                _layer_generate_kwargs(
+                    agent.model_client, self._base_generate_kwargs, self._config, settings["generate_kwargs"]
+                )
             runtime_settings.save(self._config.runtime_settings_path, settings)
 
     async def _switch_model(self, model: str) -> None:
-        """Rebuild the model client for a new model, carrying over conversation state and tools.
+        """Rebuild every live agent's client for the new model, preserving each conversation's messages.
 
-        Tools bind the agent (not the client), so they survive the swap and are republished to the new
-        client on the next run. Raises (leaving the old client in place) if the model can't be built.
+        Tools bind the agent (not the client), so they survive; each agent's own messages are restored
+        onto its new client. Raises (leaving clients in place) if the model can't be built. Also updates
+        the client factory so conversations built later use the new model.
         """
-        new_client = aio.client(model, system=resolve_system_message(self._config))  # build first; only swap on success
-        self._agent.model_client = new_client
-        self._agent.restore(expand_message_images(self._session.messages, self._config.images_path))
+        system = resolve_system_message(self._config)
+        for conversation_id in self._registry.cached_ids():
+            agent = self._registry.get(conversation_id)
+            new_client = aio.client(model, system=system)  # raises before any mutation on the first agent
+            messages = list(agent.model_client.messages)
+            agent.model_client = new_client
+            agent.restore(messages)
         self._config.model = model
-        self._base_generate_kwargs = dict(new_client.default_generate_kwargs)
+        self._base_generate_kwargs = dict(self._agent.model_client.default_generate_kwargs)
+        self._client_factory = lambda cid: aio.client(model, system=resolve_system_message(self._config))
 
     async def _maybe_push_conversations(self) -> None:
         """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""
@@ -608,26 +615,25 @@ class Assistant:
     async def _run_in_new_session(self, prompt: str, task_name: Optional[str]) -> None:
         """Run a proactive turn in a fresh conversation, then restore the active one.
 
-        Runs under the caller's hold of ``self._lock``. The active session is snapshotted first and
-        restored in a ``finally`` so the agent's context is never left pointing at the task's session.
+        Runs under the caller's hold of ``self._lock``. Switching conversations is just an active-id
+        swap (each conversation has its own agent), restored in a ``finally`` so the user's active
+        conversation is never left pointing at the task's session.
         """
-        self._persist()  # snapshot the currently-active session before swapping away
-        previous = self._session
+        previous_id = self._active_id
         now = datetime.now().isoformat()
         title = task_name or derive_title([{"role": "user", "content": prompt}]) or "Scheduled task"
-        new_session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now, "title": title})
-        self._store.save(new_session)
-        self._session = new_session
-        self._agent.restore([])
+        session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now, "title": title})
+        self._store.save(session)
+        self._active_id = session.key
         try:
-            start = len(self._agent.model_client.messages)
-            await self._agent.run(prompt)
-            for message in self._agent.model_client.messages[start:]:
+            agent = self._registry.get(self._active_id)
+            start = len(agent.model_client.messages)
+            await agent.run(prompt)
+            for message in agent.model_client.messages[start:]:
                 message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
             self._persist()
         finally:
-            self._session = previous
-            self._agent.restore(expand_message_images(previous.messages, self._config.images_path))
+            self._active_id = previous_id
         try:
             await self._maybe_push_conversations()
             await self._channel.send(f"Scheduled task '{title}' finished; open the '{title}' conversation to review.")
