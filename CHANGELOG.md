@@ -181,3 +181,7 @@ installable, modular application.
   guard, so a later connection is not wrongly refused as "busy in another tab".
 - **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,
   plugin discovery), with a vendored async mock model client (no reach into the AIMU repo).
+- **Per-conversation agents**: each conversation now has its own AIMU `SkillAgent`, built lazily and kept
+  in a bounded LRU `AgentRegistry` (new `agent_cache_cap` config, default 8), instead of a single shared
+  agent that was swapped and `restore()`d between conversations on switch. No user-visible behavior
+  change in this step; lays the groundwork for concurrent per-conversation turns in a follow-up.
