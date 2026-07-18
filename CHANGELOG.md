@@ -183,5 +183,8 @@ installable, modular application.
   plugin discovery), with a vendored async mock model client (no reach into the AIMU repo).
 - **Per-conversation agents**: each conversation now has its own AIMU `SkillAgent`, built lazily and kept
   in a bounded LRU `AgentRegistry` (new `agent_cache_cap` config, default 8), instead of a single shared
-  agent that was swapped and `restore()`d between conversations on switch. No user-visible behavior
-  change in this step; lays the groundwork for concurrent per-conversation turns in a follow-up.
+  agent that was swapped and `restore()`d between conversations on switch. Lays the groundwork for
+  concurrent per-conversation turns in a follow-up. Because building an agent is now lazy, the web UI's
+  new/select/delete-conversation controls can also hit a `ModelClientError` (e.g. a since-broken model
+  string); these are now caught and reported in the chat, like the existing settings-panel handling,
+  instead of tearing down the websocket connection.

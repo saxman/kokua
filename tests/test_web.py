@@ -496,6 +496,101 @@ def test_ws_reports_model_client_error_and_releases_busy(tmp_path, monkeypatch):
     assert "no default could be resolved" in text
 
 
+def test_ws_new_conversation_reports_model_client_error_without_dropping_connection(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    from kokua.assistant import ModelClientError
+
+    calls = {"n": 0}
+
+    def factory(conversation_id):
+        calls["n"] += 1
+        if calls["n"] > 1:  # the initial conversation builds fine; a later one fails
+            raise ModelClientError("model no longer available")
+        return MockAsyncModelClient([])
+
+    app = build_app(_config(tmp_path), client_factory=factory)
+
+    def first_message(ws):
+        while True:
+            frame = ws.receive_json()
+            if frame["type"] == "message":
+                return frame["text"]
+
+    # Before the fix, this raised ModelClientError out of pump(), which tore down the websocket via
+    # the enclosing TaskGroup; the exception surfaced when the `with` block below was exited.
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text(json.dumps({"type": "new"}))
+        text = first_message(ws)
+    assert "could not be created" in text
+
+
+def test_ws_select_conversation_reports_model_client_error_without_dropping_connection(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    from kokua.assistant import ModelClientError
+
+    calls = {"n": 0}
+
+    def factory(conversation_id):
+        calls["n"] += 1
+        if calls["n"] > 1:  # the initial conversation builds fine; the second (selected) one fails
+            raise ModelClientError("model no longer available")
+        return MockAsyncModelClient([])
+
+    app = build_app(_config(tmp_path), client_factory=factory)
+
+    def first_message(ws):
+        while True:
+            frame = ws.receive_json()
+            if frame["type"] == "message":
+                return frame["text"]
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text(json.dumps({"type": "select", "id": "does-not-exist-yet"}))
+        text = first_message(ws)
+    assert "could not be opened" in text
+
+
+def test_ws_delete_conversation_reports_model_client_error_without_dropping_connection(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    from kokua.assistant import ModelClientError
+
+    calls = {"n": 0}
+
+    def factory(conversation_id):
+        calls["n"] += 1
+        # The initial conversation builds fine; deleting it forces a fresh replacement conversation,
+        # whose build fails.
+        if calls["n"] > 1:
+            raise ModelClientError("model no longer available")
+        return MockAsyncModelClient([])
+
+    app = build_app(_config(tmp_path), client_factory=factory)
+
+    def first_message(ws):
+        while True:
+            frame = ws.receive_json()
+            if frame["type"] == "message":
+                return frame["text"]
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "delete", "id": active_id}))
+        text = first_message(ws)
+    assert "could not be deleted" in text
+
+
 def test_download_route_serves_documents(tmp_path):
     from starlette.testclient import TestClient
 

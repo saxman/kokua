@@ -84,11 +84,13 @@ def test_lock_is_stable_per_conversation():
 
 def test_discard_drops_agent_and_lock():
     registry, built = _registry()
+    lock = registry.lock("c1")
     registry.get("c1")
     registry.discard("c1")
     assert registry.cached_ids() == []
     registry.get("c1")  # rebuilt after discard
     assert built == ["c1", "c1"]
+    assert registry.lock("c1") is not lock  # the old lock was dropped, not reused
 
 
 def test_live_agents_returns_cached_instances():

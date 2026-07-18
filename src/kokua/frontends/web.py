@@ -204,11 +204,26 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                         await channel.send_settings(assistant.current_settings())
                         continue
                     if control["type"] == "new":
-                        await assistant.new_conversation()
+                        try:
+                            await assistant.new_conversation()
+                        except ModelClientError:
+                            logger.warning("Could not build agent for new conversation", exc_info=True)
+                            await channel.send("Sorry, that conversation could not be created.")
+                            continue
                     elif control["type"] == "select":
-                        await assistant.select_conversation(control["id"])
+                        try:
+                            await assistant.select_conversation(control["id"])
+                        except ModelClientError:
+                            logger.warning("Could not build agent for conversation switch", exc_info=True)
+                            await channel.send("Sorry, that conversation could not be opened.")
+                            continue
                     elif control["type"] == "delete":
-                        await assistant.delete_conversation(control["id"])
+                        try:
+                            await assistant.delete_conversation(control["id"])
+                        except ModelClientError:
+                            logger.warning("Could not build agent after conversation delete", exc_info=True)
+                            await channel.send("Sorry, that conversation could not be deleted.")
+                            continue
                     await channel.send_conversations(assistant.list_conversations())
                     await channel.send_history(assistant.history, assistant.history_metadata)
             except WebSocketDisconnect:

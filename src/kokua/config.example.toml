@@ -28,8 +28,8 @@ load_plugins = true
 # for approval and are not run unattended.
 subagents = true
 
-# Max number of per-conversation agents kept live in memory (AgentRegistry LRU cap). An agent
-# with an in-flight turn or the foreground conversation is never evicted regardless of this.
+# Max per-conversation agents kept live in memory (AgentRegistry LRU cap). Evicted agents rebuild
+# from persisted state on next access, so the cap bounds memory, not correctness.
 agent_cache_cap = 8
 
 [display]

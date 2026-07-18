@@ -388,13 +388,15 @@ class Assistant:
         """Rebuild every live agent's client for the new model, preserving each conversation's messages.
 
         Tools bind the agent (not the client), so they survive; each agent's own messages are restored
-        onto its new client. Raises (leaving clients in place) if the model can't be built. Also updates
-        the client factory so conversations built later use the new model.
+        onto its new client. ``aio.client`` is called once per cached agent, with the same fixed model
+        string each time, so the first call to fail means every call fails: a bad model raises before
+        any agent is swapped, and no partial swap happens in practice. Also updates the client factory
+        so conversations built later use the new model.
         """
         system = resolve_system_message(self._config)
         for conversation_id in self._registry.cached_ids():
             agent = self._registry.get(conversation_id)
-            new_client = aio.client(model, system=system)  # raises before any mutation on the first agent
+            new_client = aio.client(model, system=system)
             messages = list(agent.model_client.messages)
             agent.model_client = new_client
             agent.restore(messages)

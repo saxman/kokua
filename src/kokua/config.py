@@ -144,8 +144,8 @@ class AssistantConfig:
     port: int = 8000
     # Logging level for the rotating file log under logs_path (configure_logging in logging_setup.py).
     log_level: str = "INFO"
-    # Max number of per-conversation agents kept live in memory (AgentRegistry LRU cap). An agent
-    # with an in-flight turn or the foreground conversation is never evicted regardless of this.
+    # Max per-conversation agents kept live in memory (AgentRegistry LRU cap). Evicted agents rebuild
+    # from persisted state on next access, so the cap bounds memory, not correctness.
     agent_cache_cap: int = 8
     # Single root for all transient and user-provided content; the leaf paths below derive from it.
     data_dir: Path = field(default_factory=paths.data_dir)
