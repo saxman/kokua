@@ -258,7 +258,7 @@ class Assistant:
                     "id": key,
                     "title": session.metadata.get("title") or "New conversation",
                     "updated_at": session.metadata.get("updated_at", ""),
-                    "active": key == self._session.key,
+                    "active": key == self._active_id,
                 }
             )
         items.sort(key=lambda item: item["updated_at"], reverse=True)
@@ -281,28 +281,30 @@ class Assistant:
             now = datetime.now().isoformat()
             session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
             self._store.save(session)
-            self._session = session
-            self._agent.restore(expand_message_images(session.messages, self._config.images_path))
+            self._active_id = session.key
+        self._registry.get(self._active_id)  # build the (empty) agent eagerly so it is the live one
         return session.key
 
     async def select_conversation(self, conversation_id: str) -> None:
-        """Switch the active conversation to an existing one and restore it into the agent."""
+        """Switch the active conversation to an existing one; its agent (re)builds from the store."""
         await self._cancel_current_turn()
         async with self._lock:
-            self._session = self._store.get(conversation_id)
-            self._agent.restore(expand_message_images(self._session.messages, self._config.images_path))
+            self._active_id = conversation_id
+        self._registry.get(self._active_id)
 
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation. If it is the active one, switch to the most-recently-updated
-        remaining conversation (or a fresh empty one if none remain) and restore it into the agent."""
-        deleting_active = conversation_id == self._session.key
+        remaining conversation (or a fresh empty one if none remain)."""
+        deleting_active = conversation_id == self._active_id
         if deleting_active:
             await self._cancel_current_turn()
         async with self._lock:
             self._store.delete(conversation_id)
+            self._registry.discard(conversation_id)
             if deleting_active:
-                self._session = _active_session(self._store)
-                self._agent.restore(expand_message_images(self._session.messages, self._config.images_path))
+                self._active_id = _active_session(self._store).key
+        if deleting_active:
+            self._registry.get(self._active_id)
 
     def current_settings(self) -> dict:
         """The effective runtime settings for the web panel to display: model, prefs, generate kwargs."""

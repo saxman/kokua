@@ -472,7 +472,9 @@ async def test_first_turn_pushes_conversations(tmp_path):
 
 
 async def test_list_conversations_recency_desc(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a", "b"]))
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["a"])
+    )
     await assistant._handle(ChannelMessage(text="first chat", channel="fake"))
     first_id = assistant._session.key
     await assistant.new_conversation()
@@ -486,7 +488,9 @@ async def test_list_conversations_recency_desc(tmp_path):
 
 
 async def test_new_conversation_resets_agent(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a"]))
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["a"])
+    )
     await assistant._handle(ChannelMessage(text="old chat", channel="fake"))
     assert assistant._agent.model_client.messages  # has the old turn
 
@@ -497,7 +501,9 @@ async def test_new_conversation_resets_agent(tmp_path):
 
 
 async def test_select_conversation_restores_messages(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a"]))
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["a"])
+    )
     await assistant._handle(ChannelMessage(text="keep me", channel="fake"))
     first_id = assistant._session.key
     await assistant.new_conversation()
@@ -509,7 +515,9 @@ async def test_select_conversation_restores_messages(tmp_path):
 
 
 async def test_delete_inactive_conversation_leaves_active(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a", "b"]))
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["a"])
+    )
     await assistant._handle(ChannelMessage(text="old chat", channel="fake"))
     old_id = assistant._session.key
     await assistant.new_conversation()
@@ -523,7 +531,9 @@ async def test_delete_inactive_conversation_leaves_active(tmp_path):
 
 
 async def test_delete_active_switches_to_most_recent_remaining(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a", "b"]))
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["a"])
+    )
     await assistant._handle(ChannelMessage(text="keep me", channel="fake"))
     keep_id = assistant._session.key
     await assistant.new_conversation()
@@ -537,7 +547,9 @@ async def test_delete_active_switches_to_most_recent_remaining(tmp_path):
 
 
 async def test_delete_last_conversation_creates_fresh_empty(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a"]))
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["a"])
+    )
     await assistant._handle(ChannelMessage(text="only chat", channel="fake"))
     only_id = assistant._session.key
 
@@ -552,6 +564,22 @@ async def test_registry_used_for_active_conversation(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     agent = assistant._registry.get(assistant._active_id)
     assert assistant._agent is agent  # the _agent property resolves to the active conversation's agent
+
+
+async def test_switch_conversation_isolates_message_lists(tmp_path):
+    cfg = _config(tmp_path)
+    factory = lambda cid: MockAsyncModelClient(["reply in c1"])  # noqa: E731
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=factory)
+    first_id = assistant._active_id
+    # Run a turn in the first conversation.
+    await assistant._handle(ChannelMessage(text="hello", sender="t", channel="t"))
+    second_id = await assistant.new_conversation()
+    assert second_id != first_id
+    # The new conversation's agent has its own (empty) message list.
+    assert assistant._agent.model_client.messages == []
+    # Switching back does not replay onto the wrong agent.
+    await assistant.select_conversation(first_id)
+    assert any("reply in c1" == m.get("content") for m in assistant._agent.model_client.messages)
 
 
 # --- Tool approval ----------------------------------------------------------------------------
