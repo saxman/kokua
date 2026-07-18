@@ -7,6 +7,12 @@
 # Model string, e.g. "ollama:qwen3:8b". Unset -> $AIMU_LANGUAGE_MODEL, else the first already-running
 # local model found (a running Ollama server, then a local OpenAI-compatible server). A cloud model is
 # never auto-selected. Startup fails with an actionable message if nothing can be resolved.
+#
+# For a remote/custom OpenAI-compatible server (llama.cpp llama-server, vLLM, LM Studio, SGLang,
+# HF-Serve), append "@<base_url>" to override the endpoint, and for a model id not built into AIMU add
+# ";<flags>" (comma-separated from tools,thinking,vision,audio,structured) to declare its capabilities:
+#   model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"
+#   model = "openai-compat:my-model@http://gpu-box:9000/v1;tools,thinking"
 # model = "ollama:qwen3:8b"
 
 # system_message = "You are a personal assistant running on the user's own machine. ..."

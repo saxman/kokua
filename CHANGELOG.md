@@ -88,6 +88,10 @@ installable, modular application.
   (`provider defaults < config.toml < the panel`); `config.toml` is never rewritten by the app. The theme
   is a per-browser choice (stored locally, not server-side). Provider support varies: thinking models
   ignore `top_p`/`top_k` and force `temperature`, and Anthropic does not support the penalty parameters.
+- **Remote/custom model endpoints**: `[assistant].model` accepts AIMU's extended
+  `provider:model_id[@base_url][;flags]` form, so Kokua can target a remote OpenAI-compatible server
+  (e.g. a llama.cpp `llama-server` on another host) or a model id not in AIMU's catalog. Example:
+  `model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"`. Documented in `config.example.toml`.
 - **Markdown-to-PDF tool**: a built-in `pdf` tool-pack contributes `markdown_to_pdf`, which renders
   Markdown to a PDF (via `fpdf2` + `markdown`, both pure-Python, no system libraries) saved in
   `data/downloads/`. Enabled by default like any tool-pack. The web front end serves that folder at
