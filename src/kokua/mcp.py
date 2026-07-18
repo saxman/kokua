@@ -216,7 +216,12 @@ def make_mcp_tools(
         entry = next((c for c in connections if c.url == url), None)
         if entry is None:
             return f"No MCP server is connected at {url!r}."
-        removed = set(entry.tools)
+
+        # `entry.tools` lists every tool name this server exposes, but a same-named tool from
+        # another still-connected server (or a built-in) was deduped at attach time and never
+        # re-added; only strip names this removal actually frees up.
+        still_owned = {name for conn in connections if conn is not entry for name in conn.tools}
+        removed = set(entry.tools) - still_owned
 
         # Drop from every agent's tools; the engine re-reads the effective tools each round, so the
         # tools stop being advertised and dispatchable from the next round on (this turn included).

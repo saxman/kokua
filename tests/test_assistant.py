@@ -1222,6 +1222,32 @@ async def test_remove_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypat
         assert not any(getattr(t, "__name__", "") == "remote_ping" for t in agent.tools)
 
 
+async def test_remove_mcp_server_keeps_tool_still_owned_by_another_server(tmp_path, monkeypatch):
+    """Removing a server must not strip a tool name still owned by another live connection.
+
+    Two servers both expose a tool named "shared_tool". Attach dedups by __name__, so the second
+    server's as_tools() call adds nothing new to agent.tools, but ServerConnection.tools still
+    records "shared_tool" for both connections (it stores all of a server's tool names, not just
+    the ones it uniquely added). Removing the second server must not strip the tool, because the
+    first server still owns and exposes it.
+    """
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    monkeypatch.setattr(
+        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("shared_tool")]), "none"))
+    )
+    add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    await add_tool(url="https://server-a/mcp")
+    await add_tool(url="https://server-b/mcp")
+
+    remove_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "remove_mcp_server")
+    msg = await remove_tool(url="https://server-b/mcp")
+
+    assert "shared_tool" in {fn.__name__ for fn in assistant._agent.tools}
+    assert "shared_tool" not in msg
+
+
 async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeypatch):
     """A conversation whose agent is built after a server was added still gets that server's tools."""
     cfg = _config(tmp_path)
