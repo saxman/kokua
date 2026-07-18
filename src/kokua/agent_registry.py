@@ -2,8 +2,12 @@
 
 Replaces the assistant's single shared agent. Each conversation gets its own agent (own model
 client + message list), built on first access by an injected factory and evicted least-recently-used
-when the cache exceeds its cap. An agent that is currently in use (its turn is running, or it is the
-foreground conversation) is pinned so eviction never pulls it out from under a running turn.
+when the cache exceeds its cap. An evicted agent simply rebuilds from persisted state on next
+access, so the cap bounds memory, not correctness; this phase has no caller running a turn on an
+evicted agent, since the global turn lock serializes turns and recency keeps the foreground
+conversation's agent live. `pin`/`unpin` are reference-counted eviction guards provided for a later
+phase (concurrent per-conversation turns), where an in-flight turn must survive across the cap even
+if its conversation isn't the foreground one; unused so far.
 
 Pure and Assistant-agnostic: it owns the mapping and its lifecycle; the caller owns what an agent is
 and how it is built (the `build` callable) and run.

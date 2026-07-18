@@ -603,6 +603,59 @@ async def test_select_conversation_reverts_active_id_on_build_failure(tmp_path):
     assert assistant._active_id == original_id
 
 
+async def test_new_conversation_reverts_active_id_on_build_failure(tmp_path):
+    from kokua.assistant import ModelClientError
+
+    calls = {"n": 0}
+
+    def factory(conversation_id):
+        calls["n"] += 1
+        if calls["n"] > 1:  # the initial conversation builds fine; the new one fails
+            raise ModelClientError("model no longer available")
+        return MockAsyncModelClient([])
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    original_id = assistant._active_id
+
+    with pytest.raises(ModelClientError):
+        await assistant.new_conversation()
+
+    # The failed build must not leave the assistant pointed at the unbuildable new conversation;
+    # it reverts to the one that was active before the call (its session record still lingers in
+    # the store, unused but harmless).
+    assert assistant._active_id == original_id
+
+
+async def test_delete_conversation_reverts_active_id_to_deleted_id_on_build_failure(tmp_path):
+    """delete_conversation's revert is documented as best-effort: the deleted conversation's store
+    record and registry entry are already gone by the time the replacement's build fails, so
+    reverting only restores the id, not a working conversation. This asserts that documented
+    behavior (not a full rollback, which would need deferring the delete itself)."""
+    from kokua.assistant import ModelClientError
+
+    calls = {"n": 0}
+
+    def factory(conversation_id):
+        calls["n"] += 1
+        if calls["n"] > 1:  # the initial (soon-to-be-deleted) conversation builds fine; its
+            # replacement (a fresh empty conversation, since none remain) fails
+            raise ModelClientError("model no longer available")
+        return MockAsyncModelClient([])
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    original_id = assistant._active_id
+
+    with pytest.raises(ModelClientError):
+        await assistant.delete_conversation(original_id)
+
+    # Reverts to the just-deleted id (documented best-effort semantics), not to some other,
+    # never-vetted conversation.
+    assert assistant._active_id == original_id
+    # The delete itself was not rolled back: the store no longer has a record for that id
+    # (TinyDBSessionStore.get returns a fresh, unsaved Session for a missing key, not None).
+    assert original_id not in assistant._store.list_keys()
+
+
 async def test_persist_writes_active_conversation(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(
