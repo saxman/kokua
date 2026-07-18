@@ -206,6 +206,14 @@ class Assistant:
         # the active agent has, not bare provider defaults.
         assistant._client_factory = assistant._make_layered_factory(raw_factory)
         scheduler_tools, arm_tasks = make_scheduler_tools(scheduler, config.scheduled_tasks_path, assistant._proactive)
+
+        # Fan a global tool mutation (MCP add/remove) out across every live conversation's agent. Reads
+        # the registry lazily: it is set just below and only ever called at runtime (add/remove) or by the
+        # boot reconnect, by which point the registry exists and is populated.
+        def for_each_agent(apply: Callable[[object], None]) -> None:
+            for agent in assistant._registry.live_agents():
+                apply(agent)
+
         assistant._registry = AgentRegistry(
             make_agent_builder(
                 config,
@@ -218,6 +226,7 @@ class Assistant:
                 scheduler_tools=scheduler_tools,
                 store=store,
                 images_path=config.images_path,
+                for_each_agent=for_each_agent,
             ),
             cap=config.agent_cache_cap,
         )
@@ -225,9 +234,9 @@ class Assistant:
         # Build the active conversation's agent (its client is layered by the factory, which also
         # snapshots the provider base into _base_generate_kwargs) and attach any MCP servers to it,
         # preserving single-agent parity for this phase.
-        agent = assistant._registry.get(assistant._active_id)
+        assistant._registry.get(assistant._active_id)
         await reconnect_mcp_servers(
-            agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
+            for_each_agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
         )
 
         arm_tasks()

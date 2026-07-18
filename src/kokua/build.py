@@ -168,13 +168,15 @@ def build_agent(
     oauth_storage_dir: Path,
     connections: list,
     memory_tools: list,
+    for_each_agent: Callable,
 ) -> aio.SkillAgent:
     """Build the SkillAgent and its full tool set (skills, MCP management, memory, plugins, built-ins).
 
     ``add_skill_script`` and the MCP tools need the agent (to surface new tools this turn), so they are
     built after it; the SkillAgent re-appends its skills-server tools each run. Plugin tools are loaded
     here (deduped by name) when enabled. ``connections`` is the live list the MCP tools append to and
-    the boot reconnect / teardown share.
+    the boot reconnect / teardown share. ``for_each_agent`` fans a runtime add/remove out across every
+    live agent; already-connected servers in ``connections`` are attached to this fresh agent directly.
     """
     manager = SkillManager(skill_dirs=[str(config.skills_dir)])
     author_skill = make_skill_authoring_tool(manager, config.skills_dir)
@@ -190,7 +192,7 @@ def build_agent(
         author_skill,
         make_skill_script_tool(agent, manager, config.skills_dir),
         *make_mcp_tools(
-            agent,
+            for_each_agent,
             connections,
             notify=notify,
             oauth_storage_dir=oauth_storage_dir,
@@ -200,6 +202,13 @@ def build_agent(
         *plugin_tools,
         *_resolve_builtin_tools(config.tools),
     ]
+    # Attach already-connected MCP servers to this fresh agent (runtime-added servers fan out separately).
+    existing = {getattr(fn, "__name__", None) for fn in agent.tools}
+    for conn in connections:
+        for fn in conn.callables:
+            if fn.__name__ not in existing:
+                agent.tools.append(fn)
+                existing.add(fn.__name__)
     return agent
 
 
@@ -213,6 +222,7 @@ def wire_agent(
     memory_tools: list,
     tool_approval: Callable,
     scheduler_tools: list,
+    for_each_agent: Callable,
 ) -> aio.SkillAgent:
     """Build a fully-wired SkillAgent: base tools + approval gate + subagent tool + scheduler tools.
 
@@ -226,6 +236,7 @@ def wire_agent(
         oauth_storage_dir=oauth_storage_dir,
         connections=connections,
         memory_tools=memory_tools,
+        for_each_agent=for_each_agent,
     )
     agent.tool_approval = tool_approval
     add_subagent_tool(agent, config, tool_approval)
@@ -245,6 +256,7 @@ def make_agent_builder(
     scheduler_tools: list,
     store,
     images_path: Path,
+    for_each_agent: Callable,
 ) -> Callable[[str], aio.SkillAgent]:
     """Return a builder that constructs and restores a per-conversation agent on demand.
 
@@ -264,6 +276,7 @@ def make_agent_builder(
             memory_tools=memory_tools,
             tool_approval=tool_approval,
             scheduler_tools=scheduler_tools,
+            for_each_agent=for_each_agent,
         )
         session = store.get(conversation_id)
         if session is not None and session.messages:

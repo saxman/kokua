@@ -1178,6 +1178,67 @@ async def test_runtime_added_tool_is_live_in_the_same_turn(tmp_path, monkeypatch
     assert "get_portfolio" not in {fn.__name__ for fn in agent._effective_tools()}
 
 
+async def _await_value(value):
+    return value
+
+
+async def test_add_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypatch):
+    """Adding a server at runtime lands its tools on every live agent, not just the active one."""
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    first = assistant._active_id
+    await assistant.new_conversation()
+    await assistant.select_conversation(first)
+
+    monkeypatch.setattr(
+        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none"))
+    )
+    add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    await add_tool("https://example/mcp")
+
+    live = assistant._registry.live_agents()
+    assert len(live) == 2
+    for agent in live:
+        assert any(getattr(t, "__name__", "") == "remote_ping" for t in agent.tools)
+
+
+async def test_remove_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypatch):
+    """Removing a server drops its tools from every live agent."""
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    first = assistant._active_id
+    await assistant.new_conversation()
+    await assistant.select_conversation(first)
+
+    monkeypatch.setattr(
+        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none"))
+    )
+    add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    await add_tool("https://example/mcp")
+    remove_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "remove_mcp_server")
+    await remove_tool("https://example/mcp")
+
+    for agent in assistant._registry.live_agents():
+        assert not any(getattr(t, "__name__", "") == "remote_ping" for t in agent.tools)
+
+
+async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeypatch):
+    """A conversation whose agent is built after a server was added still gets that server's tools."""
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+
+    monkeypatch.setattr(
+        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none"))
+    )
+    add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    await add_tool("https://example/mcp")
+
+    new_id = await assistant.new_conversation()
+    new_agent = assistant._registry.get(new_id)
+    names = [fn.__name__ for fn in new_agent.tools]
+    assert names.count("remote_ping") == 1
+
+
 # --- Settings (generation kwargs, display prefs, model) --------------------------------------
 
 
@@ -1378,6 +1439,7 @@ def test_make_agent_builder_wires_and_restores(tmp_path):
         scheduler_tools=[],
         store=store,
         images_path=config.images_path,
+        for_each_agent=lambda apply: None,
     )
     agent = build("c1")
     assert agent.tool_approval is not None

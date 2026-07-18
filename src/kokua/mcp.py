@@ -8,7 +8,7 @@ and `mcp_registry.py` (the reconnect-across-restarts record).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -33,6 +33,11 @@ def _looks_like_auth_required(exc: BaseException) -> bool:
     return any(s in text for s in ("401", "403", "unauthor", "forbidden", "www-authenticate", "oauth"))
 
 
+# Applies a per-agent mutation to every live agent. Injected so add/remove fan the change out across
+# all conversations instead of touching a single captured agent.
+ForEachAgent = Callable[[Callable[[Any], None]], None]
+
+
 @dataclass
 class ServerConnection:
     """A live remote-MCP connection and the tools it contributed (for teardown and removal)."""
@@ -41,6 +46,7 @@ class ServerConnection:
     client: Any  # aio.MCPClient
     tools: list[str]  # __name__ of each tool this server added to agent.tools
     auth_mode: str  # "none" | "oauth" | "bearer"
+    callables: list = field(default_factory=list)  # the tool callables, so a new agent can reattach without re-fetch
 
 
 async def connect_mcp(
@@ -77,24 +83,42 @@ async def connect_mcp(
         return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
 
 
-async def attach_server(agent: aio.SkillAgent, connections: list, url: str, client: Any, auth_mode: str) -> list[str]:
-    """Add a connected server's tools to the agent (deduped) and record the connection.
+async def attach_server(
+    for_each_agent: ForEachAgent, connections: list, url: str, client: Any, auth_mode: str
+) -> list[str]:
+    """Add a connected server's tools to every live agent (deduped per agent) and record the connection.
 
-    Returns the names of the tools newly added. Tools land on ``agent.tools``; the tool-loop engine
-    re-reads the agent's effective tools each round, so a server added mid-turn is dispatchable in the
-    same turn without touching the model client.
+    Returns the names of the tools newly added on at least one agent. Tools land on each ``agent.tools``;
+    the tool-loop engine re-reads the agent's effective tools each round, so a server added mid-turn is
+    dispatchable in the same turn without touching the model client. The connection stores the tool
+    callables so a lazily-built agent can reattach them at build time without re-fetching.
     """
     new_tools = await client.as_tools()
-    existing = {getattr(fn, "__name__", None) for fn in agent.tools}
-    added = [fn for fn in new_tools if fn.__name__ not in existing]
-    agent.tools.extend(added)
-    names = [fn.__name__ for fn in added]
-    connections.append(ServerConnection(url=url, client=client, tools=names, auth_mode=auth_mode))
-    return names
+    added_names: list[str] = []
+
+    def extend(agent):
+        existing = {getattr(fn, "__name__", None) for fn in agent.tools}
+        to_add = [fn for fn in new_tools if fn.__name__ not in existing]
+        agent.tools.extend(to_add)
+        for fn in to_add:
+            if fn.__name__ not in added_names:
+                added_names.append(fn.__name__)
+
+    for_each_agent(extend)
+    connections.append(
+        ServerConnection(
+            url=url,
+            client=client,
+            tools=[fn.__name__ for fn in new_tools],
+            auth_mode=auth_mode,
+            callables=list(new_tools),
+        )
+    )
+    return added_names
 
 
 async def reconnect_mcp_servers(
-    agent: aio.SkillAgent,
+    for_each_agent: ForEachAgent,
     connections: list,
     config: AssistantConfig,
     *,
@@ -105,14 +129,16 @@ async def reconnect_mcp_servers(
 
     First the ones declared in config (--mcp / [mcp] servers), then the ones added at runtime and
     recorded in the registry (deduped by URL). A connect failure logs and continues so one unreachable
-    server can't stop the assistant from starting.
+    server can't stop the assistant from starting. Each connection is recorded in ``connections`` (so
+    ``build_agent`` attaches it to conversations built later) and fanned out to whatever agents are live
+    at boot (initially just the active one).
     """
     for url in config.mcp_servers:
         try:
             client, mode = await connect_mcp(
                 url, bearer_token=config.mcp_bearer, notify=notify, oauth_storage_dir=oauth_storage_dir
             )
-            await attach_server(agent, connections, url, client, mode)
+            await attach_server(for_each_agent, connections, url, client, mode)
         except Exception:
             logger.warning("Could not connect MCP server %s; continuing without it.", url, exc_info=True)
 
@@ -125,13 +151,13 @@ async def reconnect_mcp_servers(
             client, mode = await connect_mcp(
                 url, auth_mode=record.get("auth_mode"), notify=notify, oauth_storage_dir=oauth_storage_dir
             )
-            await attach_server(agent, connections, url, client, mode)
+            await attach_server(for_each_agent, connections, url, client, mode)
         except Exception:
             logger.warning("Could not reconnect MCP server %s; continuing without it.", url, exc_info=True)
 
 
 def make_mcp_tools(
-    agent: aio.SkillAgent,
+    for_each_agent: ForEachAgent,
     connections: list,
     *,
     notify: Notify,
@@ -140,10 +166,11 @@ def make_mcp_tools(
 ) -> list[Callable]:
     """Build the ``add_mcp_server`` / ``remove_mcp_server`` tools bound to one connection registry.
 
-    Lets the assistant connect to (and disconnect from) a remote MCP service by URL mid-session.
-    A reconnectable server (unauthenticated or OAuth) is recorded in ``registry_path`` so it
-    reconnects on the next restart; bearer-token servers are session-only (their secret is not
-    written to disk). ``connections`` is the live list shared with the boot path and teardown.
+    Lets the assistant connect to (and disconnect from) a remote MCP service by URL mid-session, with
+    the change fanned out to every live conversation's agent via ``for_each_agent``. A reconnectable
+    server (unauthenticated or OAuth) is recorded in ``registry_path`` so it reconnects on the next
+    restart; bearer-token servers are session-only (their secret is not written to disk).
+    ``connections`` is the live list shared with the boot path and teardown.
     """
 
     @tool
@@ -167,7 +194,7 @@ def make_mcp_tools(
             client, auth_mode = await connect_mcp(
                 url, bearer_token=bearer_token, notify=notify, oauth_storage_dir=oauth_storage_dir
             )
-            added = await attach_server(agent, connections, url, client, auth_mode)
+            added = await attach_server(for_each_agent, connections, url, client, auth_mode)
         except Exception as exc:
             return f"Failed to connect to MCP server {url!r}: {exc}"
         # Persist reconnectable servers (no secret on disk); a bearer server stays session-only.
@@ -190,9 +217,13 @@ def make_mcp_tools(
         if entry is None:
             return f"No MCP server is connected at {url!r}."
         removed = set(entry.tools)
-        # Drop from agent.tools; the engine re-reads the effective tools each round, so the tools
-        # stop being advertised and dispatchable from the next round on (this turn included).
-        agent.tools[:] = [fn for fn in agent.tools if getattr(fn, "__name__", None) not in removed]
+
+        # Drop from every agent's tools; the engine re-reads the effective tools each round, so the
+        # tools stop being advertised and dispatchable from the next round on (this turn included).
+        def strip(agent):
+            agent.tools[:] = [fn for fn in agent.tools if getattr(fn, "__name__", None) not in removed]
+
+        for_each_agent(strip)
         connections.remove(entry)
         try:
             await entry.client.aclose()
