@@ -203,6 +203,76 @@ def build_agent(
     return agent
 
 
+def wire_agent(
+    config: AssistantConfig,
+    client,
+    *,
+    notify: Notify,
+    oauth_storage_dir: Path,
+    connections: list,
+    memory_tools: list,
+    tool_approval: Callable,
+    scheduler_tools: list,
+) -> aio.SkillAgent:
+    """Build a fully-wired SkillAgent: base tools + approval gate + subagent tool + scheduler tools.
+
+    This is everything the assistant needs on every per-conversation agent, in one place so each
+    conversation's agent is wired identically.
+    """
+    agent = build_agent(
+        config,
+        client,
+        notify=notify,
+        oauth_storage_dir=oauth_storage_dir,
+        connections=connections,
+        memory_tools=memory_tools,
+    )
+    agent.tool_approval = tool_approval
+    add_subagent_tool(agent, config, tool_approval)
+    agent.tools.extend(scheduler_tools)
+    return agent
+
+
+def make_agent_builder(
+    config: AssistantConfig,
+    *,
+    client_factory: Callable[[str], object],
+    notify: Notify,
+    oauth_storage_dir: Path,
+    connections: list,
+    memory_tools: list,
+    tool_approval: Callable,
+    scheduler_tools: list,
+    store,
+    images_path: Path,
+) -> Callable[[str], aio.SkillAgent]:
+    """Return a builder that constructs and restores a per-conversation agent on demand.
+
+    Each call to ``client_factory`` must return a fresh model client: agents share no client, since
+    a shared client's ``.messages`` would defeat per-conversation isolation.
+    """
+    from .messages import expand_message_images
+
+    def build(conversation_id: str) -> aio.SkillAgent:
+        client = client_factory(conversation_id)
+        agent = wire_agent(
+            config,
+            client,
+            notify=notify,
+            oauth_storage_dir=oauth_storage_dir,
+            connections=connections,
+            memory_tools=memory_tools,
+            tool_approval=tool_approval,
+            scheduler_tools=scheduler_tools,
+        )
+        session = store.get(conversation_id)
+        if session is not None and session.messages:
+            agent.restore(expand_message_images(session.messages, images_path))
+        return agent
+
+    return build
+
+
 def add_subagent_tool(agent: aio.SkillAgent, config: AssistantConfig, tool_approval: Callable) -> None:
     """Append the typed ``spawn_subagent(agent_type, task)`` tool when sub-agents are enabled (no-op otherwise).
 

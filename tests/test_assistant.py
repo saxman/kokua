@@ -1269,3 +1269,40 @@ def test_cli_frontend_reports_model_client_error(tmp_path, monkeypatch, capsys):
         asyncio.run(cli_frontend.run(_config(tmp_path), args))
     assert exc.value.code == 1
     assert "no default could be resolved" in capsys.readouterr().err
+
+
+def test_make_agent_builder_wires_and_restores(tmp_path):
+    from aimu.sessions import Session, TinyDBSessionStore
+    from kokua.build import build_memory, make_agent_builder
+
+    config = _config(tmp_path)  # existing helper
+    store = TinyDBSessionStore(str(config.sessions_path))
+    session = Session(
+        key="c1",
+        metadata={},
+        messages=[{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}],
+    )
+    store.save(session)
+    _, _, memory_tools = build_memory(config)
+
+    async def noop(*a, **k):
+        return None
+
+    build = make_agent_builder(
+        config,
+        client_factory=lambda cid: MockAsyncModelClient([]),
+        notify=noop,
+        oauth_storage_dir=config.data_dir / "mcp-oauth",
+        connections=[],
+        memory_tools=memory_tools,
+        tool_approval=lambda name, args: True,
+        scheduler_tools=[],
+        store=store,
+        images_path=config.images_path,
+    )
+    agent = build("c1")
+    assert agent.tool_approval is not None
+    tool_names = {getattr(t, "__name__", None) for t in agent.tools}
+    assert "author_skill" in tool_names
+    # Messages for this conversation were restored onto the fresh agent's client.
+    assert any(m.get("content") == "hello" for m in agent.model_client.messages)
