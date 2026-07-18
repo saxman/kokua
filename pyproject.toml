@@ -23,7 +23,7 @@ classifiers = [
 # local checkout via [tool.uv.sources] below (editable). `uv sync` installs that, not PyPI.
 # TODO: pin `aimu>=<next-release>` and drop the source override once those features ship.
 dependencies = [
-    "aimu[ollama]",
+    "aimu[ollama,openai_compat]",
     # Markdown -> PDF for the built-in `pdf` tool-pack (both pure-Python, no system libraries).
     "fpdf2>=2.7",
     "markdown>=3.5",
