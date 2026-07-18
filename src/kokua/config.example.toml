@@ -28,6 +28,10 @@ load_plugins = true
 # for approval and are not run unattended.
 subagents = true
 
+# Max number of per-conversation agents kept live in memory (AgentRegistry LRU cap). An agent
+# with an in-flight turn or the foreground conversation is never evicted regardless of this.
+agent_cache_cap = 8
+
 [display]
 # Stream the model's reasoning / tool calls into the channel. The web settings panel toggles these
 # at runtime; a change there persists to data/runtime-settings.json and overrides these defaults.
