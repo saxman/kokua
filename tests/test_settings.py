@@ -204,6 +204,15 @@ def test_subagents_unknown_top_level_key_raises(tmp_path):
         settings.load(str(path))
 
 
+def test_agent_cache_cap_parsed(tmp_path, monkeypatch):
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text("[assistant]\nagent_cache_cap = 3\n")
+    from kokua import settings
+
+    overrides = settings.load()
+    assert overrides["agent_cache_cap"] == 3
+
+
 def test_shipped_example_loads_cleanly(caplog):
     """The example's active keys must parse without unknown-key or type warnings/errors."""
     _init()

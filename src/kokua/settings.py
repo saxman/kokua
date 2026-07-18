@@ -76,6 +76,7 @@ _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callab
     ("planning", "show_reasoning"): ("show_reasoning", (bool,), "a boolean", None),
     ("assistant", "memory"): ("memory", (bool,), "a boolean", None),
     ("assistant", "load_plugins"): ("load_plugins", (bool,), "a boolean", None),
+    ("assistant", "agent_cache_cap"): ("agent_cache_cap", (int,), "an integer", None),
     ("assistant", "subagents"): ("subagents", (bool,), "a boolean", None),
     ("tools", "groups"): ("tools", (list,), "a list of strings", _str_list),
     ("mcp", "servers"): ("mcp_servers", (list,), "a list of strings", _str_list),
