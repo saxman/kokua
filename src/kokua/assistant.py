@@ -636,28 +636,34 @@ class Assistant:
 
     def _apply_plan_result(self, result: "PlanResult") -> None:
         """Record a planned turn's reviewer verdicts and verbose trace under the turn's user-message
-        index, so reload replays them. Persisted by _persist (which saves session.metadata). No-op when
-        the turn did not commit (e.g. plan rejected)."""
+        index, so reload replays them. Loads the active session by id, mutates its metadata, and saves.
+        No-op when the turn did not commit (e.g. plan rejected)."""
         if not result.committed or result.user_index < 0:
             return
+        session = self._store.get(self._active_id)
+        changed = False
         if result.subagent_events:
-            self._session.metadata.setdefault("subagent", {})[str(result.user_index)] = result.subagent_events
+            session.metadata.setdefault("subagent", {})[str(result.user_index)] = result.subagent_events
+            changed = True
         if result.trace:
-            self._session.metadata.setdefault("trace", {})[str(result.user_index)] = result.trace
+            session.metadata.setdefault("trace", {})[str(result.user_index)] = result.trace
+            changed = True
+        if changed:
+            self._store.save(session)
 
     def _persist(self) -> bool:
-        """Snapshot the agent's messages onto the active session and save. Returns True if a title
-        was just derived (first user message), so a caller can refresh the conversation list."""
-        messages = compact_message_images(
+        """Snapshot the active agent's messages onto the active session and save. Returns True if a
+        title was just derived (first user message), so a caller can refresh the conversation list."""
+        session = self._store.get(self._active_id)
+        session.messages = compact_message_images(
             [dict(m) for m in self._agent.model_client.messages], self._config.images_path
         )
-        self._session.messages = messages
         title_set = False
-        if not self._session.metadata.get("title"):
-            title = derive_title(messages)
+        if not session.metadata.get("title"):
+            title = derive_title(session.messages)
             if title:
-                self._session.metadata["title"] = title
+                session.metadata["title"] = title
                 title_set = True
-        self._session.metadata["updated_at"] = datetime.now().isoformat()
-        self._store.save(self._session)
+        session.metadata["updated_at"] = datetime.now().isoformat()
+        self._store.save(session)
         return title_set

@@ -582,6 +582,17 @@ async def test_switch_conversation_isolates_message_lists(tmp_path):
     assert any("reply in c1" == m.get("content") for m in assistant._agent.model_client.messages)
 
 
+async def test_persist_writes_active_conversation(tmp_path):
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(
+        cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["hi there"])
+    )
+    active = assistant._active_id
+    await assistant._handle(ChannelMessage(text="hello", sender="t", channel="t"))
+    reloaded = assistant._store.get(active)
+    assert any(m.get("content") == "hi there" for m in reloaded.messages)
+
+
 # --- Tool approval ----------------------------------------------------------------------------
 
 
