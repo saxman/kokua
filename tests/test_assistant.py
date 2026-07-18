@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import AsyncIterator
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -545,6 +546,12 @@ async def test_delete_last_conversation_creates_fresh_empty(tmp_path):
     assert assistant._session.key != only_id  # a fresh, empty active conversation
     assert assistant._session.messages == []
     assert assistant._agent.model_client.messages == []
+
+
+async def test_registry_used_for_active_conversation(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    agent = assistant._registry.get(assistant._active_id)
+    assert assistant._agent is agent  # the _agent property resolves to the active conversation's agent
 
 
 # --- Tool approval ----------------------------------------------------------------------------

@@ -29,18 +29,18 @@ from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.sessions import Session, TinyDBSessionStore
 
 from . import runtime_settings
+from .agent_registry import AgentRegistry
 from .build import (
     ModelClientError,
-    add_subagent_tool,
-    build_agent,
     build_memory,
     build_model_client,
+    make_agent_builder,
     resolve_system_message,
 )
 from .planning import PlanResult, PlanRunner
 from .config import AssistantConfig
 from .mcp import ServerConnection, reconnect_mcp_servers
-from .messages import compact_message_images, derive_title, expand_message_images
+from .messages import compact_message_images, derive_title
 from .scheduling import make_scheduler_tools
 
 logger = logging.getLogger(__name__)
@@ -90,19 +90,21 @@ class Assistant:
 
     def __init__(
         self,
-        agent: aio.SkillAgent,
         channel: Channel,
         scheduler: Scheduler,
         store: TinyDBSessionStore,
-        session: Session,
         config: AssistantConfig,
     ):
-        self._agent = agent
         self._channel = channel
         self._scheduler = scheduler
         self._store = store
-        self._session = session
         self._config = config
+        # A per-conversation agent cache and the active conversation's id (replacing the single shared
+        # agent + swapped-in session). Assigned by create() once the registry's builder can bind
+        # self._approve; _agent / _session are read-only views onto these (see the properties below).
+        self._registry: Optional[AgentRegistry] = None
+        self._active_id: str = ""
+        self._client_factory = None
         # Live remote-MCP connections (startup + runtime-added) kept alive for their lifetime
         # and closed on shutdown. Assigned by create().
         self._mcp_servers: list[ServerConnection] = []
@@ -144,17 +146,12 @@ class Assistant:
         self._base_generate_kwargs: dict = {}
 
     @classmethod
-    async def create(cls, config: AssistantConfig, channel: Channel, *, client=None) -> "Assistant":
+    async def create(
+        cls, config: AssistantConfig, channel: Channel, *, client=None, client_factory=None
+    ) -> "Assistant":
         # Runtime-mutable settings the web panel persisted: generation kwargs, display prefs, and the
         # active model. Layered over config.toml (which is never rewritten); see runtime_settings.
         stored = runtime_settings.load(config.runtime_settings_path)
-        if client is None:
-            client = build_model_client(config, stored)
-
-        # Snapshot the provider's built-in generate kwargs, then layer config.toml + persisted runtime
-        # values on top, and apply persisted display prefs. Runs for injected clients (tests) too.
-        base_generate_kwargs = dict(client.default_generate_kwargs)
-        _layer_generate_kwargs(client, base_generate_kwargs, config, stored.get("generate_kwargs", {}))
         _apply_show_flags(channel, config, stored)
         for flag in (
             "plan_review",
@@ -169,39 +166,77 @@ class Assistant:
 
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
-        agent = build_agent(
-            config,
-            client,
-            notify=channel.send,
-            oauth_storage_dir=oauth_storage_dir,
-            connections=connections,
-            memory_tools=memory_tools,
-        )
-        await reconnect_mcp_servers(
-            agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
-        )
 
         # Multiple conversations live in a session store. The active conversation is the most
         # recently updated (a fresh empty one if there are none).
         store = TinyDBSessionStore(str(config.sessions_path))
         session = _active_session(store)
-        if session.messages:
-            agent.restore(expand_message_images(session.messages, config.images_path))
 
         scheduler = Scheduler()
-        assistant = cls(agent, channel, scheduler, store, session, config)
+        # Construct the assistant first so the registry's builder can bind its approval gate: agents are
+        # built lazily (on first get), by which point assistant._approve exists.
+        assistant = cls(channel, scheduler, store, config)
         assistant._mcp_servers = connections  # same list the MCP tools append to / remove from
         assistant._memory_store = memory_store
         assistant._document_store = document_store
-        assistant._base_generate_kwargs = base_generate_kwargs
-        # Gate configured "risky" tools behind interactive approval (see _approve). Published to the
-        # model client on every run by the agent's _prepare_run; an empty confirm_tools is a no-op.
-        agent.tool_approval = assistant._approve
-        add_subagent_tool(agent, config, assistant._approve)
+        assistant._active_id = session.key
+
+        # Per-conversation model clients: an explicit factory wins; else the injected client backs the
+        # initial conversation (single-conversation tests) and further conversations build their own;
+        # else every conversation builds its own from config.
+        if client_factory is not None:
+            resolved_factory = client_factory
+        elif client is not None:
+            initial_id = session.key
+
+            def resolved_factory(conversation_id: str, _client=client, _initial=initial_id):
+                return _client if conversation_id == _initial else build_model_client(config, stored)
+        else:
+
+            def resolved_factory(conversation_id: str):
+                return build_model_client(config, stored)
+
+        assistant._client_factory = resolved_factory
         scheduler_tools, arm_tasks = make_scheduler_tools(scheduler, config.scheduled_tasks_path, assistant._proactive)
-        agent.tools.extend(scheduler_tools)
+        assistant._registry = AgentRegistry(
+            make_agent_builder(
+                config,
+                client_factory=lambda cid: assistant._client_factory(cid),
+                notify=channel.send,
+                oauth_storage_dir=oauth_storage_dir,
+                connections=connections,
+                memory_tools=memory_tools,
+                tool_approval=assistant._approve,
+                scheduler_tools=scheduler_tools,
+                store=store,
+                images_path=config.images_path,
+            ),
+            cap=config.agent_cache_cap,
+        )
+
+        # Build the active conversation's agent (restoring its messages) and attach any MCP servers to
+        # it, preserving single-agent parity for this phase. Snapshot its client's built-in generate
+        # kwargs, then layer config.toml + persisted runtime values on top.
+        agent = assistant._registry.get(assistant._active_id)
+        await reconnect_mcp_servers(
+            agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
+        )
+        base_generate_kwargs = dict(agent.model_client.default_generate_kwargs)
+        _layer_generate_kwargs(agent.model_client, base_generate_kwargs, config, stored.get("generate_kwargs", {}))
+        assistant._base_generate_kwargs = base_generate_kwargs
+
         arm_tasks()
         return assistant
+
+    @property
+    def _agent(self) -> aio.SkillAgent:
+        """The active conversation's agent (built on demand by the registry)."""
+        return self._registry.get(self._active_id)
+
+    @property
+    def _session(self) -> Session:
+        """The active conversation's persisted session (fetched fresh each access)."""
+        return self._store.get(self._active_id)
 
     @property
     def history(self) -> list[dict]:
