@@ -582,6 +582,27 @@ async def test_switch_conversation_isolates_message_lists(tmp_path):
     assert any("reply in c1" == m.get("content") for m in assistant._agent.model_client.messages)
 
 
+async def test_select_conversation_reverts_active_id_on_build_failure(tmp_path):
+    from kokua.assistant import ModelClientError
+
+    calls = {"n": 0}
+
+    def factory(conversation_id):
+        calls["n"] += 1
+        if calls["n"] > 1:  # the initial conversation builds fine; the selected one fails
+            raise ModelClientError("model no longer available")
+        return MockAsyncModelClient([])
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    original_id = assistant._active_id
+
+    with pytest.raises(ModelClientError):
+        await assistant.select_conversation("does-not-exist-yet")
+
+    # The failed build must not leave the assistant pointed at an unbuildable conversation.
+    assert assistant._active_id == original_id
+
+
 async def test_persist_writes_active_conversation(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(

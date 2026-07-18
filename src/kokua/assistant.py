@@ -307,36 +307,69 @@ class Assistant:
                 pass
 
     async def new_conversation(self) -> str:
-        """Start and switch to a new, empty conversation; returns its id."""
+        """Start and switch to a new, empty conversation; returns its id.
+
+        If the new conversation's agent fails to build (``ModelClientError``), the active pointer
+        reverts to the previous conversation before re-raising, so the caller is never left active on
+        a conversation whose agent doesn't work. The new session record itself still lingers in the
+        store, unused but harmless (mirrors an ordinary empty conversation the user never sent to).
+        """
         await self._cancel_current_turn()
+        previous_id = self._active_id
         async with self._lock:
             now = datetime.now().isoformat()
             session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
             self._store.save(session)
             self._active_id = session.key
-        self._registry.get(self._active_id)  # build the (empty) agent eagerly so it is the live one
+        try:
+            self._registry.get(self._active_id)  # build the (empty) agent eagerly so it is the live one
+        except Exception:
+            self._active_id = previous_id
+            raise
         return session.key
 
     async def select_conversation(self, conversation_id: str) -> None:
-        """Switch the active conversation to an existing one; its agent (re)builds from the store."""
+        """Switch the active conversation to an existing one; its agent (re)builds from the store.
+
+        If the build fails, the active pointer reverts to the previous conversation before
+        re-raising, so the caller is never left active on a conversation whose agent doesn't work.
+        """
         await self._cancel_current_turn()
+        previous_id = self._active_id
         async with self._lock:
             self._active_id = conversation_id
-        self._registry.get(self._active_id)
+        try:
+            self._registry.get(self._active_id)
+        except Exception:
+            self._active_id = previous_id
+            raise
 
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation. If it is the active one, switch to the most-recently-updated
-        remaining conversation (or a fresh empty one if none remain)."""
+        remaining conversation (or a fresh empty one if none remain).
+
+        If that replacement's agent fails to build, the active pointer reverts to the just-deleted
+        id before re-raising. Its store record and registry entry are already gone by that point (the
+        delete itself is not rolled back), so this is a best-effort revert: it keeps ``_active_id``
+        from pointing at some OTHER untested conversation, but a caller that touches ``self._agent``
+        afterward will hit the same build failure again. The front end is expected to surface the
+        re-raised error and stop, not retry immediately.
+        """
         deleting_active = conversation_id == self._active_id
         if deleting_active:
             await self._cancel_current_turn()
+        previous_id = self._active_id
         async with self._lock:
             self._store.delete(conversation_id)
             self._registry.discard(conversation_id)
             if deleting_active:
                 self._active_id = _active_session(self._store).key
         if deleting_active:
-            self._registry.get(self._active_id)
+            try:
+                self._registry.get(self._active_id)
+            except Exception:
+                self._active_id = previous_id
+                raise
 
     def current_settings(self) -> dict:
         """The effective runtime settings for the web panel to display: model, prefs, generate kwargs."""
