@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import replace
 from datetime import datetime
-from typing import Optional
+from typing import Callable, Optional
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE, aio
 from aimu.aio import Channel, RunHandle, Scheduler
@@ -144,6 +144,11 @@ class Assistant:
         # is layered on, so a settings change (or a cleared field) can rebuild from a clean base.
         # Assigned by create() and refreshed on a runtime model switch.
         self._base_generate_kwargs: dict = {}
+        # The current runtime generate-kwargs override (what the settings panel last set), layered over
+        # config.generation on every client the factory builds. Assigned by create(), updated by
+        # apply_settings, so a conversation built at any time carries the same effective kwargs as the
+        # active agent.
+        self._runtime_generate_kwargs: dict = {}
 
     @classmethod
     async def create(
@@ -180,23 +185,26 @@ class Assistant:
         assistant._memory_store = memory_store
         assistant._document_store = document_store
         assistant._active_id = session.key
+        assistant._runtime_generate_kwargs = stored.get("generate_kwargs", {})
 
         # Per-conversation model clients: an explicit factory wins; else the injected client backs the
         # initial conversation (single-conversation tests) and further conversations build their own;
         # else every conversation builds its own from config.
         if client_factory is not None:
-            resolved_factory = client_factory
+            raw_factory = client_factory
         elif client is not None:
             initial_id = session.key
 
-            def resolved_factory(conversation_id: str, _client=client, _initial=initial_id):
+            def raw_factory(conversation_id: str, _client=client, _initial=initial_id):
                 return _client if conversation_id == _initial else build_model_client(config, stored)
         else:
 
-            def resolved_factory(conversation_id: str):
+            def raw_factory(conversation_id: str):
                 return build_model_client(config, stored)
 
-        assistant._client_factory = resolved_factory
+        # Wrap the raw factory so every conversation's client carries the effective generation kwargs
+        # the active agent has, not bare provider defaults.
+        assistant._client_factory = assistant._make_layered_factory(raw_factory)
         scheduler_tools, arm_tasks = make_scheduler_tools(scheduler, config.scheduled_tasks_path, assistant._proactive)
         assistant._registry = AgentRegistry(
             make_agent_builder(
@@ -214,19 +222,34 @@ class Assistant:
             cap=config.agent_cache_cap,
         )
 
-        # Build the active conversation's agent (restoring its messages) and attach any MCP servers to
-        # it, preserving single-agent parity for this phase. Snapshot its client's built-in generate
-        # kwargs, then layer config.toml + persisted runtime values on top.
+        # Build the active conversation's agent (its client is layered by the factory, which also
+        # snapshots the provider base into _base_generate_kwargs) and attach any MCP servers to it,
+        # preserving single-agent parity for this phase.
         agent = assistant._registry.get(assistant._active_id)
         await reconnect_mcp_servers(
             agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
         )
-        base_generate_kwargs = dict(agent.model_client.default_generate_kwargs)
-        _layer_generate_kwargs(agent.model_client, base_generate_kwargs, config, stored.get("generate_kwargs", {}))
-        assistant._base_generate_kwargs = base_generate_kwargs
 
         arm_tasks()
         return assistant
+
+    def _make_layered_factory(self, raw_factory: Callable[[str], object]) -> Callable[[str], object]:
+        """Wrap a raw client factory so every built client carries the same effective generation kwargs
+        the active agent has: provider defaults < config.generation < the current runtime override.
+
+        Also snapshots the provider built-in defaults into ``_base_generate_kwargs`` (used to re-layer
+        already-live agents on a settings change). Every client the factory returns is the current
+        model, so that base is stable across conversations.
+        """
+
+        def build(conversation_id: str):
+            client = raw_factory(conversation_id)
+            base = dict(client.default_generate_kwargs)
+            self._base_generate_kwargs = base
+            _layer_generate_kwargs(client, base, self._config, self._runtime_generate_kwargs)
+            return client
+
+        return build
 
     @property
     def _agent(self) -> aio.SkillAgent:
@@ -345,9 +368,10 @@ class Assistant:
             ):  # config-only
                 if flag in settings:
                     setattr(self._config, flag, settings[flag])
+            self._runtime_generate_kwargs = settings["generate_kwargs"]
             for agent in self._registry.live_agents():
                 _layer_generate_kwargs(
-                    agent.model_client, self._base_generate_kwargs, self._config, settings["generate_kwargs"]
+                    agent.model_client, self._base_generate_kwargs, self._config, self._runtime_generate_kwargs
                 )
             runtime_settings.save(self._config.runtime_settings_path, settings)
 
@@ -367,7 +391,9 @@ class Assistant:
             agent.restore(messages)
         self._config.model = model
         self._base_generate_kwargs = dict(self._agent.model_client.default_generate_kwargs)
-        self._client_factory = lambda cid: aio.client(model, system=resolve_system_message(self._config))
+        # Later-built conversations go through build_model_client (so a since-broken model raises
+        # ModelClientError, not a raw ValueError/TypeError) and get the same layered generation kwargs.
+        self._client_factory = self._make_layered_factory(lambda cid: build_model_client(self._config, {}))
 
     async def _maybe_push_conversations(self) -> None:
         """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""

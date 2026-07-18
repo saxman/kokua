@@ -497,7 +497,7 @@ async def test_new_conversation_resets_agent(tmp_path):
     new_id = await assistant.new_conversation()
     assert assistant._session.key == new_id
     assert assistant._session.messages == []
-    assert assistant._agent.model_client.messages == []  # restore([]) cleared it
+    assert assistant._agent.model_client.messages == []  # the new conversation's agent is freshly built
 
 
 async def test_select_conversation_restores_messages(tmp_path):
@@ -612,6 +612,17 @@ async def test_model_switch_applies_to_all_live_agents(tmp_path, monkeypatch):
     await assistant._switch_model("anthropic:claude-x")
     # Both cached agents got a rebuilt client for the new model.
     assert built.count("anthropic:claude-x") == len(assistant._registry.live_agents())
+
+
+async def test_new_conversation_agent_carries_layered_generate_kwargs(tmp_path):
+    # A lazily-built conversation's client must carry the same effective generation kwargs the active
+    # agent has (provider defaults < config.generation < runtime override), not bare provider defaults.
+    cfg = _config(tmp_path, generation={"temperature": 0.2})
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    new_id = await assistant.new_conversation()
+    new_agent = assistant._registry.get(new_id)
+    assert new_agent.model_client.default_generate_kwargs.get("temperature") == 0.2
+    assert assistant.current_settings()["generate_kwargs"].get("temperature") == 0.2
 
 
 # --- Tool approval ----------------------------------------------------------------------------
