@@ -11,6 +11,13 @@ installable, modular application.
   with skill authoring + runnable skill scripts, persistent conversation history,
   remote MCP servers (startup `--mcp` + runtime `add_mcp_server`), and persistent memory (a
   `SemanticMemoryStore` for facts + a `DocumentStore` for documents, on by default).
+- **Model-failure surfacing**: a failed model request now reports its actual cause instead of a fixed
+  "Sorry, something went wrong handling that." A new `kokua.errors.describe_error` walks the exception's
+  `__cause__` chain to the root and the turn handler sends it (e.g. "The request couldn't reach the model
+  server: ModelConnectionError: Connection error. (caused by ... Connection refused)"), so an unreachable
+  local model server is diagnosable from the chat itself. Reactive and proactive (scheduled) turns both
+  surface the detail; a proactive failure is reported and swallowed so it can't crash the scheduler.
+  Relies on AIMU's new `ModelConnectionError` (re-exported as `kokua.assistant.ModelConnectionError`).
 - **Hang observability**: a `/diag` chat command reports the in-flight turn, elapsed time, whether the
   turn lock is held, and dumps a wedged turn's async stack — handled in the serve loop without the lock,
   so it answers even when a hung turn holds it (`Assistant._diag_report`). Diagnostic logs now go to a

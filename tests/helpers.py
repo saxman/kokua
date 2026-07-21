@@ -55,6 +55,10 @@ class MockAsyncModelClient(AsyncBaseModelClient):
         response = self._responses[self._call_count]
         self._call_count += 1
 
+        # An exception in the queue simulates a model-request failure (e.g. an unreachable server).
+        if isinstance(response, BaseException):
+            raise response
+
         if response == "tool":
             self.messages.append(
                 {

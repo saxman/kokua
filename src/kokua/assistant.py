@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Callable, Optional
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE, aio
-from aimu.aio import Channel, RunHandle, Scheduler
+from aimu.aio import Channel, ModelConnectionError, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
 from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.sessions import Session, TinyDBSessionStore
@@ -39,14 +39,16 @@ from .build import (
 )
 from .planning import PlanResult, PlanRunner
 from .config import AssistantConfig
+from .errors import describe_error
 from .mcp import ServerConnection, reconnect_mcp_servers
 from .messages import compact_message_images, derive_title
 from .scheduling import make_scheduler_tools
 
 logger = logging.getLogger(__name__)
 
-# Re-exported so front ends can keep catching `assistant.ModelClientError`; the class lives in build.
-__all__ = ["Assistant", "ModelClientError"]
+# Re-exported so front ends can keep catching `assistant.ModelClientError` (build-time, from build) and
+# `assistant.ModelConnectionError` (runtime server-unreachable, from AIMU).
+__all__ = ["Assistant", "ModelClientError", "ModelConnectionError"]
 
 
 def _active_session(store: TinyDBSessionStore) -> Session:
@@ -579,9 +581,14 @@ class Assistant:
                 if self._persist():
                     await self._maybe_push_conversations()
                 return
-            except Exception:
+            except ModelConnectionError as exc:
+                logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
+                await self._channel.send(
+                    f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
+                )
+            except Exception as exc:
                 logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
-                await self._channel.send("Sorry, something went wrong handling that.", reply_to=msg)
+                await self._channel.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
             else:
                 logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
             if self._persist():
@@ -679,6 +686,14 @@ class Assistant:
                     await self._channel.send(reply)
                     if self._persist():
                         await self._maybe_push_conversations()
+            except ModelConnectionError as exc:
+                # Surface the reason and swallow it: a scheduled turn has no user awaiting, and letting it
+                # propagate would crash the scheduler task (`_fire_job` has no except).
+                logger.exception("proactive turn connection error")
+                await self._channel.send(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
+            except Exception as exc:
+                logger.exception("proactive turn error")
+                await self._channel.send(f"A scheduled task failed: {describe_error(exc)}")
             finally:
                 self._in_proactive = False
 
