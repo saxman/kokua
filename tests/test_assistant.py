@@ -1531,6 +1531,37 @@ async def test_proactive_new_session_degrades_on_single_conversation_channel(tmp
     assert channel.sent == ["task output"]
 
 
+async def test_proactive_new_session_holds_at_most_one_gate_turn(tmp_path):
+    """Regression for a nested-gate-hold deadlock: _proactive's new-session branch must not keep an
+    outer gate.turn(self._active_id) held while _run_in_new_session takes its own inner
+    gate.turn(new_id) -- two simultaneous reader holds from the same task can wedge against a
+    concurrent gate.exclusive() (writer-preferring: the writer waits for readers to drain, but one of
+    this task's own readers is stuck waiting on the other's lock, which never yields to the writer).
+    Asserts a single hold is ever observed, and that none is left over afterward.
+    """
+    channel = _ConvCapturingChannel()
+    observed: list[int] = []
+
+    class _RecordingClient(MockAsyncModelClient):
+        async def _chat(self, *args, **kwargs):
+            observed.append(assistant._gate.active_turns())
+            return await super()._chat(*args, **kwargs)
+
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: _RecordingClient(["task output"])
+    )
+
+    await assistant._proactive("run the report", new_session=True, task_name="report")
+
+    assert observed == [1]  # exactly one gate hold was active while the new session's turn ran
+    assert assistant._gate.active_turns() == 0  # and none left over afterward
+
+    # No wedged reader left behind: a concurrent exclusive() hold must complete promptly.
+    async with asyncio.timeout(1.0):
+        async with assistant._gate.exclusive():
+            pass
+
+
 async def test_create_registers_scheduling_tools(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     names = {getattr(fn, "__name__", None) for fn in assistant._agent.tools}

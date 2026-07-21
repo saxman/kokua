@@ -688,12 +688,20 @@ class Assistant:
         run does not hijack whatever the user is currently viewing.
         """
         multi_conversation = getattr(self._channel, "send_conversations", None) is not None
-        async with self._gate.turn(self._active_id):
-            self._in_proactive = True
-            try:
-                if new_session and multi_conversation:
-                    await self._run_in_new_session(prompt, task_name)
-                else:
+        # Each branch takes at most one gate hold, never both: the new-session branch's work happens
+        # entirely on the new conversation (inside _run_in_new_session's own gate.turn(new_id)), and
+        # the non-new-session branch's work happens on the viewed conversation (gate.turn(self._active_id)
+        # here). Nesting an outer hold on self._active_id around a call that acquires a *different*
+        # conversation's hold was a latent deadlock: with the gate's writer-preference, a concurrent
+        # exclusive() (e.g. a settings change) can see this task's outer reader stuck waiting to
+        # re-enter as an inner reader on the new conversation, while the writer itself waits for that
+        # outer reader to drop to zero -- neither side can proceed.
+        self._in_proactive = True
+        try:
+            if new_session and multi_conversation:
+                await self._run_in_new_session(prompt, task_name)
+            else:
+                async with self._gate.turn(self._active_id):
                     # Tag every message this unprompted run appends so replayed history can distinguish
                     # it from a user-driven turn. The agent doesn't reset on run (system prompt lives on
                     # the client), so the pre-run length is a stable start index for the exchange.
@@ -704,25 +712,24 @@ class Assistant:
                     await self._channel.send(reply)
                     if self._persist(self._active_id):
                         await self._maybe_push_conversations()
-            except ModelConnectionError as exc:
-                # Surface the reason and swallow it: a scheduled turn has no user awaiting, and letting it
-                # propagate would crash the scheduler task (`_fire_job` has no except).
-                logger.exception("proactive turn connection error")
-                await self._channel.send(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
-            except Exception as exc:
-                logger.exception("proactive turn error")
-                await self._channel.send(f"A scheduled task failed: {describe_error(exc)}")
-            finally:
-                self._in_proactive = False
+        except ModelConnectionError as exc:
+            # Surface the reason and swallow it: a scheduled turn has no user awaiting, and letting it
+            # propagate would crash the scheduler task (`_fire_job` has no except).
+            logger.exception("proactive turn connection error")
+            await self._channel.send(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
+        except Exception as exc:
+            logger.exception("proactive turn error")
+            await self._channel.send(f"A scheduled task failed: {describe_error(exc)}")
+        finally:
+            self._in_proactive = False
 
     async def _run_in_new_session(self, prompt: str, task_name: Optional[str]) -> None:
         """Run a proactive turn in a fresh conversation, then restore the active one.
 
-        Runs under the caller's (``_proactive``'s) gate hold on the *previously* active conversation;
-        that hold doesn't cover this new conversation, so this acquires its own gate turn on the new
-        conversation's id around the actual run. Switching conversations is just an active-id swap
-        (each conversation has its own agent), restored in a ``finally`` so the user's active
-        conversation is never left pointing at the task's session.
+        The caller (``_proactive``) takes no gate hold of its own for this branch; this acquires the
+        only gate hold for the call, on the new conversation's id, around the actual run. Switching
+        conversations is just an active-id swap (each conversation has its own agent), restored in a
+        ``finally`` so the user's active conversation is never left pointing at the task's session.
         """
         previous_id = self._active_id
         now = datetime.now().isoformat()
