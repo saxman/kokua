@@ -30,8 +30,14 @@ class TurnGate:
             while self._writer_active or self._writer_waiting:
                 await self._cond.wait()
             self._readers += 1
-        per_conversation = self._lock_for(conversation_id)
-        await per_conversation.acquire()
+        try:
+            per_conversation = self._lock_for(conversation_id)
+            await per_conversation.acquire()
+        except BaseException:
+            async with self._cond:
+                self._readers -= 1
+                self._cond.notify_all()
+            raise
         try:
             yield
         finally:

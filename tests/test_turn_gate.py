@@ -102,3 +102,53 @@ async def test_active_turns_count():
     rel.set()
     await asyncio.gather(t1, t2)
     assert gate.active_turns() == 0
+
+
+async def test_cancelled_turn_reverts_reader_count():
+    """Regression: ensure that cancelling a turn while awaiting per-conversation lock
+    reverts the reader count. If not, exclusive() will deadlock waiting for readers == 0."""
+    gate = _gate()
+    turn_a_entered = asyncio.Event()
+    let_turn_a_exit = asyncio.Event()
+
+    async def turn_a():
+        async with gate.turn("c1"):
+            turn_a_entered.set()
+            await let_turn_a_exit.wait()
+
+    async def turn_b():
+        async with gate.turn("c1"):
+            pass  # will block on per-conversation lock held by turn_a
+
+    # Start turn A (enters successfully, holds the per-conversation lock).
+    t_a = asyncio.create_task(turn_a())
+    await turn_a_entered.wait()
+    assert gate.active_turns() == 1
+
+    # Start turn B (increments readers to 2, but blocks on per-conversation lock).
+    t_b = asyncio.create_task(turn_b())
+    await asyncio.sleep(0.01)
+    assert gate.active_turns() == 2
+
+    # Cancel turn B while it's blocked on the lock acquisition.
+    t_b.cancel()
+    try:
+        await t_b
+    except asyncio.CancelledError:
+        pass
+
+    # Turn B should have reverted its reader count on cancellation.
+    await asyncio.sleep(0.01)
+    assert gate.active_turns() == 1
+
+    # Let turn A exit.
+    let_turn_a_exit.set()
+    await t_a
+
+    # Reader count should be back to 0.
+    assert gate.active_turns() == 0
+
+    # exclusive() should complete without hanging (no deadlock).
+    async with asyncio.timeout(1.0):
+        async with gate.exclusive():
+            pass
