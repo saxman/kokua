@@ -187,6 +187,15 @@ def make_scheduler_tools(
                 elif current.get("enabled", True):  # a disable during the run wins over the re-arm
                     _arm(current)
 
+    async def _run_now_job(task_id: str) -> None:
+        # Fire the task's prompt through the same proactive path a scheduled firing uses, but without
+        # _fire_job's re-arm/remove bookkeeping: a manual run must not disturb the schedule. Re-read
+        # the record so a cancel between enqueue and firing wins.
+        record = find(load(registry_path), task_id)
+        if record is None:
+            return
+        await fire(record["prompt"], new_session=record.get("new_session", False), task_name=record.get("name"))
+
     def arm_all() -> None:
         for record in load(registry_path):
             if not record.get("enabled", True):
@@ -306,10 +315,32 @@ def make_scheduler_tools(
             return f"Enabled scheduled task {handle}, but its scheduled time is in the past, so it will not fire."
         return f"Enabled scheduled task {handle}."
 
+    @tool
+    async def run_scheduled_task(id_or_name: str) -> str:
+        """Run an existing scheduled task now, without changing its schedule.
+
+        Reproduces exactly what the task's next scheduled firing would do (honoring its ``new_session``
+        flag; gated tools are auto-denied as they would be for an unattended firing), so you can verify
+        how the task behaves. The task's output arrives as a separate message shortly after, not as this
+        tool's return value. Works on a disabled task too.
+        """
+        record = find(load(registry_path), id_or_name)
+        if record is None:
+            return f"No scheduled task matches {id_or_name!r}."
+        # at(0) so the firing runs after the current turn releases the assistant lock: fire() re-acquires
+        # that lock, so running it inline here would deadlock. A distinct job name avoids colliding with
+        # the record's real armed job (name == id).
+        scheduler.at(0, functools.partial(_run_now_job, record["id"]), name=f"run-now:{record['id']}")
+        handle = f"{record['id']} ({record.get('name') or 'unnamed'})"
+        suffix = " in a new conversation" if record.get("new_session", False) else ""
+        note = " (note: this task is disabled)" if not record.get("enabled", True) else ""
+        return f"Running task {handle} now; its output will appear shortly{suffix}.{note}"
+
     return [
         schedule_task,
         list_scheduled_tasks,
         cancel_scheduled_task,
         disable_scheduled_task,
         enable_scheduled_task,
+        run_scheduled_task,
     ], arm_all

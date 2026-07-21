@@ -338,6 +338,86 @@ async def test_list_shows_disabled_state(tmp_path):
     assert "disabled" in listing.lower()
 
 
+async def test_run_now_enqueues_job_and_fires_by_id(tmp_path):
+    _noop_fire.calls = []
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", new_session=True)
+    task_id = scheduling.load(path)[0]["id"]
+    out = await tools["run_scheduled_task"](task_id)
+    assert "now" in out.lower() and "r" in out and "new conversation" in out.lower()
+    job_name = f"run-now:{task_id}"
+    assert job_name in scheduler.jobs
+    _delay, job = scheduler.jobs[job_name]
+    await job()  # simulate the scheduler firing the run-now job
+    assert _noop_fire.calls == [("ping", True, "r")]
+
+
+async def test_run_now_by_name(tmp_path):
+    _noop_fire.calls = []
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="byname")
+    task_id = scheduling.load(path)[0]["id"]
+    await tools["run_scheduled_task"]("byname")
+    _delay, job = scheduler.jobs[f"run-now:{task_id}"]
+    await job()
+    assert _noop_fire.calls == [("ping", False, "byname")]
+
+
+async def test_run_now_does_not_disturb_schedule(tmp_path):
+    _noop_fire.calls = []
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r")
+    task_id = scheduling.load(path)[0]["id"]
+    before = scheduling.load(path)
+    await tools["run_scheduled_task"](task_id)
+    _delay, job = scheduler.jobs[f"run-now:{task_id}"]
+    await job()
+    assert scheduler.at_count[task_id] == 1  # real job armed once, not re-armed by the manual run
+    assert scheduling.load(path) == before  # registry unchanged
+
+
+async def test_run_now_keeps_one_shot(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("later", "once", at_datetime="2999-01-01T00:00:00", name="o")
+    task_id = scheduling.load(path)[0]["id"]
+    await tools["run_scheduled_task"](task_id)
+    _delay, job = scheduler.jobs[f"run-now:{task_id}"]
+    await job()
+    assert scheduling.load(path)  # one-shot NOT dropped by a manual run
+
+
+async def test_run_now_allows_disabled_and_notes_it(tmp_path):
+    _noop_fire.calls = []
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="d")
+    await tools["disable_scheduled_task"]("d")
+    task_id = scheduling.load(path)[0]["id"]
+    out = await tools["run_scheduled_task"]("d")
+    assert "disabled" in out.lower()
+    _delay, job = scheduler.jobs[f"run-now:{task_id}"]
+    await job()
+    assert _noop_fire.calls == [("ping", False, "d")]
+
+
+async def test_run_now_unknown_reports_and_enqueues_nothing(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    out = await tools["run_scheduled_task"]("nope")
+    assert "No scheduled task" in out
+    assert scheduler.jobs == {}
+
+
+async def test_run_now_skips_fire_if_cancelled_before_firing(tmp_path):
+    _noop_fire.calls = []
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="c")
+    task_id = scheduling.load(path)[0]["id"]
+    await tools["run_scheduled_task"](task_id)
+    scheduling.remove(path, task_id)  # cancelled between enqueue and fire
+    _delay, job = scheduler.jobs[f"run-now:{task_id}"]
+    await job()
+    assert _noop_fire.calls == []
+
+
 async def test_arm_all_arms_and_drops_past_once(tmp_path):
     scheduler, path, tools, arm_all = _make(tmp_path)
     scheduling.add(

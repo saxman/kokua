@@ -172,7 +172,9 @@ to persist the task to `data/scheduled_tasks.json`; it survives restarts. Schedu
 interval, daily at a time, or weekly on a weekday. When a task is due it runs an unprompted turn (shown
 with the amber "proactive" styling); ask for a task to run in its own conversation and each run lands in
 a fresh chat you can review and follow up on. Ask to pause a task and it uses `disable_scheduled_task`
-to stop it firing while keeping it around; `enable_scheduled_task` resumes it. Scheduled runs auto-deny
+to stop it firing while keeping it around; `enable_scheduled_task` resumes it. Ask for a task to run now
+and it uses `run_scheduled_task` to fire it on demand without touching its schedule, reproducing exactly
+what the scheduled run would do, so you can dry-run a task before it is due. Scheduled runs auto-deny
 the approval-gated tools, since no one is present to approve them.
 
 **Sub-agents.** The assistant can delegate an independent subtask to a fresh, isolated sub-agent via a

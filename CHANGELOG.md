@@ -40,7 +40,9 @@ installable, modular application.
   weekly (no cron dependency). A per-task `new_session` flag runs each firing in a fresh conversation.
   `disable_scheduled_task` / `enable_scheduled_task` pause a task (it stops firing but stays in the
   registry) and resume it later, without losing the task; disabled tasks are skipped at startup and show
-  as `disabled` in the listing.
+  as `disabled` in the listing. `run_scheduled_task` runs an existing task now, on demand, without
+  changing its schedule: it reproduces the real firing (honoring `new_session`, auto-denying gated
+  tools), so a task can be dry-run before it is due; disabled tasks can be run too.
 - **Plugin system** (`kokua.plugins`): front ends and tool-packs discovered via the `kokua.frontends` and
   `kokua.tools` entry-point groups. Built-in `cli` and `web` front ends and an `example` tool-pack are
   registered as plugins; third parties add their own by publishing a package. `--list-frontends`,
