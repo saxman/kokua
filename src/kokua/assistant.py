@@ -511,11 +511,14 @@ class Assistant:
                     plan_turn = True
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. Turns stay serialized by self._lock (a proactive turn can't interleave).
+                # The target conversation is captured now, at submit time, so the turn persists to it
+                # even if the user switches _active_id away before the turn finishes.
+                conversation_id = self._active_id
                 tid = self._turn_seq
                 self._turn_seq += 1
                 preview = (msg.text or "").strip()[:120]
-                logger.info("turn %d submitted: %r", tid, preview)
-                handle = RunHandle.start(self._handle(msg, plan=plan_turn, tid=tid))
+                logger.info("turn %d submitted for %s: %r", tid, conversation_id, preview)
+                handle = RunHandle.start(self._handle(msg, conversation_id=conversation_id, plan=plan_turn, tid=tid))
                 self._current = handle
                 self._current_started = time.monotonic()
                 self._current_preview = preview
@@ -557,18 +560,21 @@ class Assistant:
         else:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
 
-    async def _handle(self, msg: ChannelMessage, plan: bool = False, tid: Optional[int] = None) -> None:
+    async def _handle(
+        self, msg: ChannelMessage, *, conversation_id: str, plan: bool = False, tid: Optional[int] = None
+    ) -> None:
         # Planning is opt-in per turn (the web Plan toggle or a `/plan <task>` message sets plan=True).
         do_plan = plan
         started = time.monotonic()
+        agent = self._registry.get(conversation_id)
         async with self._lock:
-            logger.info("turn %s lock acquired", tid)
+            logger.info("turn %s lock acquired (%s)", tid, conversation_id)
             try:
                 if do_plan:
-                    runner = PlanRunner(self._agent, self._channel, self._config, self._review_plan)
-                    self._apply_plan_result(await runner.run(msg))
+                    runner = PlanRunner(agent, self._channel, self._config, self._review_plan)
+                    self._apply_plan_result(await runner.run(msg), conversation_id)
                 else:
-                    stream = await self._agent.run(msg.text, stream=True, images=msg.images)
+                    stream = await agent.run(msg.text, stream=True, images=msg.images)
                     await self._channel.send(stream, reply_to=msg)
             except asyncio.CancelledError:
                 # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
@@ -578,7 +584,7 @@ class Assistant:
                     await self._channel.send("(stopped)", reply_to=msg)
                 except Exception:
                     pass
-                if self._persist():
+                if self._persist(conversation_id):
                     await self._maybe_push_conversations()
                 return
             except ModelConnectionError as exc:
@@ -591,7 +597,7 @@ class Assistant:
                 await self._channel.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
             else:
                 logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
-            if self._persist():
+            if self._persist(conversation_id):
                 await self._maybe_push_conversations()
 
     def _diag_report(self) -> str:
@@ -684,7 +690,7 @@ class Assistant:
                     for message in self._agent.model_client.messages[start:]:
                         message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
                     await self._channel.send(reply)
-                    if self._persist():
+                    if self._persist(self._active_id):
                         await self._maybe_push_conversations()
             except ModelConnectionError as exc:
                 # Surface the reason and swallow it: a scheduled turn has no user awaiting, and letting it
@@ -716,7 +722,7 @@ class Assistant:
             await agent.run(prompt)
             for message in agent.model_client.messages[start:]:
                 message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
-            self._persist()
+            self._persist(session.key)
         finally:
             self._active_id = previous_id
         try:
@@ -725,13 +731,13 @@ class Assistant:
         except Exception:
             logger.warning("Scheduled task '%s' ran; its notification could not be delivered", title, exc_info=True)
 
-    def _apply_plan_result(self, result: "PlanResult") -> None:
+    def _apply_plan_result(self, result: "PlanResult", conversation_id: str) -> None:
         """Record a planned turn's reviewer verdicts and verbose trace under the turn's user-message
-        index, so reload replays them. Loads the active session by id, mutates its metadata, and saves.
+        index, so reload replays them. Loads the session by id, mutates its metadata, and saves.
         No-op when the turn did not commit (e.g. plan rejected)."""
         if not result.committed or result.user_index < 0:
             return
-        session = self._store.get(self._active_id)
+        session = self._store.get(conversation_id)
         changed = False
         if result.subagent_events:
             session.metadata.setdefault("subagent", {})[str(result.user_index)] = result.subagent_events
@@ -742,12 +748,13 @@ class Assistant:
         if changed:
             self._store.save(session)
 
-    def _persist(self) -> bool:
-        """Snapshot the active agent's messages onto the active session and save. Returns True if a
+    def _persist(self, conversation_id: str) -> bool:
+        """Snapshot conversation_id's agent messages onto its session and save. Returns True if a
         title was just derived (first user message), so a caller can refresh the conversation list."""
-        session = self._store.get(self._active_id)
+        session = self._store.get(conversation_id)
+        agent = self._registry.get(conversation_id)
         session.messages = compact_message_images(
-            [dict(m) for m in self._agent.model_client.messages], self._config.images_path
+            [dict(m) for m in agent.model_client.messages], self._config.images_path
         )
         title_set = False
         if not session.metadata.get("title"):

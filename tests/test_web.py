@@ -360,7 +360,7 @@ def test_ws_sends_history_on_connect(tmp_path):
 
     async def seed():
         seeder = await Assistant.create(cfg, WebChannel(_FakeWS()), client=MockAsyncModelClient(["Hi!"]))
-        await seeder._handle(ChannelMessage(text="hello", channel="web"))
+        await seeder._handle(ChannelMessage(text="hello", channel="web"), conversation_id=seeder._active_id)
         seeder._store.close()  # flush TinyDB so a new connection restores it
 
     asyncio.run(seed())

@@ -91,7 +91,9 @@ async def test_verbose_no_reviewers_streams_phases_and_commits(tmp_path):
     client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])  # planner, executor
     assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
+    await assistant._handle(
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+    )
 
     assert [label for label, _ in channel.phases] == ["Planner", "Executor"]
     assert all(show for show, _ in channel.streamed)  # every call streamed visibly (show_answer=True)
@@ -113,7 +115,9 @@ async def test_verbose_plan_review_streams_and_records_trace(tmp_path, monkeypat
         _config(tmp_path, plan_review_agent=True, show_reasoning=True), channel, client=client
     )
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
+    await assistant._handle(
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+    )
 
     labels = [label for label, _ in channel.phases]
     assert labels.count("Plan reviewer") == 2  # reject then approve
@@ -138,7 +142,9 @@ async def test_verbose_result_review_streams_every_version(tmp_path, monkeypatch
         _config(tmp_path, result_review=True, show_reasoning=True), channel, client=client
     )
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
+    await assistant._handle(
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+    )
 
     labels = [label for label, _ in channel.phases]
     assert labels.count("Result reviewer") == 2
@@ -164,7 +170,9 @@ async def test_show_reasoning_without_phase_channel_uses_normal_path(tmp_path):
     client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])
     assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True)
+    await assistant._handle(
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+    )
 
     assert channel.phases == []  # verbose path skipped
     assert any("THE ANSWER" in s for s in channel.sent)  # answer still delivered via the normal path

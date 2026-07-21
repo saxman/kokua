@@ -46,7 +46,9 @@ async def test_autonomous_planned_turn_plans_then_executes(tmp_path):
     client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])  # plan phase, then execute phase
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="do the thing", channel="fake"), plan=True)
+    await assistant._handle(
+        ChannelMessage(text="do the thing", channel="fake"), conversation_id=assistant._active_id, plan=True
+    )
 
     # The plan was surfaced first (no send_plan on this channel -> plain-text fallback), then the answer.
     assert any("THE PLAN" in s for s in channel.sent)
@@ -64,8 +66,9 @@ async def test_unplanned_turn_is_a_single_turn(tmp_path):
     client = MockAsyncModelClient(["JUST THE ANSWER"])  # only one response -> only one run happens
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
-    await assistant._handle(ChannelMessage(text="hi", channel="fake"))  # plan defaults off
-
+    await assistant._handle(
+        ChannelMessage(text="hi", channel="fake"), conversation_id=assistant._active_id
+    )  # plan defaults off
     assert channel.sent == ["JUST THE ANSWER"]  # no plan surfaced, single run
 
 
@@ -88,7 +91,9 @@ async def test_review_approve_executes(tmp_path):
     client = MockAsyncModelClient(["PLAN", "ANSWER"])
     assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
 
-    turn = asyncio.create_task(assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True))
+    turn = asyncio.create_task(
+        assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True)
+    )
     await _resolve_when_pending(assistant, None, approve=True)
     await turn
 
@@ -100,7 +105,9 @@ async def test_review_reject_skips_execution(tmp_path):
     client = MockAsyncModelClient(["PLAN"])  # only the plan; execution must not run (would need a 2nd)
     assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
 
-    turn = asyncio.create_task(assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True))
+    turn = asyncio.create_task(
+        assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True)
+    )
     await _resolve_when_pending(assistant, None)  # reject
     await turn
 
@@ -122,7 +129,9 @@ async def test_review_edit_executes_edited_plan(tmp_path):
     client = RecordingMock(["PLAN", "ANSWER"])
     assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
 
-    turn = asyncio.create_task(assistant._handle(ChannelMessage(text="do X", channel="fake"), plan=True))
+    turn = asyncio.create_task(
+        assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True)
+    )
     await _resolve_when_pending(assistant, "MY EDITED PLAN")
     await turn
 

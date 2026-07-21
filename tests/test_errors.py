@@ -39,8 +39,7 @@ async def test_handle_surfaces_connection_error(tmp_path):
     channel = FakeChannel()
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([_connection_error()]))
 
-    await assistant._handle(ChannelMessage(text="hi", channel="fake"))
-
+    await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=assistant._active_id)
     assert len(channel.sent) == 1
     message = channel.sent[0]
     assert "model server" in message
@@ -54,8 +53,7 @@ async def test_handle_surfaces_generic_error_detail(tmp_path):
         _config(tmp_path), channel, client=MockAsyncModelClient([ValueError("bad request shape")])
     )
 
-    await assistant._handle(ChannelMessage(text="hi", channel="fake"))
-
+    await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=assistant._active_id)
     assert channel.sent == ["Sorry, the request failed: ValueError: bad request shape"]
 
 
