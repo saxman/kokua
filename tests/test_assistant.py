@@ -790,7 +790,7 @@ async def test_serve_loop_routes_message_to_pending_approval(tmp_path):
     await assistant._serve_channel()
 
     assert fut.done() and fut.result() is True
-    assert assistant._current is None  # the answer did not start a new turn
+    assert assistant._tracker.get(assistant._active_id) is None  # the answer did not start a new turn
 
 
 class _RequestsToolOnce(MockAsyncModelClient):
@@ -922,8 +922,9 @@ async def test_stop_cancels_in_flight_turn(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
     await assistant._serve_channel()  # reads "long task" (starts the turn), then "/stop" (cancels it)
-    if assistant._current is not None:  # let the cancelled turn finish its (stopped) + persist
-        await asyncio.gather(assistant._current.task, return_exceptions=True)
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:  # let the cancelled turn finish its (stopped) + persist
+        await asyncio.gather(info.handle.task, return_exceptions=True)
 
     assert "(stopped)" in channel.sent
     # The partial turn was captured for resume (the agent snapshots in its finally).
@@ -942,7 +943,49 @@ async def test_stop_with_no_active_turn_is_noop(tmp_path):
 
     assistant = await Assistant.create(_config(tmp_path), _OnlyStop(), client=MockAsyncModelClient([]))
     await assistant._serve_channel()  # must not raise with no in-flight turn
-    assert assistant._current is None
+    assert assistant._tracker.get(assistant._active_id) is None
+
+
+async def test_two_conversations_turns_run_concurrently(tmp_path):
+    """A direct TurnGate exercise: two different conversations' turns overlap, proving the gate no
+    longer serializes across conversations the way the old global lock did."""
+    cfg = _config(tmp_path)
+    gate_events: list[str] = []
+
+    def factory(cid):
+        return MockAsyncModelClient(["done"])
+
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=factory)
+    conv_a = assistant._active_id
+    conv_b = await assistant.new_conversation()
+
+    async def run_turn(cid):
+        async with assistant._gate.turn(cid):
+            gate_events.append(f"in-{cid}")
+            await asyncio.sleep(0.02)
+            gate_events.append(f"out-{cid}")
+
+    await asyncio.gather(run_turn(conv_a), run_turn(conv_b))
+    # Both entered before either exited -> concurrent.
+    assert gate_events.index(f"in-{conv_b}") < gate_events.index(f"out-{conv_a}")
+
+
+async def test_stop_cancels_active_conversation_turn(tmp_path):
+    """/stop's helper cancels the tracked turn for the viewed conversation directly (no serve loop
+    needed to exercise it)."""
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    from kokua.turn_registry import TurnInfo
+    from aimu.aio import RunHandle
+
+    async def forever():
+        await asyncio.Event().wait()
+
+    handle = RunHandle.start(forever())
+    assistant._tracker.add(assistant._active_id, TurnInfo(handle=handle, started=0.0, preview="p"))
+    assistant._stop_active_turn()  # helper the /stop branch calls
+    await asyncio.sleep(0.01)
+    assert handle.done
 
 
 # --- /diag command + logging ------------------------------------------------------------------
@@ -973,7 +1016,7 @@ async def test_diag_command_does_not_start_a_turn(tmp_path):
     channel = _DiagOnly()
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
     await assistant._serve_channel()
-    assert assistant._current is None  # /diag must not dispatch a turn
+    assert assistant._tracker.get(assistant._active_id) is None  # /diag must not dispatch a turn
     assert any("turn in flight: no" in s.lower() for s in channel.sent)
 
 
@@ -1007,13 +1050,14 @@ async def test_diag_reports_wedged_turn_with_stack(tmp_path):
     await assistant._serve_channel()  # starts the hung turn, then answers /diag while it is wedged
     report = "\n".join(channel.sent)
     assert "turn in flight: yes" in report.lower()
-    assert "lock held: yes" in report.lower()
+    assert "active turns: 1" in report.lower()
     assert "stuck turn stack" in report.lower()
 
     # cleanup: cancel the hung turn
-    if assistant._current is not None:
-        assistant._current.cancel()
-        await asyncio.gather(assistant._current.task, return_exceptions=True)
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:
+        info.handle.cancel()
+        await asyncio.gather(info.handle.task, return_exceptions=True)
 
 
 def test_configure_logging_writes_to_log_file(tmp_path):

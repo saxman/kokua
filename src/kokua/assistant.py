@@ -43,6 +43,8 @@ from .errors import describe_error
 from .mcp import ServerConnection, reconnect_mcp_servers
 from .messages import compact_message_images, derive_title
 from .scheduling import make_scheduler_tools
+from .turn_gate import TurnGate
+from .turn_registry import TurnInfo, TurnTracker
 
 logger = logging.getLogger(__name__)
 
@@ -114,21 +116,20 @@ class Assistant:
         # automatic (Chroma PersistentClient / DocumentStore disk writes), so no teardown needed.
         self._memory_store: Optional[SemanticMemoryStore] = None
         self._document_store: Optional[DocumentStore] = None
-        # The reactive turn and a proactive turn share one agent/client; serialize them so
-        # a proactive turn firing mid-conversation can't interleave on shared message state.
-        self._lock = asyncio.Lock()
+        # The readers-writer gate: turns on different conversations run concurrently (each is its own
+        # "reader", serialized per-conversation by the registry's per-conversation lock); a config
+        # mutation is the exclusive "writer" that waits for in-flight turns to drain. Constructed with
+        # a lambda (not `self._registry.lock` directly) because `self._registry` is still None here;
+        # it is assigned by create() well before any turn or exclusive hold runs.
+        self._gate = TurnGate(lambda conversation_id: self._registry.lock(conversation_id))
         # Each reactive turn runs as a background task (a RunHandle) so the serve loop stays free to
-        # receive a `/stop` while a turn is in flight. `_current` is the latest turn (the one `/stop`
-        # cancels); `_turns` keeps task refs alive until they finish.
-        self._current: Optional[RunHandle] = None
-        self._turns: set = set()
-        # Diagnostics for the /diag command: when the latest turn started (monotonic) and a preview of
-        # the message that triggered it, plus a per-turn sequence id for the lifecycle log lines.
-        self._current_started: Optional[float] = None
-        self._current_preview: str = ""
+        # receive a `/stop` while a turn is in flight. Tracks at most one running turn per conversation
+        # (the gate enforces that invariant); backs /stop, /diag, and shutdown cancellation.
+        self._tracker = TurnTracker()
+        # A per-turn sequence id for the lifecycle log lines.
         self._turn_seq: int = 0
         # Tool-approval coordination. At most one approval is pending at a time (enforced by
-        # self._approval_lock in _approve, not self._lock); the serve loop resolves the future
+        # self._approval_lock in _approve, not the turn gate); the serve loop resolves the future
         # with the user's answer.
         self._pending_approval: Optional[asyncio.Future] = None
         # Serializes the gated-tool approval path so concurrent tool calls (concurrent_tool_calls) can
@@ -299,12 +300,13 @@ class Assistant:
         return items
 
     async def _cancel_current_turn(self) -> None:
-        """Cancel any in-flight turn and let it settle, so its partial state persists to the
-        conversation it belongs to before we switch away."""
-        if self._current is not None and not self._current.done:
-            self._current.cancel()
+        """Cancel the viewed conversation's in-flight turn (if any) and let it settle, so its partial
+        state persists to the conversation it belongs to before we switch away."""
+        info = self._tracker.get(self._active_id)
+        if info is not None and not info.handle.done:
+            info.handle.cancel()
             try:
-                await self._current.task
+                await info.handle.task
             except Exception:
                 pass
 
@@ -318,11 +320,10 @@ class Assistant:
         """
         await self._cancel_current_turn()
         previous_id = self._active_id
-        async with self._lock:
-            now = datetime.now().isoformat()
-            session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
-            self._store.save(session)
-            self._active_id = session.key
+        now = datetime.now().isoformat()
+        session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
+        self._store.save(session)
+        self._active_id = session.key
         try:
             self._registry.get(self._active_id)  # build the (empty) agent eagerly so it is the live one
         except Exception:
@@ -338,8 +339,7 @@ class Assistant:
         """
         await self._cancel_current_turn()
         previous_id = self._active_id
-        async with self._lock:
-            self._active_id = conversation_id
+        self._active_id = conversation_id
         try:
             self._registry.get(self._active_id)
         except Exception:
@@ -361,7 +361,7 @@ class Assistant:
         if deleting_active:
             await self._cancel_current_turn()
         previous_id = self._active_id
-        async with self._lock:
+        async with self._gate.exclusive():
             self._store.delete(conversation_id)
             self._registry.discard(conversation_id)
             if deleting_active:
@@ -389,10 +389,10 @@ class Assistant:
     async def apply_settings(self, incoming: dict) -> None:
         """Apply a settings-panel change at runtime and persist it so it survives restarts.
 
-        Generation-kwargs and display-pref changes are applied in place under the turn lock. Switching
-        the model rebuilds the model client (mirroring select_conversation: cancel the in-flight turn,
-        then restore conversation state onto the new client). A model that fails to build leaves the
-        running client untouched.
+        Generation-kwargs and display-pref changes are applied in place under an exclusive gate hold
+        (waits for in-flight turns to drain, blocks new ones). Switching the model rebuilds the model
+        client (mirroring select_conversation: cancel the in-flight turn, then restore conversation
+        state onto the new client). A model that fails to build leaves the running client untouched.
         """
         settings = runtime_settings.sanitize(incoming)
         new_model = settings.get("model")
@@ -400,7 +400,7 @@ class Assistant:
 
         if switching:
             await self._cancel_current_turn()
-        async with self._lock:
+        async with self._gate.exclusive():
             if switching:
                 await self._switch_model(new_model)
             _apply_show_flags(self._channel, self._config, settings)
@@ -454,12 +454,14 @@ class Assistant:
                 tg.create_task(self._serve_channel())
                 tg.create_task(self._scheduler.run())
         finally:
-            # Cancel any turn still running at shutdown and let the cancellations settle (each turn
-            # persists its partial state on stop), so no task is left pending.
-            for task in list(self._turns):
-                task.cancel()
-            if self._turns:
-                await asyncio.gather(*self._turns, return_exceptions=True)
+            # Cancel every conversation's turn still running at shutdown and let the cancellations
+            # settle (each turn persists its partial state on stop), so no task is left pending.
+            turns = self._tracker.all()
+            for _conversation_id, info in turns:
+                if not info.handle.done:
+                    info.handle.cancel()
+            if turns:
+                await asyncio.gather(*(info.handle.task for _conversation_id, info in turns), return_exceptions=True)
             for conn in self._mcp_servers:
                 try:
                     await conn.client.aclose()
@@ -473,11 +475,10 @@ class Assistant:
                 raw = msg.text or ""
                 text = raw.strip().lower()
                 if text == "/stop":
-                    if self._current is not None and not self._current.done:
-                        self._current.cancel()
+                    self._stop_active_turn()
                     continue
                 # /diag reports live state (and the wedged turn's async stack) without touching the
-                # turn lock, so it still answers when a hung turn is holding it. Handled here, like /stop.
+                # turn gate, so it still answers when a hung turn is holding it. Handled here, like /stop.
                 if text == "/diag":
                     await self._channel.send(self._diag_report())
                     continue
@@ -510,22 +511,26 @@ class Assistant:
                     msg = replace(msg, text=task)
                     plan_turn = True
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
-                # arrive mid-turn. Turns stay serialized by self._lock (a proactive turn can't interleave).
-                # The target conversation is captured now, at submit time, so the turn persists to it
-                # even if the user switches _active_id away before the turn finishes.
+                # arrive mid-turn. The gate still serializes same-conversation turns (a proactive turn
+                # on this conversation can't interleave); different conversations' turns don't block
+                # each other. The target conversation is captured now, at submit time, so the turn
+                # persists to it even if the user switches _active_id away before the turn finishes.
                 conversation_id = self._active_id
                 tid = self._turn_seq
                 self._turn_seq += 1
                 preview = (msg.text or "").strip()[:120]
                 logger.info("turn %d submitted for %s: %r", tid, conversation_id, preview)
                 handle = RunHandle.start(self._handle(msg, conversation_id=conversation_id, plan=plan_turn, tid=tid))
-                self._current = handle
-                self._current_started = time.monotonic()
-                self._current_preview = preview
-                self._turns.add(handle.task)
-                handle.task.add_done_callback(self._turns.discard)
+                self._tracker.add(conversation_id, TurnInfo(handle=handle, started=time.monotonic(), preview=preview))
+                handle.task.add_done_callback(lambda _t, cid=conversation_id: self._tracker.remove(cid))
         finally:
             self._scheduler.stop()  # channel closed -> stop the scheduler so run() returns
+
+    def _stop_active_turn(self) -> None:
+        """Cancel the viewed conversation's tracked turn (if any); the /stop branch's helper."""
+        info = self._tracker.get(self._active_id)
+        if info is not None and not info.handle.done:
+            info.handle.cancel()
 
     async def _approve(self, name: str, arguments: dict) -> bool:
         """Tool-approval gate run before each tool call (published to the model client per run).
@@ -567,66 +572,73 @@ class Assistant:
         do_plan = plan
         started = time.monotonic()
         agent = self._registry.get(conversation_id)
-        async with self._lock:
-            logger.info("turn %s lock acquired (%s)", tid, conversation_id)
-            try:
-                if do_plan:
-                    runner = PlanRunner(agent, self._channel, self._config, self._review_plan)
-                    self._apply_plan_result(await runner.run(msg), conversation_id)
-                else:
-                    stream = await agent.run(msg.text, stream=True, images=msg.images)
-                    await self._channel.send(stream, reply_to=msg)
-            except asyncio.CancelledError:
-                # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
-                # agent snapshots it in a finally), and return so the daemon keeps serving.
-                logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
+        # Pinned for the whole turn so LRU eviction can't drop this conversation's agent out from
+        # under an in-flight turn, even if other conversations' turns push it past the cache cap.
+        self._registry.pin(conversation_id)
+        try:
+            async with self._gate.turn(conversation_id):
+                logger.info("turn %s gate entered (%s)", tid, conversation_id)
                 try:
-                    await self._channel.send("(stopped)", reply_to=msg)
-                except Exception:
-                    pass
+                    if do_plan:
+                        runner = PlanRunner(agent, self._channel, self._config, self._review_plan)
+                        self._apply_plan_result(await runner.run(msg), conversation_id)
+                    else:
+                        stream = await agent.run(msg.text, stream=True, images=msg.images)
+                        await self._channel.send(stream, reply_to=msg)
+                except asyncio.CancelledError:
+                    # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
+                    # agent snapshots it in a finally), and return so the daemon keeps serving.
+                    logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
+                    try:
+                        await self._channel.send("(stopped)", reply_to=msg)
+                    except Exception:
+                        pass
+                    if self._persist(conversation_id):
+                        await self._maybe_push_conversations()
+                    return
+                except ModelConnectionError as exc:
+                    logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
+                    await self._channel.send(
+                        f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
+                    )
+                except Exception as exc:
+                    logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
+                    await self._channel.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
+                else:
+                    logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                 if self._persist(conversation_id):
                     await self._maybe_push_conversations()
-                return
-            except ModelConnectionError as exc:
-                logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
-                await self._channel.send(
-                    f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
-                )
-            except Exception as exc:
-                logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
-                await self._channel.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
-            else:
-                logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
-            if self._persist(conversation_id):
-                await self._maybe_push_conversations()
+        finally:
+            self._registry.unpin(conversation_id)
 
     def _diag_report(self) -> str:
-        """A snapshot of live turn/lock state for the `/diag` command, plus the wedged turn's async
-        stack. Reads only in-memory state and never acquires ``self._lock``, so it answers even while a
-        hung turn holds the lock (the case it exists to diagnose)."""
-        turn = self._current
-        running = turn is not None and not turn.done
+        """A snapshot of live turn/gate state for the `/diag` command, plus each wedged turn's async
+        stack. Reads only in-memory state and never awaits the turn gate, so it answers even while a
+        hung turn holds it (the case it exists to diagnose)."""
+        turns = self._tracker.all()
         lines = ["Diagnostics:"]
-        if running:
-            elapsed = time.monotonic() - (self._current_started or time.monotonic())
-            lines.append(f"- turn in flight: yes (elapsed {elapsed:.1f}s)")
-            lines.append(f"- message: {self._current_preview!r}")
+        if turns:
+            lines.append(f"- turn in flight: yes ({len(turns)})")
+            for conversation_id, info in turns:
+                elapsed = time.monotonic() - info.started
+                lines.append(f"  - {conversation_id}: elapsed {elapsed:.1f}s, message: {info.preview!r}")
         else:
             lines.append("- turn in flight: no")
-        lines.append(f"- lock held: {'yes' if self._lock.locked() else 'no'}")
-        lines.append(f"- live turns: {len(self._turns)}")
+        lines.append(f"- active turns: {self._gate.active_turns()}")
         approval = self._pending_approval is not None and not self._pending_approval.done()
         plan = self._pending_plan is not None and not self._pending_plan.done()
         lines.append(
             f"- pending approval: {'yes' if approval else 'no'} | "
             f"pending plan: {'yes' if plan else 'no'} | proactive: {'yes' if self._in_proactive else 'no'}"
         )
-        if running:
-            stack = self._format_task_stack(turn.task)
+        for conversation_id, info in turns:
+            if info.handle.done:
+                continue
+            stack = self._format_task_stack(info.handle.task)
             if stack:
                 lines.append(
-                    "\nStuck turn stack (async only; run `kill -USR1 <pid>` for full thread stacks):\n"
-                    f"```\n{stack}\n```"
+                    f"\nStuck turn stack for {conversation_id} "
+                    f"(async only; run `kill -USR1 <pid>` for full thread stacks):\n```\n{stack}\n```"
                 )
         return "\n".join(lines)
 
@@ -676,7 +688,7 @@ class Assistant:
         run does not hijack whatever the user is currently viewing.
         """
         multi_conversation = getattr(self._channel, "send_conversations", None) is not None
-        async with self._lock:
+        async with self._gate.turn(self._active_id):
             self._in_proactive = True
             try:
                 if new_session and multi_conversation:
@@ -706,8 +718,10 @@ class Assistant:
     async def _run_in_new_session(self, prompt: str, task_name: Optional[str]) -> None:
         """Run a proactive turn in a fresh conversation, then restore the active one.
 
-        Runs under the caller's hold of ``self._lock``. Switching conversations is just an active-id
-        swap (each conversation has its own agent), restored in a ``finally`` so the user's active
+        Runs under the caller's (``_proactive``'s) gate hold on the *previously* active conversation;
+        that hold doesn't cover this new conversation, so this acquires its own gate turn on the new
+        conversation's id around the actual run. Switching conversations is just an active-id swap
+        (each conversation has its own agent), restored in a ``finally`` so the user's active
         conversation is never left pointing at the task's session.
         """
         previous_id = self._active_id
@@ -717,12 +731,13 @@ class Assistant:
         self._store.save(session)
         self._active_id = session.key
         try:
-            agent = self._registry.get(self._active_id)
-            start = len(agent.model_client.messages)
-            await agent.run(prompt)
-            for message in agent.model_client.messages[start:]:
-                message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
-            self._persist(session.key)
+            async with self._gate.turn(session.key):
+                agent = self._registry.get(self._active_id)
+                start = len(agent.model_client.messages)
+                await agent.run(prompt)
+                for message in agent.model_client.messages[start:]:
+                    message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
+                self._persist(session.key)
         finally:
             self._active_id = previous_id
         try:
