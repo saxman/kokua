@@ -1774,6 +1774,52 @@ async def test_proactive_new_session_holds_at_most_one_gate_turn(tmp_path):
             pass
 
 
+async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_active_id(tmp_path):
+    """Critical regression: _run_in_new_session must never touch self._active_id.
+
+    Before the fix it swapped self._active_id to the new session's id for the run's duration (restored
+    in a finally). Under Phase B concurrency that made _approve see streaming_conversation ==
+    self._active_id (both the new session) -- i.e. foreground -- so a gated tool call inside a
+    scheduled new-session run would PROMPT instead of auto-denying, and a concurrent user switch
+    during the run would be silently clobbered back by the finally. Asserts both the auto-deny and
+    that self._active_id (the viewed conversation) is untouched DURING the run, not just after.
+    """
+    from kokua.channels.web import streaming_conversation
+
+    observed: dict[str, object] = {}
+
+    class _RecordingRequestsToolOnce(_RequestsToolOnce):
+        async def _chat(self, *args, **kwargs):
+            # Captured mid-run (inside the agent's tool-dispatch call), not after -- the bug this
+            # guards against only manifests while the scheduled turn is actually in flight.
+            observed["active_id_during_run"] = assistant._active_id
+            observed["streaming_conversation_during_run"] = streaming_conversation.get()
+            return await super()._chat(*args, **kwargs)
+
+    channel = _ConvCapturingChannel()
+    cfg = _config(tmp_path, confirm_tools=["execute_python"])
+    assistant = await Assistant.create(
+        cfg, channel, client_factory=lambda cid: _RecordingRequestsToolOnce("execute_python", {"code": "1+1"})
+    )
+    viewed = assistant._active_id
+
+    await assistant._proactive("run the report", new_session=True, task_name="report")
+
+    # Mid-run, the viewed conversation was never hijacked, and the run's own streaming context is a
+    # *different* conversation than the viewed one -- the precondition for _approve to auto-deny.
+    assert observed["active_id_during_run"] == viewed
+    assert observed["streaming_conversation_during_run"] != viewed
+
+    # The gated tool call the scheduled run made was denied, not prompted.
+    new_id = next(k for k in assistant._store.list_keys() if k != viewed)
+    new_session = assistant._store.get(new_id)
+    denied = [m for m in new_session.messages if m.get("role") == "tool"]
+    assert denied and denied[-1]["content"] == "Tool 'execute_python' was not approved."
+
+    # And self._active_id is still the viewed conversation after the run completes.
+    assert assistant._active_id == viewed
+
+
 async def test_create_registers_scheduling_tools(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     names = {getattr(fn, "__name__", None) for fn in assistant._agent.tools}

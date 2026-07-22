@@ -741,8 +741,10 @@ class Assistant:
         ``_approve`` gates a gated tool call the same way it would for any other turn: prompted if that
         conversation is the one ``self._active_id`` currently points at, auto-denied otherwise (no user
         watching to confirm). With ``new_session`` set (and a multi-conversation channel), the turn runs
-        in a fresh conversation and the user's active conversation is restored afterward, so a scheduled
-        run does not hijack whatever the user is currently viewing.
+        in a fresh conversation and never touches ``self._active_id`` at all (see
+        ``_run_in_new_session``), so a scheduled run never hijacks whatever the user is currently
+        viewing -- its own gated tool calls always auto-deny, since the fresh session is never the one
+        ``self._active_id`` points at.
         """
         multi_conversation = getattr(self._channel, "send_conversations", None) is not None
         # Each branch takes at most one gate hold, never both: returning right after
@@ -784,26 +786,28 @@ class Assistant:
             streaming_conversation.reset(token)
 
     async def _run_in_new_session(self, prompt: str, task_name: Optional[str]) -> None:
-        """Run a proactive turn in a fresh conversation, then restore the active one.
+        """Run a proactive turn in a fresh conversation without disturbing the viewed one.
 
         The caller (``_proactive``) takes no gate hold of its own for this branch; this acquires the
-        only gate hold for the call, on the new conversation's id, around the actual run. Switching
-        conversations is just an active-id swap (each conversation has its own agent), restored in a
-        ``finally`` so the user's active conversation is never left pointing at the task's session.
-        Also sets ``streaming_conversation`` to the new session for the run's duration, so a gated
-        tool call it makes goes through ``_approve``'s ordinary foreground check consistently with any
-        other turn (``self._active_id`` points here for the same duration, so it reads as foreground).
+        only gate hold for the call, on the new conversation's id, around the actual run. Unlike
+        select/new_conversation, this never touches ``self._active_id`` -- it is not "switching" to
+        the new session, just running a turn on it (the registry looks up any conversation's agent by
+        id, no active-pointer swap needed). Leaving ``self._active_id`` alone is what keeps this turn
+        consistent with every other Phase B concurrency invariant: ``streaming_conversation`` (set to
+        ``session.key`` below) then never equals the viewed conversation, so ``_approve`` auto-denies a
+        gated tool call here (no user is watching this session) instead of prompting; the serve loop's
+        `conversation_id = self._active_id` at submit time still binds a message the user sends during
+        this run to the conversation they're actually viewing, not to this one; and there is no active
+        id for a concurrent user switch to race or for a ``finally`` to clobber back.
         """
-        previous_id = self._active_id
         now = datetime.now().isoformat()
         title = task_name or derive_title([{"role": "user", "content": prompt}]) or "Scheduled task"
         session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now, "title": title})
         self._store.save(session)
-        self._active_id = session.key
         token = streaming_conversation.set(session.key)
         try:
             async with self._gate.turn(session.key):
-                agent = self._registry.get(self._active_id)
+                agent = self._registry.get(session.key)
                 start = len(agent.model_client.messages)
                 await agent.run(prompt)
                 for message in agent.model_client.messages[start:]:
@@ -811,7 +815,6 @@ class Assistant:
                 self._persist(session.key)
         finally:
             streaming_conversation.reset(token)
-            self._active_id = previous_id
         try:
             await self._maybe_push_conversations()
             await self._channel.send(f"Scheduled task '{title}' finished; open the '{title}' conversation to review.")
