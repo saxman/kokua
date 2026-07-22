@@ -1200,8 +1200,10 @@ async def test_background_turn_notifies_on_success_when_switched_away(tmp_path):
     assert any(s.startswith("[notify]") for s in channel.sent)
 
 
-async def test_background_turn_error_does_not_notify(tmp_path):
-    """Item 2 from the Task 5 review: a muted turn that errors must not claim 'reply ready'."""
+async def test_background_turn_error_notifies_with_reason(tmp_path):
+    """A muted turn that errors must notify with the failure reason, not stay silent and not claim
+    'reply ready' (its error reply went out muted, so the notification is the only signal the user
+    gets that the background turn finished and how)."""
 
     class _NotifyChannel(FakeChannel):
         async def send_notification(self, text: str) -> None:
@@ -1218,8 +1220,10 @@ async def test_background_turn_error_does_not_notify(tmp_path):
 
     await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=conv_a)
 
-    assert not any(s.startswith("[notify]") for s in channel.sent)
-    assert any("failed" in s for s in channel.sent)  # the error reply itself still went out (muted)
+    notifies = [s for s in channel.sent if s.startswith("[notify]")]
+    assert notifies, "a background failure should still notify the user"
+    assert any("failed" in s.lower() for s in notifies)  # the notification carries the reason
+    assert not any("reply ready" in s.lower() for s in notifies)  # not a misleading success notice
 
 
 # --- /stop cancellation -----------------------------------------------------------------------

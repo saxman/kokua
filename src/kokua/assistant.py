@@ -636,6 +636,7 @@ class Assistant:
         # it so its turn's conversation_id reads as foreground in _approve.
         token = streaming_conversation.set(conversation_id)
         succeeded = False
+        failure_reason = ""  # set on error, so a backgrounded turn's notification can carry the reason
         try:
             async with self._gate.turn(conversation_id):
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
@@ -659,11 +660,13 @@ class Assistant:
                     return
                 except ModelConnectionError as exc:
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
+                    failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
                     await self._channel.send(
                         f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
                     )
                 except Exception as exc:
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
+                    failure_reason = f"failed: {describe_error(exc)}"
                     await self._channel.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
                 else:
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
@@ -673,16 +676,20 @@ class Assistant:
         finally:
             streaming_conversation.reset(token)
             self._registry.unpin(conversation_id)
-        # The user switched away before this turn finished (it ran, and completed, in the background):
-        # tell them rather than silently updating a conversation they're not looking at. Gated on
-        # `succeeded` (not reached on the cancelled-turn path above, which returns before this point) so
-        # a muted error doesn't get a misleading "reply ready" -- its failure message already went out
-        # muted, same as a successful reply would have; there is nothing more useful to say here.
-        if succeeded and conversation_id != self._active_id:
+        # The user switched away before this turn finished (it ran to completion in the background):
+        # tell them rather than silently updating a conversation they're not looking at. The reply
+        # (or the error message) went out muted, so this notification is the only signal they get.
+        # A cancelled turn returns before this point, so it never notifies. On failure the reason is
+        # carried in the notification because the muted error message is not persisted and so is not
+        # visible on switch-in.
+        if conversation_id != self._active_id:
             notify = getattr(self._channel, "send_notification", None)
             if notify is not None:
                 title = self._store.get(conversation_id).metadata.get("title") or "a conversation"
-                await notify(f"Reply ready in '{title}'.")
+                if succeeded:
+                    await notify(f"Reply ready in '{title}'.")
+                else:
+                    await notify(f"A reply in '{title}' {failure_reason}.")
 
     def _diag_report(self) -> str:
         """A snapshot of live turn/gate state for the `/diag` command, plus each wedged turn's async
