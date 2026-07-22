@@ -30,6 +30,7 @@ from aimu.sessions import Session, TinyDBSessionStore
 
 from . import runtime_settings
 from .agent_registry import AgentRegistry
+from .channels.web import streaming_conversation
 from .build import (
     ModelClientError,
     build_memory,
@@ -575,6 +576,13 @@ class Assistant:
         # Pinned for the whole turn so LRU eviction can't drop this conversation's agent out from
         # under an in-flight turn, even if other conversations' turns push it past the cache cap.
         self._registry.pin(conversation_id)
+        # The web channel mutes a background turn's streaming frames (only the conversation being
+        # viewed streams; see channels/web.py). The contextvar carries this turn's conversation id for
+        # the duration of this task (and its awaited children, e.g. agent.run); set only for a channel
+        # that supports muting -- the CLI channel has no `_foreground` and always streams, single-view.
+        token = None
+        if hasattr(self._channel, "_foreground"):
+            token = streaming_conversation.set(conversation_id)
         try:
             async with self._gate.turn(conversation_id):
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
@@ -609,7 +617,17 @@ class Assistant:
                 if self._persist(conversation_id):
                     await self._maybe_push_conversations()
         finally:
+            if token is not None:
+                streaming_conversation.reset(token)
             self._registry.unpin(conversation_id)
+        # The user switched away before this turn finished (it ran, and completed, in the background):
+        # tell them rather than silently updating a conversation they're not looking at. Not reached on
+        # the cancelled-turn path above, which returns before this point.
+        if conversation_id != self._active_id:
+            notify = getattr(self._channel, "send_notification", None)
+            if notify is not None:
+                title = self._store.get(conversation_id).metadata.get("title") or "a conversation"
+                await notify(f"Reply ready in '{title}'.")
 
     def _diag_report(self) -> str:
         """A snapshot of live turn/gate state for the `/diag` command, plus each wedged turn's async

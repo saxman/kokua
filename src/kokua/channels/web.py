@@ -4,11 +4,20 @@ The generic transport (queue-bridged ``receive()``, streamed ``send()``, the tok
 frame protocol, and the ``send_frame`` seam) lives in :class:`aimu.aio.channels.web.WebChannel`. This
 subclass adds the frames Kokua's richer page needs: a conversation-list sidebar, conversation-history
 replay, and tool-call approval prompts. Each is sent through the inherited public ``send_frame``.
+
+Phase B lets turns on different conversations run concurrently, but only the conversation the user is
+currently viewing should stream token/thinking/tool frames; a background turn runs silently and posts a
+``notification`` frame on completion instead. The module-level :data:`streaming_conversation` contextvar
+carries the running turn's conversation id (set by ``Assistant._handle`` for the task running that turn);
+:meth:`WebChannel._foreground` compares it against :attr:`WebChannel.active_conversation_id` (the viewed
+conversation) to decide whether to emit. ``None`` means "no turn context" (e.g. a direct push, or the
+CLI channel, which has no muting at all) and is always treated as foreground.
 """
 
 from __future__ import annotations
 
 import re
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Union
 
@@ -24,6 +33,11 @@ from aimu.models import (
 )
 
 from ..images import ROUTE_PREFIX
+
+# The conversation id of the turn currently running in this task (and its awaited children), set by
+# Assistant._handle for the duration of the turn and unset (default None) outside any turn. WebChannel
+# instances read it to decide whether a turn's frames belong to the conversation being viewed.
+streaming_conversation: ContextVar[Optional[str]] = ContextVar("streaming_conversation", default=None)
 
 # User-role turns the agent loop injects between tool-calling iterations. They are byte-for-byte
 # ordinary user messages except for this provenance tag, so display keys off the tag alone.
@@ -147,6 +161,29 @@ def conversation_to_frames(
 class WebChannel(BaseWebChannel):
     """AIMU's ``WebChannel`` plus Kokua's conversation-sidebar, history-replay, and approval frames."""
 
+    def __init__(self, websocket: Any, *, show_thinking: bool = False, show_tools: bool = False):
+        super().__init__(websocket, show_thinking=show_thinking, show_tools=show_tools)
+        # The conversation this socket is currently viewing (set by the front end, Task 6/7). None
+        # until then, which _foreground() treats as "always foreground" (nothing to compare against).
+        self.active_conversation_id: Optional[str] = None
+
+    def _foreground(self) -> bool:
+        """Whether the running turn's frames belong to the conversation this socket is viewing.
+
+        ``streaming_conversation`` is None outside any turn context (a direct push, or a proactive send
+        that isn't wrapped by ``Assistant._handle``), which is always foreground. ``active_conversation_id``
+        is None until the front end starts tracking the viewed conversation (Task 6/7); until then there is
+        nothing to mute against, so every turn is foreground -- the pre-Phase-B behavior for the one
+        connection Kokua allows at a time."""
+        if self.active_conversation_id is None:
+            return True
+        viewing = streaming_conversation.get()
+        return viewing is None or viewing == self.active_conversation_id
+
+    async def send_notification(self, text: str) -> None:
+        """A background turn finished; tell the user without stealing the current view."""
+        await self.send_frame({"type": "notification", "text": text})
+
     async def feed_input(self, text: str, image_paths: list[str]) -> None:
         """Enqueue a user turn carrying attached image file paths (the web pump's ``input`` frame).
 
@@ -179,10 +216,17 @@ class WebChannel(BaseWebChannel):
         """Stream a reply, emitting a ``loop`` marker at each agent-loop iteration boundary.
 
         Wraps the chunk iterator so the base ``send`` loop is reused unchanged (it has no per-chunk
-        hook); strings (including proactive pushes) pass straight through.
+        hook); strings (including proactive pushes) pass straight through. Muted for a background turn
+        (see the module docstring): a string is dropped, and a stream is still fully drained -- so the
+        agent run completes and its state persists -- but emits no frames.
         """
         if isinstance(content, str):
-            await super().send(content, reply_to=reply_to)
+            if self._foreground():
+                await super().send(content, reply_to=reply_to)
+            return
+        if not self._foreground():
+            async for _ in content:  # drain so the agent run completes, but emit nothing
+                pass
             return
         await super().send(self._mark_loop_boundaries(content), reply_to=reply_to)
 
@@ -195,29 +239,39 @@ class WebChannel(BaseWebChannel):
         withheld by default (the caller shows the returned text once it's ready -- a reviewed answer or a
         plan bubble); with ``show_answer=True`` it is also streamed as ``token`` frames (verbose trace,
         where every version and each reviewer's prose is shown live).
+
+        Muted for a background turn: still fully drains ``chunks`` and returns the accumulated text (the
+        caller needs it regardless of who's watching), but emits no frames.
         """
         from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
 
+        foreground = self._foreground()
         parts: list[str] = []
         last_iteration = 0
         async for chunk in chunks:
             if chunk.iteration > last_iteration:
-                await self.send_frame({"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT})
+                if foreground:
+                    await self.send_frame({"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT})
                 last_iteration = chunk.iteration
             if chunk.phase == StreamingContentType.GENERATING:
                 if isinstance(chunk.content, str):
                     parts.append(chunk.content)
-                    if show_answer and chunk.content:
+                    if foreground and show_answer and chunk.content:
                         await self.send_frame({"type": "token", "text": chunk.content})
             elif chunk.phase == StreamingContentType.THINKING and self.show_thinking and chunk.content:
-                await self.send_frame({"type": "thinking", "text": chunk.content})
+                if foreground:
+                    await self.send_frame({"type": "thinking", "text": chunk.content})
             elif chunk.phase == StreamingContentType.TOOL_CALLING and self.show_tools:
-                call = chunk.content if isinstance(chunk.content, dict) else {}
-                await self.send_frame({"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")})
+                if foreground:
+                    call = chunk.content if isinstance(chunk.content, dict) else {}
+                    await self.send_frame(
+                        {"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")}
+                    )
             else:
-                image = _image_frame_for(chunk)
-                if image is not None:
-                    await self.send_frame(image)
+                if foreground:
+                    image = _image_frame_for(chunk)
+                    if image is not None:
+                        await self.send_frame(image)
         return "".join(parts)
 
     async def _mark_loop_boundaries(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
@@ -274,24 +328,39 @@ class WebChannel(BaseWebChannel):
         await self.send_frame({"type": "approval", "name": name, "arguments": arguments})
 
     async def send_plan(self, plan: str) -> None:
-        """Show a deep-planning plan as its own bubble (rendered as markdown by the page)."""
+        """Show a deep-planning plan as its own bubble (rendered as markdown by the page).
+
+        Muted for a background turn (see the module docstring)."""
+        if not self._foreground():
+            return
         await self.send_frame({"type": "plan", "text": plan})
 
     async def send_done(self) -> None:
         """Emit a terminal ``done`` frame (verbose trace): finalize the last streamed bubble and clear the
-        page's processing state, since the streamed answer isn't followed by a ``message``."""
+        page's processing state, since the streamed answer isn't followed by a ``message``.
+
+        Muted for a background turn (see the module docstring)."""
+        if not self._foreground():
+            return
         await self.send_frame({"type": "done"})
 
     async def send_phase(self, label: str, detail: str = "") -> None:
         """Mark the start of a labeled phase in a verbose planned turn (planner / reviewer / executor).
 
         The page finalizes any open streaming bubble and starts a fresh one under this header, so each
-        LLM call's streamed output reads as its own labeled block."""
+        LLM call's streamed output reads as its own labeled block. Muted for a background turn (see the
+        module docstring)."""
+        if not self._foreground():
+            return
         await self.send_frame({"type": "phase", "label": label, "detail": detail})
 
     async def send_subagent(self, event: dict) -> None:
         """Show sub-agent (reviewer) activity as its own card. ``event`` carries an ``id`` (so a
-        'running' card updates in place on its verdict), a ``role``, a ``status``, and any ``issues``."""
+        'running' card updates in place on its verdict), a ``role``, a ``status``, and any ``issues``.
+
+        Muted for a background turn (see the module docstring)."""
+        if not self._foreground():
+            return
         await self.send_frame({"type": "subagent", **event})
 
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:

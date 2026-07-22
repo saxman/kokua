@@ -240,6 +240,50 @@ def test_conversation_to_frames_replays_verbose_trace_not_committed_answer():
     assert not any(i["type"] in ("subagent", "message") for i in items)
 
 
+async def test_web_channel_background_turn_frames_are_muted():
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel.active_conversation_id = "viewed"
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "hello")
+
+    token = streaming_conversation.set("other")  # a background conversation
+    try:
+        await channel.send(gen())
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == []  # fully muted, including the "done" terminator
+
+
+async def test_web_channel_foreground_turn_frames_stream():
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel.active_conversation_id = "viewed"
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "hello")
+
+    token = streaming_conversation.set("viewed")
+    try:
+        await channel.send(gen())
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == [{"type": "token", "text": "hello"}, {"type": "done"}]
+
+
+async def test_web_channel_send_notification_always_sends():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    await channel.send_notification("Task 'Digest' finished")
+    assert {"type": "notification", "text": "Task 'Digest' finished"} in ws.frames
+
+
 async def test_web_channel_send_approval_request_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
