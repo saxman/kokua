@@ -187,6 +187,13 @@ class WebChannel(BaseWebChannel):
         """A background turn finished; tell the user without stealing the current view."""
         await self.send_frame({"type": "notification", "text": text})
 
+    async def send_working(self, active: bool) -> None:
+        """Tell the page whether the conversation it is now viewing has a turn already running in
+        the background (started before this switch). Not gated by ``_foreground()``: this describes
+        the viewed conversation's own state, not a running turn's streamed content, so it is sent
+        regardless of what ``streaming_conversation`` currently names."""
+        await self.send_frame({"type": "working", "active": active})
+
     async def feed_input(self, text: str, image_paths: list[str]) -> None:
         """Enqueue a user turn carrying attached image file paths (the web pump's ``input`` frame).
 

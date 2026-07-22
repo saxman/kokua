@@ -73,6 +73,16 @@
     header { padding: 12px 16px; background: var(--header-bg); color: var(--header-fg); font-weight: 600;
       display: flex; align-items: center; justify-content: space-between; }
     header small { font-weight: 400; opacity: 0.7; margin-left: 8px; }
+    /* Shown in the header while the conversation being viewed has a turn running in the background
+       (e.g. switched into mid-turn); cleared once that turn's next done/message/notification arrives. */
+    #working-indicator { font-size: 0.85em; opacity: 0.85; padding: 3px 10px; border-radius: 10px;
+      background: rgba(255, 255, 255, 0.15); }
+    /* Dismissible banners for background-turn completions ("notification" frames), stacked above the log. */
+    #notifications { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 0; }
+    .notification-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      background: var(--approval-bg); border: 1px solid var(--approval-border); border-radius: 10px;
+      padding: 8px 14px; font-size: 0.9em; }
+    .notification-banner button { padding: 2px 10px; font-size: 0.85em; background: var(--muted); }
     #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
     .bubble { max-width: 70%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; line-height: 1.4; }
     .user { align-self: flex-end; background: var(--accent); color: var(--accent-fg); border-bottom-right-radius: 4px; }
@@ -182,9 +192,11 @@
       <header>
         <span>Kokua <small>local, single user</small></span>
         <span class="header-actions">
+          <span id="working-indicator" class="hidden" title="This conversation has a turn still running in the background">⏳ Working…</span>
           <button id="settings-btn" type="button" title="Settings">⚙️</button>
         </span>
       </header>
+      <div id="notifications"></div>
       <div id="log"></div>
       <div id="attach-previews" class="attach-previews hidden"></div>
       <form id="form">
@@ -267,6 +279,31 @@
     const attachPreviews = document.getElementById("attach-previews");
     const convList = document.getElementById("conv-list");
     const newConvBtn = document.getElementById("new-conv");
+    const notifications = document.getElementById("notifications");
+    const workingIndicator = document.getElementById("working-indicator");
+
+    // A background turn finished while the user was viewing a different conversation ("notification"
+    // frame): show a dismissible banner rather than stealing the current view.
+    function showNotification(text) {
+      const el = document.createElement("div");
+      el.className = "notification-banner";
+      const span = document.createElement("span");
+      span.textContent = text;
+      const dismiss = document.createElement("button");
+      dismiss.type = "button";
+      dismiss.textContent = "Dismiss";
+      dismiss.addEventListener("click", () => el.remove());
+      el.appendChild(span);
+      el.appendChild(dismiss);
+      notifications.appendChild(el);
+    }
+
+    // Shows/hides the "still working" indicator for the conversation currently being viewed. Set on
+    // switching into a conversation with an in-flight turn ("working" frame); cleared once that turn's
+    // next done/message frame arrives, or the view switches again (a "history" frame).
+    function setWorking(active) {
+      workingIndicator.classList.toggle("hidden", !active);
+    }
 
     function renderConversations(items) {
       convList.innerHTML = "";
@@ -636,6 +673,7 @@
         finalizeStreaming();
         autoscroll();
         setProcessing(false);
+        setWorking(false);
       } else if (frame.type === "phase") {
         // Verbose trace: close the previous phase's streamed bubble and start a labeled section.
         finalizeStreaming();
@@ -647,6 +685,14 @@
       } else if (frame.type === "message") {
         addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text);
         if (!frame.proactive) setProcessing(false);  // a reactive message ends the turn (e.g. "(stopped)" / error)
+        setWorking(false);
+      } else if (frame.type === "notification") {
+        // A background turn on some OTHER conversation finished (never the one being viewed -- the
+        // server only sends this when you've switched away); show it without touching this view or its
+        // own working indicator.
+        showNotification(frame.text);
+      } else if (frame.type === "working") {
+        setWorking(!!frame.active);
       } else if (frame.type === "approval") {
         renderApproval(frame.name, frame.arguments);
       } else if (frame.type === "plan") {
@@ -670,6 +716,7 @@
         log.innerHTML = "";  // replace any current transcript
         subagentCards = {};  // fresh view: drop any live sub-agent card references
         stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
+        setWorking(false);  // reset; a "working" frame right behind this one re-shows it if still running
         for (const item of frame.items) {
           if (item.type === "user") addBubble("user", item.text);
           else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user");
@@ -776,6 +823,7 @@
       notice("Disconnected.");
       input.disabled = true; sendBtn.disabled = true;
       setProcessing(false);
+      setWorking(false);
     };
 
     // Plan toggle: a sticky per-request switch. While on, each sent message is planned (drafted, then

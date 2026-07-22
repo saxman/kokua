@@ -82,6 +82,14 @@ conversation and click its `×` to delete it (you are asked to confirm; deleting
 drops you into the most recent remaining one). Memory (facts and documents) is shared across all
 conversations. The CLI remains single-conversation for now.
 
+Conversations run concurrently: switching away from a conversation with a reply still streaming does not
+cancel it, and only the conversation you're viewing streams tokens/thinking/tool activity live. A turn
+that finishes while you're looking elsewhere posts a dismissible notification instead of streaming into
+the view you're on; switch back to see the result. If you switch (or reconnect) into a conversation that
+still has a turn running in the background, a "Working…" indicator appears in the header until that
+turn's next update arrives. Tool-approval prompts (see below) only ever appear for the conversation you
+are currently viewing; a backgrounded or scheduled turn auto-denies any gated tool instead of prompting.
+
 The header's gear button opens a settings panel to change, at runtime, the model generation parameters
 (`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), display prefs
 (`show_thinking` / `show_tools`), and the active model. These changes apply on the next turn and are

@@ -86,6 +86,26 @@ def _parse_image_input(raw: str) -> Optional[tuple[str, list[str]]]:
     return str(obj.get("text", "")), urls
 
 
+async def _sync_view(channel: WebChannel, assistant: Assistant) -> None:
+    """Point the channel at the conversation being viewed and refresh the sidebar/history for it.
+
+    Sets ``channel.active_conversation_id`` before pushing conversations/history, so a turn on this
+    conversation streams from now on. The assistant keeps this in sync on every later select/new/delete
+    (``Assistant._sync_channel_active_id``); this call covers the connect-time case that precedes any of
+    those (otherwise a fresh connection's channel would default to ``None``), and calling it again after
+    an op is a harmless re-assignment of the value the assistant already set.
+
+    If the conversation being switched into already has an in-flight turn (started before this switch,
+    still running in the background), tell the page so it shows a "working" indicator instead of looking
+    idle until that turn's next frame arrives.
+    """
+    channel.active_conversation_id = assistant.active_id
+    await channel.send_conversations(assistant.list_conversations())
+    await channel.send_history(assistant.history, assistant.history_metadata)
+    if assistant.turn_running(assistant.active_id):
+        await channel.send_working(True)
+
+
 def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> Starlette:
     """Build the Starlette app serving the chat page (``/``) and the WebSocket (``/ws``).
 
@@ -161,8 +181,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             return
         # Show the conversation list, the active conversation's history, and the current settings on
         # (re)connect, so the sidebar, chat, and settings panel are all populated.
-        await channel.send_conversations(assistant.list_conversations())
-        await channel.send_history(assistant.history, assistant.history_metadata)
+        await _sync_view(channel, assistant)
         await channel.send_settings(assistant.current_settings())
 
         async def pump() -> None:
@@ -224,8 +243,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                             logger.warning("Could not build agent after conversation delete", exc_info=True)
                             await channel.send("Sorry, that conversation could not be deleted.")
                             continue
-                    await channel.send_conversations(assistant.list_conversations())
-                    await channel.send_history(assistant.history, assistant.history_metadata)
+                    await _sync_view(channel, assistant)
             except WebSocketDisconnect:
                 pass
             finally:

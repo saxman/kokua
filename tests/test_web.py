@@ -284,6 +284,20 @@ async def test_web_channel_send_notification_always_sends():
     assert {"type": "notification", "text": "Task 'Digest' finished"} in ws.frames
 
 
+async def test_web_channel_send_working_emits_frame_regardless_of_foreground():
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    token = streaming_conversation.set("other")  # a background turn's context; must not mute this
+    try:
+        await channel.send_working(True)
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == [{"type": "working", "active": True}]
+
+
 async def test_web_channel_send_approval_request_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -759,6 +773,75 @@ def test_ws_slash_plan_triggers_planning(tmp_path):
     with TestClient(app).websocket_connect("/ws") as ws:
         ws.send_text("/plan do X")
         assert _drain_until(ws, "plan")["text"] == "THE PLAN"  # the per-request /plan drafts a plan
+
+
+# --- Concurrent conversations: active-conversation sync + working indicator ------------------
+
+
+async def test_assistant_active_id_and_turn_running_accessors(tmp_path):
+    from kokua.assistant import Assistant
+
+    assistant = await Assistant.create(_config(tmp_path), WebChannel(_FakeWS()), client=MockAsyncModelClient([]))
+    assert assistant.active_id == assistant._active_id
+    assert assistant.turn_running(assistant.active_id) is False
+    assert assistant.turn_running("no-such-conversation") is False
+
+
+async def test_select_sets_active_conversation_and_streams_from_now(tmp_path):
+    # After selecting a conversation, the channel's active_conversation_id matches, so its turn streams
+    # (Assistant._sync_channel_active_id, exercised here directly rather than through the pump).
+    from kokua.assistant import Assistant
+
+    channel = WebChannel(_FakeWS())
+    assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient([]))
+    first_id = assistant.active_id
+    await assistant.new_conversation()
+    assert channel.active_conversation_id == assistant.active_id != first_id
+
+    await assistant.select_conversation(first_id)
+    assert channel.active_conversation_id == assistant.active_id == first_id
+
+
+async def test_sync_view_sets_active_conversation_id_and_refreshes_state_without_running_turn(tmp_path):
+    from kokua.assistant import Assistant
+    from kokua.frontends.web import _sync_view
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+
+    await _sync_view(channel, assistant)
+
+    assert channel.active_conversation_id == assistant.active_id
+    types = [f["type"] for f in ws.frames]
+    assert "conversations" in types and "history" in types
+    assert "working" not in types  # nothing is running, so no working indicator
+
+
+async def test_switch_into_running_conversation_sends_working_indicator(tmp_path):
+    # Selecting (or connecting into) a conversation that has an in-flight turn emits a "working" frame,
+    # so the page shows the turn is still going rather than looking idle.
+    from aimu.aio import RunHandle
+    from kokua.assistant import Assistant
+    from kokua.frontends.web import _sync_view
+    from kokua.turn_registry import TurnInfo
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+
+    async def forever():
+        await asyncio.Event().wait()
+
+    handle = RunHandle.start(forever())
+    assistant._tracker.add(assistant.active_id, TurnInfo(handle=handle, started=0.0, preview="p"))
+    try:
+        await _sync_view(channel, assistant)
+    finally:
+        handle.cancel()
+        await asyncio.gather(handle.task, return_exceptions=True)
+
+    assert any(f.get("type") == "working" and f.get("active") is True for f in ws.frames)
 
 
 # --- Server round-trip via Starlette TestClient ----------------------------------------------

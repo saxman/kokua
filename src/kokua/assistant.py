@@ -272,6 +272,18 @@ class Assistant:
         return self._store.get(self._active_id)
 
     @property
+    def active_id(self) -> str:
+        """The conversation currently being viewed. Public accessor so a front end doesn't need to
+        reach into `_active_id` directly."""
+        return self._active_id
+
+    def turn_running(self, conversation_id: str) -> bool:
+        """Whether `conversation_id` has an in-flight turn right now. Public accessor so a front end
+        doesn't need to reach into `_tracker` directly (e.g. to decide whether to show a "working"
+        indicator on switching into a conversation)."""
+        return self._tracker.running(conversation_id)
+
+    @property
     def history(self) -> list[dict]:
         """The active conversation's messages (OpenAI-format), for a front end to display."""
         return self._session.messages
