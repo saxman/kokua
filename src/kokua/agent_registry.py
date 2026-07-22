@@ -3,11 +3,10 @@
 Replaces the assistant's single shared agent. Each conversation gets its own agent (own model
 client + message list), built on first access by an injected factory and evicted least-recently-used
 when the cache exceeds its cap. An evicted agent simply rebuilds from persisted state on next
-access, so the cap bounds memory, not correctness; this phase has no caller running a turn on an
-evicted agent, since the global turn lock serializes turns and recency keeps the foreground
-conversation's agent live. `pin`/`unpin` are reference-counted eviction guards provided for a later
-phase (concurrent per-conversation turns), where an in-flight turn must survive across the cap even
-if its conversation isn't the foreground one; unused so far.
+access, so the cap bounds memory, not correctness. `pin`/`unpin` are reference-counted eviction
+guards the assistant holds around any in-flight turn (reactive, proactive, or scheduled), so a turn's
+agent survives across the cap even when its conversation isn't the foreground one and other
+conversations build concurrently.
 
 Pure and Assistant-agnostic: it owns the mapping and its lifecycle; the caller owns what an agent is
 and how it is built (the `build` callable) and run.
