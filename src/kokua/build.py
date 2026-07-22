@@ -8,7 +8,9 @@ with ``apply_settings``).
 
 from __future__ import annotations
 
+import functools
 import logging
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -144,6 +146,25 @@ def build_model_client(config: AssistantConfig, stored: dict):
         raise ModelClientError(str(e)) from e
 
 
+def _guard_store_tool(fn: Callable, lock: threading.Lock) -> Callable:
+    """Wrap a sync store tool so it holds ``lock`` for the whole call, preserving dispatch attributes.
+
+    ``functools.wraps`` carries ``__name__``/``__doc__`` but AIMU's dispatch also reads the custom
+    ``__tool_*`` attributes the tool carries (spec, param adapters, allowed args, etc.); those are
+    copied explicitly so the wrapper stays a drop-in for the original.
+    """
+
+    @functools.wraps(fn)
+    def guarded(*args, **kwargs):
+        with lock:
+            return fn(*args, **kwargs)
+
+    for attr in vars(fn):
+        if attr.startswith("__tool_"):
+            setattr(guarded, attr, getattr(fn, attr))
+    return guarded
+
+
 def build_memory(config: AssistantConfig) -> tuple[Optional[SemanticMemoryStore], Optional[DocumentStore], list]:
     """Build persistent memory and its tools, or ``(None, None, [])`` when memory is disabled.
 
@@ -151,12 +172,20 @@ def build_memory(config: AssistantConfig) -> tuple[Optional[SemanticMemoryStore]
     documents. Both live under the app state dir, so they survive restarts and span conversations
     (unlike per-conversation history). Their tools have distinct names, so both sets coexist on the
     one agent.
+
+    The stores are shared across every per-conversation agent, and Phase B lets turns on different
+    conversations run concurrently, so two turns could invoke these sync tools in parallel (each via
+    ``asyncio.to_thread``) and race on the same store (garbled file, lost update, sqlite lock). Every
+    tool call is guarded by one shared ``threading.Lock`` (a thread lock, not asyncio, since the race
+    is between worker threads). Coarse-grained serialization is fine for a single-user assistant.
     """
     if not config.memory:
         return None, None, []
     memory_store = SemanticMemoryStore(persist_path=str(config.memory_path))
     document_store = DocumentStore(persist_path=str(config.documents_path))
-    tools = make_memory_tools(memory_store) + make_document_tools(document_store)
+    store_lock = threading.Lock()
+    raw_tools = make_memory_tools(memory_store) + make_document_tools(document_store)
+    tools = [_guard_store_tool(fn, store_lock) for fn in raw_tools]
     return memory_store, document_store, tools
 
 

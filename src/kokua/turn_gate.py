@@ -56,6 +56,11 @@ class TurnGate:
                 self._writer_active = True
             finally:
                 self._writer_waiting -= 1
+                # A cancelled wait leaves _writer_waiting decremented; wake the others so any turn
+                # that queued behind this writer re-checks and can proceed promptly. (On the normal
+                # acquisition path this is a harmless spurious wakeup: waiters see _writer_active and
+                # re-wait.)
+                self._cond.notify_all()
         try:
             yield
         finally:

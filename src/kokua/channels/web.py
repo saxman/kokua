@@ -42,6 +42,13 @@ from ..images import ROUTE_PREFIX
 # instances read it to decide whether a turn's frames belong to the conversation being viewed.
 streaming_conversation: ContextVar[Optional[str]] = ContextVar("streaming_conversation", default=None)
 
+# True while a proactive/scheduled turn runs in this task (set by Assistant._proactive /
+# _run_in_new_session). Unlike streaming_conversation, this does not depend on which conversation is
+# viewed: a scheduled task with new_session=False sets streaming_conversation to the viewed
+# conversation and would otherwise look foreground, so Assistant._approve reads this to auto-deny a
+# gated tool for any proactive turn (nobody is watching to confirm an unattended full-access call).
+proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)
+
 # User-role turns the agent loop injects between tool-calling iterations. They are byte-for-byte
 # ordinary user messages except for this provenance tag, so display keys off the tag alone.
 _LOOP_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})

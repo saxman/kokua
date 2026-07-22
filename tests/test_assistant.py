@@ -251,6 +251,64 @@ async def test_assistant_proactive_tags_turn_provenance(tmp_path):
     assert all(p in (None, PROVENANCE_PROACTIVE) for p in tagged)
 
 
+async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path):
+    """A new_session=False proactive run auto-denies a gated tool even when it fires on the CURRENTLY
+    VIEWED conversation (where streaming_conversation == _active_id would otherwise look foreground and
+    wrongly prompt). Unattended turns must never prompt."""
+    cfg = _config(tmp_path, confirm_tools=["execute_python"])
+    client = _RequestsToolOnce("execute_python", {"code": "print(1)"})
+    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+
+    # No streaming_conversation is set by the test; _proactive sets it to _active_id (the viewed
+    # conversation) itself, so only the proactive marker keeps this from prompting.
+    await asyncio.wait_for(assistant._proactive("do it"), timeout=2.0)
+
+    denied = [m for m in client.messages if m.get("role") == "tool"]
+    assert denied and denied[-1]["content"] == "Tool 'execute_python' was not approved."
+
+
+async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
+    """The new_session=True path (fresh conversation, never the viewed one) also auto-denies."""
+    cfg = _config(tmp_path, confirm_tools=["execute_python"])
+    client = _RequestsToolOnce("execute_python", {"code": "print(1)"})
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: client)
+
+    await asyncio.wait_for(assistant._proactive("do it", new_session=True, task_name="t"), timeout=2.0)
+
+    denied = [m for m in client.messages if m.get("role") == "tool"]
+    assert denied and denied[-1]["content"] == "Tool 'execute_python' was not approved."
+
+
+async def test_proactive_pins_agent_for_the_run(tmp_path):
+    """_proactive pins its conversation's agent for the run and unpins after, mirroring _handle, so
+    eviction can't drop the agent mid-run and lose the output."""
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient(["done"]))
+
+    pins: list[str] = []
+    unpins: list[str] = []
+    orig_pin = assistant._registry.pin
+    orig_unpin = assistant._registry.unpin
+
+    def spy_pin(cid):
+        pins.append(cid)
+        return orig_pin(cid)
+
+    def spy_unpin(cid):
+        unpins.append(cid)
+        return orig_unpin(cid)
+
+    assistant._registry.pin = spy_pin
+    assistant._registry.unpin = spy_unpin
+
+    conversation_id = assistant._active_id
+    await assistant._proactive("remind")
+
+    assert pins == [conversation_id]
+    assert unpins == [conversation_id]
+
+
 async def test_assistant_persists_and_restores(tmp_path):
     cfg = _config(tmp_path)
 
@@ -420,6 +478,80 @@ async def test_document_tools_round_trip(tmp_path):
     tools = {fn.__name__: fn for fn in assistant._agent.tools}
     assert tools["save_document"]("/notes/standup.md", "Yesterday, Today, Blockers") == "Saved /notes/standup.md."
     assert tools["read_document"]("/notes/standup.md") == "Yesterday, Today, Blockers"
+
+
+def test_guard_store_tool_preserves_dispatch_attrs():
+    """The store-tool wrapper must stay a drop-in for AIMU dispatch: name/doc and every __tool_* attr."""
+    import threading
+
+    from kokua.build import _guard_store_tool
+
+    def tool(a, b=1):
+        """Add two numbers."""
+        return a + b
+
+    tool.__tool_spec__ = {"name": "tool"}
+    tool.__tool_injected__ = ["ctx"]
+    tool.__tool_required__ = ["a"]
+    tool.__tool_is_async__ = False
+
+    guarded = _guard_store_tool(tool, threading.Lock())
+    assert guarded.__name__ == "tool"
+    assert guarded.__doc__ == "Add two numbers."
+    assert guarded.__tool_spec__ == {"name": "tool"}
+    assert guarded.__tool_injected__ == ["ctx"]
+    assert guarded.__tool_required__ == ["a"]
+    assert guarded.__tool_is_async__ is False
+    assert guarded(2, 3) == 5
+
+
+def test_guard_store_tool_serializes_concurrent_calls():
+    """Two threads calling a wrapped store tool must not run inside the shared store concurrently."""
+    import threading
+    import time
+
+    from kokua.build import _guard_store_tool
+
+    class FakeStore:
+        def __init__(self):
+            self.active = 0
+            self.max_active = 0
+
+        def record(self):
+            # Guarded by the shared lock, so these increments never interleave; without the guard both
+            # threads would be inside during the sleep and drive max_active to 2.
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            time.sleep(0.02)
+            self.active -= 1
+            return "ok"
+
+    store = FakeStore()
+
+    def tool():
+        return store.record()
+
+    tool.__tool_spec__ = {"name": "tool"}
+    guarded = _guard_store_tool(tool, threading.Lock())
+
+    threads = [threading.Thread(target=guarded) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert store.max_active == 1  # calls were serialized: never two inside the store at once
+
+
+def test_build_memory_wraps_tools_preserving_attrs(tmp_path):
+    """build_memory's real memory + document tools survive wrapping with their dispatch attributes."""
+    from kokua.build import build_memory
+
+    _, _, tools = build_memory(_config(tmp_path, memory=True))
+    assert tools
+    for fn in tools:
+        assert fn.__name__
+        assert hasattr(fn, "__tool_spec__")
 
 
 # --- Multiple conversations -------------------------------------------------------------------

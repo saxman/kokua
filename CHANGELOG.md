@@ -198,10 +198,10 @@ installable, modular application.
   string); these are now caught and reported in the chat, like the existing settings-panel handling,
   instead of tearing down the websocket connection.
 
-### Changed
-- Conversations now run concurrently: a turn keeps running when you switch away, streaming only into
-  the conversation you are viewing. Background turns post a completion notification instead of
-  streaming. Switching conversations no longer cancels the in-flight turn. Tool approval prompts only
-  for the conversation you are viewing; background/scheduled turns auto-deny gated tools. Switching into
-  (or connecting into) a conversation with a turn already running in the background shows a "working"
-  indicator until that turn's next frame arrives.
+- **Concurrent conversations**: a turn keeps running when you switch away, streaming only into the
+  conversation you are viewing. Background turns post a completion notification instead of streaming.
+  Switching conversations no longer cancels the in-flight turn. Tool approval prompts only for the
+  conversation you are viewing; background and scheduled/proactive turns always auto-deny gated tools.
+  Switching into (or connecting into) a conversation with a turn already running in the background shows
+  a "working" indicator until that turn's next frame arrives. Shared memory and document tools are
+  serialized with one lock so concurrent turns can't race on the stores.

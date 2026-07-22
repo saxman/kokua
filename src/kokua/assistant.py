@@ -30,7 +30,7 @@ from aimu.sessions import Session, TinyDBSessionStore
 
 from . import runtime_settings
 from .agent_registry import AgentRegistry
-from .channels.web import streaming_conversation
+from .channels.web import proactive_turn, streaming_conversation
 from .build import (
     ModelClientError,
     build_memory,
@@ -569,7 +569,7 @@ class Assistant:
                 logger.info("turn %d submitted for %s: %r", tid, conversation_id, preview)
                 handle = RunHandle.start(self._handle(msg, conversation_id=conversation_id, plan=plan_turn, tid=tid))
                 self._tracker.add(conversation_id, TurnInfo(handle=handle, started=time.monotonic(), preview=preview))
-                handle.task.add_done_callback(lambda _t, cid=conversation_id: self._tracker.remove(cid))
+                handle.task.add_done_callback(lambda _t, cid=conversation_id, h=handle: self._tracker.remove_if(cid, h))
         finally:
             self._scheduler.stop()  # channel closed -> stop the scheduler so run() returns
 
@@ -582,12 +582,13 @@ class Assistant:
     async def _approve(self, name: str, arguments: dict) -> bool:
         """Tool-approval gate run before each tool call (published to the model client per run).
 
-        Ungated tools pass. Otherwise the calling turn is approved only if its conversation is the one
-        the user is currently viewing: ``streaming_conversation`` (set by ``_handle``/``_proactive`` for
-        the duration of the turn) must equal ``self._active_id``. A turn on any other conversation --
-        backgrounded by a switch, or a proactive run on a conversation nobody is looking at -- auto-denies,
-        since no user is watching to confirm an unprompted full-access call. Otherwise prompt over the
-        channel and await the answer, which the serve loop routes here.
+        Ungated tools pass. A proactive/scheduled turn (``proactive_turn`` set) always auto-denies a
+        gated tool: it is unattended, so nobody is watching to confirm, and a ``new_session=False``
+        scheduled task would otherwise look foreground (its ``streaming_conversation`` equals the viewed
+        conversation) and wrongly prompt. Otherwise a reactive turn is approved only if its conversation
+        is the one the user is currently viewing: ``streaming_conversation`` (set by ``_handle`` for the
+        duration of the turn) must equal ``self._active_id``; a turn backgrounded by a switch auto-denies.
+        Otherwise prompt over the channel and await the answer, which the serve loop routes here.
 
         Gated approvals are serialized by ``self._approval_lock``: with concurrent tool calls a round can
         invoke several tools at once, but only one approval is ever pending, so the single
@@ -595,6 +596,8 @@ class Assistant:
         """
         if name not in self._config.confirm_tools:
             return True
+        if proactive_turn.get():
+            return False
         if streaming_conversation.get() != self._active_id:
             return False
         async with self._approval_lock:
@@ -773,6 +776,10 @@ class Assistant:
         # conversations while it's in flight (Task 6 no longer cancels a turn on switch).
         conversation_id = self._active_id
         token = streaming_conversation.set(conversation_id)
+        proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run (unattended)
+        # Pinned for the whole run so LRU eviction can't drop this conversation's agent mid-run (which
+        # would leave _persist rebuilding a stale one and losing this turn's output), mirroring _handle.
+        self._registry.pin(conversation_id)
         try:
             async with self._gate.turn(conversation_id):
                 agent = self._registry.get(conversation_id)
@@ -795,6 +802,8 @@ class Assistant:
             logger.exception("proactive turn error")
             await self._channel.send(f"A scheduled task failed: {describe_error(exc)}")
         finally:
+            self._registry.unpin(conversation_id)
+            proactive_turn.reset(proactive_token)
             streaming_conversation.reset(token)
 
     async def _run_in_new_session(self, prompt: str, task_name: Optional[str]) -> None:
@@ -817,6 +826,10 @@ class Assistant:
         session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now, "title": title})
         self._store.save(session)
         token = streaming_conversation.set(session.key)
+        proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run (unattended)
+        # Pinned for the whole run so LRU eviction can't drop this session's agent mid-run and leave
+        # _persist rebuilding a stale one, mirroring _handle and the non-new-session branch.
+        self._registry.pin(session.key)
         try:
             async with self._gate.turn(session.key):
                 agent = self._registry.get(session.key)
@@ -826,6 +839,8 @@ class Assistant:
                     message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
                 self._persist(session.key)
         finally:
+            self._registry.unpin(session.key)
+            proactive_turn.reset(proactive_token)
             streaming_conversation.reset(token)
         try:
             await self._maybe_push_conversations()
