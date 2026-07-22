@@ -72,6 +72,13 @@ default value vs. opt-in `None`. When it recurs, capture (before restart) what w
 tool call streaming? which one?) and whether the backend was responsive, plus the persisted state.
 
 ## 9. Don't cancel the in-flight turn when the user switches conversations
+**Resolved by the agent-per-thread refactor (Phase A + B, merged 2026-07-22).** Each conversation now
+owns its agent + model client (`AgentRegistry`); switching no longer cancels the running turn; a
+backgrounded turn persists to its own conversation, is muted (only the viewed conversation streams),
+and posts a completion notification; approval is foreground-gated (background/proactive turns
+auto-deny). The single shared lock was replaced by `TurnGate`. Left below for history. See the specs
+and plans under `docs/superpowers/`.
+
 Switching conversations cancels a running reply. `Assistant.select_conversation` (and
 `new_conversation` / `delete_conversation`) call `_cancel_current_turn()` before `agent.restore(...)`,
 so a slow turn (e.g. 60s+ on a large local model) is lost when the user clicks away and back. This is a
@@ -103,3 +110,20 @@ and defers cancel/restore until the user actually sends in the other conversatio
 follow-on to the multiple-conversations design under `docs/superpowers/specs/`. The real trigger is
 often latency (TODO #8-adjacent): trimming the per-turn tool surface (e.g. the robinhood MCP server adds
 ~45 tools to every request) makes users less likely to wander off mid-turn.
+
+## 10. A message can bind to the wrong conversation if the user switches immediately after sending
+A reactive turn is bound to a conversation at the moment `_serve_channel` dequeues its message
+(`conversation_id = self._active_id` at submit), not at the moment the message was enqueued. The web
+front end feeds a chat message onto the channel queue (`channel.feed`) but handles `new`/`select`/
+`delete` controls inline in `frontends/web.py`'s `pump()` (which mutate `self._active_id`). So if a
+`new`/`select` control is processed in the window between `feed` and the serve loop's dequeue, the turn
+binds to the conversation switched *to*, and its reply renders there instead of where the user typed it.
+
+The window is sub-millisecond (the serve loop dequeues on the next loop tick), so a human can't
+realistically trigger it; it was surfaced deterministically by the Playwright e2e suite
+(`tests/test_web_e2e.py`), which now waits for the turn to be observably running before switching to
+avoid the race rather than assert the bug. Low priority. Fix direction: bind the message to the active
+conversation at *enqueue* time -- e.g. capture `_active_id` when feeding and carry it on the queued
+message, or route control frames (`new`/`select`/`delete`) through the same inbound queue as messages
+so their ordering relative to a just-sent message is preserved. Introduced by the agent-per-thread
+refactor (Phase B); before it, one shared agent meant every turn used the currently-active state anyway.
