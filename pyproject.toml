@@ -39,6 +39,9 @@ dev = [
     "ruff",
     "pytest",
     "pytest-asyncio",
+    # Browser-driven end-to-end tests of the web UI's client JS (opt-in: `pytest -m e2e`).
+    # Needs a Chromium: `uv run playwright install chromium`.
+    "pytest-playwright",
 ]
 
 [project.urls]
@@ -97,3 +100,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
+# The default suite is mock-only and fast. Browser-driven UI tests are opt-in (they need a running
+# server + Chromium), so deselect them unless explicitly requested with `pytest -m e2e`.
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: browser-driven end-to-end test of the web UI (opt-in; needs the web extra + Chromium)",
+]

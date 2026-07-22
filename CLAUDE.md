@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 uv sync --all-extras                     # install; pulls the editable sibling ../aimu (see below)
-uv run pytest -q                         # full test suite (mock-only: no model, network, or keys)
+uv run pytest -q                         # full test suite (mock-only: no model, network, or keys; e2e deselected)
 uv run pytest tests/test_web.py::test_ws_round_trip -q   # a single test
+uv run pytest -m e2e                      # opt-in browser UI tests (needs `playwright install chromium`)
 uv run ruff check . && uv run ruff format --check .      # lint (format with `ruff format .`)
 uv run kokua --frontend web              # run the web UI (or `kokua-web`); `kokua` alone is the CLI
 uv run kokua config init                 # scaffold $KOKUA_HOME/config.toml from the documented example
@@ -83,8 +84,13 @@ Tests are mock-only. `tests/helpers.py` provides `MockAsyncModelClient`; `tests/
 `KOKUA_HOME` to a temp dir so tests never touch real state. The mock **fakes tool-call rounds** rather
 than running AIMU's real dispatch, so features that hook dispatch (e.g. the tool-approval gate) are
 tested by calling `agent._prepare_run()` then `agent.model_client._handle_tool_calls([...])` directly.
-Client-side page JS (markdown rendering, theme, sidebar) has no pytest coverage — verify it with a
-headless browser.
+The default suite is mock-only and fast. Client-side page JS is covered separately by an **opt-in**
+end-to-end suite (`tests/test_web_e2e.py`, marked `e2e`, deselected by default): it drives the real
+`index.html` in headless Chromium against a live server backed by a mock client, covering the
+frame->DOM behaviors unit tests can't reach (streamed reply rendering, background-turn muting +
+notification, the "working" indicator). Run it with `uv run pytest -m e2e` (needs the `web` extra +
+`uv run playwright install chromium`); it is skipped, not errored, when those aren't installed. It
+does not gate the default suite. Behaviors it doesn't cover still warrant a manual browser check.
 
 ## Conventions
 
