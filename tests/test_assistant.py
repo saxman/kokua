@@ -751,26 +751,39 @@ async def test_approve_allows_ungated_tool_without_prompting(tmp_path):
 
 
 async def test_approve_gated_tool_waits_for_routed_answer(tmp_path):
+    from kokua.channels.web import streaming_conversation
+
     channel = FakeChannel()
     assistant = await Assistant.create(
         _config(tmp_path, confirm_tools=["add_skill_script"]), channel, client=MockAsyncModelClient([])
     )
-    task = asyncio.create_task(assistant._approve("add_skill_script", {"skill_name": "x"}))
-    await asyncio.sleep(0)  # let the policy register the pending approval and prompt
-    assert assistant._pending_approval is not None
-    assert channel.sent  # a prompt was sent to the user
-    assistant._pending_approval.set_result(True)
-    assert await task is True
+    # Foreground: the calling turn's conversation is the one currently viewed.
+    token = streaming_conversation.set(assistant._active_id)
+    try:
+        task = asyncio.create_task(assistant._approve("add_skill_script", {"skill_name": "x"}))
+        await asyncio.sleep(0)  # let the policy register the pending approval and prompt
+        assert assistant._pending_approval is not None
+        assert channel.sent  # a prompt was sent to the user
+        assistant._pending_approval.set_result(True)
+        assert await task is True
+    finally:
+        streaming_conversation.reset(token)
 
 
 async def test_approve_proactive_auto_denies_gated_tool(tmp_path):
+    from kokua.channels.web import streaming_conversation
+
     channel = FakeChannel()
     assistant = await Assistant.create(
         _config(tmp_path, confirm_tools=["add_skill_script"]), channel, client=MockAsyncModelClient([])
     )
-    assistant._in_proactive = True
-    assert await assistant._approve("add_skill_script", {}) is False
-    assert channel.sent == []  # auto-deny: no prompt, no waiting
+    # Background: the calling turn's conversation ("elsewhere") isn't the one being viewed.
+    token = streaming_conversation.set("elsewhere")
+    try:
+        assert await assistant._approve("add_skill_script", {}) is False
+        assert channel.sent == []  # auto-deny: no prompt, no waiting
+    finally:
+        streaming_conversation.reset(token)
 
 
 async def test_serve_loop_routes_message_to_pending_approval(tmp_path):
@@ -827,9 +840,9 @@ async def test_denied_gated_tool_does_not_run(tmp_path):
     cfg = _config(tmp_path, confirm_tools=["add_skill_script"])
     client = _RequestsToolOnce("add_skill_script", {"skill_name": "disk", "filename": "u.py", "content": "print(1)\n"})
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
-    # Proactive context makes _approve auto-deny without an interactive prompt, so the real dispatch
-    # path (the Agent's tool-loop engine + approval gate) can be exercised by a normal run.
-    assistant._in_proactive = True
+    # No streaming_conversation is set around this call, so it defaults to None -- not the viewed
+    # conversation -- making _approve auto-deny without an interactive prompt. That exercises the real
+    # dispatch path (the Agent's tool-loop engine + approval gate) via a normal run.
 
     await assistant._agent.run("go")
 
@@ -849,6 +862,8 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
     resolved, pending_approval cleared) before it acquires the lock, creates its own future, and
     resolves it safely.
     """
+    from kokua.channels.web import streaming_conversation
+
     cfg = _config(tmp_path, confirm_tools=["execute_python"])
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
@@ -871,11 +886,208 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
         order.append(tag)
         return result
 
-    results = await asyncio.wait_for(asyncio.gather(call("a"), call("b")), timeout=2.0)
+    # Foreground: both concurrent calls belong to the viewed conversation.
+    token = streaming_conversation.set(assistant._active_id)
+    try:
+        results = await asyncio.wait_for(asyncio.gather(call("a"), call("b")), timeout=2.0)
+    finally:
+        streaming_conversation.reset(token)
 
     assert results == [True, True]
     assert prompts == ["execute_python", "execute_python"]  # both prompted, one at a time
     assert set(order) == {"a", "b"}
+
+
+# --- foreground-gated approval + switch-away concurrency (Task 6) -----------------------------
+
+
+async def test_background_turn_auto_denies_gated_tool(tmp_path):
+    from kokua.channels.web import streaming_conversation
+
+    cfg = _config(tmp_path, confirm_tools=["execute_python"])
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    viewed = assistant._active_id
+    await assistant.new_conversation()  # _active_id now the new (background) conversation
+    background = assistant._active_id
+    await assistant.select_conversation(viewed)  # make `viewed` active again
+    # A turn running in `background` is not the viewed conversation -> auto-deny.
+    token = streaming_conversation.set(background)
+    try:
+        assert await assistant._approve("execute_python", {}) is False
+    finally:
+        streaming_conversation.reset(token)
+
+
+async def test_foreground_turn_prompts_for_approval(tmp_path):
+    from kokua.channels.web import streaming_conversation
+
+    cfg = _config(tmp_path, confirm_tools=["execute_python"])
+    channel = FakeChannel()
+    assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient([]))
+    viewed = assistant._active_id
+    token = streaming_conversation.set(viewed)
+    try:
+        approve_task = asyncio.create_task(assistant._approve("execute_python", {}))
+        await asyncio.sleep(0.01)
+        assert assistant._pending_approval is not None and not assistant._pending_approval.done()
+        assistant._pending_approval.set_result(True)
+        assert await approve_task is True
+    finally:
+        streaming_conversation.reset(token)
+
+
+async def test_switch_away_does_not_cancel_running_turn(tmp_path):
+    from kokua.turn_registry import TurnInfo
+    from aimu.aio import RunHandle
+
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    conv_a = assistant._active_id
+
+    async def forever():
+        await asyncio.Event().wait()
+
+    handle = RunHandle.start(forever())
+    assistant._tracker.add(conv_a, TurnInfo(handle=handle, started=0.0, preview="p"))
+    await assistant.new_conversation()  # switches away from A
+    assert not handle.done  # A's turn keeps running
+    handle.cancel()
+    await asyncio.gather(handle.task, return_exceptions=True)
+
+
+async def test_select_conversation_does_not_cancel_running_turn(tmp_path):
+    """Mirrors the new_conversation case: select_conversation must not cancel the turn either."""
+    from kokua.turn_registry import TurnInfo
+    from aimu.aio import RunHandle
+
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    conv_a = assistant._active_id
+    conv_b = await assistant.new_conversation()
+    await assistant.select_conversation(conv_a)
+
+    async def forever():
+        await asyncio.Event().wait()
+
+    handle = RunHandle.start(forever())
+    assistant._tracker.add(conv_a, TurnInfo(handle=handle, started=0.0, preview="p"))
+    await assistant.select_conversation(conv_b)  # switches away from A
+    assert not handle.done
+    handle.cancel()
+    await asyncio.gather(handle.task, return_exceptions=True)
+
+
+async def test_switch_away_resolves_pending_approval_as_denied(tmp_path):
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    assistant._pending_approval = asyncio.get_running_loop().create_future()
+    await assistant.new_conversation()  # switching away
+    assert assistant._pending_approval is None or assistant._pending_approval.result() is False
+
+
+async def test_switch_away_resolves_pending_plan_as_rejected(tmp_path):
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    assistant._pending_plan = asyncio.get_running_loop().create_future()
+    await assistant.select_conversation(assistant._active_id)  # switching (even to the same id)
+    assert assistant._pending_plan is None or assistant._pending_plan.result() is None
+
+
+async def test_delete_conversation_cancels_its_own_running_turn(tmp_path):
+    """delete_conversation cancels the DELETED conversation's own turn -- there is no conversation
+    left for it to keep persisting to -- even if that conversation isn't the one being viewed."""
+    from kokua.turn_registry import TurnInfo
+    from aimu.aio import RunHandle
+
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    conv_a = assistant._active_id
+    conv_b = await assistant.new_conversation()  # active_id now B; A is inactive
+    assert assistant._active_id == conv_b
+
+    async def forever():
+        await asyncio.Event().wait()
+
+    handle = RunHandle.start(forever())
+    assistant._tracker.add(conv_a, TurnInfo(handle=handle, started=0.0, preview="p"))
+
+    await assistant.delete_conversation(conv_a)
+    await asyncio.sleep(0.01)
+    assert handle.done  # A's own turn was cancelled
+    assert assistant._active_id == conv_b  # deleting an inactive conversation leaves active untouched
+
+
+async def test_switch_methods_sync_channel_active_conversation_id(tmp_path):
+    """Item 1 from the Task 5 review: the muting key (WebChannel.active_conversation_id) and the
+    background-completion notification key (Assistant._active_id) must agree on what's viewed, so
+    every switch method mirrors _active_id onto the channel (when it tracks one)."""
+
+    class _TrackingChannel(FakeChannel):
+        def __init__(self):
+            super().__init__()
+            self.active_conversation_id = None
+
+    channel = _TrackingChannel()
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient([]))
+
+    new_id = await assistant.new_conversation()
+    assert channel.active_conversation_id == new_id == assistant._active_id
+
+    other_id = await assistant.new_conversation()
+    assert channel.active_conversation_id == other_id == assistant._active_id
+
+    await assistant.select_conversation(new_id)
+    assert channel.active_conversation_id == new_id == assistant._active_id
+
+    await assistant.delete_conversation(other_id)
+    assert channel.active_conversation_id == assistant._active_id  # unaffected: not the deleted one
+
+    await assistant.delete_conversation(new_id)  # deletes the viewed one -> falls back to a fresh one
+    assert channel.active_conversation_id == assistant._active_id
+
+
+async def test_background_turn_notifies_on_success_when_switched_away(tmp_path):
+    """Reconciled notification key (item 1): fires exactly when the turn's conversation was muted,
+    i.e. `conversation_id != self._active_id` at completion -- the same notion WebChannel's own
+    muting uses once its active_conversation_id is kept in sync (see the sync test above)."""
+
+    class _NotifyChannel(FakeChannel):
+        async def send_notification(self, text: str) -> None:
+            self.sent.append(f"[notify] {text}")
+
+    channel = _NotifyChannel()
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient(["ok"]))
+    conv_a = assistant._active_id
+    await assistant.new_conversation()  # switch away from A before A's (background) turn runs
+    assert assistant._active_id != conv_a
+
+    await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=conv_a)
+
+    assert any(s.startswith("[notify]") for s in channel.sent)
+
+
+async def test_background_turn_error_does_not_notify(tmp_path):
+    """Item 2 from the Task 5 review: a muted turn that errors must not claim 'reply ready'."""
+
+    class _NotifyChannel(FakeChannel):
+        async def send_notification(self, text: str) -> None:
+            self.sent.append(f"[notify] {text}")
+
+    channel = _NotifyChannel()
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(
+        cfg, channel, client_factory=lambda cid: MockAsyncModelClient([Exception("boom")])
+    )
+    conv_a = assistant._active_id
+    await assistant.new_conversation()  # switch away from A before A's (background) turn runs
+    assert assistant._active_id != conv_a
+
+    await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=conv_a)
+
+    assert not any(s.startswith("[notify]") for s in channel.sent)
+    assert any("failed" in s for s in channel.sent)  # the error reply itself still went out (muted)
 
 
 # --- /stop cancellation -----------------------------------------------------------------------

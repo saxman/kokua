@@ -8,10 +8,13 @@ replay, and tool-call approval prompts. Each is sent through the inherited publi
 Phase B lets turns on different conversations run concurrently, but only the conversation the user is
 currently viewing should stream token/thinking/tool frames; a background turn runs silently and posts a
 ``notification`` frame on completion instead. The module-level :data:`streaming_conversation` contextvar
-carries the running turn's conversation id (set by ``Assistant._handle`` for the task running that turn);
-:meth:`WebChannel._foreground` compares it against :attr:`WebChannel.active_conversation_id` (the viewed
-conversation) to decide whether to emit. ``None`` means "no turn context" (e.g. a direct push, or the
-CLI channel, which has no muting at all) and is always treated as foreground.
+carries the running turn's conversation id (set by ``Assistant._handle``/``_proactive`` for the task
+running that turn); :meth:`WebChannel._foreground` compares it against
+:attr:`WebChannel.active_conversation_id` (the viewed conversation) to decide whether to emit. ``None``
+means "no turn context" (e.g. a direct push, or the CLI channel, which has no muting at all) and is
+always treated as foreground. ``Assistant._approve`` reads the same contextvar (against
+``Assistant._active_id`` rather than this channel's ``active_conversation_id``) to gate tool approval on
+foreground: a background turn auto-denies a gated tool since no user is watching to confirm it.
 """
 
 from __future__ import annotations

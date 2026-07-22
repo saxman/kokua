@@ -141,9 +141,6 @@ class Assistant:
         # approve/edit/reject, the serve loop resolves the future. Mirrors the approval gate.
         self._pending_plan: Optional[asyncio.Future] = None
         self._pending_plan_text = ""
-        # True while a proactive (unprompted) turn runs, so _approve auto-denies gated tools (no
-        # user is waiting to confirm).
-        self._in_proactive = False
         # The active model client's provider built-in generate kwargs, snapshotted before any override
         # is layered on, so a settings change (or a cleared field) can rebuild from a clean base.
         # Assigned by create() and refreshed on a runtime model switch.
@@ -302,7 +299,9 @@ class Assistant:
 
     async def _cancel_current_turn(self) -> None:
         """Cancel the viewed conversation's in-flight turn (if any) and let it settle, so its partial
-        state persists to the conversation it belongs to before we switch away."""
+        state persists to the conversation it belongs to before we switch its agent's client (a model
+        switch, unlike a conversation switch, replaces the client under it, so the in-flight turn
+        cannot be left running)."""
         info = self._tracker.get(self._active_id)
         if info is not None and not info.handle.done:
             info.handle.cancel()
@@ -311,67 +310,102 @@ class Assistant:
             except Exception:
                 pass
 
+    def _sync_channel_active_id(self) -> None:
+        """Mirror ``_active_id`` onto the channel's ``active_conversation_id`` (if it tracks one), so
+        ``WebChannel``'s foreground-muting and this class's background-completion notification (in
+        ``_handle``) agree on which conversation is being viewed. A no-op for a channel that doesn't
+        track a viewed conversation (the CLI channel, or a test double)."""
+        if hasattr(self._channel, "active_conversation_id"):
+            self._channel.active_conversation_id = self._active_id
+
+    def _abandon_pending_interactions(self) -> None:
+        """Resolve any pending tool approval or plan review as denied/rejected.
+
+        Called before switching the viewed conversation away from the turn that raised them: that
+        turn keeps running in the background (Task 6 drops the old cancel-on-switch behavior), so
+        without this its awaited future would hang forever, and a reply the user types after
+        switching could otherwise be misrouted to it instead of starting a new turn."""
+        if self._pending_approval is not None and not self._pending_approval.done():
+            self._pending_approval.set_result(False)
+        if self._pending_plan is not None and not self._pending_plan.done():
+            self._pending_plan.set_result(None)
+
     async def new_conversation(self) -> str:
         """Start and switch to a new, empty conversation; returns its id.
 
-        If the new conversation's agent fails to build (``ModelClientError``), the active pointer
-        reverts to the previous conversation before re-raising, so the caller is never left active on
-        a conversation whose agent doesn't work. The new session record itself still lingers in the
-        store, unused but harmless (mirrors an ordinary empty conversation the user never sent to).
+        The previous conversation's turn (if any) keeps running in the background -- switching no
+        longer cancels it (Task 6). If the new conversation's agent fails to build
+        (``ModelClientError``), the active pointer reverts to the previous conversation before
+        re-raising, so the caller is never left active on a conversation whose agent doesn't work.
+        The new session record itself still lingers in the store, unused but harmless (mirrors an
+        ordinary empty conversation the user never sent to).
         """
-        await self._cancel_current_turn()
+        self._abandon_pending_interactions()
         previous_id = self._active_id
         now = datetime.now().isoformat()
         session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
         self._store.save(session)
         self._active_id = session.key
+        self._sync_channel_active_id()
         try:
             self._registry.get(self._active_id)  # build the (empty) agent eagerly so it is the live one
         except Exception:
             self._active_id = previous_id
+            self._sync_channel_active_id()
             raise
         return session.key
 
     async def select_conversation(self, conversation_id: str) -> None:
         """Switch the active conversation to an existing one; its agent (re)builds from the store.
 
-        If the build fails, the active pointer reverts to the previous conversation before
-        re-raising, so the caller is never left active on a conversation whose agent doesn't work.
+        The previous conversation's turn (if any) keeps running in the background -- switching no
+        longer cancels it (Task 6). If the build fails, the active pointer reverts to the previous
+        conversation before re-raising, so the caller is never left active on a conversation whose
+        agent doesn't work.
         """
-        await self._cancel_current_turn()
+        self._abandon_pending_interactions()
         previous_id = self._active_id
         self._active_id = conversation_id
+        self._sync_channel_active_id()
         try:
             self._registry.get(self._active_id)
         except Exception:
             self._active_id = previous_id
+            self._sync_channel_active_id()
             raise
 
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation. If it is the active one, switch to the most-recently-updated
         remaining conversation (or a fresh empty one if none remain).
 
-        If that replacement's agent fails to build, the active pointer reverts to the just-deleted
-        id before re-raising. Its store record and registry entry are already gone by that point (the
-        delete itself is not rolled back), so this is a best-effort revert: it keeps ``_active_id``
-        from pointing at some OTHER untested conversation, but a caller that touches ``self._agent``
-        afterward will hit the same build failure again. The front end is expected to surface the
-        re-raised error and stop, not retry immediately.
+        Unlike select/new, this DOES cancel a turn -- but only the deleted conversation's own (there
+        is no conversation left for it to keep persisting to). If that replacement's agent fails to
+        build, the active pointer reverts to the just-deleted id before re-raising. Its store record
+        and registry entry are already gone by that point (the delete itself is not rolled back), so
+        this is a best-effort revert: it keeps ``_active_id`` from pointing at some OTHER untested
+        conversation, but a caller that touches ``self._agent`` afterward will hit the same build
+        failure again. The front end is expected to surface the re-raised error and stop, not retry
+        immediately.
         """
+        info = self._tracker.get(conversation_id)
+        if info is not None and not info.handle.done:
+            info.handle.cancel()
         deleting_active = conversation_id == self._active_id
         if deleting_active:
-            await self._cancel_current_turn()
+            self._abandon_pending_interactions()
         previous_id = self._active_id
         async with self._gate.exclusive():
             self._store.delete(conversation_id)
             self._registry.discard(conversation_id)
             if deleting_active:
                 self._active_id = _active_session(self._store).key
+                self._sync_channel_active_id()
         if deleting_active:
             try:
                 self._registry.get(self._active_id)
             except Exception:
                 self._active_id = previous_id
+                self._sync_channel_active_id()
                 raise
 
     def current_settings(self) -> dict:
@@ -536,9 +570,12 @@ class Assistant:
     async def _approve(self, name: str, arguments: dict) -> bool:
         """Tool-approval gate run before each tool call (published to the model client per run).
 
-        Ungated tools pass. A proactive (unprompted) turn auto-denies a gated tool, since no user is
-        waiting to confirm and an unprompted full-access call is what approval guards against.
-        Otherwise prompt over the channel and await the answer, which the serve loop routes here.
+        Ungated tools pass. Otherwise the calling turn is approved only if its conversation is the one
+        the user is currently viewing: ``streaming_conversation`` (set by ``_handle``/``_proactive`` for
+        the duration of the turn) must equal ``self._active_id``. A turn on any other conversation --
+        backgrounded by a switch, or a proactive run on a conversation nobody is looking at -- auto-denies,
+        since no user is watching to confirm an unprompted full-access call. Otherwise prompt over the
+        channel and await the answer, which the serve loop routes here.
 
         Gated approvals are serialized by ``self._approval_lock``: with concurrent tool calls a round can
         invoke several tools at once, but only one approval is ever pending, so the single
@@ -546,7 +583,7 @@ class Assistant:
         """
         if name not in self._config.confirm_tools:
             return True
-        if self._in_proactive:
+        if streaming_conversation.get() != self._active_id:
             return False
         async with self._approval_lock:
             self._pending_approval = asyncio.get_running_loop().create_future()
@@ -576,13 +613,14 @@ class Assistant:
         # Pinned for the whole turn so LRU eviction can't drop this conversation's agent out from
         # under an in-flight turn, even if other conversations' turns push it past the cache cap.
         self._registry.pin(conversation_id)
-        # The web channel mutes a background turn's streaming frames (only the conversation being
-        # viewed streams; see channels/web.py). The contextvar carries this turn's conversation id for
-        # the duration of this task (and its awaited children, e.g. agent.run); set only for a channel
-        # that supports muting -- the CLI channel has no `_foreground` and always streams, single-view.
-        token = None
-        if hasattr(self._channel, "_foreground"):
-            token = streaming_conversation.set(conversation_id)
+        # Carries this turn's conversation id for the duration of this task (and its awaited children,
+        # e.g. agent.run / a gated tool's _approve call) for two readers: the web channel mutes a
+        # background turn's streaming frames (only the conversation being viewed streams; see
+        # channels/web.py), and _approve auto-denies a gated tool whose turn isn't the viewed
+        # conversation. Set unconditionally -- even the CLI channel (single-view, never switches) needs
+        # it so its turn's conversation_id reads as foreground in _approve.
+        token = streaming_conversation.set(conversation_id)
+        succeeded = False
         try:
             async with self._gate.turn(conversation_id):
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
@@ -614,16 +652,18 @@ class Assistant:
                     await self._channel.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
                 else:
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
+                    succeeded = True
                 if self._persist(conversation_id):
                     await self._maybe_push_conversations()
         finally:
-            if token is not None:
-                streaming_conversation.reset(token)
+            streaming_conversation.reset(token)
             self._registry.unpin(conversation_id)
         # The user switched away before this turn finished (it ran, and completed, in the background):
-        # tell them rather than silently updating a conversation they're not looking at. Not reached on
-        # the cancelled-turn path above, which returns before this point.
-        if conversation_id != self._active_id:
+        # tell them rather than silently updating a conversation they're not looking at. Gated on
+        # `succeeded` (not reached on the cancelled-turn path above, which returns before this point) so
+        # a muted error doesn't get a misleading "reply ready" -- its failure message already went out
+        # muted, same as a successful reply would have; there is nothing more useful to say here.
+        if succeeded and conversation_id != self._active_id:
             notify = getattr(self._channel, "send_notification", None)
             if notify is not None:
                 title = self._store.get(conversation_id).metadata.get("title") or "a conversation"
@@ -645,10 +685,7 @@ class Assistant:
         lines.append(f"- active turns: {self._gate.active_turns()}")
         approval = self._pending_approval is not None and not self._pending_approval.done()
         plan = self._pending_plan is not None and not self._pending_plan.done()
-        lines.append(
-            f"- pending approval: {'yes' if approval else 'no'} | "
-            f"pending plan: {'yes' if plan else 'no'} | proactive: {'yes' if self._in_proactive else 'no'}"
-        )
+        lines.append(f"- pending approval: {'yes' if approval else 'no'} | pending plan: {'yes' if plan else 'no'}")
         for conversation_id, info in turns:
             if info.handle.done:
                 continue
@@ -700,36 +737,41 @@ class Assistant:
         """Run an unprompted turn with ``prompt`` and surface the reply.
 
         The substrate for scheduled tasks: a caller (the scheduler) fires this with the task's
-        instruction. Gated tools auto-deny while it runs (see ``_approve``), since no user is present
-        to approve them. With ``new_session`` set (and a multi-conversation channel), the turn runs in
-        a fresh conversation and the user's active conversation is restored afterward, so a scheduled
+        instruction. Sets ``streaming_conversation`` to this run's conversation for the duration, so
+        ``_approve`` gates a gated tool call the same way it would for any other turn: prompted if that
+        conversation is the one ``self._active_id`` currently points at, auto-denied otherwise (no user
+        watching to confirm). With ``new_session`` set (and a multi-conversation channel), the turn runs
+        in a fresh conversation and the user's active conversation is restored afterward, so a scheduled
         run does not hijack whatever the user is currently viewing.
         """
         multi_conversation = getattr(self._channel, "send_conversations", None) is not None
-        # Each branch takes at most one gate hold, never both: the new-session branch's work happens
-        # entirely on the new conversation (inside _run_in_new_session's own gate.turn(new_id)), and
-        # the non-new-session branch's work happens on the viewed conversation (gate.turn(self._active_id)
-        # here). Nesting an outer hold on self._active_id around a call that acquires a *different*
-        # conversation's hold was a latent deadlock: with the gate's writer-preference, a concurrent
-        # exclusive() (e.g. a settings change) can see this task's outer reader stuck waiting to
-        # re-enter as an inner reader on the new conversation, while the writer itself waits for that
-        # outer reader to drop to zero -- neither side can proceed.
-        self._in_proactive = True
+        # Each branch takes at most one gate hold, never both: returning right after
+        # _run_in_new_session leaves it as the only holder of its own gate.turn(new_id); nesting an
+        # outer hold on self._active_id around that call was a latent deadlock (regression-tested by
+        # test_proactive_new_session_holds_at_most_one_gate_turn) -- with the gate's writer-preference,
+        # a concurrent exclusive() could see this task's outer reader stuck waiting to re-enter as an
+        # inner reader on the new conversation, while the writer waits for that outer reader to drop
+        # to zero, and neither side can proceed.
+        if new_session and multi_conversation:
+            await self._run_in_new_session(prompt, task_name)
+            return
+        # Captured once so the rest of this run is internally consistent even if the user switches
+        # conversations while it's in flight (Task 6 no longer cancels a turn on switch).
+        conversation_id = self._active_id
+        token = streaming_conversation.set(conversation_id)
         try:
-            if new_session and multi_conversation:
-                await self._run_in_new_session(prompt, task_name)
-            else:
-                async with self._gate.turn(self._active_id):
-                    # Tag every message this unprompted run appends so replayed history can distinguish
-                    # it from a user-driven turn. The agent doesn't reset on run (system prompt lives on
-                    # the client), so the pre-run length is a stable start index for the exchange.
-                    start = len(self._agent.model_client.messages)
-                    reply = await self._agent.run(prompt)
-                    for message in self._agent.model_client.messages[start:]:
-                        message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
-                    await self._channel.send(reply)
-                    if self._persist(self._active_id):
-                        await self._maybe_push_conversations()
+            async with self._gate.turn(conversation_id):
+                agent = self._registry.get(conversation_id)
+                # Tag every message this unprompted run appends so replayed history can distinguish
+                # it from a user-driven turn. The agent doesn't reset on run (system prompt lives on
+                # the client), so the pre-run length is a stable start index for the exchange.
+                start = len(agent.model_client.messages)
+                reply = await agent.run(prompt)
+                for message in agent.model_client.messages[start:]:
+                    message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
+                await self._channel.send(reply)
+                if self._persist(conversation_id):
+                    await self._maybe_push_conversations()
         except ModelConnectionError as exc:
             # Surface the reason and swallow it: a scheduled turn has no user awaiting, and letting it
             # propagate would crash the scheduler task (`_fire_job` has no except).
@@ -739,7 +781,7 @@ class Assistant:
             logger.exception("proactive turn error")
             await self._channel.send(f"A scheduled task failed: {describe_error(exc)}")
         finally:
-            self._in_proactive = False
+            streaming_conversation.reset(token)
 
     async def _run_in_new_session(self, prompt: str, task_name: Optional[str]) -> None:
         """Run a proactive turn in a fresh conversation, then restore the active one.
@@ -748,6 +790,9 @@ class Assistant:
         only gate hold for the call, on the new conversation's id, around the actual run. Switching
         conversations is just an active-id swap (each conversation has its own agent), restored in a
         ``finally`` so the user's active conversation is never left pointing at the task's session.
+        Also sets ``streaming_conversation`` to the new session for the run's duration, so a gated
+        tool call it makes goes through ``_approve``'s ordinary foreground check consistently with any
+        other turn (``self._active_id`` points here for the same duration, so it reads as foreground).
         """
         previous_id = self._active_id
         now = datetime.now().isoformat()
@@ -755,6 +800,7 @@ class Assistant:
         session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now, "title": title})
         self._store.save(session)
         self._active_id = session.key
+        token = streaming_conversation.set(session.key)
         try:
             async with self._gate.turn(session.key):
                 agent = self._registry.get(self._active_id)
@@ -764,6 +810,7 @@ class Assistant:
                     message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
                 self._persist(session.key)
         finally:
+            streaming_conversation.reset(token)
             self._active_id = previous_id
         try:
             await self._maybe_push_conversations()
