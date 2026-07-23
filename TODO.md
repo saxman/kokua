@@ -127,3 +127,12 @@ conversation at *enqueue* time -- e.g. capture `_active_id` when feeding and car
 message, or route control frames (`new`/`select`/`delete`) through the same inbound queue as messages
 so their ordering relative to a just-sent message is preserved. Introduced by the agent-per-thread
 refactor (Phase B); before it, one shared agent meant every turn used the currently-active state anyway.
+
+## 11. Bound the growth of a `target="task"` scheduled-task conversation
+A scheduled task with `target="task"` (see `scheduling.py` / `Assistant._run_in_new_session`) reuses one
+dedicated conversation across every firing, so its history grows without limit and each firing replays
+the full, growing transcript to the model. That is the intended continuity tradeoff, but for a
+high-frequency or long-lived task it means steadily rising token cost and, eventually, hitting the
+model's context window. Decide on a mitigation: e.g. cap/trim the reused conversation (drop or
+summarize older firings), roll over to a fresh conversation past a size threshold, or expose the choice
+per task. No cap exists today.
