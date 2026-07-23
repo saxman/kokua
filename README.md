@@ -178,8 +178,11 @@ daily digest.
 my calendar") and it uses its `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` tools
 to persist the task to `data/scheduled_tasks.json`; it survives restarts. Schedules can be one-shot, an
 interval, daily at a time, or weekly on a weekday. When a task is due it runs an unprompted turn (shown
-with the amber "proactive" styling); ask for a task to run in its own conversation and each run lands in
-a fresh chat you can review and follow up on. Ask to pause a task and it uses `disable_scheduled_task`
+with the amber "proactive" styling). By default a task runs in whatever conversation you are viewing;
+ask for it to run in its own conversation and each firing lands in a fresh chat you can review and
+follow up on, or ask for it to keep its own ongoing conversation and every firing writes to the one
+chat it created the first time it ran, so it builds on its own history. Ask to pause a task and it uses
+`disable_scheduled_task`
 to stop it firing while keeping it around; `enable_scheduled_task` resumes it. Ask for a task to run now
 and it uses `run_scheduled_task` to fire it on demand without touching its schedule, reproducing exactly
 what the scheduled run would do, so you can dry-run a task before it is due. Scheduled runs auto-deny

@@ -252,7 +252,7 @@ async def test_assistant_proactive_tags_turn_provenance(tmp_path):
 
 
 async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path):
-    """A new_session=False proactive run auto-denies a gated tool even when it fires on the CURRENTLY
+    """A target="active" proactive run auto-denies a gated tool even when it fires on the CURRENTLY
     VIEWED conversation (where streaming_conversation == _active_id would otherwise look foreground and
     wrongly prompt). Unattended turns must never prompt."""
     cfg = _config(tmp_path, confirm_tools=["execute_python"])
@@ -268,13 +268,13 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
 
 
 async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
-    """The new_session=True path (fresh conversation, never the viewed one) also auto-denies."""
+    """The target="new" path (fresh conversation, never the viewed one) also auto-denies."""
     cfg = _config(tmp_path, confirm_tools=["execute_python"])
     client = _RequestsToolOnce("execute_python", {"code": "print(1)"})
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: client)
 
-    await asyncio.wait_for(assistant._proactive("do it", new_session=True, task_name="t"), timeout=2.0)
+    await asyncio.wait_for(assistant._proactive("do it", target="new", task_name="t"), timeout=2.0)
 
     denied = [m for m in client.messages if m.get("role") == "tool"]
     assert denied and denied[-1]["content"] == "Tool 'execute_python' was not approved."
@@ -1849,7 +1849,7 @@ async def test_proactive_new_session_runs_in_fresh_conversation(tmp_path):
     active_key = assistant._session.key
     active_len = len(assistant._session.messages)
 
-    await assistant._proactive("run the report", new_session=True, task_name="report")
+    await assistant._proactive("run the report", target="new", task_name="report")
 
     # Active conversation is restored and untouched.
     assert assistant._session.key == active_key
@@ -1872,7 +1872,7 @@ async def test_proactive_new_session_degrades_on_single_conversation_channel(tmp
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)
     active_key = assistant._session.key
 
-    await assistant._proactive("run the report", new_session=True, task_name="report")
+    await assistant._proactive("run the report", target="new", task_name="report")
 
     # No extra conversation; ran in place and pushed the reply.
     assert assistant._store.list_keys() == [active_key]
@@ -1899,7 +1899,7 @@ async def test_proactive_new_session_holds_at_most_one_gate_turn(tmp_path):
         _config(tmp_path), channel, client_factory=lambda cid: _RecordingClient(["task output"])
     )
 
-    await assistant._proactive("run the report", new_session=True, task_name="report")
+    await assistant._proactive("run the report", target="new", task_name="report")
 
     assert observed == [1]  # exactly one gate hold was active while the new session's turn ran
     assert assistant._gate.active_turns() == 0  # and none left over afterward
@@ -1939,7 +1939,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
     )
     viewed = assistant._active_id
 
-    await assistant._proactive("run the report", new_session=True, task_name="report")
+    await assistant._proactive("run the report", target="new", task_name="report")
 
     # Mid-run, the viewed conversation was never hijacked, and the run's own streaming context is a
     # *different* conversation than the viewed one -- the precondition for _approve to auto-deny.
@@ -1954,6 +1954,43 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
 
     # And self._active_id is still the viewed conversation after the run completes.
     assert assistant._active_id == viewed
+
+
+async def test_proactive_task_target_reuses_created_conversation(tmp_path):
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out1", "out2"])
+    )
+    active_key = assistant._active_id
+
+    first_key = await assistant._proactive("first run", target="task", task_name="digest")
+    assert first_key is not None and first_key != active_key
+    keys_after_first = set(assistant._store.list_keys())
+
+    second_key = await assistant._proactive("second run", target="task", task_name="digest", session_id=first_key)
+
+    assert second_key == first_key  # reused, not a fresh conversation
+    assert set(assistant._store.list_keys()) == keys_after_first  # no new conversation created
+    contents = [m.get("content") for m in assistant._store.get(first_key).messages]
+    assert "out1" in contents and "out2" in contents  # both firings' replies accumulate
+    assert "first run" in contents and "second run" in contents
+    assert assistant._active_id == active_key  # viewed conversation untouched
+
+
+async def test_proactive_task_target_recreates_when_conversation_deleted(tmp_path):
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out1", "out2"])
+    )
+    first_key = await assistant._proactive("first", target="task", task_name="digest")
+    assistant._store.delete(first_key)
+    assistant._registry.discard(first_key)
+
+    second_key = await assistant._proactive("second", target="task", task_name="digest", session_id=first_key)
+
+    assert second_key and second_key != first_key  # stale id not resurrected as an empty session
+    assert first_key not in assistant._store.list_keys()
+    assert second_key in assistant._store.list_keys()
 
 
 async def test_create_registers_scheduling_tools(tmp_path):

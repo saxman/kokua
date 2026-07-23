@@ -28,6 +28,22 @@ def _record(task_id="abc", name="t1"):
     }
 
 
+def test_record_target_reads_explicit_target():
+    assert scheduling._record_target({"target": "task"}) == "task"
+    assert scheduling._record_target({"target": "new"}) == "new"
+    assert scheduling._record_target({"target": "active"}) == "active"
+
+
+def test_record_target_migrates_legacy_new_session():
+    assert scheduling._record_target({"new_session": True}) == "new"
+    assert scheduling._record_target({"new_session": False}) == "active"
+    assert scheduling._record_target({}) == "active"
+
+
+def test_record_target_prefers_target_over_legacy_flag():
+    assert scheduling._record_target({"target": "task", "new_session": True}) == "task"
+
+
 def test_registry_add_load_roundtrip(tmp_path):
     path = tmp_path / "scheduled_tasks.json"
     scheduling.add(path, _record())
@@ -120,11 +136,13 @@ class FakeScheduler:
         return self.jobs.pop(name, None) is not None
 
 
-async def _noop_fire(prompt, *, new_session=False, task_name=None):
-    _noop_fire.calls.append((prompt, new_session, task_name))
+async def _noop_fire(prompt, *, target="active", task_name=None, session_id=None):
+    _noop_fire.calls.append((prompt, target, task_name, session_id))
+    return _noop_fire.return_key
 
 
 _noop_fire.calls = []
+_noop_fire.return_key = None
 
 
 def _make(tmp_path, fire=_noop_fire):
@@ -139,10 +157,17 @@ async def test_schedule_task_persists_and_arms(tmp_path):
     scheduler, path, tools, _ = _make(tmp_path)
     out = await tools["schedule_task"]("do it", "daily", time_of_day="09:00", name="brief")
     records = scheduling.load(path)
-    assert len(records) == 1 and records[0]["name"] == "brief" and records[0]["new_session"] is False
+    assert len(records) == 1 and records[0]["name"] == "brief" and records[0]["target"] == "active"
     assert records[0]["schedule"] == {"type": "daily", "at": "09:00"}
     assert records[0]["id"] in scheduler.jobs
     assert "brief" in out
+
+
+async def test_schedule_task_target_task_persists_with_empty_session_id(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("digest", "daily", time_of_day="09:00", name="d", target="task")
+    record = scheduling.load(path)[0]
+    assert record["target"] == "task" and record["session_id"] == ""
 
 
 async def test_schedule_task_flat_daily_call(tmp_path):
@@ -194,21 +219,92 @@ async def test_cancel_removes_record_and_job(tmp_path):
 async def test_list_scheduled_tasks(tmp_path):
     scheduler, path, tools, _ = _make(tmp_path)
     assert "No scheduled tasks" in await tools["list_scheduled_tasks"]()
-    await tools["schedule_task"]("summarize inbox", "daily", time_of_day="09:00", name="brief")
+    await tools["schedule_task"]("summarize inbox", "daily", time_of_day="09:00", name="brief", target="task")
     listing = await tools["list_scheduled_tasks"]()
-    assert "brief" in listing and "summarize inbox" in listing
+    assert "brief" in listing and "summarize inbox" in listing and "target=task" in listing
 
 
 async def test_fire_job_recurring_rearms(tmp_path):
     _noop_fire.calls = []
     scheduler, path, tools, _ = _make(tmp_path)
-    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", new_session=True)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", target="new")
     task_id = scheduling.load(path)[0]["id"]
     _delay, job = scheduler.jobs[task_id]
     await job()  # simulate the scheduler firing
-    assert _noop_fire.calls == [("ping", True, "r")]
+    assert _noop_fire.calls == [("ping", "new", "r", None)]
     assert task_id in scheduler.jobs  # re-armed
     assert scheduling.load(path)  # still present
+
+
+async def test_fire_job_task_target_persists_returned_session_id(tmp_path):
+    _noop_fire.calls = []
+    _noop_fire.return_key = "sess-123"
+    try:
+        scheduler, path, tools, _ = _make(tmp_path)
+        await tools["schedule_task"]("digest", "interval", interval_seconds=60, name="d", target="task")
+        task_id = scheduling.load(path)[0]["id"]
+        _delay, job = scheduler.jobs[task_id]
+        await job()  # first firing: fire() returns the newly-created conversation key
+        assert _noop_fire.calls == [("digest", "task", "d", None)]  # no session_id yet on first firing
+        assert scheduling.load(path)[0]["session_id"] == "sess-123"  # written back
+
+        await job()  # second firing: the remembered key is passed in for reuse
+        assert _noop_fire.calls[-1] == ("digest", "task", "d", "sess-123")
+    finally:
+        _noop_fire.return_key = None
+
+
+async def test_fire_job_new_target_does_not_persist_session_id(tmp_path):
+    _noop_fire.calls = []
+    _noop_fire.return_key = "ephemeral"
+    try:
+        scheduler, path, tools, _ = _make(tmp_path)
+        await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="n", target="new")
+        task_id = scheduling.load(path)[0]["id"]
+        _delay, job = scheduler.jobs[task_id]
+        await job()
+        assert scheduling.load(path)[0].get("session_id", "") == ""  # a "new" firing never remembers a key
+    finally:
+        _noop_fire.return_key = None
+
+
+async def test_fire_job_task_target_skips_writeback_if_cancelled_during_run(tmp_path):
+    _noop_fire.return_key = "sess-late"
+
+    async def cancelling_fire(prompt, *, target="active", task_name=None, session_id=None):
+        scheduling.remove(path, scheduling.load(path)[0]["id"])  # user cancelled mid-run
+        return _noop_fire.return_key
+
+    try:
+        scheduler, path, tools, _ = _make(tmp_path, fire=cancelling_fire)
+        await tools["schedule_task"]("digest", "interval", interval_seconds=60, name="c", target="task")
+        task_id = scheduling.load(path)[0]["id"]
+        _delay, job = scheduler.jobs[task_id]
+        await job()
+        assert scheduling.load(path) == []  # not resurrected by the write-back
+    finally:
+        _noop_fire.return_key = None
+
+
+async def test_fire_job_migrates_legacy_new_session_record(tmp_path):
+    _noop_fire.calls = []
+    scheduler, path, _, arm_all = _make(tmp_path)
+    scheduling.add(
+        path,
+        {
+            "id": "legacy",
+            "name": "L",
+            "prompt": "p",
+            "schedule": {"type": "interval", "seconds": 60},
+            "new_session": True,  # legacy record, no "target"
+            "created_at": "x",
+            "enabled": True,
+        },
+    )
+    arm_all()
+    _delay, job = scheduler.jobs["legacy"]
+    await job()
+    assert _noop_fire.calls[-1] == ("p", "new", "L", None)  # legacy new_session=True migrates to "new"
 
 
 async def test_fire_job_once_removes(tmp_path):
@@ -222,7 +318,7 @@ async def test_fire_job_once_removes(tmp_path):
 
 
 async def test_fire_job_skips_rearm_if_cancelled_during_run(tmp_path):
-    async def cancelling_fire(prompt, *, new_session=False, task_name=None):
+    async def cancelling_fire(prompt, *, target="active", task_name=None, session_id=None):
         scheduling.remove(path, scheduling.load(path)[0]["id"])  # user cancelled mid-run
 
     scheduler, path, tools, _ = _make(tmp_path, fire=cancelling_fire)
@@ -316,7 +412,7 @@ async def test_arm_all_skips_disabled(tmp_path):
 
 
 async def test_fire_job_skips_rearm_when_disabled_during_run(tmp_path):
-    async def disabling_fire(prompt, *, new_session=False, task_name=None):
+    async def disabling_fire(prompt, *, target="active", task_name=None, session_id=None):
         record = scheduling.load(path)[0]
         record["enabled"] = False
         scheduling.add(path, record)  # user disabled mid-run
@@ -341,7 +437,7 @@ async def test_list_shows_disabled_state(tmp_path):
 async def test_run_now_enqueues_job_and_fires_by_id(tmp_path):
     _noop_fire.calls = []
     scheduler, path, tools, _ = _make(tmp_path)
-    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", new_session=True)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", target="new")
     task_id = scheduling.load(path)[0]["id"]
     out = await tools["run_scheduled_task"](task_id)
     assert "now" in out.lower() and "r" in out and "new conversation" in out.lower()
@@ -349,7 +445,7 @@ async def test_run_now_enqueues_job_and_fires_by_id(tmp_path):
     assert job_name in scheduler.jobs
     _delay, job = scheduler.jobs[job_name]
     await job()  # simulate the scheduler firing the run-now job
-    assert _noop_fire.calls == [("ping", True, "r")]
+    assert _noop_fire.calls == [("ping", "new", "r", None)]
 
 
 async def test_run_now_by_name(tmp_path):
@@ -360,7 +456,7 @@ async def test_run_now_by_name(tmp_path):
     await tools["run_scheduled_task"]("byname")
     _delay, job = scheduler.jobs[f"run-now:{task_id}"]
     await job()
-    assert _noop_fire.calls == [("ping", False, "byname")]
+    assert _noop_fire.calls == [("ping", "active", "byname", None)]
 
 
 async def test_run_now_does_not_disturb_schedule(tmp_path):
@@ -374,6 +470,28 @@ async def test_run_now_does_not_disturb_schedule(tmp_path):
     await job()
     assert scheduler.at_count[task_id] == 1  # real job armed once, not re-armed by the manual run
     assert scheduling.load(path) == before  # registry unchanged
+
+
+async def test_run_now_task_target_persists_and_reuses_session_id(tmp_path):
+    _noop_fire.calls = []
+    _noop_fire.return_key = "sess-run"
+    try:
+        scheduler, path, tools, _ = _make(tmp_path)
+        await tools["schedule_task"]("digest", "interval", interval_seconds=60, name="d", target="task")
+        task_id = scheduling.load(path)[0]["id"]
+
+        await tools["run_scheduled_task"](task_id)
+        _delay, job = scheduler.jobs[f"run-now:{task_id}"]
+        await job()  # first manual run creates and remembers the conversation
+        assert _noop_fire.calls[-1] == ("digest", "task", "d", None)
+        assert scheduling.load(path)[0]["session_id"] == "sess-run"
+
+        await tools["run_scheduled_task"](task_id)
+        _delay, job = scheduler.jobs[f"run-now:{task_id}"]
+        await job()  # second manual run reuses it
+        assert _noop_fire.calls[-1] == ("digest", "task", "d", "sess-run")
+    finally:
+        _noop_fire.return_key = None
 
 
 async def test_run_now_keeps_one_shot(tmp_path):
@@ -396,7 +514,7 @@ async def test_run_now_allows_disabled_and_notes_it(tmp_path):
     assert "disabled" in out.lower()
     _delay, job = scheduler.jobs[f"run-now:{task_id}"]
     await job()
-    assert _noop_fire.calls == [("ping", False, "d")]
+    assert _noop_fire.calls == [("ping", "active", "d", None)]
 
 
 async def test_run_now_unknown_reports_and_enqueues_nothing(tmp_path):

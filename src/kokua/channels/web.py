@@ -44,7 +44,7 @@ streaming_conversation: ContextVar[Optional[str]] = ContextVar("streaming_conver
 
 # True while a proactive/scheduled turn runs in this task (set by Assistant._proactive /
 # _run_in_new_session). Unlike streaming_conversation, this does not depend on which conversation is
-# viewed: a scheduled task with new_session=False sets streaming_conversation to the viewed
+# viewed: a scheduled task with target="active" sets streaming_conversation to the viewed
 # conversation and would otherwise look foreground, so Assistant._approve reads this to auto-deny a
 # gated tool for any proactive turn (nobody is watching to confirm an unattended full-access call).
 proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)

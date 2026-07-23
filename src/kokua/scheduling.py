@@ -79,6 +79,18 @@ def next_fire(schedule: dict, now: datetime) -> Optional[float]:
     raise ValueError(f"unknown schedule type {kind!r}")
 
 
+def _record_target(record: dict) -> str:
+    """Return a task record's effective proactive-turn target: one of "active", "new", "task".
+
+    Reads the ``target`` field written by current code, falling back to the legacy ``new_session``
+    boolean so registries written before ``target`` existed keep working without a file rewrite.
+    """
+    target = record.get("target")
+    if target:
+        return target
+    return "new" if record.get("new_session") else "active"
+
+
 def load(path: Path) -> list[dict]:
     """Return the persisted task records (``[]`` if the file is absent or unreadable)."""
     if not path.exists():
@@ -160,8 +172,10 @@ def make_scheduler_tools(
     """Build the schedule/list/cancel agent tools bound to a live ``Scheduler`` and a fire callback.
 
     ``fire`` is the assistant's proactive-turn entry point, called as
-    ``await fire(prompt, new_session=..., task_name=...)`` when a task is due. Returns the tool list
-    plus ``arm_all`` (call once at boot to schedule persisted tasks).
+    ``await fire(prompt, target=..., task_name=..., session_id=...)`` when a task is due; for a
+    ``target="task"`` firing it returns the conversation key it used, which is persisted back onto the
+    record so the next firing reuses it. Returns the tool list plus ``arm_all`` (call once at boot to
+    schedule persisted tasks).
     """
 
     def _arm(record: dict) -> bool:
@@ -171,12 +185,30 @@ def make_scheduler_tools(
         scheduler.at(delay, functools.partial(_fire_job, record["id"]), name=record["id"])
         return True
 
+    def _remember_session(task_id: str, target: str, used_key) -> None:
+        # Persist the conversation key a "task"-target firing wrote to, so the next firing reuses it.
+        # Re-read the registry so a cancel/delete during the run wins (mirrors the re-arm guard): a
+        # write-back must never resurrect a record the user removed mid-run.
+        if target != "task" or not used_key:
+            return
+        current = find(load(registry_path), task_id)
+        if current is not None and current.get("session_id") != used_key:
+            current["session_id"] = used_key
+            add(registry_path, current)
+
     async def _fire_job(task_id: str) -> None:
         record = find(load(registry_path), task_id)
         if record is None:  # cancelled between arming and firing
             return
+        target = _record_target(record)
         try:
-            await fire(record["prompt"], new_session=record.get("new_session", False), task_name=record.get("name"))
+            used_key = await fire(
+                record["prompt"],
+                target=target,
+                task_name=record.get("name"),
+                session_id=record.get("session_id") or None,
+            )
+            _remember_session(task_id, target, used_key)
         finally:
             # Re-read the registry: a cancel during the run (which removes the record) must win over
             # the re-arm, and any edit is picked up. Recurring tasks re-arm; one-shots are dropped.
@@ -194,7 +226,14 @@ def make_scheduler_tools(
         record = find(load(registry_path), task_id)
         if record is None:
             return
-        await fire(record["prompt"], new_session=record.get("new_session", False), task_name=record.get("name"))
+        target = _record_target(record)
+        used_key = await fire(
+            record["prompt"],
+            target=target,
+            task_name=record.get("name"),
+            session_id=record.get("session_id") or None,
+        )
+        _remember_session(task_id, target, used_key)
 
     def arm_all() -> None:
         for record in load(registry_path):
@@ -213,7 +252,7 @@ def make_scheduler_tools(
         interval_seconds: Optional[float] = None,
         weekday: Optional[str] = None,
         name: Optional[str] = None,
-        new_session: bool = False,
+        target: Literal["active", "new", "task"] = "active",
     ) -> str:
         """Schedule a task that runs an unprompted assistant turn with the given prompt when it is due.
 
@@ -225,7 +264,10 @@ def make_scheduler_tools(
             interval_seconds: For "interval", the number of seconds between runs (>= 1).
             weekday: For "weekly", one of mon/tue/wed/thu/fri/sat/sun.
             name: Optional unique handle to cancel the task later.
-            new_session: If true, run each firing in its own new conversation so the user can review it.
+            target: Where each firing runs. "active" (default) uses the currently-viewed conversation.
+                "new" runs each firing in its own fresh conversation. "task" gives the task one
+                dedicated conversation, created on the first firing and reused on every later firing so
+                it builds on its own history.
         """
         try:
             schedule = _build_schedule(schedule_type, time_of_day, at_datetime, interval_seconds, weekday)
@@ -242,7 +284,8 @@ def make_scheduler_tools(
             "name": name,
             "prompt": prompt,
             "schedule": schedule,
-            "new_session": bool(new_session),
+            "target": target,
+            "session_id": "",  # populated on the first firing when target == "task"
             "created_at": datetime.now().isoformat(),
             "enabled": True,
         }
@@ -270,7 +313,7 @@ def make_scheduler_tools(
             preview = record["prompt"][:60]
             lines.append(
                 f"- {record['id']} [{record.get('name') or 'unnamed'}] {record['schedule']} "
-                f"next {when} new_session={record.get('new_session', False)}: {preview}"
+                f"next {when} target={_record_target(record)}: {preview}"
             )
         return "\n".join(lines)
 
@@ -319,10 +362,11 @@ def make_scheduler_tools(
     async def run_scheduled_task(id_or_name: str) -> str:
         """Run an existing scheduled task now, without changing its schedule.
 
-        Reproduces exactly what the task's next scheduled firing would do (honoring its ``new_session``
-        flag; gated tools are auto-denied as they would be for an unattended firing), so you can verify
-        how the task behaves. The task's output arrives as a separate message shortly after, not as this
-        tool's return value. Works on a disabled task too.
+        Reproduces exactly what the task's next scheduled firing would do (honoring its ``target``;
+        gated tools are auto-denied as they would be for an unattended firing), so you can verify how
+        the task behaves. A ``target="task"`` run writes into (and, on the first run, creates and
+        remembers) the task's dedicated conversation. The task's output arrives as a separate message
+        shortly after, not as this tool's return value. Works on a disabled task too.
         """
         record = find(load(registry_path), id_or_name)
         if record is None:
@@ -332,7 +376,7 @@ def make_scheduler_tools(
         # the record's real armed job (name == id).
         scheduler.at(0, functools.partial(_run_now_job, record["id"]), name=f"run-now:{record['id']}")
         handle = f"{record['id']} ({record.get('name') or 'unnamed'})"
-        suffix = " in a new conversation" if record.get("new_session", False) else ""
+        suffix = " in a new conversation" if _record_target(record) in ("new", "task") else ""
         note = " (note: this task is disabled)" if not record.get("enabled", True) else ""
         return f"Running task {handle} now; its output will appear shortly{suffix}.{note}"
 

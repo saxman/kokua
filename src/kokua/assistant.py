@@ -583,7 +583,7 @@ class Assistant:
         """Tool-approval gate run before each tool call (published to the model client per run).
 
         Ungated tools pass. A proactive/scheduled turn (``proactive_turn`` set) always auto-denies a
-        gated tool: it is unattended, so nobody is watching to confirm, and a ``new_session=False``
+        gated tool: it is unattended, so nobody is watching to confirm, and a ``target="active"``
         scheduled task would otherwise look foreground (its ``streaming_conversation`` equals the viewed
         conversation) and wrongly prompt. Otherwise a reactive turn is approved only if its conversation
         is the one the user is currently viewing: ``streaming_conversation`` (set by ``_handle`` for the
@@ -755,17 +755,33 @@ class Assistant:
             note = ("\nReviewer's concerns:\n" + concerns) if concerns else ""
             await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'." + note)
 
-    async def _proactive(self, prompt: str, *, new_session: bool = False, task_name: Optional[str] = None) -> None:
+    async def _proactive(
+        self,
+        prompt: str,
+        *,
+        target: str = "active",
+        task_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Optional[str]:
         """Run an unprompted turn with ``prompt`` and surface the reply.
 
         The substrate for scheduled tasks: a caller (the scheduler) fires this with the task's
-        instruction. Sets ``streaming_conversation`` to this run's conversation for the duration, so
-        ``_approve`` gates a gated tool call the same way it would for any other turn: prompted if that
-        conversation is the one ``self._active_id`` currently points at, auto-denied otherwise (no user
-        watching to confirm). With ``new_session`` set (and a multi-conversation channel), the turn runs
-        in a fresh conversation and never touches ``self._active_id`` at all (see
+        instruction. ``target`` selects the conversation the turn runs in:
+
+        - ``"active"``: the currently-viewed conversation (``self._active_id``).
+        - ``"new"``: a fresh conversation minted for this firing alone.
+        - ``"task"``: the task's own dedicated conversation, reused across firings -- ``session_id`` is
+          the key it created previously (``None`` on the first firing).
+
+        Returns the key of the conversation the turn ran in for ``"new"``/``"task"`` (so the caller can
+        persist a ``"task"`` conversation's key), or ``None`` for ``"active"``.
+
+        Sets ``streaming_conversation`` to this run's conversation for the duration, so ``_approve``
+        gates a gated tool call the same way it would for any other turn: prompted if that conversation
+        is the one ``self._active_id`` currently points at, auto-denied otherwise (no user watching to
+        confirm). The ``"new"``/``"task"`` branch never touches ``self._active_id`` at all (see
         ``_run_in_new_session``), so a scheduled run never hijacks whatever the user is currently
-        viewing -- its own gated tool calls always auto-deny, since the fresh session is never the one
+        viewing -- its own gated tool calls always auto-deny, since that conversation is never the one
         ``self._active_id`` points at.
         """
         multi_conversation = getattr(self._channel, "send_conversations", None) is not None
@@ -776,9 +792,10 @@ class Assistant:
         # a concurrent exclusive() could see this task's outer reader stuck waiting to re-enter as an
         # inner reader on the new conversation, while the writer waits for that outer reader to drop
         # to zero, and neither side can proceed.
-        if new_session and multi_conversation:
-            await self._run_in_new_session(prompt, task_name)
-            return
+        if target in ("new", "task") and multi_conversation:
+            # "new" always mints a fresh conversation; "task" reuses its remembered one when present.
+            reuse = session_id if target == "task" else None
+            return await self._run_in_new_session(prompt, task_name, session_id=reuse)
         # Captured once so the rest of this run is internally consistent even if the user switches
         # conversations while it's in flight (Task 6 no longer cancels a turn on switch).
         conversation_id = self._active_id
@@ -813,13 +830,23 @@ class Assistant:
             proactive_turn.reset(proactive_token)
             streaming_conversation.reset(token)
 
-    async def _run_in_new_session(self, prompt: str, task_name: Optional[str]) -> None:
-        """Run a proactive turn in a fresh conversation without disturbing the viewed one.
+    async def _run_in_new_session(
+        self, prompt: str, task_name: Optional[str], *, session_id: Optional[str] = None
+    ) -> str:
+        """Run a proactive turn in a task-owned conversation without disturbing the viewed one.
+
+        With ``session_id`` given and still present in the store, the turn reuses that conversation
+        (the registry replays its history, so the task sees its prior firings); otherwise a fresh
+        conversation is minted. A ``session_id`` that no longer exists is treated as absent and
+        recreated -- so a task keeps working after its conversation is deleted. Existence is checked
+        against ``list_keys()`` rather than ``store.get()``, because the store returns an empty
+        ``Session`` for a missing key, which would otherwise resurrect a deleted conversation as a
+        blank one. Returns the key of the conversation the turn actually ran in.
 
         The caller (``_proactive``) takes no gate hold of its own for this branch; this acquires the
-        only gate hold for the call, on the new conversation's id, around the actual run. Unlike
+        only gate hold for the call, on the conversation's id, around the actual run. Unlike
         select/new_conversation, this never touches ``self._active_id`` -- it is not "switching" to
-        the new session, just running a turn on it (the registry looks up any conversation's agent by
+        the session, just running a turn on it (the registry looks up any conversation's agent by
         id, no active-pointer swap needed). Leaving ``self._active_id`` alone is what keeps this turn
         consistent with every other Phase B concurrency invariant: ``streaming_conversation`` (set to
         ``session.key`` below) then never equals the viewed conversation, so ``_approve`` auto-denies a
@@ -829,8 +856,13 @@ class Assistant:
         id for a concurrent user switch to race or for a ``finally`` to clobber back.
         """
         now = datetime.now().isoformat()
-        title = task_name or derive_title([{"role": "user", "content": prompt}]) or "Scheduled task"
-        session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now, "title": title})
+        if session_id and session_id in self._store.list_keys():
+            session = self._store.get(session_id)
+            session.metadata["updated_at"] = now
+        else:
+            title = task_name or derive_title([{"role": "user", "content": prompt}]) or "Scheduled task"
+            session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now, "title": title})
+        title = session.metadata.get("title") or "Scheduled task"
         self._store.save(session)
         token = streaming_conversation.set(session.key)
         proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run (unattended)
@@ -854,6 +886,7 @@ class Assistant:
             await self._channel.send(f"Scheduled task '{title}' finished; open the '{title}' conversation to review.")
         except Exception:
             logger.warning("Scheduled task '%s' ran; its notification could not be delivered", title, exc_info=True)
+        return session.key
 
     def _apply_plan_result(self, result: "PlanResult", conversation_id: str) -> None:
         """Record a planned turn's reviewer verdicts and verbose trace under the turn's user-message

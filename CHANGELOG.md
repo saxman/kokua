@@ -37,12 +37,15 @@ installable, modular application.
 - **Scheduled tasks**: the assistant can schedule durable, agent-managed tasks (`schedule_task` /
   `list_scheduled_tasks` / `cancel_scheduled_task`) that fire an unprompted turn when due, persisted to
   `data/scheduled_tasks.json` and re-armed at startup. Schedules are one-shot, interval, daily, or
-  weekly (no cron dependency). A per-task `new_session` flag runs each firing in a fresh conversation.
-  `disable_scheduled_task` / `enable_scheduled_task` pause a task (it stops firing but stays in the
-  registry) and resume it later, without losing the task; disabled tasks are skipped at startup and show
-  as `disabled` in the listing. `run_scheduled_task` runs an existing task now, on demand, without
-  changing its schedule: it reproduces the real firing (honoring `new_session`, auto-denying gated
-  tools), so a task can be dry-run before it is due; disabled tasks can be run too.
+  weekly (no cron dependency). A per-task `target` selects where each firing runs: `active` (default,
+  the currently-viewed conversation), `new` (a fresh conversation per firing), or `task` (one dedicated
+  conversation, created on the first firing and reused on every later firing so the task builds on its
+  own history; a deleted conversation is recreated on the next firing). `disable_scheduled_task` /
+  `enable_scheduled_task` pause a task (it stops firing but stays in the registry) and resume it later,
+  without losing the task; disabled tasks are skipped at startup and show as `disabled` in the listing.
+  `run_scheduled_task` runs an existing task now, on demand, without changing its schedule: it reproduces
+  the real firing (honoring `target`, auto-denying gated tools), so a task can be dry-run before it is
+  due; disabled tasks can be run too.
 - **Plugin system** (`kokua.plugins`): front ends and tool-packs discovered via the `kokua.frontends` and
   `kokua.tools` entry-point groups. Built-in `cli` and `web` front ends and an `example` tool-pack are
   registered as plugins; third parties add their own by publishing a package. `--list-frontends`,
