@@ -122,49 +122,58 @@ def conversation_to_frames(
     subagent = subagent or {}
     trace = trace or {}
     items: list[dict] = []
+
+    def add(item: dict, timestamp) -> None:
+        # Attach the source message's append-time timestamp (AIMU's inert ``timestamp`` key) so the page
+        # can caption the bubble. Omitted when absent (messages persisted before timestamping shipped),
+        # so those simply render no caption. Metadata-derived items (phase/reasoning/subagent) pass the
+        # turn's user-message timestamp, since they have no timestamp of their own.
+        if timestamp:
+            item["ts"] = timestamp
+        items.append(item)
+
     for index, message in enumerate(messages):
         role = message.get("role")
         provenance = message.get(PROVENANCE_KEY)
+        ts = message.get("timestamp")
         if role == "user":
             if provenance in _LOOP_PROVENANCE:
                 # A framework-injected continuation/final-answer turn, not user input. Show a loop
                 # marker carrying the injected prompt text (for inspection), not a user bubble.
-                items.append({"type": "loop", "text": _text_of(message.get("content"))})
+                add({"type": "loop", "text": _text_of(message.get("content"))}, ts)
                 continue
             text = _text_of(message.get("content"))
             if text:
-                items.append({"type": "user", "text": text})
+                add({"type": "user", "text": text}, ts)
             for url in _image_refs_of(message.get("content")):  # uploaded images, replayed under the bubble
-                items.append({"type": "image", "url": url, "from": "user"})
+                add({"type": "image", "url": url, "from": "user"}, ts)
             if str(index) in trace:  # verbose turn: replay the raw trace, not cards
                 for segment in trace[str(index)]:
-                    items.append(
-                        {"type": "phase", "label": segment.get("label", ""), "detail": segment.get("detail", "")}
-                    )
+                    add({"type": "phase", "label": segment.get("label", ""), "detail": segment.get("detail", "")}, ts)
                     if segment.get("text"):
-                        items.append({"type": "reasoning", "text": segment["text"]})
+                        add({"type": "reasoning", "text": segment["text"]}, ts)
             else:
                 for event in subagent.get(str(index), []):
-                    items.append({"type": "subagent", **event})
+                    add({"type": "subagent", **event}, ts)
         elif role == "assistant":
             if str(index - 1) in trace:
                 # The preceding user turn was verbose; its trace already contains this final answer
                 # (in its last Executor phase), so don't emit it again as a separate message.
                 continue
             if show_thinking and message.get("thinking"):
-                items.append({"type": "thinking", "text": message["thinking"]})
+                add({"type": "thinking", "text": message["thinking"]}, ts)
             if show_tools:
                 for call in message.get("tool_calls") or []:
                     fn = call.get("function", {})
-                    items.append({"type": "tool", "name": fn.get("name"), "arguments": fn.get("arguments")})
+                    add({"type": "tool", "name": fn.get("name"), "arguments": fn.get("arguments")}, ts)
             text = _text_of(message.get("content"))
             if text:
-                items.append({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE})
+                add({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE}, ts)
         elif role == "tool":
             # Tool results are otherwise not replayed, but a generate_image result carries an /images/
             # reference the user asked to see, so surface it as an image (regardless of show_tools).
             for url in _image_refs_of(message.get("content")):
-                items.append({"type": "image", "url": url, "from": "assistant"})
+                add({"type": "image", "url": url, "from": "assistant"}, ts)
     return items
 
 

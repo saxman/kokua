@@ -209,6 +209,35 @@ def test_conversation_to_frames_interleaves_subagent_after_user():
     assert items[2]["type"] == "message"
 
 
+def test_conversation_to_frames_threads_message_timestamp():
+    messages = [
+        {"role": "user", "content": "do X", "timestamp": "2026-07-23T15:45:00"},
+        {"role": "assistant", "content": "done", "timestamp": "2026-07-23T15:45:07"},
+    ]
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    user_item = next(i for i in items if i["type"] == "user")
+    message_item = next(i for i in items if i["type"] == "message")
+    assert user_item["ts"] == "2026-07-23T15:45:00"
+    assert message_item["ts"] == "2026-07-23T15:45:07"
+
+
+def test_conversation_to_frames_omits_ts_when_message_has_no_timestamp():
+    messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    assert all("ts" not in i for i in items)  # legacy messages (no timestamp) render no caption
+
+
+def test_conversation_to_frames_subagent_inherits_turn_timestamp():
+    messages = [
+        {"role": "user", "content": "do X", "timestamp": "2026-07-23T15:45:00"},
+        {"role": "assistant", "content": "done", "timestamp": "2026-07-23T15:45:07"},
+    ]
+    subagent = {"0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["x"], "round": 0}]}
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True, subagent=subagent)
+    subagent_item = next(i for i in items if i["type"] == "subagent")
+    assert subagent_item["ts"] == "2026-07-23T15:45:00"  # inherits its turn's user-message timestamp
+
+
 def test_conversation_to_frames_omits_subagent_by_default():
     messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
     items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
@@ -427,8 +456,11 @@ def test_ws_sends_history_on_connect(tmp_path):
     with TestClient(app).websocket_connect("/ws") as ws:
         frame = _drain_until(ws, "history")  # conversations is sent first, then the restored history
 
-    assert {"type": "user", "text": "hello"} in frame["items"]
-    assert {"type": "message", "text": "Hi!", "proactive": False} in frame["items"]
+    # Items carry an append-time `ts` (stamped through the model client); assert the rest.
+    user_item = next(i for i in frame["items"] if i["type"] == "user")
+    message_item = next(i for i in frame["items"] if i["type"] == "message")
+    assert user_item["text"] == "hello" and "ts" in user_item
+    assert message_item["text"] == "Hi!" and message_item["proactive"] is False and "ts" in message_item
 
 
 def test_ws_connect_sends_conversations(tmp_path):

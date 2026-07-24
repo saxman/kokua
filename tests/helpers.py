@@ -42,16 +42,18 @@ class MockAsyncModelClient(AsyncBaseModelClient):
     async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
         if stream:
             return self._chat_streamed(user_message, generate_kwargs, use_tools, images=images)
+        # Route appends through _append_message (the base mixin's append-with-timestamp seam) so the
+        # mock stays faithful to the real clients: every stored message carries the inert `timestamp`.
         if audio:
             from aimu.models._internal.audio_input import _build_audio_content_blocks
 
-            self.messages.append({"role": "user", "content": _build_audio_content_blocks(user_message, audio)})
+            self._append_message({"role": "user", "content": _build_audio_content_blocks(user_message, audio)})
         elif images:
             from aimu.models._internal.image_input import _build_user_content_blocks
 
-            self.messages.append({"role": "user", "content": _build_user_content_blocks(user_message, images)})
+            self._append_message({"role": "user", "content": _build_user_content_blocks(user_message, images)})
         else:
-            self.messages.append({"role": "user", "content": user_message})
+            self._append_message({"role": "user", "content": user_message})
         response = self._responses[self._call_count]
         self._call_count += 1
 
@@ -60,18 +62,18 @@ class MockAsyncModelClient(AsyncBaseModelClient):
             raise response
 
         if response == "tool":
-            self.messages.append(
+            self._append_message(
                 {
                     "role": "assistant",
                     "tool_calls": [{"type": "function", "function": {"name": "mock_tool", "arguments": {}}, "id": "x"}],
                 }
             )
-            self.messages.append({"role": "tool", "name": "mock_tool", "content": "tool result", "tool_call_id": "x"})
+            self._append_message({"role": "tool", "name": "mock_tool", "content": "tool result", "tool_call_id": "x"})
             text = self._responses[self._call_count]
             self._call_count += 1
-            self.messages.append({"role": "assistant", "content": text})
+            self._append_message({"role": "assistant", "content": text})
             return text
-        self.messages.append({"role": "assistant", "content": response})
+        self._append_message({"role": "assistant", "content": response})
         return response
 
     async def _chat_streamed(

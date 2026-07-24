@@ -120,6 +120,16 @@ def test_send_message_renders_reply(page, live_server):
     expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
 
 
+def test_bubbles_show_timestamp_caption(page, live_server):
+    """The user bubble and the streamed reply each carry a datetime caption (`.bubble-ts`)."""
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "ping")
+    page.click("#send")
+    # User bubble stamped at submit; assistant bubble stamped when the stream finalizes.
+    expect(page.locator(".bubble.user .bubble-ts")).to_be_visible()
+    expect(page.locator(".bubble.assistant .bubble-ts")).to_be_visible(timeout=10_000)
+
+
 def test_background_turn_notifies_and_does_not_leak(page, live_server):
     """Switching away mid-turn: the reply is muted (never rendered in the now-viewed conversation) and
     the turn's completion surfaces as a dismissible notification banner instead."""

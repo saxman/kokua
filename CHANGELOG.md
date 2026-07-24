@@ -63,7 +63,15 @@ installable, modular application.
   safe, and `throwOnError:false` leaves a malformed expression as source text instead of breaking the
   bubble. Light and dark themes: a theme selector in the settings panel
   (auto / light / dark; auto follows the OS preference) sets a per-browser choice remembered locally and
-  applied before first paint (no flash on load, no new dependencies).
+  applied before first paint (no flash on load, no new dependencies). Each conversation bubble shows a
+  datetime caption ("Jul 23, 3:45 PM", localized via `toLocaleString`, full precision on hover); it sits
+  below a regular bubble and on the always-visible header line of a foldable (thinking/tool/phase/
+  sub-agent) so it shows whether the block is collapsed or expanded. The time is the message's
+  append-time `timestamp` (AIMU's inert message key, now populated on the async path), threaded into the
+  `history` frame per item by `conversation_to_frames` and rendered on both live and replayed bubbles;
+  live bubbles with no server time yet are stamped client-side. Messages persisted before this change
+  carry no timestamp and render without a caption. Ephemeral chrome (system notices, approval prompts,
+  banners) is not stamped.
 - **Multiple web conversations**: the web UI lists conversations in a sidebar (auto-titled from the
   first message) and lets you start a new one or select an existing one to continue, backed by AIMU's
   `sessions` store. Memory stays shared across conversations. CLI multi-conversation is a later change.

@@ -157,6 +157,12 @@
     /* An inline image, in the composer preview row or a chat bubble. */
     .bubble.image { padding: 0; background: transparent; border: none; overflow: hidden; }
     .bubble.image img { max-width: 100%; border-radius: 12px; display: block; }
+    /* Append-time datetime caption. On a regular bubble it sits below the content; on a foldable it
+       rides the always-visible header line (so it shows whether the block is collapsed or expanded). */
+    .bubble-ts { display: block; margin-top: 4px; font-size: 0.7em; opacity: 0.5; text-align: right; }
+    .bubble.image .bubble-ts { text-align: left; margin-top: 2px; }
+    .fold-ts { float: right; margin-left: 8px; font-size: 0.72em; font-weight: 400; font-style: normal;
+      font-family: system-ui, sans-serif; text-transform: none; letter-spacing: 0; opacity: 0.5; }
     .attach-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px 0; }
     .attach-previews .chip { position: relative; }
     .attach-previews img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }
@@ -424,10 +430,10 @@
     // Render/update a sub-agent (reviewer) card as a foldable block: the header shows role + status,
     // the body lists the reviewer's issues (markdown). Live frames carry an id so the "running" card
     // updates in place on its verdict; replayed history items have no id and just render a static card.
-    function renderSubagent(frame) {
+    function renderSubagent(frame, ts) {
       let card = frame.id ? subagentCards[frame.id] : null;
       if (!card) {
-        card = addFoldable("subagent", "", { md: true });
+        card = addFoldable("subagent", "", { md: true }, ts);  // stamp once, when first created
         if (frame.id) subagentCards[frame.id] = card;
       }
       const role = frame.role || "Sub-agent";
@@ -463,10 +469,43 @@
     function autoscroll() { if (stickToBottom) log.scrollTop = log.scrollHeight; }
     log.addEventListener("scroll", () => { stickToBottom = atBottom(); });
 
-    function addBubble(cls, text) {
+    // A datetime value (an ISO string from history, or a Date for a live bubble) split into a short
+    // label and a full-precision tooltip, or null when unparseable/absent so callers render no caption.
+    function tsParts(value) {
+      if (value == null) return null;
+      const d = value instanceof Date ? value : new Date(value);
+      if (isNaN(d.getTime())) return null;
+      return {
+        label: d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+        full: d.toLocaleString(),
+      };
+    }
+    // Caption a regular bubble with its datetime (below the content). No-op when value is absent.
+    function stampBubble(el, value) {
+      const t = tsParts(value);
+      if (!t) return;
+      const span = document.createElement("span");
+      span.className = "bubble-ts";
+      span.textContent = t.label;
+      span.title = t.full;
+      el.appendChild(span);
+    }
+    // Caption a foldable block on its header line, so the time shows whether collapsed or expanded.
+    function stampHeader(header, value) {
+      const t = tsParts(value);
+      if (!t) return;
+      const span = document.createElement("span");
+      span.className = "fold-ts";
+      span.textContent = t.label;
+      span.title = t.full;
+      header.appendChild(span);
+    }
+
+    function addBubble(cls, text, ts) {
       const el = document.createElement("div");
       el.className = "bubble " + cls;
       el.textContent = text || "";
+      stampBubble(el, ts);
       log.appendChild(el);
       autoscroll();
       return el;
@@ -478,7 +517,7 @@
     // detail, hidden until expanded). Starts collapsed. Returns handles so callers can populate/stream
     // into `body` and update `label` (e.g. a sub-agent card whose status changes). `opts.md` marks the
     // body as markdown-rendered content (drops plain-text pre-wrap; see the .md rules).
-    function addFoldable(cls, headerText, opts) {
+    function addFoldable(cls, headerText, opts, ts) {
       const outer = document.createElement("div");
       outer.className = "bubble foldable collapsed " + cls;
       const header = document.createElement("button");
@@ -494,6 +533,7 @@
       header.appendChild(tri);
       header.appendChild(document.createTextNode(" "));
       header.appendChild(label);
+      stampHeader(header, ts);  // rides the header so it stays visible while collapsed
       const body = document.createElement("div");
       body.className = "fold-body" + (opts && opts.md ? " md" : "");
       header.addEventListener("click", () => {
@@ -510,13 +550,14 @@
 
     // An image in the chat: an uploaded image echoed under the user's turn, or one the assistant
     // produced/surfaced. `src` is a /images/<name> reference (server route) or a data: URL (local echo).
-    function addImageBubble(src, cls) {
+    function addImageBubble(src, cls, ts) {
       const el = document.createElement("div");
       el.className = "bubble image " + (cls || "assistant");
       const img = document.createElement("img");
       img.src = src;
       img.alt = "image";
       el.appendChild(img);
+      stampBubble(el, ts);
       log.appendChild(el);
       autoscroll();
       return el;
@@ -568,7 +609,7 @@
       }
     }
 
-    function addMarkdownBubble(cls, text) {
+    function addMarkdownBubble(cls, text, ts) {
       const el = document.createElement("div");
       el.className = "bubble md " + cls;
       const html = renderMarkdown(text);
@@ -577,6 +618,7 @@
         el.innerHTML = html;
         typesetMath(el);
       }
+      stampBubble(el, ts);
       log.appendChild(el);
       autoscroll();
       return el;
@@ -593,6 +635,9 @@
           streamingBubble.innerHTML = html;
           typesetMath(streamingBubble);
         }
+        // A live answer has no server timestamp; stamp it with the completion time (setting innerHTML
+        // above cleared the bubble, so this appends after the rendered content).
+        stampBubble(streamingBubble, new Date());
       }
       streamingBubble = null;
       thinkingBlock = null;
@@ -618,21 +663,21 @@
 
     // Foldable tool / continuation blocks. Header carries the identifying name; body holds the verbose
     // detail (arguments, injected prompt). Shared by live frames and history replay.
-    function renderTool(name, args) {
-      const f = addFoldable("tool", "🔧 " + (name || "tool"));
+    function renderTool(name, args, ts) {
+      const f = addFoldable("tool", "🔧 " + (name || "tool"), undefined, ts);
       f.body.textContent = toolArgs(args);
       return f;
     }
-    function renderLoop(text) {
-      const f = addFoldable("loop", "↻ continuation");
+    function renderLoop(text, ts) {
+      const f = addFoldable("loop", "↻ continuation", undefined, ts);
       f.body.textContent = text || "";
       return f;
     }
 
     // Verbose-trace phase header: a labeled divider (e.g. "Planner · drafting a plan"). Shared by the
     // live `phase` frame and history replay so both render the raw trace identically.
-    function renderPhase(label, detail) {
-      const f = addFoldable("phase", label || "");
+    function renderPhase(label, detail, ts) {
+      const f = addFoldable("phase", label || "", undefined, ts);
       if (detail) f.body.textContent = "· " + detail;
       return f.outer;
     }
@@ -644,17 +689,17 @@
       if (frame.type === "thinking") {
         // thinkingBlock points at the foldable body so streamed tokens accumulate inside it (collapsed
         // by default; the user expands to watch it).
-        if (!thinkingBlock) thinkingBlock = addFoldable("thinking", "💭 thinking").body;
+        if (!thinkingBlock) thinkingBlock = addFoldable("thinking", "💭 thinking", undefined, new Date()).body;
         thinkingBlock.appendChild(document.createTextNode(frame.text));
         autoscroll();
       } else if (frame.type === "tool") {
         thinkingBlock = null;
-        renderTool(frame.name, frame.arguments);
+        renderTool(frame.name, frame.arguments, new Date());
       } else if (frame.type === "loop") {
         // Agent-loop continuation boundary. Leave streamingBubble open so the answer keeps
         // accumulating and floats below this marker (same float-to-bottom rule as tool blocks).
         thinkingBlock = null;
-        renderLoop(frame.text);
+        renderLoop(frame.text, new Date());
       } else if (frame.type === "token") {
         thinkingBlock = null;
         if (!streamingBubble) {
@@ -677,13 +722,13 @@
       } else if (frame.type === "phase") {
         // Verbose trace: close the previous phase's streamed bubble and start a labeled section.
         finalizeStreaming();
-        renderPhase(frame.label, frame.detail);
+        renderPhase(frame.label, frame.detail, new Date());
       } else if (frame.type === "image") {
         // A generated image finished (or the assistant surfaced one). Float it below any open answer.
         thinkingBlock = null;
-        addImageBubble(frame.url, "assistant");
+        addImageBubble(frame.url, "assistant", new Date());
       } else if (frame.type === "message") {
-        addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text);
+        addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text, new Date());
         if (!frame.proactive) setProcessing(false);  // a reactive message ends the turn (e.g. "(stopped)" / error)
         setWorking(false);
       } else if (frame.type === "notification") {
@@ -704,7 +749,7 @@
           typesetMath(f.body);
         }
       } else if (frame.type === "subagent") {
-        renderSubagent(frame);
+        renderSubagent(frame, new Date());
       } else if (frame.type === "plan_review") {
         renderPlanReview(frame.plan, frame.critique);
       } else if (frame.type === "settings") {
@@ -718,15 +763,15 @@
         stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
         setWorking(false);  // reset; a "working" frame right behind this one re-shows it if still running
         for (const item of frame.items) {
-          if (item.type === "user") addBubble("user", item.text);
-          else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user");
-          else if (item.type === "thinking") addFoldable("thinking", "💭 thinking").body.textContent = item.text || "";
-          else if (item.type === "tool") renderTool(item.name, item.arguments);
-          else if (item.type === "loop") renderLoop(item.text);
-          else if (item.type === "subagent") renderSubagent(item);
-          else if (item.type === "phase") renderPhase(item.label, item.detail);
-          else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text);
-          else if (item.type === "message") addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text);
+          if (item.type === "user") addBubble("user", item.text, item.ts);
+          else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user", item.ts);
+          else if (item.type === "thinking") addFoldable("thinking", "💭 thinking", undefined, item.ts).body.textContent = item.text || "";
+          else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts);
+          else if (item.type === "loop") renderLoop(item.text, item.ts);
+          else if (item.type === "subagent") renderSubagent(item, item.ts);
+          else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
+          else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);
+          else if (item.type === "message") addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text, item.ts);
         }
         autoscroll();
       }
@@ -884,8 +929,9 @@
       if ((!text && attached.length === 0) || ws.readyState !== WebSocket.OPEN) return;
       stickToBottom = true;  // sending snaps back to the bottom to follow the reply
       subagentCards = {};  // new turn: reviewer card ids (plan-review-0, ...) start fresh
-      if (text) addBubble("user", text);  // show the user's own words, not the /plan wrapper
-      for (const item of attached) addImageBubble(item.dataUrl, "user");  // echo attachments locally
+      const now = new Date();
+      if (text) addBubble("user", text, now);  // show the user's own words, not the /plan wrapper
+      for (const item of attached) addImageBubble(item.dataUrl, "user", now);  // echo attachments locally
       if (attached.length) {
         // An image turn carries its own frame shape (text + data URLs); /plan wrapping doesn't apply.
         ws.send(JSON.stringify({ type: "input", text, images: attached.map(a => a.dataUrl) }));
