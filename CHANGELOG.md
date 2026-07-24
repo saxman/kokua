@@ -78,6 +78,11 @@ installable, modular application.
   Each conversation row has a delete (`×`) control (with a confirmation prompt); deleting the active
   conversation switches to the most-recently-updated remaining one, or a fresh empty one if none remain.
   Backed by a new `delete(key)` on AIMU's `SessionStore`.
+- **Collapsible, resizable sidebar (web)**: the left panel can be collapsed to a narrow icon rail (a
+  `«`/`»` toggle) and drag-resized via the divider between it and the chat (clamped to 180-480px;
+  dragging below the threshold snaps to the rail, dragging back out re-expands). The divider is also
+  keyboard-operable (arrows resize, Enter toggles). Width and collapsed state are a per-browser
+  preference (localStorage), applied before first paint like the theme so there is no flash on load.
 - **Distinguish agent-loop turns from user input (web)**: the agent loop injects its own continuation
   turns as `user`-role messages; using AIMU's inert `provenance` message key, the web UI now renders these
   as a muted `↻ continuation` marker at each loop-iteration boundary instead of as user bubbles, both live

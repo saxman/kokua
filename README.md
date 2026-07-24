@@ -82,7 +82,9 @@ The web UI holds multiple conversations: the left sidebar lists them (titled aut
 message) and has a "+ New conversation" button; click any conversation to continue it, or hover a
 conversation and click its `×` to delete it (you are asked to confirm; deleting the current conversation
 drops you into the most recent remaining one). Memory (facts and documents) is shared across all
-conversations. The CLI remains single-conversation for now.
+conversations. The CLI remains single-conversation for now. The sidebar can be collapsed to an icon rail
+(the `«`/`»` toggle) and resized by dragging the divider next to it; the width and collapsed state are
+remembered per browser.
 
 Conversations run concurrently: switching away from a conversation with a reply still streaming does not
 cancel it, and only the conversation you're viewing streams tokens/thinking/tool activity live. A turn

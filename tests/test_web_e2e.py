@@ -152,6 +152,44 @@ def test_background_turn_notifies_and_does_not_leak(page, live_server):
     expect(page.locator("#notifications .notification-banner")).to_have_count(0)
 
 
+def test_sidebar_collapse_resize_persist(page, live_server):
+    """The left panel collapses to the icon rail, drag-resizes within its clamp, and both the
+    collapsed state and the width survive a reload (localStorage, applied pre-paint)."""
+    url = live_server(delay=0.0)
+    _open(page, url)
+    root = page.locator("html")
+    sidebar = page.locator("#sidebar")
+
+    expect(root).not_to_have_attribute("data-sidebar-collapsed", "true")
+    expanded_width = sidebar.bounding_box()["width"]
+    assert expanded_width > 120
+
+    page.click("#sidebar-toggle")  # collapse to the rail
+    expect(root).to_have_attribute("data-sidebar-collapsed", "true")
+    expect(page.locator("#conv-list")).to_be_hidden()
+    assert sidebar.bounding_box()["width"] < 120
+
+    page.reload()  # collapsed state persists across reloads
+    page.wait_for_selector("#conv-list li", state="attached")  # list is display:none while collapsed
+    expect(root).to_have_attribute("data-sidebar-collapsed", "true")
+
+    page.click("#sidebar-toggle")  # expand again
+    expect(root).not_to_have_attribute("data-sidebar-collapsed", "true")
+
+    # Drag the divider left to shrink the panel, then confirm the new width persists on reload.
+    handle = page.locator("#sidebar-resize").bounding_box()
+    page.mouse.move(handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(handle["x"] - 60, handle["y"] + handle["height"] / 2, steps=5)
+    page.mouse.up()
+    resized_width = sidebar.bounding_box()["width"]
+    assert resized_width < expanded_width
+
+    page.reload()
+    page.wait_for_selector("#conv-list li")
+    assert abs(sidebar.bounding_box()["width"] - resized_width) < 2
+
+
 def test_working_indicator_on_switch_into_running(page, live_server):
     """Switching back into a conversation whose turn is still running shows the 'working' indicator,
     which clears once that turn completes."""

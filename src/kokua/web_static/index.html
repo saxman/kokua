@@ -16,6 +16,18 @@
       } catch (e) {}
     })();
   </script>
+  <!-- Resolve the left panel's stored width/collapsed state before first paint, like the theme above,
+       so the sidebar doesn't flash at its default width then jump. Width is clamped to [180, 480]. -->
+  <script>
+    (function () {
+      try {
+        var w = parseInt(localStorage.getItem("sidebar-width"), 10);
+        if (w >= 180 && w <= 480) document.documentElement.style.setProperty("--sidebar-width", w + "px");
+        if (localStorage.getItem("sidebar-collapsed") === "true")
+          document.documentElement.setAttribute("data-sidebar-collapsed", "true");
+      } catch (e) {}
+    })();
+  </script>
   <!-- Vendored KaTeX styles (math typesetting; fonts served from /fonts/). Loaded before the page's
        own styles so those win on any conflict. -->
   <link rel="stylesheet" href="katex.min.css" />
@@ -56,10 +68,25 @@
       background: var(--bg); color: var(--fg);
     }
     #app { display: flex; flex: 1; min-height: 0; }
-    #sidebar { width: 240px; flex: none; background: var(--sidebar-bg); border-right: 1px solid var(--border);
+    :root { --sidebar-width: 240px; --sidebar-rail: 48px; }
+    #sidebar { width: var(--sidebar-width); flex: none; background: var(--sidebar-bg); border-right: 1px solid var(--border);
       display: flex; flex-direction: column; padding: 10px; gap: 8px; overflow-y: auto; }
     #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-    #new-conv { background: var(--accent); color: var(--accent-fg); }
+    /* Draggable divider between the sidebar and main pane; also arrow-key/Enter operable (see JS). */
+    #sidebar-resize { flex: none; width: 5px; cursor: col-resize; background: transparent; align-self: stretch; }
+    #sidebar-resize:hover, body.resizing #sidebar-resize { background: var(--accent); }
+    #sidebar-top { display: flex; }
+    #sidebar-toggle { flex: none; margin-left: auto; border: none; background: none; color: inherit;
+      cursor: pointer; font-size: 1.1em; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+    #sidebar-toggle:hover { background: var(--sidebar-active); }
+    #new-conv { background: var(--accent); color: var(--accent-fg); display: flex; align-items: center;
+      justify-content: center; gap: 6px; }
+    /* Collapsed "icon rail": sidebar shrinks to a narrow strip; only the toggle and the "+" glyph show. */
+    :root[data-sidebar-collapsed="true"] #sidebar { width: var(--sidebar-rail); padding: 10px 4px; overflow: hidden; }
+    :root[data-sidebar-collapsed="true"] #sidebar-toggle { margin: 0 auto; }
+    :root[data-sidebar-collapsed="true"] #new-conv .label,
+    :root[data-sidebar-collapsed="true"] #conv-list { display: none; }
+    body.resizing { user-select: none; }
     #conv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
     #conv-list li { padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 0.9em;
       display: flex; align-items: center; gap: 6px; }
@@ -191,9 +218,14 @@
 <body>
   <div id="app">
     <aside id="sidebar">
-      <button id="new-conv" type="button">+ New conversation</button>
+      <div id="sidebar-top">
+        <button id="sidebar-toggle" type="button" aria-expanded="true" title="Collapse sidebar">«</button>
+      </div>
+      <button id="new-conv" type="button"><span class="icon">+</span><span class="label">New conversation</span></button>
       <ul id="conv-list"></ul>
     </aside>
+    <div id="sidebar-resize" role="separator" aria-orientation="vertical"
+         aria-label="Resize sidebar" tabindex="0"></div>
     <main id="main">
       <header>
         <span>Kokua <small>local, single user</small></span>
@@ -421,6 +453,69 @@
         if (currentThemeChoice() === "auto") applyThemeChoice("auto");
       });
     }
+
+    // Left panel: collapse/expand + drag-resize. Width and collapsed state are per-browser
+    // preferences (localStorage), applied pre-paint by the head script. Dragging narrower than
+    // SNAP_WIDTH collapses to the icon rail; dragging back out re-expands.
+    const sidebar = document.getElementById("sidebar");
+    const sidebarResize = document.getElementById("sidebar-resize");
+    const sidebarToggle = document.getElementById("sidebar-toggle");
+    const SIDEBAR_MIN = 180, SIDEBAR_MAX = 480, SIDEBAR_SNAP = 120;
+    function currentSidebarWidth() {
+      const w = parseInt(localStorage.getItem("sidebar-width"), 10);
+      return (w >= SIDEBAR_MIN && w <= SIDEBAR_MAX) ? w : 240;
+    }
+    function applySidebarWidth(px) {
+      const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(px)));
+      document.documentElement.style.setProperty("--sidebar-width", w + "px");
+      try { localStorage.setItem("sidebar-width", String(w)); } catch (e) {}
+    }
+    function setSidebarCollapsed(collapsed) {
+      const root = document.documentElement;
+      if (collapsed) root.setAttribute("data-sidebar-collapsed", "true");
+      else root.removeAttribute("data-sidebar-collapsed");
+      sidebarToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      sidebarToggle.textContent = collapsed ? "»" : "«";
+      sidebarToggle.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+      try { localStorage.setItem("sidebar-collapsed", collapsed ? "true" : "false"); } catch (e) {}
+    }
+    // Reflect the pre-paint state in the toggle control at load.
+    setSidebarCollapsed(document.documentElement.getAttribute("data-sidebar-collapsed") === "true");
+    sidebarToggle.addEventListener("click", () => {
+      setSidebarCollapsed(document.documentElement.getAttribute("data-sidebar-collapsed") !== "true");
+    });
+    // Resize width from the pointer position relative to the sidebar's left edge; snap to the rail below
+    // the threshold. Pointer capture keeps tracking even if the cursor leaves the thin handle.
+    function resizeFromClientX(clientX) {
+      const width = clientX - sidebar.getBoundingClientRect().left;
+      if (width < SIDEBAR_SNAP) { setSidebarCollapsed(true); return; }
+      setSidebarCollapsed(false);
+      applySidebarWidth(width);
+    }
+    sidebarResize.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      sidebarResize.setPointerCapture(e.pointerId);
+      document.body.classList.add("resizing");
+    });
+    sidebarResize.addEventListener("pointermove", (e) => {
+      if (!sidebarResize.hasPointerCapture(e.pointerId)) return;
+      resizeFromClientX(e.clientX);
+    });
+    sidebarResize.addEventListener("pointerup", (e) => {
+      sidebarResize.releasePointerCapture(e.pointerId);
+      document.body.classList.remove("resizing");
+    });
+    sidebarResize.addEventListener("keydown", (e) => {
+      const collapsed = document.documentElement.getAttribute("data-sidebar-collapsed") === "true";
+      if (e.key === "Enter") { setSidebarCollapsed(!collapsed); e.preventDefault(); }
+      else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        const delta = e.key === "ArrowRight" ? 16 : -16;
+        const base = collapsed ? SIDEBAR_MIN : currentSidebarWidth();
+        if (collapsed && delta > 0) setSidebarCollapsed(false);
+        applySidebarWidth(base + delta);
+        e.preventDefault();
+      }
+    });
 
     let streamingBubble = null;  // the assistant answer bubble accumulating tokens
     let streamingText = "";      // raw answer text, re-rendered as markdown when the turn completes
