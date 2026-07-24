@@ -15,7 +15,7 @@ import argparse
 import asyncio
 
 from . import plugins, settings
-from .config import AssistantConfig
+from .config import AssistantConfig, MCPServerConfig
 from .logging_setup import configure_logging
 
 
@@ -77,13 +77,10 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         action="append",
         default=None,
         metavar="URL",
-        help="Remote MCP server URL whose tools the assistant should use (repeatable). The "
-        "assistant can also connect more servers mid-session via the add_mcp_server tool.",
-    )
-    parser.add_argument(
-        "--mcp-bearer",
-        default=None,
-        help="Bearer token applied to all --mcp servers that require authentication.",
+        help="Remote MCP server URL whose tools the assistant should use (repeatable). Connects "
+        "unauthenticated (or via OAuth on an auth challenge); for a server needing a bearer token, "
+        "configure it in config.toml under [[mcp.server]] with token_env. The assistant can also "
+        "connect more servers mid-session via the add_mcp_server tool.",
     )
     parser.add_argument(
         "--memory",
@@ -141,8 +138,7 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
     take("show_thinking", args.show_thinking)
     take("show_tools", args.show_tools)
     take("tools", args.tools, lambda v: [group.strip() for group in v.split(",") if group.strip()])
-    take("mcp_servers", args.mcp)
-    take("mcp_bearer", args.mcp_bearer)
+    take("mcp_servers", args.mcp, lambda urls: [MCPServerConfig(url=url) for url in urls])
     take("memory", args.memory)
     take("load_plugins", args.plugins)
     take("subagents", args.subagents)

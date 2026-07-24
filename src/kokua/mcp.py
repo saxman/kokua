@@ -8,6 +8,7 @@ and `mcp_registry.py` (the reconnect-across-restarts record).
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -16,21 +17,49 @@ from aimu import aio
 from aimu.tools import tool
 
 from . import mcp_registry
-from .config import AssistantConfig
+from .config import AssistantConfig, MCPServerConfig
 from .mcp_auth import Notify, build_chat_oauth
 
 logger = logging.getLogger(__name__)
 
 
+class BearerTokenRequired(Exception):
+    """A server needs authentication that the automatic OAuth flow can't obtain (no dynamic client
+    registration), so the user must supply a bearer token. Its message is user-facing and actionable.
+    """
+
+    def __init__(self, url: str):
+        super().__init__(
+            f"The MCP server {url} requires authentication, but its OAuth flow can't complete because "
+            "the server does not support automatic client registration. To connect, provide a bearer "
+            "token (for example a personal access token from the service) and add the server again with "
+            "that token."
+        )
+
+
 def _looks_like_auth_required(exc: BaseException) -> bool:
     """Heuristic: did this connection failure come from an auth challenge (so OAuth should run)?
 
-    Matches the failure text against common auth signals (401/403, "unauthorized", a
-    WWW-Authenticate / OAuth hint). Deliberately narrow so a plain unreachable host (DNS,
-    connection refused) does not trigger an OAuth attempt.
+    Matches the failure text against common auth signals (401/403, an authorization/
+    authentication requirement, a WWW-Authenticate / OAuth hint). "authoriz"/"authentic" also
+    catch servers that signal the requirement with a 400 + "missing Authorization header"
+    instead of a standard 401. Deliberately narrow so a plain unreachable host (DNS, connection
+    refused) does not trigger an OAuth attempt.
     """
     text = f"{exc} {getattr(exc, '__cause__', '') or ''}".lower()
-    return any(s in text for s in ("401", "403", "unauthor", "forbidden", "www-authenticate", "oauth"))
+    signals = ("401", "403", "authoriz", "authentic", "forbidden", "www-authenticate", "oauth")
+    return any(s in text for s in signals)
+
+
+def _looks_like_registration_unsupported(exc: BaseException) -> bool:
+    """Did the OAuth flow fail because the server has no dynamic client registration endpoint?
+
+    fastmcp auto-registers a client (RFC 7591) before the authorization redirect; a server without a
+    ``/register`` endpoint fails that step (e.g. "Registration failed: 404"). That means OAuth can't
+    proceed and the user must supply a bearer token instead.
+    """
+    text = f"{exc} {getattr(exc, '__cause__', '') or ''}".lower()
+    return "registration" in text
 
 
 # Applies a per-agent mutation to every live agent. Injected so add/remove fan the change out across
@@ -80,7 +109,12 @@ async def connect_mcp(
             raise
         logger.info("MCP server %s requires authorization; starting OAuth flow.", url)
         provider = build_chat_oauth(url, notify=notify, token_storage_dir=oauth_storage_dir)
-        return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
+        try:
+            return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
+        except Exception as oauth_exc:
+            if _looks_like_registration_unsupported(oauth_exc):
+                raise BearerTokenRequired(url) from oauth_exc
+            raise
 
 
 async def attach_server(
@@ -117,6 +151,26 @@ async def attach_server(
     return added_names
 
 
+def _resolve_server_token(server: MCPServerConfig) -> Optional[str]:
+    """Read a startup server's bearer token from its ``token_env`` environment variable.
+
+    Returns ``None`` when no ``token_env`` is configured. If one is configured but the variable is
+    unset or empty, logs a warning and returns ``None`` so the assistant still starts (the connection
+    then proceeds tokenless, surfacing the auth requirement) rather than crashing on a missing secret.
+    """
+    if not server.token_env:
+        return None
+    token = os.environ.get(server.token_env)
+    if not token:
+        logger.warning(
+            "MCP server %s: environment variable %s is unset; connecting without a token.",
+            server.url,
+            server.token_env,
+        )
+        return None
+    return token
+
+
 async def reconnect_mcp_servers(
     for_each_agent: ForEachAgent,
     connections: list,
@@ -127,20 +181,23 @@ async def reconnect_mcp_servers(
 ) -> None:
     """Reconnect MCP servers at boot so their tools are available without re-adding them.
 
-    First the ones declared in config (--mcp / [mcp] servers), then the ones added at runtime and
+    First the ones declared in config (--mcp / [[mcp.server]]), then the ones added at runtime and
     recorded in the registry (deduped by URL). A connect failure logs and continues so one unreachable
     server can't stop the assistant from starting. Each connection is recorded in ``connections`` (so
     ``build_agent`` attaches it to conversations built later) and fanned out to whatever agents are live
     at boot (initially just the active one).
     """
-    for url in config.mcp_servers:
+    for server in config.mcp_servers:
         try:
             client, mode = await connect_mcp(
-                url, bearer_token=config.mcp_bearer, notify=notify, oauth_storage_dir=oauth_storage_dir
+                server.url,
+                bearer_token=_resolve_server_token(server),
+                notify=notify,
+                oauth_storage_dir=oauth_storage_dir,
             )
-            await attach_server(for_each_agent, connections, url, client, mode)
+            await attach_server(for_each_agent, connections, server.url, client, mode)
         except Exception:
-            logger.warning("Could not connect MCP server %s; continuing without it.", url, exc_info=True)
+            logger.warning("Could not connect MCP server %s; continuing without it.", server.url, exc_info=True)
 
     connected_urls = {conn.url for conn in connections}
     for record in mcp_registry.load(config.mcp_servers_path):
@@ -187,6 +244,10 @@ def make_mcp_tools(
         the token is saved for future sessions. Do not claim you cannot authenticate or that this
         is impossible from here, that flow is built in. Pass bearer_token only when the user gives
         you a static token to use instead of the OAuth flow.
+
+        Some servers require authentication but do not support the automatic OAuth flow. When that
+        happens this returns a message asking for a bearer token: relay it, ask the user for a
+        token, then call this tool again with that bearer_token.
         """
         if any(conn.url == url for conn in connections):
             return f"Already connected to {url}; its tools are available. Use remove_mcp_server to disconnect first."
@@ -195,6 +256,8 @@ def make_mcp_tools(
                 url, bearer_token=bearer_token, notify=notify, oauth_storage_dir=oauth_storage_dir
             )
             added = await attach_server(for_each_agent, connections, url, client, auth_mode)
+        except BearerTokenRequired as exc:
+            return str(exc)
         except Exception as exc:
             return f"Failed to connect to MCP server {url!r}: {exc}"
         # Persist reconnectable servers (no secret on disk); a bearer server stays session-only.

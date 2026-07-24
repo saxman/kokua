@@ -81,6 +81,19 @@ MEMORY_GUIDANCE = (
 
 
 @dataclass
+class MCPServerConfig:
+    """A remote MCP server to connect at startup.
+
+    ``token_env`` names an environment variable holding a bearer token, resolved at connect time so
+    the secret stays out of the config file. It is unset for an unauthenticated server (or one that
+    uses the OAuth flow, which triggers on an auth challenge).
+    """
+
+    url: str
+    token_env: Optional[str] = None
+
+
+@dataclass
 class AssistantConfig:
     model: Optional[str] = None
     system_message: str = DEFAULT_SYSTEM_MESSAGE
@@ -105,9 +118,8 @@ class AssistantConfig:
     show_reasoning: bool = False
     # AIMU built-in tool groups to expose (see build._TOOL_GROUPS; "all"/"none" also accepted).
     tools: list[str] = field(default_factory=lambda: ["web", "fs", "compute", "misc"])
-    # Remote MCP server URLs to connect at startup; a bearer token (if set) is applied to all.
-    mcp_servers: list[str] = field(default_factory=list)
-    mcp_bearer: Optional[str] = None
+    # Remote MCP servers to connect at startup; each may name an env var holding its bearer token.
+    mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     # Email (SMTP send). Recipients are LOCKED to email_to: the send_email tool takes no recipient, so
     # the assistant can only ever email the user. The password is read from KOKUA_EMAIL_PASSWORD (env),
     # never TOML. The email tool-pack self-gates: it offers no tool unless host + email_to are set and

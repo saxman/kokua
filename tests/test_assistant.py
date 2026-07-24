@@ -14,7 +14,7 @@ from helpers import MockAsyncModelClient
 from kokua import runtime_settings
 from kokua.assistant import Assistant
 from kokua.cli import build_arg_parser, resolve_config
-from kokua.config import AssistantConfig
+from kokua.config import AssistantConfig, MCPServerConfig
 
 from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamingContentType
@@ -375,8 +375,9 @@ async def test_startup_mcp_servers_wire_tools(tmp_path, monkeypatch):
 
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
+    monkeypatch.setenv("SVC_TOKEN", "tok")
     assistant = await Assistant.create(
-        _config(tmp_path, mcp_servers=["https://svc/mcp"], mcp_bearer="tok"),
+        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://svc/mcp", token_env="SVC_TOKEN")]),
         FakeChannel(),
         client=MockAsyncModelClient([]),
     )
@@ -394,7 +395,9 @@ async def test_startup_mcp_connect_failure_does_not_crash(tmp_path, monkeypatch)
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
     assistant = await Assistant.create(
-        _config(tmp_path, mcp_servers=["https://down/mcp"]), FakeChannel(), client=MockAsyncModelClient([])
+        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://down/mcp")]),
+        FakeChannel(),
+        client=MockAsyncModelClient([]),
     )
     assert assistant._mcp_servers == []
 

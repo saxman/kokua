@@ -65,11 +65,16 @@ concurrent = true
 # groups = ["compute"]
 # system_message = "You manage and query databases."
 
-[mcp]
-# Remote MCP server URLs to connect at startup.
-servers = []
-# Bearer token applied to all servers above that require authentication.
-# bearer = "..."
+# Remote MCP servers to connect at startup. Each server is its own [[mcp.server]] table.
+# `url` is required. `token_env` (optional) names an environment variable holding a bearer token,
+# read at startup so the secret stays out of this file; omit it for an unauthenticated server (or
+# one that uses the OAuth flow, which triggers automatically on an auth challenge).
+# [[mcp.server]]
+# url = "https://api.githubcopilot.com/mcp/"
+# token_env = "GITHUB_MCP_TOKEN"
+#
+# [[mcp.server]]
+# url = "https://example.com/mcp"
 
 [security]
 # Tools that require interactive confirmation before each call (terminal y/N, or Allow/Deny in the

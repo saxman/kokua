@@ -110,7 +110,8 @@ kokua --list-tool-packs    # example, pdf, image, email, + any installed plugins
 ```
 
 Useful flags: `--tools web,fs,compute,misc` (AIMU built-in tool groups), `--mcp <url>` (repeatable, connect
-a remote MCP server; `--mcp-bearer` for auth), `--no-memory`, `--no-plugins`, `--no-subagents`, `--system`, `--config <path>`,
+a remote MCP server; for one needing a bearer token, configure it in `config.toml` under `[[mcp.server]]`
+with `token_env`), `--no-memory`, `--no-plugins`, `--no-subagents`, `--system`, `--config <path>`,
 `--host` / `--port` (web).
 
 ### Configuration file

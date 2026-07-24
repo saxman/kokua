@@ -204,6 +204,44 @@ def test_subagents_unknown_top_level_key_raises(tmp_path):
         settings.load(str(path))
 
 
+def test_mcp_server_tables_parse(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[[mcp.server]]\n"
+        'url = "https://api.githubcopilot.com/mcp/"\n'
+        'token_env = "GITHUB_MCP_TOKEN"\n\n'
+        "[[mcp.server]]\n"
+        'url = "https://plain/mcp"\n',
+        encoding="utf-8",
+    )
+    servers = settings.load(str(path))["mcp_servers"]
+    assert [(s.url, s.token_env) for s in servers] == [
+        ("https://api.githubcopilot.com/mcp/", "GITHUB_MCP_TOKEN"),
+        ("https://plain/mcp", None),
+    ]
+
+
+def test_mcp_server_missing_url_raises(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[[mcp.server]]\ntoken_env = "X"\n', encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match="url"):
+        settings.load(str(path))
+
+
+def test_mcp_server_unknown_key_raises(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[[mcp.server]]\nurl = "https://x/mcp"\nbearer = "nope"\n', encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match="bearer"):
+        settings.load(str(path))
+
+
+def test_mcp_unknown_top_level_key_raises(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[mcp]\nservers = ["https://x/mcp"]\n', encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match=r"\[mcp\].servers"):
+        settings.load(str(path))
+
+
 def test_agent_cache_cap_parsed(tmp_path, monkeypatch):
     monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
     (tmp_path / "config.toml").write_text("[assistant]\nagent_cache_cap = 3\n")

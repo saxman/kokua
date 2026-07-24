@@ -145,6 +145,23 @@ installable, modular application.
   runs the plan autonomously. Built on Kokua's existing turn loop and tool-approval round-trip (AIMU
   already makes the agent plan-capable); planning is scratch work kept out of the saved conversation,
   which stores your actual request and the answer. `web-search`-for-MCP relies on the default `web` tools.
+- **MCP OAuth fallback fix**: `add_mcp_server` now starts the OAuth flow for a server that signals its
+  auth requirement with a 400 + "missing Authorization header" (rather than a standard 401). The
+  auth-challenge heuristic previously matched only `unauthor`/401/403, so such a server surfaced the raw
+  "bad request: missing required Authorization header" error instead of posting an authorization link; it
+  now also matches `authoriz`/`authentic`.
+- **Bearer-token guidance for OAuth-incapable servers**: when a server requires authentication but its
+  OAuth flow can't complete because it lacks dynamic client registration (the `/register` endpoint 404s),
+  `add_mcp_server` now returns an actionable "provide a bearer token and add the server again" message
+  instead of a raw `OAuthRegistrationError`. Its docstring tells the assistant to relay the message, ask
+  the user for a token, and retry with `bearer_token`.
+- **Per-service MCP bearer tokens via env vars**: the `[mcp]` config is now an array of `[[mcp.server]]`
+  tables, each with a required `url` and an optional `token_env` naming an environment variable that holds
+  that server's bearer token (read at startup, so the secret stays out of `config.toml`). This replaces
+  the single `[mcp] servers`/`bearer` keys, which applied one token to every server. `--mcp <url>` still
+  adds token-less servers from the CLI; the `--mcp-bearer` flag is removed (put authenticated servers in
+  `config.toml`). A configured `token_env` whose variable is unset logs a warning and connects tokenless
+  rather than aborting startup.
 - **Adversarial plan + result review** (deep planning, both off by default): an independent, context-free
   reviewer agent (fresh client, sees only the request + plan/answer) critiques the plan and/or the final
   result. `plan_review_agent` re-plans on rejection up to `review_rounds`, surfacing leftover concerns (to

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from . import paths, runtime_settings
+from .config import MCPServerConfig
 
 EXAMPLE_FILENAME = "config.example.toml"
 
@@ -39,6 +40,25 @@ def _str_list(section: str, key: str, value: list) -> list[str]:
     if not all(isinstance(item, str) for item in value):
         raise ConfigError(f"[{section}].{key} must be a list of strings")
     return list(value)
+
+
+def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
+    """Validate the [[mcp.server]] array of tables into a list of ``MCPServerConfig``."""
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise ConfigError("[[mcp.server]] must be an array of tables")
+    servers: list[MCPServerConfig] = []
+    for entry in value:
+        url = entry.get("url")
+        if not isinstance(url, str):
+            raise ConfigError("[[mcp.server]] requires a string 'url'")
+        token_env = entry.get("token_env")
+        if token_env is not None and not isinstance(token_env, str):
+            raise ConfigError(f"[[mcp.server]].token_env must be a string (server {url})")
+        unknown = set(entry) - {"url", "token_env"}
+        if unknown:
+            raise ConfigError(f"unknown key(s) in [[mcp.server]] (server {url}): {', '.join(sorted(unknown))}")
+        servers.append(MCPServerConfig(url=url, token_env=token_env))
+    return servers
 
 
 _SUBAGENT_ROLE_KEYS = {"description": str, "groups": list, "system_message": str}
@@ -79,8 +99,6 @@ _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callab
     ("assistant", "agent_cache_cap"): ("agent_cache_cap", (int,), "an integer", None),
     ("assistant", "subagents"): ("subagents", (bool,), "a boolean", None),
     ("tools", "groups"): ("tools", (list,), "a list of strings", _str_list),
-    ("mcp", "servers"): ("mcp_servers", (list,), "a list of strings", _str_list),
-    ("mcp", "bearer"): ("mcp_bearer", (str,), "a string", None),
     # [email]: SMTP send settings. No `password` key on purpose -- the password comes from the
     # KOKUA_EMAIL_PASSWORD env var, so putting it here is a hard "unknown config key" error.
     ("email", "host"): ("email_host", (str,), "a string", None),
@@ -150,6 +168,14 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
                     }
                 else:
                     raise ConfigError(f"unknown config key [subagents].{key}")
+            continue
+        # The [mcp] table holds a [[mcp.server]] array of tables (each url + optional token_env),
+        # not flat scalar keys, so it is handled specially like [subagents]/[generation].
+        if section == "mcp":
+            for key, value in entries.items():
+                if key != "server":
+                    raise ConfigError(f"unknown config key [mcp].{key}")
+                overrides["mcp_servers"] = _parse_mcp_servers(value)
             continue
         for key, value in entries.items():
             spec = _SCHEMA.get((section, key))
