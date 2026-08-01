@@ -151,7 +151,8 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
 
 def resolve_config(args: argparse.Namespace) -> AssistantConfig:
     """Merge built-in defaults < config file < CLI flags into the final config."""
-    overrides = {**settings.load(args.config), **_cli_overrides(args)}
+    config_path, _ = settings.resolve_path(args.config)
+    overrides = {"config_path": config_path, **settings.load(args.config), **_cli_overrides(args)}
     return AssistantConfig(**overrides)
 
 

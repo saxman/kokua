@@ -116,6 +116,63 @@ _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callab
 }
 
 
+def _coerce_flat(section: str, key: str, value: Any) -> tuple[str, Any]:
+    """Validate one scalar ``[section].key`` against ``_SCHEMA``; return ``(field, coerced)``."""
+    spec = _SCHEMA.get((section, key))
+    if spec is None:
+        raise ConfigError(f"unknown config key [{section}].{key}")
+    field, types, label, convert = spec
+    rejected_bool = isinstance(value, bool) and bool not in types
+    if rejected_bool or not isinstance(value, types):
+        raise ConfigError(f"[{section}].{key} must be {label}, got {type(value).__name__}")
+    return field, (convert(section, key, value) if convert else value)
+
+
+def _parse_scalar(section: str, key: str, raw: str, types: tuple[type, ...]) -> Any:
+    """Parse a string from the ``update_config`` tool into the TOML type ``_SCHEMA`` expects."""
+    if bool in types:
+        lowered = raw.strip().lower()
+        if lowered in ("true", "false"):
+            return lowered == "true"
+        raise ConfigError(f"[{section}].{key} must be true or false, got {raw!r}")
+    if list in types:
+        return [item.strip() for item in raw.split(",") if item.strip()]
+    if int in types:
+        try:
+            return int(raw)
+        except ValueError:
+            raise ConfigError(f"[{section}].{key} must be an integer, got {raw!r}")
+    return raw
+
+
+def coerce_config_string(section: str, key: str, raw: str) -> Any:
+    """Validate and coerce a string value from the ``update_config`` tool into its config type.
+
+    The tool passes every value as a string (LLM-friendly, avoids a union-typed argument); this maps
+    it onto the type the config schema expects. Raises ``ConfigError`` with a user-facing message for an
+    unknown key, a wrong-typed/out-of-range value, or a structured section that has no scalar entries.
+    """
+    if section == "generation":
+        if key not in runtime_settings.GENERATION_KEYS:
+            raise ConfigError(f"unknown config key [generation].{key}")
+        try:
+            number = float(raw)
+        except ValueError:
+            raise ConfigError(f"[generation].{key} must be a number, got {raw!r}")
+        cleaned = runtime_settings.sanitize({"generate_kwargs": {key: number}})["generate_kwargs"]
+        if key not in cleaned:
+            raise ConfigError(f"[generation].{key} is out of the allowed range")
+        return cleaned[key]
+    if section in ("subagents", "mcp"):
+        raise ConfigError(f"[{section}] has no scalar keys editable with update_config")
+    spec = _SCHEMA.get((section, key))
+    if spec is None:
+        raise ConfigError(f"unknown config key [{section}].{key}")
+    _, types, _, convert = spec
+    value = _parse_scalar(section, key, raw, types)
+    return convert(section, key, value) if convert else value
+
+
 def resolve_path(explicit: Optional[str]) -> tuple[Path, bool]:
     """Return the config-file path and whether the user explicitly requested it."""
     if explicit:
@@ -178,12 +235,6 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
                 overrides["mcp_servers"] = _parse_mcp_servers(value)
             continue
         for key, value in entries.items():
-            spec = _SCHEMA.get((section, key))
-            if spec is None:
-                raise ConfigError(f"unknown config key [{section}].{key}")
-            field, types, label, convert = spec
-            rejected_bool = isinstance(value, bool) and bool not in types
-            if rejected_bool or not isinstance(value, types):
-                raise ConfigError(f"[{section}].{key} must be {label}, got {type(value).__name__}")
-            overrides[field] = convert(section, key, value) if convert else value
+            field, coerced = _coerce_flat(section, key, value)
+            overrides[field] = coerced
     return overrides

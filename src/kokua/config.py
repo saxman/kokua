@@ -131,9 +131,10 @@ class AssistantConfig:
     email_to: Optional[str] = None  # the ONLY recipient the tool will ever send to
     # True -> SMTP_SSL (implicit TLS, usually port 465); False -> plain connect + STARTTLS (usually 587).
     email_use_ssl: bool = False
-    # Baseline model generation kwargs seeded from the [generation] TOML section. At runtime the web
-    # settings panel overrides these (persisted separately to runtime-settings.json); see the
-    # layering note there. Kept as a plain dict so provider-specific keys pass through untouched.
+    # Model generation kwargs from the [generation] TOML section, layered over the provider's built-in
+    # defaults. The web settings panel and update_config change these at runtime by writing back to
+    # config.toml, so this is the single effective layer. Kept as a plain dict so provider-specific keys
+    # pass through untouched.
     generation: dict = field(default_factory=dict)
     # Persistent memory: a SemanticMemoryStore for facts + a DocumentStore for documents. On by default.
     memory: bool = True
@@ -149,7 +150,9 @@ class AssistantConfig:
     subagents_concurrent: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
-    confirm_tools: list[str] = field(default_factory=lambda: ["add_skill_script", "add_mcp_server", "execute_python"])
+    confirm_tools: list[str] = field(
+        default_factory=lambda: ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
+    )
     # Front end to run and, for the web front end, its bind address.
     frontend: str = "cli"
     host: str = "127.0.0.1"
@@ -161,6 +164,10 @@ class AssistantConfig:
     agent_cache_cap: int = 8
     # Single root for all transient and user-provided content; the leaf paths below derive from it.
     data_dir: Path = field(default_factory=paths.data_dir)
+    # The config.toml this assistant reads and writes. The web settings panel, the add_mcp_server tool,
+    # and the assistant's own update_config tool all persist here; set from --config / $KOKUA_CONFIG by
+    # the CLI, else the default $KOKUA_HOME/config.toml.
+    config_path: Path = field(default_factory=paths.config_path)
 
     @property
     def skills_dir(self) -> Path:
@@ -193,11 +200,6 @@ class AssistantConfig:
         return self.data_dir / "images"
 
     @property
-    def mcp_servers_path(self) -> Path:
-        """Where runtime-added MCP servers are recorded so they reconnect across restarts."""
-        return self.data_dir / "mcp-servers.json"
-
-    @property
     def scheduled_tasks_path(self) -> Path:
         return self.data_dir / "scheduled_tasks.json"
 
@@ -205,8 +207,3 @@ class AssistantConfig:
     def logs_path(self) -> Path:
         """Directory for the rotating diagnostic log (kokua.log). See logging_setup.configure_logging."""
         return self.data_dir / "logs"
-
-    @property
-    def runtime_settings_path(self) -> Path:
-        """Where the web settings panel persists runtime model settings across restarts."""
-        return self.data_dir / "runtime-settings.json"

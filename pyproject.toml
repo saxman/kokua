@@ -27,6 +27,9 @@ dependencies = [
     # Markdown -> PDF for the built-in `pdf` tool-pack (both pure-Python, no system libraries).
     "fpdf2>=2.7",
     "markdown>=3.5",
+    # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
+    # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
+    "tomlkit>=0.13",
 ]
 
 [project.optional-dependencies]

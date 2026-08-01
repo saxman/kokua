@@ -251,6 +251,38 @@ def test_agent_cache_cap_parsed(tmp_path, monkeypatch):
     assert overrides["agent_cache_cap"] == 3
 
 
+def test_coerce_config_string_scalars():
+    assert settings.coerce_config_string("assistant", "model", "anthropic:x") == "anthropic:x"
+    assert settings.coerce_config_string("display", "show_thinking", "false") is False
+    assert settings.coerce_config_string("display", "show_tools", "true") is True
+    assert settings.coerce_config_string("web", "port", "9100") == 9100
+
+
+def test_coerce_config_string_list():
+    assert settings.coerce_config_string("tools", "groups", "web, fs, misc") == ["web", "fs", "misc"]
+
+
+def test_coerce_config_string_generation_range_checked():
+    assert settings.coerce_config_string("generation", "temperature", "0.3") == 0.3
+    with pytest.raises(settings.ConfigError, match="temperature"):
+        settings.coerce_config_string("generation", "temperature", "9")  # above the 2.0 max
+
+
+def test_coerce_config_string_bad_int_raises():
+    with pytest.raises(settings.ConfigError, match=r"\[web\].port"):
+        settings.coerce_config_string("web", "port", "not-an-int")
+
+
+def test_coerce_config_string_unknown_key_raises():
+    with pytest.raises(settings.ConfigError, match="unknown config key"):
+        settings.coerce_config_string("assistant", "bogus", "x")
+
+
+def test_coerce_config_string_rejects_structured_sections():
+    with pytest.raises(settings.ConfigError, match="mcp"):
+        settings.coerce_config_string("mcp", "server", "x")
+
+
 def test_shipped_example_loads_cleanly(caplog):
     """The example's active keys must parse without unknown-key or type warnings/errors."""
     _init()

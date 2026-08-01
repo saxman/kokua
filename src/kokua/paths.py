@@ -2,11 +2,11 @@
 
 The reference example stored everything under ``aimu.paths.output``; a standalone app owns
 its own directory instead. The state root defaults to ``~/.kokua`` and is overridable with the
-``KOKUA_HOME`` environment variable. The root holds an optional ``config.toml`` and a single
-``data/`` directory under which all transient and user-provided content lives::
+``KOKUA_HOME`` environment variable. The root holds ``config.toml`` (all settings; hand-authored and
+app-written) and a single ``data/`` directory holding only content (conversations, memory, etc.)::
 
     $KOKUA_HOME/
-      config.toml          # optional; read if present
+      config.toml          # all settings (created on first write if absent)
       data/
         sessions.json
         memory/

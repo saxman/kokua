@@ -1,8 +1,8 @@
 """Durable, agent-managed scheduled tasks.
 
 AIMU's ``Scheduler`` runs in-memory jobs and is deliberately non-persistent; this module is the
-"durable wrapper above the library" it defers to. It owns a tolerant JSON registry of tasks (mirroring
-``mcp_registry.py``), the ``next_fire`` scheduler math for the supported recurrence types, and the
+"durable wrapper above the library" it defers to. It owns a tolerant JSON registry of tasks, the
+``next_fire`` scheduler math for the supported recurrence types, and the
 ``make_scheduler_tools`` factory that binds the agent tools to the live ``Scheduler`` and the
 assistant's proactive-turn method (mirroring ``mcp.make_mcp_tools``).
 """

@@ -2,6 +2,11 @@
 # ~/.kokua/config.toml), copy it there yourself, or point at it with --config PATH or $KOKUA_CONFIG.
 # Every key is optional; the value shown is the built-in default. Command-line flags override anything
 # set here. An unknown key or wrong-typed value is a hard error (startup fails and names the key).
+#
+# This file is the single source of settings: besides hand-editing, the web settings panel, the
+# add_mcp_server tool, and the assistant's own update_config tool write to it too (comments are
+# preserved). A few security-critical keys ([security].confirm_tools, [email].to, [paths].data_dir)
+# can only be changed by hand-editing, never by the assistant.
 
 [assistant]
 # Model string, e.g. "ollama:qwen3:8b". Unset -> $AIMU_LANGUAGE_MODEL, else the first already-running
@@ -34,7 +39,7 @@ agent_cache_cap = 8
 
 [display]
 # Stream the model's reasoning / tool calls into the channel. The web settings panel toggles these
-# at runtime; a change there persists to data/runtime-settings.json and overrides these defaults.
+# at runtime; a change there is written straight back into these keys.
 show_thinking = true
 show_tools = true
 
@@ -68,7 +73,8 @@ concurrent = true
 # Remote MCP servers to connect at startup. Each server is its own [[mcp.server]] table.
 # `url` is required. `token_env` (optional) names an environment variable holding a bearer token,
 # read at startup so the secret stays out of this file; omit it for an unauthenticated server (or
-# one that uses the OAuth flow, which triggers automatically on an auth challenge).
+# one that uses the OAuth flow, which triggers automatically on an auth challenge). Servers you add at
+# runtime with the add_mcp_server tool are appended here automatically (URL only, no secret).
 # [[mcp.server]]
 # url = "https://api.githubcopilot.com/mcp/"
 # token_env = "GITHUB_MCP_TOKEN"
@@ -79,8 +85,9 @@ concurrent = true
 [security]
 # Tools that require interactive confirmation before each call (terminal y/N, or Allow/Deny in the
 # web UI). These run with full machine access. Set to [] to disable approval. Proactive (unprompted)
-# turns auto-deny these regardless.
-confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python"]
+# turns auto-deny these regardless. `update_config` is here because it lets the assistant rewrite this
+# file (except the security-critical keys, which it can never change).
+confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
 
 [paths]
 # Absolute override for where all transient + user content lives. Default: $KOKUA_HOME/data.
@@ -136,9 +143,9 @@ level = "INFO"
 # show_reasoning = false
 
 [generation]
-# Baseline model generation kwargs. The web settings panel overrides these at runtime and persists
-# its own choice separately (to data/runtime-settings.json), so these act only as the starting
-# defaults. Provider support varies: AIMU forces temperature and drops top_p/top_k for thinking
+# Model generation kwargs, layered over the provider's built-in defaults. The web settings panel and
+# the update_config tool change these at runtime by writing back here, so this section is the single
+# effective layer. Provider support varies: AIMU forces temperature and drops top_p/top_k for thinking
 # models, and Anthropic does not support presence_penalty / repetition_penalty (OpenAI-family keys).
 # Unset keys fall back to the provider's built-in default.
 # temperature = 0.1

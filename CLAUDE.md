@@ -48,13 +48,25 @@ tool-pack are registered in Kokua's own `pyproject.toml` exactly as a third part
 see `src/kokua/toolpacks/example.py` for the template.
 
 **Config layering.** Precedence is **CLI flag > TOML config file > built-in default**. `config.py` holds
-`AssistantConfig` (plain dataclass; leaf paths derive from `data_dir`). `settings.py` finds and parses the
-TOML file into schema-validated `AssistantConfig` overrides. `cli.py`'s `resolve_config` merges
-`settings.load()` under `_cli_overrides()`. Flag defaults are the `None` sentinel so an unspecified flag
-defers to the file/default. `config.example.toml` documents every key at its default.
+`AssistantConfig` (plain dataclass; leaf paths derive from `data_dir`, plus `config_path` for the file
+itself). `settings.py` finds and parses the TOML file into schema-validated `AssistantConfig` overrides.
+`cli.py`'s `resolve_config` merges `settings.load()` under `_cli_overrides()`. Flag defaults are the
+`None` sentinel so an unspecified flag defers to the file/default. `config.example.toml` documents every
+key at its default.
 
-**State lives under `~/.kokua`** (override with `KOKUA_HOME`); `paths.py` owns all locations. `data/`
-holds `sessions.json` (conversations), `skills/`, `memory/`, `documents/`, `downloads/`, `images/`, `mcp-servers.json`, and `scheduled_tasks.json` (durable scheduled tasks).
+**`config.toml` is the single source of settings, and the app writes it.** `config_store.py` does
+comment-preserving writes via `tomlkit` (stdlib `tomllib` can't write). Three writers: the web settings
+panel (`assistant.apply_settings` -> `_persist_settings`), the `add_mcp_server`/`remove_mcp_server` tools
+(runtime-added servers land in `[[mcp.server]]`, URL only, no secret), and the assistant's own
+`read_config`/`update_config` tools (`config_tools.py`). `update_config` refuses a security blocklist
+(`confirm_tools`, `email.to`, `data_dir`) and applies hot-appliable keys (model, generation, display and
+planning flags) live via `_apply_config_change`, reporting "restart required" for everything else. There
+is no separate runtime-settings store any more: `runtime_settings.py` is now just the panel-payload
+sanitizer, and `config.generation` is the single generation-kwargs layer over provider defaults.
+
+**State lives under `~/.kokua`** (override with `KOKUA_HOME`); `paths.py` owns all locations. `config.toml`
+sits at the root; `data/` holds only content: `sessions.json` (conversations), `skills/`, `memory/`,
+`documents/`, `downloads/`, `images/`, and `scheduled_tasks.json` (durable scheduled tasks).
 
 **Images.** `images.py` owns the on-disk store and the `/images/<name>` reference. Input images (web
 upload/paste, or CLI `/attach`) and generated images (the `image` tool-pack, gated on `AIMU_IMAGE_MODEL`)
@@ -63,10 +75,11 @@ base64 data URL into stored message content, but a persisted session must stay s
 isn't fetchable by the provider, so `assistant._compact_message_images` rewrites data URLs to references
 on persist and `_expand_message_images` re-inlines them before each `agent.restore`.
 
-**MCP servers** come from config `[mcp]` at startup or the runtime `add_mcp_server` tool. `mcp_auth.py`
-(`ChatOAuth`) handles OAuth by posting the authorization link into the chat and persisting tokens to
-disk; `mcp_registry.py` records runtime-added servers (URL + auth mode, never a bearer secret) so they
-reconnect across restarts.
+**MCP servers** all come from config `[[mcp.server]]` at startup (`mcp.reconnect_mcp_servers` is a single
+pass over `config.mcp_servers`). The runtime `add_mcp_server` tool appends reconnectable servers (URL
+only, no secret) there via `config_store`, so config.toml is the one source. `mcp_auth.py` (`ChatOAuth`)
+handles OAuth by posting the authorization link into the chat and persisting tokens to disk; an OAuth
+server reconnects by rediscovering the challenge (a plain attempt first, then the cached-token provider).
 
 **Web front end.** `frontends/web.py` is a Starlette + uvicorn WebSocket server (behind the `web` extra);
 `channels/web.py`'s `WebChannel` subclasses AIMU's base `WebChannel`. The streaming transport

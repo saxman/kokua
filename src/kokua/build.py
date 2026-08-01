@@ -22,6 +22,7 @@ from aimu.tools import builtin
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
 from .config import DEFAULT_SUBAGENT_ROLES, MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, AssistantConfig
+from .config_tools import make_config_tools
 from .mcp import make_mcp_tools
 from .mcp_auth import Notify
 from .plugins import discover_tool_packs
@@ -130,16 +131,13 @@ def resolve_system_message(config: AssistantConfig) -> str:
     return system + (SUBAGENT_GUIDANCE if config.subagents else "")
 
 
-def build_model_client(config: AssistantConfig, stored: dict):
-    """Build the model client for ``config.model``, applying any persisted model override first.
+def build_model_client(config: AssistantConfig):
+    """Build the model client for ``config.model``.
 
-    A persisted model choice wins over ``config.model``, and ``config.model`` is kept in sync so
-    ``current_settings()`` and the panel reflect the model actually running. Raises
-    ``ModelClientError`` (carrying AIMU's message) instead of the raw ValueError/TypeError so a front
-    end can present it rather than a traceback.
+    The persisted model choice already lives in ``config.model`` (loaded from config.toml), so there is
+    no separate override to apply. Raises ``ModelClientError`` (carrying AIMU's message) instead of the
+    raw ValueError/TypeError so a front end can present it rather than a traceback.
     """
-    if stored.get("model"):
-        config.model = stored["model"]
     try:
         return aio.client(config.model, system=resolve_system_message(config))
     except (ValueError, TypeError) as e:
@@ -198,6 +196,7 @@ def build_agent(
     connections: list,
     memory_tools: list,
     for_each_agent: Callable,
+    reapply_config: Callable,
 ) -> aio.SkillAgent:
     """Build the SkillAgent and its full tool set (skills, MCP management, memory, plugins, built-ins).
 
@@ -225,9 +224,10 @@ def build_agent(
             connections,
             notify=notify,
             oauth_storage_dir=oauth_storage_dir,
-            registry_path=config.mcp_servers_path,
+            config_path=config.config_path,
         ),
         *memory_tools,
+        *make_config_tools(config.config_path, reapply_config),
         *plugin_tools,
         *_resolve_builtin_tools(config.tools),
     ]
@@ -252,6 +252,7 @@ def wire_agent(
     tool_approval: Callable,
     scheduler_tools: list,
     for_each_agent: Callable,
+    reapply_config: Callable,
 ) -> aio.SkillAgent:
     """Build a fully-wired SkillAgent: base tools + approval gate + subagent tool + scheduler tools.
 
@@ -266,6 +267,7 @@ def wire_agent(
         connections=connections,
         memory_tools=memory_tools,
         for_each_agent=for_each_agent,
+        reapply_config=reapply_config,
     )
     agent.tool_approval = tool_approval
     add_subagent_tool(agent, config, tool_approval)
@@ -286,6 +288,7 @@ def make_agent_builder(
     store,
     images_path: Path,
     for_each_agent: Callable,
+    reapply_config: Callable,
 ) -> Callable[[str], aio.SkillAgent]:
     """Return a builder that constructs and restores a per-conversation agent on demand.
 
@@ -306,6 +309,7 @@ def make_agent_builder(
             tool_approval=tool_approval,
             scheduler_tools=scheduler_tools,
             for_each_agent=for_each_agent,
+            reapply_config=reapply_config,
         )
         session = store.get(conversation_id)
         if session is not None and session.messages:

@@ -108,11 +108,24 @@ installable, modular application.
   generation kwargs (`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`,
   `repetition_penalty`), display prefs (`show_thinking` / `show_tools` plus the auto/light/dark theme),
   and the active model. Server-backed changes take effect on the next turn (switching the model rebuilds
-  the client and carries the conversation over) and persist across restarts to
-  `data/runtime-settings.json`, layered over the optional `[generation]` config section
-  (`provider defaults < config.toml < the panel`); `config.toml` is never rewritten by the app. The theme
-  is a per-browser choice (stored locally, not server-side). Provider support varies: thinking models
-  ignore `top_p`/`top_k` and force `temperature`, and Anthropic does not support the penalty parameters.
+  the client and carries the conversation over) and persist across restarts by writing back into
+  `config.toml` (see the config-consolidation entry below). The theme is a per-browser choice (stored
+  locally, not server-side). Provider support varies: thinking models ignore `top_p`/`top_k` and force
+  `temperature`, and Anthropic does not support the penalty parameters.
+- **Config consolidation (single source of settings)**: `config.toml` now holds all settings and is
+  written by the app as well as hand-edited, replacing the separate `data/runtime-settings.json` and
+  `data/mcp-servers.json` state files (both removed, along with `mcp_registry.py`). `config_store.py`
+  does comment-preserving writes via `tomlkit` (new dependency; stdlib `tomllib` cannot write TOML), so
+  hand-written comments and layout survive app writes; a fresh file is seeded from the shipped example on
+  first write. The web settings panel and the `add_mcp_server`/`remove_mcp_server` tools now persist here
+  (runtime-added MCP servers land in `[[mcp.server]]`, URL only). `data/` holds only content now.
+- **Assistant config tools**: `read_config` / `update_config` (`kokua.config_tools`) let the assistant
+  inspect and repair its own configuration in-conversation. `update_config` validates and coerces the
+  value, applies hot-appliable keys (model, `[generation]`, display and planning flags) to the running
+  session immediately (persisting only after a successful apply, so a bad model isn't saved) and reports
+  "restart required" for everything else. A security blocklist (`[security].confirm_tools`, `[email].to`,
+  `[paths].data_dir`) can never be changed by the tool, only by hand-edit; `update_config` is in the
+  default `confirm_tools` list, so each write goes through the approval prompt.
 - **Remote/custom model endpoints**: `[assistant].model` accepts AIMU's extended
   `provider:model_id[@base_url][;flags]` form, so Kokua can target a remote OpenAI-compatible server
   (e.g. a llama.cpp `llama-server` on another host) or a model id not in AIMU's catalog. Example:

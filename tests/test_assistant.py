@@ -11,7 +11,6 @@ import pytest
 
 import kokua.paths
 from helpers import MockAsyncModelClient
-from kokua import runtime_settings
 from kokua.assistant import Assistant
 from kokua.cli import build_arg_parser, resolve_config
 from kokua.config import AssistantConfig, MCPServerConfig
@@ -854,12 +853,9 @@ async def test_new_conversation_agent_carries_layered_generate_kwargs(tmp_path):
 
 
 def test_default_confirm_tools():
-    assert AssistantConfig().confirm_tools == ["add_skill_script", "add_mcp_server", "execute_python"]
-    assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == [
-        "add_skill_script",
-        "add_mcp_server",
-        "execute_python",
-    ]
+    expected = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
+    assert AssistantConfig().confirm_tools == expected
+    assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == expected
 
 
 def test_confirm_tools_flag_parses():
@@ -1521,11 +1517,23 @@ async def test_add_mcp_server_no_oauth_on_non_auth_failure(tmp_path, monkeypatch
     assert "Failed to connect" in msg
 
 
-async def test_runtime_added_server_persists_and_reconnects(tmp_path, monkeypatch):
-    """A server added at runtime is recorded and reconnected on the next start (the reported bug)."""
-    from aimu import aio
+def _persisted_servers(cfg):
+    """The [[mcp.server]] entries settings.load reads back from the assistant's config.toml."""
+    from kokua import settings
 
-    from kokua import mcp_registry
+    if not cfg.config_path.exists():
+        return []
+    return settings.load(str(cfg.config_path)).get("mcp_servers", [])
+
+
+def _restart_config(tmp_path, cfg):
+    """A fresh config for a simulated restart, loading persisted MCP servers as resolve_config would."""
+    return _config(tmp_path, mcp_servers=_persisted_servers(cfg))
+
+
+async def test_runtime_added_server_persists_and_reconnects(tmp_path, monkeypatch):
+    """A server added at runtime is recorded in config.toml and reconnected on the next start."""
+    from aimu import aio
 
     async def fake_connect(*, url=None, auth=None, **kw):
         return _FakeMCP([_fake_mcp_tool("remote_search")])
@@ -1537,20 +1545,19 @@ async def test_runtime_added_server_persists_and_reconnects(tmp_path, monkeypatc
     add_mcp = next(t for t in a1._agent.tools if t.__name__ == "add_mcp_server")
     await add_mcp(url="https://svc/mcp")
     a1._store.close()
-    # Recorded for reconnect, no secret on disk, auth_mode "none".
-    assert mcp_registry.load(cfg.mcp_servers_path) == [{"url": "https://svc/mcp", "auth_mode": "none"}]
+    # Recorded in config.toml [[mcp.server]] with just the URL (no secret on disk).
+    assert [(s.url, s.token_env) for s in _persisted_servers(cfg)] == [("https://svc/mcp", None)]
 
-    # Simulate a restart: a fresh Assistant reconnects from the registry without re-adding.
-    a2 = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    # Simulate a restart: a fresh Assistant reconnects from config.toml without re-adding.
+    a2 = await Assistant.create(_restart_config(tmp_path, cfg), FakeChannel(), client=MockAsyncModelClient([]))
     assert "remote_search" in {fn.__name__ for fn in a2._agent.tools}
     assert [conn.url for conn in a2._mcp_servers] == ["https://svc/mcp"]
 
 
 async def test_oauth_server_persists_and_reconnects_with_provider(tmp_path, monkeypatch):
-    """An OAuth server is recorded as auth_mode 'oauth' and reconnects via the provider directly."""
+    """An OAuth server is recorded (URL only) and reconnects via the provider on the auth challenge."""
     from aimu import aio
 
-    from kokua import mcp_registry
     from kokua.mcp_auth import ChatOAuth
 
     async def fake_connect(*, url=None, auth=None, **kw):
@@ -1565,26 +1572,26 @@ async def test_oauth_server_persists_and_reconnects_with_provider(tmp_path, monk
     add_mcp = next(t for t in a1._agent.tools if t.__name__ == "add_mcp_server")
     await add_mcp(url="https://svc/mcp")
     a1._store.close()
-    assert mcp_registry.load(cfg.mcp_servers_path) == [{"url": "https://svc/mcp", "auth_mode": "oauth"}]
+    # No auth_mode is stored, only the URL; reconnect rediscovers OAuth via the challenge path.
+    assert [(s.url, s.token_env) for s in _persisted_servers(cfg)] == [("https://svc/mcp", None)]
 
-    # Restart: reconnect goes straight to the OAuth provider (no plain attempt first).
     seen = []
 
     async def fake_connect2(*, url=None, auth=None, **kw):
         seen.append(auth)
+        if auth is None:  # a plain attempt first, then the OAuth provider on the challenge
+            raise RuntimeError("Client error '401 Unauthorized'")
         return _FakeMCP([_fake_mcp_tool("remote_trade")])
 
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect2)
-    a2 = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    a2 = await Assistant.create(_restart_config(tmp_path, cfg), FakeChannel(), client=MockAsyncModelClient([]))
     assert "remote_trade" in {fn.__name__ for fn in a2._agent.tools}
-    assert len(seen) == 1 and isinstance(seen[0], ChatOAuth)  # reconnected via the provider, no re-auth dance
+    assert any(isinstance(auth, ChatOAuth) for auth in seen)  # reconnected via the OAuth provider
 
 
 async def test_bearer_server_not_persisted(tmp_path, monkeypatch):
     """A bearer-token server is session-only: its secret is never written, so it is not reconnected."""
     from aimu import aio
-
-    from kokua import mcp_registry
 
     async def fake_connect(*, url=None, auth=None, **kw):
         return _FakeMCP([_fake_mcp_tool("remote_trade")])
@@ -1597,17 +1604,15 @@ async def test_bearer_server_not_persisted(tmp_path, monkeypatch):
     msg = await add_mcp(url="https://svc/mcp", bearer_token="secret")
     a1._store.close()
     assert "session only" in msg
-    assert mcp_registry.load(cfg.mcp_servers_path) == []
+    assert _persisted_servers(cfg) == []
 
-    a2 = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    a2 = await Assistant.create(_restart_config(tmp_path, cfg), FakeChannel(), client=MockAsyncModelClient([]))
     assert "remote_trade" not in {fn.__name__ for fn in a2._agent.tools}
 
 
 async def test_remove_mcp_server_drops_tools_and_forgets(tmp_path, monkeypatch):
-    """remove_mcp_server removes the live tools and the persisted record, so no reconnect on restart."""
+    """remove_mcp_server removes the live tools and the config.toml record, so no reconnect on restart."""
     from aimu import aio
-
-    from kokua import mcp_registry
 
     async def fake_connect(*, url=None, auth=None, **kw):
         return _FakeMCP([_fake_mcp_tool("remote_search")])
@@ -1626,11 +1631,11 @@ async def test_remove_mcp_server_drops_tools_and_forgets(tmp_path, monkeypatch):
     assert "Disconnected" in msg and "remote_search" in msg
     assert "remote_search" not in {fn.__name__ for fn in a1._agent.tools}
     assert a1._mcp_servers == []
-    assert mcp_registry.load(cfg.mcp_servers_path) == []
+    assert _persisted_servers(cfg) == []
     a1._store.close()
 
     # Restart: the removed server is not reconnected.
-    a2 = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    a2 = await Assistant.create(_restart_config(tmp_path, cfg), FakeChannel(), client=MockAsyncModelClient([]))
     assert "remote_search" not in {fn.__name__ for fn in a2._agent.tools}
 
 
@@ -1753,53 +1758,77 @@ async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeyp
 # --- Settings (generation kwargs, display prefs, model) --------------------------------------
 
 
-async def test_boot_applies_stored_settings(tmp_path):
-    cfg = _config(tmp_path)
-    runtime_settings.save(
-        cfg.runtime_settings_path,
-        {"generate_kwargs": {"temperature": 0.4, "max_tokens": 500}, "show_tools": False},
-    )
+async def test_boot_applies_config_generation_and_flags(tmp_path):
+    # config.toml is now the single source: its [generation] and [display] values apply at boot.
+    cfg = _config(tmp_path, generation={"temperature": 0.4, "max_tokens": 500}, show_tools=False)
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
     assert client.default_generate_kwargs == {"temperature": 0.4, "max_tokens": 500}
     assert assistant._config.show_tools is False
 
 
-async def test_boot_layers_runtime_over_config_generation(tmp_path):
-    # config.toml [generation] is the baseline; the runtime store overrides only the keys it sets.
-    cfg = _config(tmp_path, generation={"temperature": 0.1, "max_tokens": 100})
-    runtime_settings.save(cfg.runtime_settings_path, {"generate_kwargs": {"temperature": 0.9}})
-    client = MockAsyncModelClient([])
-    await Assistant.create(cfg, FakeChannel(), client=client)
-    assert client.default_generate_kwargs == {"temperature": 0.9, "max_tokens": 100}
-
-
-async def test_boot_without_settings_file_writes_nothing(tmp_path):
+async def test_boot_does_not_write_config(tmp_path):
     cfg = _config(tmp_path)
     await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
-    assert not cfg.runtime_settings_path.exists()
+    assert not cfg.config_path.exists()  # boot reads config.toml, never writes it
 
 
-async def test_apply_settings_updates_and_persists(tmp_path):
+async def test_apply_settings_updates_and_persists_to_config(tmp_path):
+    from kokua import settings
+
     cfg = _config(tmp_path)
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
     await assistant.apply_settings({"generate_kwargs": {"temperature": 0.5}, "show_tools": False})
     assert client.default_generate_kwargs["temperature"] == 0.5
     assert assistant._config.show_tools is False
-    saved = runtime_settings.load(cfg.runtime_settings_path)
-    assert saved["generate_kwargs"]["temperature"] == 0.5
+    saved = settings.load(str(cfg.config_path))
+    assert saved["generation"]["temperature"] == 0.5
     assert saved["show_tools"] is False
 
 
-async def test_apply_settings_blank_field_reverts_to_config_generation(tmp_path):
+async def test_update_config_tool_applies_generation_live_and_persists(tmp_path):
+    from kokua import settings
+
+    cfg = _config(tmp_path)
+    client = MockAsyncModelClient([])
+    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    update = next(t for t in assistant._agent.tools if t.__name__ == "update_config")
+    result = await update(section="generation", key="temperature", value="0.7")
+    assert client.default_generate_kwargs["temperature"] == 0.7  # applied to the live session
+    assert settings.load(str(cfg.config_path))["generation"]["temperature"] == 0.7  # persisted
+    assert "restart" not in result.lower()
+
+
+async def test_update_config_tool_restart_key_writes_without_applying(tmp_path):
+    from kokua import settings
+
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    update = next(t for t in assistant._agent.tools if t.__name__ == "update_config")
+    result = await update(section="logging", key="level", value="DEBUG")
+    assert settings.load(str(cfg.config_path))["log_level"] == "DEBUG"
+    assert "restart" in result.lower()
+
+
+async def test_update_config_tool_refuses_blocklisted_key(tmp_path):
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    update = next(t for t in assistant._agent.tools if t.__name__ == "update_config")
+    result = await update(section="security", key="confirm_tools", value="[]")
+    assert not cfg.config_path.exists()  # nothing written
+    assert "hand-edit" in result.lower()
+
+
+async def test_apply_settings_cleared_field_reverts_to_provider_default(tmp_path):
+    # With no separate runtime layer, clearing a generation kwarg removes it from config entirely.
     cfg = _config(tmp_path, generation={"temperature": 0.2})
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
     await assistant.apply_settings({"generate_kwargs": {"temperature": 0.9}})
     assert client.default_generate_kwargs["temperature"] == 0.9
-    await assistant.apply_settings({"generate_kwargs": {}})  # cleared -> back to the config baseline
-    assert client.default_generate_kwargs["temperature"] == 0.2
+    await assistant.apply_settings({"generate_kwargs": {}})  # cleared -> falls back to the provider base
+    assert "temperature" not in client.default_generate_kwargs
 
 
 async def test_apply_settings_switches_model(tmp_path, monkeypatch):
@@ -2067,6 +2096,7 @@ def test_make_agent_builder_wires_and_restores(tmp_path):
         store=store,
         images_path=config.images_path,
         for_each_agent=lambda apply: None,
+        reapply_config=noop,
     )
     agent = build("c1")
     assert agent.tool_approval is not None

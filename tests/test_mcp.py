@@ -96,7 +96,7 @@ async def test_add_mcp_server_tool_returns_bearer_instruction(monkeypatch, tmp_p
         [],
         notify=_noop_notify,
         oauth_storage_dir=tmp_path / "oauth",
-        registry_path=tmp_path / "registry.json",
+        config_path=tmp_path / "config.toml",
     )
     msg = await add_mcp_server(url="https://git.example/mcp")
     assert "bearer token" in msg.lower()

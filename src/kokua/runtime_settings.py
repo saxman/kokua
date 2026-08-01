@@ -1,24 +1,18 @@
-"""Persist runtime-mutable model settings so the web UI's changes survive restarts.
+"""Validate the runtime-mutable model settings the web settings panel sends.
 
 The settings panel lets the user change model generation kwargs (temperature, max_tokens, ...),
-display prefs (show_thinking / show_tools), and the active model mid-session. This stores that
-choice as a single JSON object under the app state dir, mirroring ``mcp_registry.py``. It is the
-runtime layer of the config chain: ``provider defaults < config.toml [generation] < this store``.
-``config.toml`` is never written by the app -- it stays a hand-authored baseline.
+display prefs (show_thinking / show_tools), and the active model mid-session. ``sanitize`` turns the
+panel's wire payload into a clean, type-checked, range-checked settings dict; the assistant applies it
+live and persists it into ``config.toml`` (there is no longer a separate JSON store).
 
-Only generation kwargs the user actually set are persisted (blanks are omitted), so an unsupported
-key with a default value is never injected into a provider call (e.g. Anthropic rejects
-``presence_penalty`` / ``repetition_penalty``; AIMU drops ``top_p`` / ``top_k`` for thinking models).
+Only generation kwargs the user actually set survive (blanks are dropped), so an unsupported key with
+a default value is never injected into a provider call (e.g. Anthropic rejects ``presence_penalty`` /
+``repetition_penalty``; AIMU drops ``top_p`` / ``top_k`` for thinking models).
 """
 
 from __future__ import annotations
 
-import json
-import logging
-from pathlib import Path
 from typing import Any, Optional
-
-logger = logging.getLogger(__name__)
 
 # Generation kwargs the panel exposes, in display order. Each maps to a coercer and an inclusive
 # (min, max) range; values outside the range or of the wrong type are dropped by ``sanitize``.
@@ -33,26 +27,6 @@ _GENERATION_SPEC: dict[str, tuple[type, Optional[float], Optional[float]]] = {
 }
 
 GENERATION_KEYS = tuple(_GENERATION_SPEC)
-
-
-def load(path: Path) -> dict:
-    """Return the persisted settings object (``{}`` if the file is absent or unreadable)."""
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        logger.warning("Could not read generation settings %s; ignoring it.", path, exc_info=True)
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return sanitize(data)
-
-
-def save(path: Path, settings: dict) -> None:
-    """Validate and write the whole settings object (creates the parent dir)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(sanitize(settings), indent=2), encoding="utf-8")
 
 
 def _coerce(value: Any, kind: type, lo: Optional[float], hi: Optional[float]) -> Optional[Any]:

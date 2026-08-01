@@ -1,8 +1,9 @@
 """Remote-MCP connection management: connect/attach helpers and the runtime add/remove tools.
 
 Split out of the assistant core (which only orchestrates); these functions touch the passed-in
-agent and connections list, not `Assistant` state. Lives alongside `mcp_auth.py` (the OAuth flow)
-and `mcp_registry.py` (the reconnect-across-restarts record).
+agent and connections list, not `Assistant` state. Lives alongside `mcp_auth.py` (the OAuth flow).
+A runtime-added server is recorded straight into config.toml's ``[[mcp.server]]`` (via config_store),
+so config.toml is the single source of servers to reconnect at the next startup.
 """
 
 from __future__ import annotations
@@ -16,11 +17,16 @@ from typing import Any, Callable, Optional
 from aimu import aio
 from aimu.tools import tool
 
-from . import mcp_registry
+from . import config_store
 from .config import AssistantConfig, MCPServerConfig
 from .mcp_auth import Notify, build_chat_oauth
 
 logger = logging.getLogger(__name__)
+
+# Auth modes a server can be reconnected in at boot without a stored secret: unauthenticated, or the
+# persisted-token OAuth flow. A bearer-token server is session-only (its secret is never written to
+# config.toml); persist that via a hand-authored [[mcp.server]] with a token_env instead.
+RECONNECTABLE = ("none", "oauth")
 
 
 class BearerTokenRequired(Exception):
@@ -181,11 +187,11 @@ async def reconnect_mcp_servers(
 ) -> None:
     """Reconnect MCP servers at boot so their tools are available without re-adding them.
 
-    First the ones declared in config (--mcp / [[mcp.server]]), then the ones added at runtime and
-    recorded in the registry (deduped by URL). A connect failure logs and continues so one unreachable
-    server can't stop the assistant from starting. Each connection is recorded in ``connections`` (so
-    ``build_agent`` attaches it to conversations built later) and fanned out to whatever agents are live
-    at boot (initially just the active one).
+    All servers now live in config.toml ``[[mcp.server]]`` (both hand-authored bearer-token servers and
+    runtime-added ones the tool recorded there), so this is a single pass over ``config.mcp_servers``. A
+    connect failure logs and continues so one unreachable server can't stop the assistant from starting.
+    Each connection is recorded in ``connections`` (so ``build_agent`` attaches it to conversations built
+    later) and fanned out to whatever agents are live at boot (initially just the active one).
     """
     for server in config.mcp_servers:
         try:
@@ -199,19 +205,6 @@ async def reconnect_mcp_servers(
         except Exception:
             logger.warning("Could not connect MCP server %s; continuing without it.", server.url, exc_info=True)
 
-    connected_urls = {conn.url for conn in connections}
-    for record in mcp_registry.load(config.mcp_servers_path):
-        url = record["url"]
-        if url in connected_urls:
-            continue
-        try:
-            client, mode = await connect_mcp(
-                url, auth_mode=record.get("auth_mode"), notify=notify, oauth_storage_dir=oauth_storage_dir
-            )
-            await attach_server(for_each_agent, connections, url, client, mode)
-        except Exception:
-            logger.warning("Could not reconnect MCP server %s; continuing without it.", url, exc_info=True)
-
 
 def make_mcp_tools(
     for_each_agent: ForEachAgent,
@@ -219,14 +212,14 @@ def make_mcp_tools(
     *,
     notify: Notify,
     oauth_storage_dir: Path,
-    registry_path: Path,
+    config_path: Path,
 ) -> list[Callable]:
-    """Build the ``add_mcp_server`` / ``remove_mcp_server`` tools bound to one connection registry.
+    """Build the ``add_mcp_server`` / ``remove_mcp_server`` tools bound to the config file.
 
     Lets the assistant connect to (and disconnect from) a remote MCP service by URL mid-session, with
     the change fanned out to every live conversation's agent via ``for_each_agent``. A reconnectable
-    server (unauthenticated or OAuth) is recorded in ``registry_path`` so it reconnects on the next
-    restart; bearer-token servers are session-only (their secret is not written to disk).
+    server (unauthenticated or OAuth) is recorded in ``config.toml`` ``[[mcp.server]]`` so it reconnects
+    on the next restart; bearer-token servers are session-only (their secret is not written to disk).
     ``connections`` is the live list shared with the boot path and teardown.
     """
 
@@ -261,8 +254,8 @@ def make_mcp_tools(
         except Exception as exc:
             return f"Failed to connect to MCP server {url!r}: {exc}"
         # Persist reconnectable servers (no secret on disk); a bearer server stays session-only.
-        if auth_mode in mcp_registry.RECONNECTABLE:
-            mcp_registry.add(registry_path, url, auth_mode)
+        if auth_mode in RECONNECTABLE:
+            config_store.add_mcp_server(config_path, url)
             note = ""
         else:
             note = " (session only; add it to config.toml [mcp] to keep a bearer-token server across restarts)"
@@ -297,7 +290,7 @@ def make_mcp_tools(
             await entry.client.aclose()
         except Exception:
             logger.debug("Error closing MCP client for %s", url, exc_info=True)
-        mcp_registry.remove(registry_path, url)
+        config_store.remove_mcp_server(config_path, url)
         names = ", ".join(sorted(removed)) if removed else "(none)"
         return f"Disconnected {url}. Removed tools: {names}."
 

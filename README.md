@@ -97,8 +97,8 @@ are currently viewing; a backgrounded or scheduled turn auto-denies any gated to
 The header's gear button opens a settings panel to change, at runtime, the model generation parameters
 (`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), display prefs
 (`show_thinking` / `show_tools`), and the active model. These changes apply on the next turn and are
-remembered across restarts (saved to `data/runtime-settings.json`, layered over the optional
-`[generation]` config section). Leave a generation field blank to use the model/provider default; note
+remembered across restarts (written back into `config.toml`, which is the single source of settings).
+Leave a generation field blank to use the model/provider default; note
 that thinking models ignore `top_p`/`top_k` and force `temperature`, and Anthropic does not support the
 penalty parameters. The panel also has a theme selector (auto / light / dark; auto follows your OS
 preference); the theme is a per-browser choice remembered locally, applied before first paint to avoid a
@@ -137,11 +137,11 @@ built-in default in a later release still takes effect for keys you leave commen
 ### State
 
 All state lives under `~/.kokua` (override the root with the `KOKUA_HOME` environment variable). The root
-holds an optional `config.toml` and a single `data/` directory for all transient and user-provided content:
+holds `config.toml` (all settings) and a single `data/` directory for all user content:
 
 ```
 ~/.kokua/
-  config.toml          # optional (see Configuration file)
+  config.toml          # all settings (see Configuration file); app-written as well as hand-edited
   data/
     skills/            # authored skills
     sessions.json      # conversations (web UI can hold several)
@@ -149,7 +149,6 @@ holds an optional `config.toml` and a single `data/` directory for all transient
     documents/         # saved documents (text; scanned by the DocumentStore)
     downloads/         # generated files (e.g. PDFs), served by the web UI at /download
     images/            # uploaded + generated images, served by the web UI at /images
-    runtime-settings.json  # runtime model settings from the web settings panel
     scheduled_tasks.json   # durable scheduled tasks (agent-managed)
 ```
 

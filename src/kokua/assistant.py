@@ -28,7 +28,7 @@ from aimu.aio.channels.base import ChannelMessage
 from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.sessions import Session, TinyDBSessionStore
 
-from . import runtime_settings
+from . import config_store, runtime_settings
 from .agent_registry import AgentRegistry
 from .channels.web import proactive_turn, streaming_conversation
 from .build import (
@@ -67,18 +67,17 @@ def _active_session(store: TinyDBSessionStore) -> Session:
     return session
 
 
-def _layer_generate_kwargs(client, base: dict, config: AssistantConfig, runtime: dict) -> None:
-    """Rebuild the client's default generate kwargs in place, layering the runtime override on top.
+def _layer_generate_kwargs(client, base: dict, config: AssistantConfig) -> None:
+    """Rebuild the client's default generate kwargs in place from the config's generation settings.
 
-    Order (later wins): provider built-in defaults (`base`) < config.toml `[generation]` < the runtime
-    values the settings panel set. Only keys present in a layer are applied, so a key the user never
-    set (e.g. presence_penalty on Anthropic) is never injected.
+    Order (later wins): provider built-in defaults (`base`) < config.toml `[generation]`. The settings
+    panel and update_config now write straight into `config.generation`, so it is the single effective
+    layer; a key it never set (e.g. presence_penalty on Anthropic) is never injected.
     """
     kwargs = client.default_generate_kwargs
     kwargs.clear()
     kwargs.update(base)
     kwargs.update(config.generation)
-    kwargs.update(runtime)
 
 
 def _apply_show_flags(channel: Channel, config: AssistantConfig, settings: dict) -> None:
@@ -155,18 +154,11 @@ class Assistant:
     async def create(
         cls, config: AssistantConfig, channel: Channel, *, client=None, client_factory=None
     ) -> "Assistant":
-        # Runtime-mutable settings the web panel persisted: generation kwargs, display prefs, and the
-        # active model. Layered over config.toml (which is never rewritten); see runtime_settings.
-        stored = runtime_settings.load(config.runtime_settings_path)
-        _apply_show_flags(channel, config, stored)
-        for flag in (
-            "plan_review",
-            "plan_review_agent",
-            "result_review",
-            "show_reasoning",
-        ):  # config-only toggles
-            if flag in stored:
-                setattr(config, flag, stored[flag])
+        # config.toml is the single source of settings: the panel and update_config write it, and the
+        # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
+        for flag in ("show_thinking", "show_tools"):
+            if hasattr(channel, flag):
+                setattr(channel, flag, getattr(config, flag))
 
         memory_store, document_store, memory_tools = build_memory(config)
 
@@ -186,7 +178,6 @@ class Assistant:
         assistant._memory_store = memory_store
         assistant._document_store = document_store
         assistant._active_id = session.key
-        assistant._runtime_generate_kwargs = stored.get("generate_kwargs", {})
 
         # Per-conversation model clients: an explicit factory wins; else the injected client backs the
         # initial conversation (single-conversation tests) and further conversations build their own;
@@ -197,11 +188,11 @@ class Assistant:
             initial_id = session.key
 
             def raw_factory(conversation_id: str, _client=client, _initial=initial_id):
-                return _client if conversation_id == _initial else build_model_client(config, stored)
+                return _client if conversation_id == _initial else build_model_client(config)
         else:
 
             def raw_factory(conversation_id: str):
-                return build_model_client(config, stored)
+                return build_model_client(config)
 
         # Wrap the raw factory so every conversation's client carries the effective generation kwargs
         # the active agent has, not bare provider defaults.
@@ -228,6 +219,7 @@ class Assistant:
                 store=store,
                 images_path=config.images_path,
                 for_each_agent=for_each_agent,
+                reapply_config=assistant._apply_config_change,
             ),
             cap=config.agent_cache_cap,
         )
@@ -245,7 +237,7 @@ class Assistant:
 
     def _make_layered_factory(self, raw_factory: Callable[[str], object]) -> Callable[[str], object]:
         """Wrap a raw client factory so every built client carries the same effective generation kwargs
-        the active agent has: provider defaults < config.generation < the current runtime override.
+        the active agent has: provider defaults < config.generation.
 
         Also snapshots the provider built-in defaults into ``_base_generate_kwargs`` (used to re-layer
         already-live agents on a settings change). Every client the factory returns is the current
@@ -256,7 +248,7 @@ class Assistant:
             client = raw_factory(conversation_id)
             base = dict(client.default_generate_kwargs)
             self._base_generate_kwargs = base
-            _layer_generate_kwargs(client, base, self._config, self._runtime_generate_kwargs)
+            _layer_generate_kwargs(client, base, self._config)
             return client
 
         return build
@@ -434,14 +426,23 @@ class Assistant:
         }
 
     async def apply_settings(self, incoming: dict) -> None:
-        """Apply a settings-panel change at runtime and persist it so it survives restarts.
+        """Apply a settings-panel change at runtime and persist it to config.toml so it survives restarts.
+
+        The panel sends the full set of settings it exposes; ``_apply_settings`` applies them to the live
+        session and ``_persist_settings`` writes them back to config.toml (the single source of truth).
+        """
+        applied = await self._apply_settings(runtime_settings.sanitize(incoming))
+        self._persist_settings(applied)
+
+    async def _apply_settings(self, settings: dict) -> dict:
+        """Apply a sanitized settings dict (model, display/planning flags, generation kwargs) live.
 
         Generation-kwargs and display-pref changes are applied in place under an exclusive gate hold
         (waits for in-flight turns to drain, blocks new ones). Switching the model rebuilds the model
         client (mirroring select_conversation: cancel the in-flight turn, then restore conversation
-        state onto the new client). A model that fails to build leaves the running client untouched.
+        state onto the new client). A model that fails to build raises and leaves the running client
+        untouched. Returns the settings that were applied (for the caller to persist).
         """
-        settings = runtime_settings.sanitize(incoming)
         new_model = settings.get("model")
         switching = bool(new_model) and new_model != (str(self._config.model) if self._config.model else "")
 
@@ -459,12 +460,44 @@ class Assistant:
             ):  # config-only
                 if flag in settings:
                     setattr(self._config, flag, settings[flag])
-            self._runtime_generate_kwargs = settings["generate_kwargs"]
+            self._config.generation = settings["generate_kwargs"]
             for agent in self._registry.live_agents():
-                _layer_generate_kwargs(
-                    agent.model_client, self._base_generate_kwargs, self._config, self._runtime_generate_kwargs
-                )
-            runtime_settings.save(self._config.runtime_settings_path, settings)
+                _layer_generate_kwargs(agent.model_client, self._base_generate_kwargs, self._config)
+        return settings
+
+    def _persist_settings(self, settings: dict) -> None:
+        """Write an applied settings dict back into config.toml, keeping [generation] in sync."""
+        path = self._config.config_path
+        if "model" in settings:
+            config_store.set_value(path, "assistant", "model", settings["model"])
+        for flag in ("show_thinking", "show_tools"):
+            if flag in settings:
+                config_store.set_value(path, "display", flag, settings[flag])
+        for flag in ("plan_review", "plan_review_agent", "result_review", "show_reasoning"):
+            if flag in settings:
+                config_store.set_value(path, "planning", flag, settings[flag])
+        generate_kwargs = settings["generate_kwargs"]
+        for key in runtime_settings.GENERATION_KEYS:
+            if key in generate_kwargs:
+                config_store.set_value(path, "generation", key, generate_kwargs[key])
+            else:
+                config_store.unset_value(path, "generation", key)
+
+    async def _apply_config_change(self, section: str, key: str, value) -> None:
+        """Apply one hot ``update_config`` change to the live session (no persist; the tool writes disk).
+
+        Builds the panel-shaped settings dict for the single change (always carrying the current
+        generation set so ``_apply_settings`` does not wipe it) and applies it. Raises if it cannot be
+        applied (e.g. an invalid model), so the tool skips persisting a change that did not take.
+        """
+        applied = {"generate_kwargs": dict(self._config.generation)}
+        if section == "generation":
+            applied["generate_kwargs"][key] = value
+        elif (section, key) == ("assistant", "model"):
+            applied["model"] = value
+        elif section in ("display", "planning"):
+            applied[key] = value
+        await self._apply_settings(runtime_settings.sanitize(applied))
 
     async def _switch_model(self, model: str) -> None:
         """Rebuild every live agent's client for the new model, preserving each conversation's messages.
@@ -486,7 +519,7 @@ class Assistant:
         self._base_generate_kwargs = dict(self._agent.model_client.default_generate_kwargs)
         # Later-built conversations go through build_model_client (so a since-broken model raises
         # ModelClientError, not a raw ValueError/TypeError) and get the same layered generation kwargs.
-        self._client_factory = self._make_layered_factory(lambda cid: build_model_client(self._config, {}))
+        self._client_factory = self._make_layered_factory(lambda cid: build_model_client(self._config))
 
     async def _maybe_push_conversations(self) -> None:
         """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""

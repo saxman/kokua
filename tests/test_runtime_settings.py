@@ -1,39 +1,8 @@
-"""Unit tests for the runtime-settings JSON store (load / save / sanitize)."""
+"""Unit tests for the runtime-settings sanitizer (the web panel's wire payload -> clean dict)."""
 
 from __future__ import annotations
 
 from kokua import runtime_settings
-
-
-def test_load_missing_returns_empty(tmp_path):
-    assert runtime_settings.load(tmp_path / "nope.json") == {}
-
-
-def test_load_corrupt_returns_empty(tmp_path):
-    path = tmp_path / "settings.json"
-    path.write_text("{ not json", encoding="utf-8")
-    assert runtime_settings.load(path) == {}
-
-
-def test_load_non_dict_returns_empty(tmp_path):
-    path = tmp_path / "settings.json"
-    path.write_text("[1, 2, 3]", encoding="utf-8")
-    assert runtime_settings.load(path) == {}
-
-
-def test_save_then_load_round_trip(tmp_path):
-    path = tmp_path / "sub" / "settings.json"  # parent dir does not exist yet
-    settings = {
-        "model": "anthropic:claude-sonnet-4-6",
-        "show_thinking": False,
-        "generate_kwargs": {"temperature": 0.3, "max_tokens": 2048},
-    }
-    runtime_settings.save(path, settings)
-    assert path.exists()  # save created the parent dir
-    loaded = runtime_settings.load(path)
-    assert loaded["model"] == "anthropic:claude-sonnet-4-6"
-    assert loaded["show_thinking"] is False
-    assert loaded["generate_kwargs"] == {"temperature": 0.3, "max_tokens": 2048}
 
 
 def test_sanitize_drops_unknown_and_coerces_types():
