@@ -43,8 +43,10 @@ installable, modular application.
   URL) and tool-packs (`tool_packs`) in addition to built-in `groups`, so a role can own e.g. a trading
   MCP server or the `pdf`/`email` packs. In lean mode `[tools] groups` defines the universe of built-in
   groups workers may draw from. Default (flat) wiring is unchanged. MCP servers now connect before the
-  first agent is built so config-declared servers reach workers (a server added at runtime reaches a
-  worker after that conversation's agent is rebuilt).
+  first agent is built so config-declared servers reach workers; adding or removing a server at runtime
+  (`add_mcp_server`/`remove_mcp_server`) rebuilds each live agent's `spawn_subagent` so worker roles
+  pick up or drop it immediately (and in lean mode the server's raw tools are not mounted on the
+  supervisor).
 - **Scheduled tasks**: the assistant can schedule durable, agent-managed tasks (`schedule_task` /
   `list_scheduled_tasks` / `cancel_scheduled_task`) that fire an unprompted turn when due, persisted to
   `data/scheduled_tasks.json` and re-armed at startup. Schedules are one-shot, interval, daily, or

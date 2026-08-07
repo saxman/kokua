@@ -254,6 +254,8 @@ def build_agent(
     for_each_agent: Callable,
     reapply_config: Callable,
     plugin_tools: Optional[list] = None,
+    tool_approval: Optional[Callable] = None,
+    plugin_tools_by_pack: Optional[dict[str, list]] = None,
 ) -> aio.SkillAgent:
     """Build the SkillAgent and its full tool set (skills, MCP management, memory, plugins, built-ins).
 
@@ -274,6 +276,15 @@ def build_agent(
         name="assistant",
         concurrent_tool_calls=config.subagents_concurrent,
     )
+    lean = config.lean_supervisor and config.subagents
+    by_pack = plugin_tools_by_pack or {}
+
+    # When an MCP server is added/removed at runtime, rebuild each live agent's spawn_subagent so its
+    # workers pick up (or drop) the change -- roles snapshot their toolset when the tool is built, so
+    # without this a runtime server would only reach workers after the conversation's agent rebuilt.
+    def refresh_workers(a: aio.SkillAgent) -> None:
+        rebuild_subagent_tool(a, config, tool_approval, connections, by_pack)
+
     # Cross-cutting / parent-only tools the supervisor keeps in both modes (they mutate shared,
     # per-conversation state that workers must not touch: skills, MCP connections, memory, config).
     base_parent_tools = [
@@ -285,11 +296,13 @@ def build_agent(
             notify=notify,
             oauth_storage_dir=oauth_storage_dir,
             config_path=config.config_path,
+            refresh_workers=refresh_workers if config.subagents else None,
+            lean=lean,
         ),
         *memory_tools,
         *make_config_tools(config.config_path, reapply_config),
     ]
-    if config.lean_supervisor and config.subagents:
+    if lean:
         # Lean supervisor: keep only the cross-cutting tools + date/time (and, added by wire_agent, the
         # single spawn_subagent delegate + scheduler tools). The built-in groups, tool-packs, and
         # connected-MCP callables are NOT mounted here -- they live on the workers, scoped per role.
@@ -339,6 +352,8 @@ def wire_agent(
         for_each_agent=for_each_agent,
         reapply_config=reapply_config,
         plugin_tools=_dedup_by_name(plugin_tools_by_pack.values()),
+        tool_approval=tool_approval,
+        plugin_tools_by_pack=plugin_tools_by_pack,
     )
     agent.tool_approval = tool_approval
     add_subagent_tool(agent, config, tool_approval, connections=connections, plugin_tools_by_pack=plugin_tools_by_pack)
@@ -416,3 +431,19 @@ def add_subagent_tool(
             tool_approval=tool_approval,
         )
     )
+
+
+def rebuild_subagent_tool(
+    agent: aio.SkillAgent,
+    config: AssistantConfig,
+    tool_approval: Optional[Callable],
+    connections: list,
+    plugin_tools_by_pack: Optional[dict[str, list]],
+) -> None:
+    """Replace an agent's ``spawn_subagent`` tool with a fresh one built from the CURRENT connections.
+
+    Worker roles snapshot their toolset when ``spawn_subagent`` is built, so after a runtime MCP
+    add/remove this re-resolves each role (picking up or dropping the changed server's tools). No-op
+    when sub-agents are disabled (there is no delegate to rebuild)."""
+    agent.tools[:] = [t for t in agent.tools if getattr(t, "__name__", None) != "spawn_subagent"]
+    add_subagent_tool(agent, config, tool_approval, connections=connections, plugin_tools_by_pack=plugin_tools_by_pack)

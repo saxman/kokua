@@ -305,6 +305,76 @@ async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypa
     assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # not on the lean supervisor
 
 
+def _capturing_subagent_factory(captured: list):
+    """A make_async_subagent_tool stand-in that records each build's agent_types and returns a
+    spawn_subagent stub (so rebuild_subagent_tool can find and replace it by name)."""
+
+    def fake_make(model, *, agent_types, tool_approval, **kwargs):
+        captured.append(agent_types)
+
+        async def spawn_subagent(agent_type: str, task: str) -> str:
+            """menu"""
+            return "ok"
+
+        spawn_subagent.__name__ = "spawn_subagent"
+        spawn_subagent.__tool_is_async__ = True
+        spawn_subagent.__tool_is_streaming__ = False
+        spawn_subagent.__tool_spec__ = {"function": {"name": "spawn_subagent"}}
+        return spawn_subagent
+
+    return fake_make
+
+
+async def test_runtime_added_mcp_server_reaches_lean_worker(tmp_path, monkeypatch):
+    """Rebuild trigger: adding an MCP server at runtime rebuilds spawn_subagent, so a lean worker role
+    that names the server gets its tools without a restart -- and the raw tools stay off the supervisor."""
+    import kokua.build as build_mod
+
+    captured: list = []
+    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
+    monkeypatch.setattr(
+        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
+    )
+
+    cfg = _config(
+        tmp_path,
+        lean_supervisor=True,
+        subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
+    )
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    assert captured[-1]["trader"]["tools"] == []  # server not connected at create -> worker has nothing yet
+
+    add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    await add_mcp(url="https://broker/mcp")
+
+    assert "get_quote" in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}  # worker got it via rebuild
+    assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # supervisor stayed lean
+
+
+async def test_runtime_removed_mcp_server_drops_from_lean_worker(tmp_path, monkeypatch):
+    import kokua.build as build_mod
+
+    captured: list = []
+    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
+    monkeypatch.setattr(
+        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
+    )
+
+    cfg = _config(
+        tmp_path,
+        lean_supervisor=True,
+        subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
+    )
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    await add_mcp(url="https://broker/mcp")
+    assert "get_quote" in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}
+
+    remove_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "remove_mcp_server")
+    await remove_mcp(url="https://broker/mcp")
+    assert "get_quote" not in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}  # worker dropped it
+
+
 def test_lean_supervisor_on_by_default():
     from kokua.config import AssistantConfig
 
