@@ -351,6 +351,36 @@ async def test_runtime_added_mcp_server_reaches_lean_worker(tmp_path, monkeypatc
     assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # supervisor stayed lean
 
 
+async def test_runtime_added_mcp_server_reaches_all_lean_conversations(tmp_path, monkeypatch):
+    """The rebuild fans out: a runtime add updates the spawn_subagent of EVERY live conversation's
+    supervisor, not just the one whose add_mcp_server ran."""
+    import kokua.build as build_mod
+
+    captured: list = []
+    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
+    monkeypatch.setattr(
+        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
+    )
+
+    cfg = _config(
+        tmp_path,
+        lean_supervisor=True,
+        subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
+    )
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    first = assistant._active_id
+    await assistant.new_conversation()  # a second live conversation/agent
+    await assistant.select_conversation(first)
+    assert len(assistant._registry.live_agents()) == 2
+
+    add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    await add_mcp(url="https://broker/mcp")
+
+    # The add's refresh rebuilt spawn_subagent on both agents -> the two most recent builds both have it.
+    recent = captured[-2:]
+    assert all("get_quote" in {fn.__name__ for fn in c["trader"]["tools"]} for c in recent)
+
+
 async def test_runtime_removed_mcp_server_drops_from_lean_worker(tmp_path, monkeypatch):
     import kokua.build as build_mod
 

@@ -282,6 +282,9 @@ def build_agent(
     # When an MCP server is added/removed at runtime, rebuild each live agent's spawn_subagent so its
     # workers pick up (or drop) the change -- roles snapshot their toolset when the tool is built, so
     # without this a runtime server would only reach workers after the conversation's agent rebuilt.
+    # This closure is fanned out (for_each_agent) to every live agent, so `by_pack` here (one agent's
+    # snapshot) is applied to siblings too; that is fine because a tool-pack's build() is a pure
+    # function of config (no per-call state), so all snapshots hold equivalent tool instances.
     def refresh_workers(a: aio.SkillAgent) -> None:
         rebuild_subagent_tool(a, config, tool_approval, connections, by_pack)
 
