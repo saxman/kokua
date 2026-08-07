@@ -36,6 +36,21 @@ SUBAGENT_GUIDANCE = (
     "conversation so far."
 )
 
+# Replaces SUBAGENT_GUIDANCE in lean_supervisor mode. There the assistant mounts almost no direct
+# tools, so the "you have almost no direct tools" line is load-bearing: without it the model tries to
+# answer web/file/code questions from memory instead of delegating to a worker that actually has the
+# tools. It still answers trivial/conversational requests itself (it keeps memory, skills, config,
+# scheduling, and MCP-management tools).
+SUPERVISOR_GUIDANCE = (
+    " You are a lean supervisor. Answer trivial or conversational requests directly using your own "
+    "tools (date/time, memory, skills, config, scheduling, MCP management). For any specialized work "
+    "-- web research, reading or writing files, running code, or anything needing a domain tool -- you "
+    "have almost no direct tools, so you MUST delegate by calling `spawn_subagent(agent_type, task)`: "
+    "pick the worker whose role fits, give it a complete, self-contained task (it shares no history "
+    "with you), then relay or synthesize its answer for the user. Emit several `spawn_subagent` calls "
+    "when subtasks are independent."
+)
+
 # Built-in sub-agent roles (AIMU agent_types). Each role's tools are its groups intersected with the
 # assistant's enabled tool groups (see assistant._build_subagent_tool), so a role never grants a tool
 # the user disabled globally. `description` becomes the role's menu line shown to the model; the
@@ -87,10 +102,14 @@ class MCPServerConfig:
     ``token_env`` names an environment variable holding a bearer token, resolved at connect time so
     the secret stays out of the config file. It is unset for an unauthenticated server (or one that
     uses the OAuth flow, which triggers on an auth challenge).
+
+    ``name`` is an optional friendly label a sub-agent role can reference in its ``mcp_servers`` list
+    (instead of the full URL) to be given this server's tools; unset means "reference by URL".
     """
 
     url: str
     token_env: Optional[str] = None
+    name: Optional[str] = None
 
 
 @dataclass
@@ -148,6 +167,13 @@ class AssistantConfig:
     subagent_roles: dict[str, dict] = field(default_factory=dict)
     # Run independent tool calls in one turn concurrently (so several spawn_subagent calls overlap).
     subagents_concurrent: bool = True
+    # Lean supervisor mode (requires subagents). When on, the per-conversation agent mounts only its
+    # cross-cutting tools (memory, skills, MCP management, config, scheduling, date/time) plus the
+    # single `spawn_subagent` delegate, and delegates all specialized work to workers whose roles carry
+    # the scoped toolsets. Off keeps the flat agent that carries every tool itself. In lean mode
+    # `tools` (below) becomes the universe of built-in groups workers may draw from, not the
+    # supervisor's own tools.
+    lean_supervisor: bool = False
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
     confirm_tools: list[str] = field(

@@ -187,6 +187,35 @@ def test_subagents_section_parses_concurrent_and_roles(tmp_path):
     assert roles["dba"]["system_message"] == "You manage databases."
 
 
+def test_lean_supervisor_flag_parses(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[assistant]\nlean_supervisor = true\n", encoding="utf-8")
+    assert settings.load(str(path))["lean_supervisor"] is True
+
+
+def test_subagent_role_mcp_servers_and_tool_packs_parse(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[subagents.roles.trader]\n"
+        'description = "Places trades."\n'
+        'groups = ["compute"]\n'
+        'mcp_servers = ["stocks"]\n'
+        'tool_packs = ["pdf", "email"]\n',
+        encoding="utf-8",
+    )
+    role = settings.load(str(path))["subagent_roles"]["trader"]
+    assert role["mcp_servers"] == ["stocks"]
+    assert role["tool_packs"] == ["pdf", "email"]
+    assert role["groups"] == ["compute"]
+
+
+def test_subagent_role_mcp_servers_must_be_string_list(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[subagents.roles.bad]\nmcp_servers = [1, 2]\n", encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match="mcp_servers"):
+        settings.load(str(path))
+
+
 def test_subagents_unknown_role_key_raises(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text(
@@ -219,6 +248,16 @@ def test_mcp_server_tables_parse(tmp_path):
         ("https://api.githubcopilot.com/mcp/", "GITHUB_MCP_TOKEN"),
         ("https://plain/mcp", None),
     ]
+
+
+def test_mcp_server_name_parses(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[[mcp.server]]\nurl = "https://broker/mcp"\nname = "stocks"\n',
+        encoding="utf-8",
+    )
+    servers = settings.load(str(path))["mcp_servers"]
+    assert (servers[0].url, servers[0].name) == ("https://broker/mcp", "stocks")
 
 
 def test_mcp_server_missing_url_raises(tmp_path):

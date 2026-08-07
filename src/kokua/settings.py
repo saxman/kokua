@@ -54,14 +54,25 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
         token_env = entry.get("token_env")
         if token_env is not None and not isinstance(token_env, str):
             raise ConfigError(f"[[mcp.server]].token_env must be a string (server {url})")
-        unknown = set(entry) - {"url", "token_env"}
+        name = entry.get("name")
+        if name is not None and not isinstance(name, str):
+            raise ConfigError(f"[[mcp.server]].name must be a string (server {url})")
+        unknown = set(entry) - {"url", "token_env", "name"}
         if unknown:
             raise ConfigError(f"unknown key(s) in [[mcp.server]] (server {url}): {', '.join(sorted(unknown))}")
-        servers.append(MCPServerConfig(url=url, token_env=token_env))
+        servers.append(MCPServerConfig(url=url, token_env=token_env, name=name))
     return servers
 
 
-_SUBAGENT_ROLE_KEYS = {"description": str, "groups": list, "system_message": str}
+# String-list role keys (groups + the two tool-source references) share the _str_list validator.
+_SUBAGENT_ROLE_LIST_KEYS = {"groups", "mcp_servers", "tool_packs"}
+_SUBAGENT_ROLE_KEYS = {
+    "description": str,
+    "groups": list,
+    "mcp_servers": list,
+    "tool_packs": list,
+    "system_message": str,
+}
 
 
 def _parse_subagent_role(name: str, spec: Any) -> dict:
@@ -73,7 +84,7 @@ def _parse_subagent_role(name: str, spec: Any) -> dict:
         expected = _SUBAGENT_ROLE_KEYS.get(key)
         if expected is None:
             raise ConfigError(f"unknown config key [subagents.roles.{name}].{key}")
-        if key == "groups":
+        if key in _SUBAGENT_ROLE_LIST_KEYS:
             role[key] = _str_list(f"subagents.roles.{name}", key, value)
         elif not isinstance(value, expected):
             raise ConfigError(f"[subagents.roles.{name}].{key} must be a {expected.__name__}")
@@ -98,6 +109,7 @@ _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callab
     ("assistant", "load_plugins"): ("load_plugins", (bool,), "a boolean", None),
     ("assistant", "agent_cache_cap"): ("agent_cache_cap", (int,), "an integer", None),
     ("assistant", "subagents"): ("subagents", (bool,), "a boolean", None),
+    ("assistant", "lean_supervisor"): ("lean_supervisor", (bool,), "a boolean", None),
     ("tools", "groups"): ("tools", (list,), "a list of strings", _str_list),
     # [email]: SMTP send settings. No `password` key on purpose -- the password comes from the
     # KOKUA_EMAIL_PASSWORD env var, so putting it here is a hard "unknown config key" error.
