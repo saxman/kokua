@@ -34,6 +34,17 @@ installable, modular application.
   unattended. Fixed: `[tools] groups = ["all"]` now correctly enables all tool groups for sub-agent
   roles (previously the clamping logic treated `"all"` as a literal group name, leaving roles with no
   tools).
+- **Lean supervisor mode** (opt-in `[assistant] lean_supervisor`, default off): a supervisor/worker
+  architecture that shrinks the per-request tool context. When on, the per-conversation agent keeps
+  only its cross-cutting tools (memory, skills, MCP management, config, scheduling, date/time) plus the
+  single `spawn_subagent` delegate, and delegates all specialized work to workers whose roles carry the
+  scoped toolsets — dropping the advertised tool set from ~30+ to ~10-12. Sub-agent roles can now be
+  assigned specific MCP servers (`mcp_servers`, by a server's new optional `[[mcp.server]].name` or its
+  URL) and tool-packs (`tool_packs`) in addition to built-in `groups`, so a role can own e.g. a trading
+  MCP server or the `pdf`/`email` packs. In lean mode `[tools] groups` defines the universe of built-in
+  groups workers may draw from. Default (flat) wiring is unchanged. MCP servers now connect before the
+  first agent is built so config-declared servers reach workers (a server added at runtime reaches a
+  worker after that conversation's agent is rebuilt).
 - **Scheduled tasks**: the assistant can schedule durable, agent-managed tasks (`schedule_task` /
   `list_scheduled_tasks` / `cancel_scheduled_task`) that fire an unprompted turn when due, persisted to
   `data/scheduled_tasks.json` and re-armed at startup. Schedules are one-shot, interval, daily, or

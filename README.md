@@ -197,9 +197,19 @@ the approval-gated tools, since no one is present to approve them.
 roles — built-in `researcher` (web lookups), `coder` (files + code), and `generalist` (everything) — each
 cloning the active model with its own tool subset (a role's tools are its groups intersected with the
 enabled `[tools]` groups; parent-only memory/skills/MCP tools are withheld). Define or override roles
-under `[subagents.roles.*]` in the config. Independent spawns in one turn run concurrently
-(`[subagents] concurrent`, on by default). A sub-agent's gated-tool calls (the `confirm_tools`, e.g.
-`execute_python`) are routed to the parent for your approval and are not run unattended.
+under `[subagents.roles.*]` in the config; a role may also be assigned specific MCP servers
+(`mcp_servers`) and tool-packs (`tool_packs`), not just built-in `groups`. Independent spawns in one
+turn run concurrently (`[subagents] concurrent`, on by default). A sub-agent's gated-tool calls (the
+`confirm_tools`, e.g. `execute_python`) are routed to the parent for your approval and are not run
+unattended.
+
+**Lean supervisor mode** (opt-in `[assistant] lean_supervisor`). A supervisor/worker setup that keeps
+the always-on agent's tool context small: the assistant mounts only its cross-cutting tools (memory,
+skills, MCP management, config, scheduling, date/time) plus the `spawn_subagent` delegate, answers
+trivial requests itself, and delegates all specialized work to the role-scoped workers above (each
+carrying only its own narrow toolset). In this mode `[tools] groups` defines the universe of built-in
+groups workers may use, rather than the assistant's own tools. Off by default (the assistant carries
+every tool itself).
 
 **Deep planning (per request).** When you ask for it, the assistant drafts an explicit plan before doing
 the work — which tools, skills, and MCP services it will use, what it will web-search for, and where it

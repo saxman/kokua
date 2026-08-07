@@ -33,6 +33,14 @@ load_plugins = true
 # for approval and are not run unattended.
 subagents = true
 
+# Lean supervisor mode (requires subagents). When true, the assistant keeps only its cross-cutting
+# tools (memory, skills, MCP management, config, scheduling, date/time) plus the single spawn_subagent
+# delegate, and hands ALL specialized work (web, files, code, domain/MCP tools) to workers whose roles
+# carry the scoped toolsets (see [subagents.roles.*] below). This shrinks the per-request tool context.
+# Important: in this mode [tools].groups below defines the universe of built-in groups WORKERS may use
+# (not the assistant's own tools), so don't set it to ["none"] or your workers have nothing to draw on.
+# lean_supervisor = false
+
 # Max per-conversation agents kept live in memory (AgentRegistry LRU cap). Evicted agents rebuild
 # from persisted state on next access, so the cap bounds memory, not correctness.
 agent_cache_cap = 8
@@ -60,27 +68,36 @@ concurrent = true
 
 # Sub-agent roles the model can pick via spawn_subagent(agent_type, task). These merge over the
 # built-in defaults (researcher, coder, generalist) by name: reuse a name to override it, or add a
-# new name. Each role's tools are its groups intersected with [tools] groups above, so a role can
-# narrow within the enabled tools but never exceed them. `system_message` is optional.
+# new name. A role's worker toolset is the union of: its `groups` (intersected with [tools] groups
+# above, so a role narrows within the enabled tools but never exceeds them); the tools of any MCP
+# servers it lists in `mcp_servers` (by the server's `name` below, or its raw URL); and the tools of
+# any tool-packs it lists in `tool_packs` (installed kokua.tools plugins, e.g. "pdf", "email").
+# `system_message` is optional. Roles matter most with lean_supervisor = true, where the assistant
+# only delegates and the workers carry the tools.
 # [subagents.roles.researcher]
 # description = "Research specialist: gather and verify information from the web."
 # groups = ["web", "misc"]
-# [subagents.roles.dba]
-# description = "Database helper."
+# [subagents.roles.stock-trader]
+# description = "Looks up quotes and places trades."
+# mcp_servers = ["stocks"]        # matches [[mcp.server]].name below
 # groups = ["compute"]
-# system_message = "You manage and query databases."
+# [subagents.roles.report-writer]
+# description = "Builds and emails PDF reports."
+# tool_packs = ["pdf", "email"]
 
 # Remote MCP servers to connect at startup. Each server is its own [[mcp.server]] table.
 # `url` is required. `token_env` (optional) names an environment variable holding a bearer token,
 # read at startup so the secret stays out of this file; omit it for an unauthenticated server (or
-# one that uses the OAuth flow, which triggers automatically on an auth challenge). Servers you add at
-# runtime with the add_mcp_server tool are appended here automatically (URL only, no secret).
+# one that uses the OAuth flow, which triggers automatically on an auth challenge). `name` (optional)
+# is a friendly label a sub-agent role can reference in its `mcp_servers` list instead of the full URL.
+# Servers you add at runtime with the add_mcp_server tool are appended here automatically (URL only).
 # [[mcp.server]]
 # url = "https://api.githubcopilot.com/mcp/"
 # token_env = "GITHUB_MCP_TOKEN"
 #
 # [[mcp.server]]
-# url = "https://example.com/mcp"
+# url = "https://broker.example.com/mcp"
+# name = "stocks"
 
 [security]
 # Tools that require interactive confirmation before each call (terminal y/N, or Allow/Deny in the
