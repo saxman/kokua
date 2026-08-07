@@ -224,13 +224,19 @@ class Assistant:
             cap=config.agent_cache_cap,
         )
 
-        # Build the active conversation's agent (its client is layered by the factory, which also
-        # snapshots the provider base into _base_generate_kwargs) and attach any MCP servers to it,
-        # preserving single-agent parity for this phase.
-        assistant._registry.get(assistant._active_id)
+        # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when
+        # that agent is built: a flat agent attaches the servers' tools directly, and a lean
+        # supervisor's spawn_subagent snapshots `connections` at build time to give MCP-backed workers
+        # their tools. The fan-out is a no-op here (no agents are live yet); it just fills `connections`.
         await reconnect_mcp_servers(
             for_each_agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
         )
+        if config.lean_supervisor and not config.subagents:
+            logger.warning("lean_supervisor is set but subagents is off; using the flat toolset instead.")
+
+        # Build the active conversation's agent (its client is layered by the factory, which also
+        # snapshots the provider base into _base_generate_kwargs).
+        assistant._registry.get(assistant._active_id)
 
         arm_tasks()
         return assistant

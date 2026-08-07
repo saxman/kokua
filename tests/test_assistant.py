@@ -262,6 +262,46 @@ async def test_lean_supervisor_drops_worker_tools(tmp_path):
         assert gone in flat_names, gone
 
 
+async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
+    """Boot reorder: config [[mcp.server]] servers connect before the first agent is built, so a lean
+    supervisor's worker role that names one receives its tools (and the supervisor itself does not)."""
+    import kokua.build as build_mod
+    from aimu import aio
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("get_quote")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+
+    captured = {}
+
+    def fake_make(model, *, agent_types, tool_approval, **kwargs):
+        captured["agent_types"] = agent_types
+
+        async def spawn_subagent(agent_type: str, task: str) -> str:
+            """menu"""
+            return "ok"
+
+        spawn_subagent.__name__ = "spawn_subagent"
+        spawn_subagent.__tool_is_async__ = True
+        spawn_subagent.__tool_is_streaming__ = False
+        spawn_subagent.__tool_spec__ = {"function": {"name": "spawn_subagent"}}
+        return spawn_subagent
+
+    monkeypatch.setattr(build_mod, "make_async_subagent_tool", fake_make)
+
+    cfg = _config(
+        tmp_path,
+        lean_supervisor=True,
+        mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
+        subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["stocks"]}},
+    )
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    trader_tools = {fn.__name__ for fn in captured["agent_types"]["trader"]["tools"]}
+    assert "get_quote" in trader_tools  # worker got the boot-connected server's tool
+    assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # not on the lean supervisor
+
+
 def test_resolve_system_message_selects_supervisor_guidance(tmp_path):
     from kokua.build import resolve_system_message
     from kokua.config import SUBAGENT_GUIDANCE, SUPERVISOR_GUIDANCE
