@@ -244,6 +244,47 @@ def test_load_plugin_tools_by_pack_groups_by_name(tmp_path):
     assert _load_plugin_tools_by_pack(_config(tmp_path, load_plugins=False)) == {}
 
 
+async def test_lean_supervisor_drops_worker_tools(tmp_path):
+    # memory=True so the memory tools are present and we can confirm they STAY on the lean supervisor.
+    flat = await Assistant.create(_config(tmp_path, memory=True), FakeChannel(), client=MockAsyncModelClient([]))
+    lean = await Assistant.create(
+        _config(tmp_path, memory=True, lean_supervisor=True), FakeChannel(), client=MockAsyncModelClient([])
+    )
+    flat_names = {fn.__name__ for fn in flat._agent.tools}
+    lean_names = {fn.__name__ for fn in lean._agent.tools}
+    assert lean_names < flat_names  # strictly smaller
+    # The delegate + date/time + cross-cutting tools stay; worker/built-in/plugin tools are gone.
+    assert {"spawn_subagent", "get_current_date_and_time"} <= lean_names
+    for kept in ("author_skill", "add_mcp_server", "store_memory", "update_config"):
+        assert kept in lean_names
+    for gone in ("web_search", "read_file", "calculate", "echo", "roll_dice"):
+        assert gone not in lean_names, gone
+        assert gone in flat_names, gone
+
+
+def test_resolve_system_message_selects_supervisor_guidance(tmp_path):
+    from kokua.build import resolve_system_message
+    from kokua.config import SUBAGENT_GUIDANCE, SUPERVISOR_GUIDANCE
+
+    lean = resolve_system_message(_config(tmp_path, lean_supervisor=True))
+    assert SUPERVISOR_GUIDANCE.strip() in lean
+    assert SUBAGENT_GUIDANCE.strip() not in lean
+    flat = resolve_system_message(_config(tmp_path))
+    assert SUBAGENT_GUIDANCE.strip() in flat
+    assert SUPERVISOR_GUIDANCE.strip() not in flat
+
+
+async def test_lean_supervisor_requires_subagents_falls_back_to_flat(tmp_path):
+    # lean_supervisor without subagents is meaningless (no delegate), so wiring falls back to flat:
+    # the supervisor keeps the built-in worker tools it would otherwise delegate.
+    a = await Assistant.create(
+        _config(tmp_path, lean_supervisor=True, subagents=False), FakeChannel(), client=MockAsyncModelClient([])
+    )
+    names = {fn.__name__ for fn in a._agent.tools}
+    assert "web_search" in names  # flat groups present
+    assert "spawn_subagent" not in names  # subagents off, so no delegate
+
+
 def test_flattened_by_pack_matches_flat_plugin_tools(tmp_path):
     # The flat supervisor mounts _dedup_by_name(by_pack.values()); it must equal the original flat
     # plugin-tool set so flat-mode wiring is unchanged (packs are now built once, shared).

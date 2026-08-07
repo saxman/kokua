@@ -21,7 +21,7 @@ from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_scri
 from aimu.tools import builtin
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
-from .config import DEFAULT_SUBAGENT_ROLES, MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, AssistantConfig
+from .config import DEFAULT_SUBAGENT_ROLES, MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, SUPERVISOR_GUIDANCE, AssistantConfig
 from .config_tools import make_config_tools
 from .mcp import make_mcp_tools
 from .mcp_auth import Notify
@@ -182,6 +182,8 @@ def resolve_system_message(config: AssistantConfig) -> str:
     """The system prompt for the model client: base message plus the memory/subagent guidance the
     enabled features need. Shared by the initial build and a runtime model switch."""
     system = config.system_message + (MEMORY_GUIDANCE if config.memory else "")
+    if config.subagents and config.lean_supervisor:
+        return system + SUPERVISOR_GUIDANCE  # "delegate everything specialized" prompt for lean mode
     return system + (SUBAGENT_GUIDANCE if config.subagents else "")
 
 
@@ -272,9 +274,9 @@ def build_agent(
         name="assistant",
         concurrent_tool_calls=config.subagents_concurrent,
     )
-    if plugin_tools is None:
-        plugin_tools = _load_plugin_tools(config) if config.load_plugins else []
-    agent.tools = [
+    # Cross-cutting / parent-only tools the supervisor keeps in both modes (they mutate shared,
+    # per-conversation state that workers must not touch: skills, MCP connections, memory, config).
+    base_parent_tools = [
         author_skill,
         make_skill_script_tool(agent, manager, config.skills_dir),
         *make_mcp_tools(
@@ -286,9 +288,16 @@ def build_agent(
         ),
         *memory_tools,
         *make_config_tools(config.config_path, reapply_config),
-        *plugin_tools,
-        *_resolve_builtin_tools(config.tools),
     ]
+    if config.lean_supervisor and config.subagents:
+        # Lean supervisor: keep only the cross-cutting tools + date/time (and, added by wire_agent, the
+        # single spawn_subagent delegate + scheduler tools). The built-in groups, tool-packs, and
+        # connected-MCP callables are NOT mounted here -- they live on the workers, scoped per role.
+        agent.tools = [*base_parent_tools, builtin.get_current_date_and_time]
+        return agent
+    if plugin_tools is None:
+        plugin_tools = _load_plugin_tools(config) if config.load_plugins else []
+    agent.tools = [*base_parent_tools, *plugin_tools, *_resolve_builtin_tools(config.tools)]
     # Attach already-connected MCP servers to this fresh agent (runtime-added servers fan out separately).
     existing = {getattr(fn, "__name__", None) for fn in agent.tools}
     for conn in connections:
