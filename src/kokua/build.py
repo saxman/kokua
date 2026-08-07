@@ -150,6 +150,19 @@ def _load_plugin_tools(config: AssistantConfig) -> list:
     return tools
 
 
+def _dedup_by_name(tool_lists) -> list:
+    """Flatten lists of tool callables into one list, keeping the first of each ``__name__``."""
+    out: list = []
+    seen: set[str] = set()
+    for fns in tool_lists:
+        for fn in fns:
+            name = getattr(fn, "__name__", None)
+            if name and name not in seen:
+                seen.add(name)
+                out.append(fn)
+    return out
+
+
 def _load_plugin_tools_by_pack(config: AssistantConfig) -> dict[str, list]:
     """Tool-pack tools grouped by pack name (each pack built once), so a sub-agent role can request a
     specific pack's tools by name. Empty when plugins are disabled. A pack that fails to build is
@@ -238,14 +251,17 @@ def build_agent(
     memory_tools: list,
     for_each_agent: Callable,
     reapply_config: Callable,
+    plugin_tools: Optional[list] = None,
 ) -> aio.SkillAgent:
     """Build the SkillAgent and its full tool set (skills, MCP management, memory, plugins, built-ins).
 
     ``add_skill_script`` and the MCP tools need the agent (to surface new tools this turn), so they are
-    built after it; the SkillAgent re-appends its skills-server tools each run. Plugin tools are loaded
-    here (deduped by name) when enabled. ``connections`` is the live list the MCP tools append to and
-    the boot reconnect / teardown share. ``for_each_agent`` fans a runtime add/remove out across every
-    live agent; already-connected servers in ``connections`` are attached to this fresh agent directly.
+    built after it; the SkillAgent re-appends its skills-server tools each run. ``plugin_tools`` is the
+    already-built, deduped tool-pack list (the caller builds packs once and shares it); when ``None``
+    the packs are built here (deduped by name) if enabled. ``connections`` is the live list the MCP
+    tools append to and the boot reconnect / teardown share. ``for_each_agent`` fans a runtime
+    add/remove out across every live agent; already-connected servers in ``connections`` are attached
+    to this fresh agent directly.
     """
     manager = SkillManager(skill_dirs=[str(config.skills_dir)])
     author_skill = make_skill_authoring_tool(manager, config.skills_dir)
@@ -256,7 +272,8 @@ def build_agent(
         name="assistant",
         concurrent_tool_calls=config.subagents_concurrent,
     )
-    plugin_tools = _load_plugin_tools(config) if config.load_plugins else []
+    if plugin_tools is None:
+        plugin_tools = _load_plugin_tools(config) if config.load_plugins else []
     agent.tools = [
         author_skill,
         make_skill_script_tool(agent, manager, config.skills_dir),
@@ -300,6 +317,9 @@ def wire_agent(
     This is everything the assistant needs on every per-conversation agent, in one place so each
     conversation's agent is wired identically.
     """
+    # Build tool-packs once here and share: the flat supervisor mounts the flattened set, while each
+    # worker role draws only the packs it names (add_subagent_tool). Empty when plugins are disabled.
+    plugin_tools_by_pack = _load_plugin_tools_by_pack(config)
     agent = build_agent(
         config,
         client,
@@ -309,9 +329,10 @@ def wire_agent(
         memory_tools=memory_tools,
         for_each_agent=for_each_agent,
         reapply_config=reapply_config,
+        plugin_tools=_dedup_by_name(plugin_tools_by_pack.values()),
     )
     agent.tool_approval = tool_approval
-    add_subagent_tool(agent, config, tool_approval)
+    add_subagent_tool(agent, config, tool_approval, connections=connections, plugin_tools_by_pack=plugin_tools_by_pack)
     agent.tools.extend(scheduler_tools)
     return agent
 
@@ -360,21 +381,29 @@ def make_agent_builder(
     return build
 
 
-def add_subagent_tool(agent: aio.SkillAgent, config: AssistantConfig, tool_approval: Callable) -> None:
+def add_subagent_tool(
+    agent: aio.SkillAgent,
+    config: AssistantConfig,
+    tool_approval: Callable,
+    *,
+    connections: Optional[list] = None,
+    plugin_tools_by_pack: Optional[dict[str, list]] = None,
+) -> None:
     """Append the typed ``spawn_subagent(agent_type, task)`` tool when sub-agents are enabled (no-op otherwise).
 
-    Each spawn clones the active model and gets its role's tool subset (role groups intersected with
-    ``config.tools``); the parent-only stateful tools (memory, skills, MCP management) are deliberately
-    withheld. Concurrent spawns overlap under the parent's ``concurrent_tool_calls``; the approval gate
-    is forwarded so a sub-agent's gated-tool calls (e.g. execute_python) prompt via the parent rather
-    than running unattended.
+    Each spawn clones the active model and gets its role's scoped tool subset -- built-in groups
+    (intersected with ``config.tools``) plus any MCP servers / tool-packs the role names, resolved
+    against ``connections`` and ``plugin_tools_by_pack``. The parent-only stateful tools (memory,
+    skills, MCP management, config, scheduling) are deliberately withheld. Concurrent spawns overlap
+    under the parent's ``concurrent_tool_calls``; the approval gate is forwarded so a sub-agent's
+    gated-tool calls (e.g. execute_python) prompt via the parent rather than running unattended.
     """
     if not config.subagents:
         return
     agent.tools.append(
         make_async_subagent_tool(
             agent.model_client.model,
-            agent_types=_build_subagent_agent_types(config),
+            agent_types=_build_subagent_agent_types(config, connections, plugin_tools_by_pack),
             tool_approval=tool_approval,
         )
     )

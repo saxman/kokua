@@ -244,6 +244,17 @@ def test_load_plugin_tools_by_pack_groups_by_name(tmp_path):
     assert _load_plugin_tools_by_pack(_config(tmp_path, load_plugins=False)) == {}
 
 
+def test_flattened_by_pack_matches_flat_plugin_tools(tmp_path):
+    # The flat supervisor mounts _dedup_by_name(by_pack.values()); it must equal the original flat
+    # plugin-tool set so flat-mode wiring is unchanged (packs are now built once, shared).
+    from kokua.build import _dedup_by_name, _load_plugin_tools, _load_plugin_tools_by_pack
+
+    cfg = _config(tmp_path)
+    flat = {fn.__name__ for fn in _load_plugin_tools(cfg)}
+    flattened = {fn.__name__ for fn in _dedup_by_name(_load_plugin_tools_by_pack(cfg).values())}
+    assert flattened == flat
+
+
 async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
     import kokua.build as build_mod
 
