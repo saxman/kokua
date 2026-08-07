@@ -176,6 +176,74 @@ def test_subagent_roles_nonempty_when_tools_all(tmp_path):
     assert types["generalist"]["tools"]  # non-empty: all groups enabled
 
 
+def test_worker_role_resolves_mcp_and_tool_pack_sources(tmp_path):
+    from types import SimpleNamespace
+
+    from kokua.build import _build_subagent_agent_types
+    from kokua.config import MCPServerConfig
+
+    def stock_quote():  # fake MCP tool callable -- the resolver only reads __name__
+        pass
+
+    def make_pdf():  # fake tool-pack tool
+        pass
+
+    cfg = _config(
+        tmp_path,
+        tools=["compute"],
+        mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
+        subagent_roles={
+            "trader": {
+                "description": "Trades.",
+                "groups": ["compute"],
+                "mcp_servers": ["stocks"],  # matched by name
+                "tool_packs": ["pdf"],
+            }
+        },
+    )
+    connections = [SimpleNamespace(url="https://broker/mcp", callables=[stock_quote])]
+    by_pack = {"pdf": [make_pdf]}
+    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg, connections, by_pack)["trader"]["tools"]}
+    assert "stock_quote" in names  # named MCP server's tool
+    assert "make_pdf" in names  # tool-pack's tool
+    assert "calculate" in names  # built-in compute group still included
+
+
+def test_worker_role_resolves_mcp_by_raw_url(tmp_path):
+    from types import SimpleNamespace
+
+    from kokua.build import _build_subagent_agent_types
+
+    def remote_tool():
+        pass
+
+    cfg = _config(tmp_path, tools=["none"], subagent_roles={"r": {"mcp_servers": ["https://raw/mcp"]}})
+    connections = [SimpleNamespace(url="https://raw/mcp", callables=[remote_tool])]
+    types = _build_subagent_agent_types(cfg, connections, {})
+    assert [fn.__name__ for fn in types["r"]["tools"]] == ["remote_tool"]
+
+
+def test_worker_role_unknown_sources_drop_silently(tmp_path):
+    from kokua.build import _build_subagent_agent_types
+
+    cfg = _config(
+        tmp_path,
+        tools=["all"],
+        subagent_roles={"r": {"groups": ["web"], "mcp_servers": ["nope"], "tool_packs": ["ghost"]}},
+    )
+    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg, [], {})["r"]["tools"]}
+    assert "web_search" in names  # web group survived; unknown mcp/pack refs dropped without error
+
+
+def test_load_plugin_tools_by_pack_groups_by_name(tmp_path):
+    from kokua.build import _load_plugin_tools_by_pack
+
+    by_pack = _load_plugin_tools_by_pack(_config(tmp_path))  # load_plugins on by default
+    assert "example" in by_pack
+    assert any(fn.__name__ == "roll_dice" for fn in by_pack["example"])
+    assert _load_plugin_tools_by_pack(_config(tmp_path, load_plugins=False)) == {}
+
+
 async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
     import kokua.build as build_mod
 

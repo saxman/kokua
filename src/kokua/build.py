@@ -82,26 +82,52 @@ def _effective_subagent_roles(config: AssistantConfig) -> dict[str, dict]:
     return {**DEFAULT_SUBAGENT_ROLES, **config.subagent_roles}
 
 
-def _build_subagent_agent_types(config: AssistantConfig) -> dict[str, dict]:
-    """Build AIMU ``agent_types`` from the effective roles.
+def _build_subagent_agent_types(
+    config: AssistantConfig,
+    connections: Optional[list] = None,
+    plugin_tools_by_pack: Optional[dict[str, list]] = None,
+) -> dict[str, dict]:
+    """Build AIMU ``agent_types`` (worker specs) from the effective roles.
 
-    Each role's tools are its groups intersected with the assistant's enabled tool groups
-    (``config.tools``), so a role can narrow within what is enabled but never exceed it. The role's
-    ``description`` is made the first line of the built ``system_message`` (AIMU shows that line in the
-    tool's role menu); an omitted ``system_message`` body defaults to just the description.
+    A role's worker toolset is the union, deduped by ``__name__``, of:
+      - its ``groups`` intersected with the assistant's enabled ``config.tools`` (a role narrows within
+        what is enabled, never exceeds it);
+      - the tools of any MCP servers it names in ``mcp_servers``, matched against the live
+        ``connections`` by the server's configured ``name`` first, then its raw URL;
+      - the tools of any tool-packs it names in ``tool_packs`` (from ``plugin_tools_by_pack``).
+    Unknown group/server/pack references drop silently, mirroring the forgiving contract for unknown
+    groups. ``connections``/``plugin_tools_by_pack`` default to empty (so a role's built-in groups
+    resolve even before the MCP/plugin sources are wired). The role ``description`` becomes the first
+    line of the built ``system_message`` (AIMU shows it in the tool's role menu).
     """
+    connections = connections or []
+    plugin_tools_by_pack = plugin_tools_by_pack or {}
     # "all" expands to every group; "none" and unknown/disabled groups are dropped silently.
     if "all" in config.tools:
         enabled = set(_TOOL_GROUPS)
     else:
         enabled = {g for g in config.tools if g != "none"}
+    url_by_name = {s.name: s.url for s in config.mcp_servers if getattr(s, "name", None)}
+    callables_by_url = {getattr(c, "url", None): getattr(c, "callables", []) for c in connections}
     agent_types: dict[str, dict] = {}
     for name, role in _effective_subagent_roles(config).items():
-        groups = [g for g in role.get("groups", []) if g in enabled]
+        sources: list[list] = [_resolve_builtin_tools([g for g in role.get("groups", []) if g in enabled])]
+        for ref in role.get("mcp_servers", []):
+            sources.append(callables_by_url.get(url_by_name.get(ref, ref), []))
+        for pack in role.get("tool_packs", []):
+            sources.append(plugin_tools_by_pack.get(pack, []))
+        tools: list = []
+        seen: set[str] = set()
+        for fns in sources:
+            for fn in fns:
+                fname = getattr(fn, "__name__", None)
+                if fname and fname not in seen:
+                    seen.add(fname)
+                    tools.append(fn)
         body = role.get("system_message", "")
         description = role.get("description", name)
         system_message = f"{description}\n\n{body}" if body else description
-        agent_types[name] = {"system_message": system_message, "tools": _resolve_builtin_tools(groups)}
+        agent_types[name] = {"system_message": system_message, "tools": tools}
     return agent_types
 
 
@@ -122,6 +148,21 @@ def _load_plugin_tools(config: AssistantConfig) -> list:
                 tools.append(fn)
         logger.info("Loaded tool-pack %r (%d tools).", name, len(pack_tools))
     return tools
+
+
+def _load_plugin_tools_by_pack(config: AssistantConfig) -> dict[str, list]:
+    """Tool-pack tools grouped by pack name (each pack built once), so a sub-agent role can request a
+    specific pack's tools by name. Empty when plugins are disabled. A pack that fails to build is
+    skipped (same forgiving contract as ``_load_plugin_tools``)."""
+    if not config.load_plugins:
+        return {}
+    by_pack: dict[str, list] = {}
+    for name, pack in discover_tool_packs().items():
+        try:
+            by_pack[name] = list(pack.build(config))
+        except Exception:
+            logger.warning("Tool-pack %r failed to build; skipping.", name, exc_info=True)
+    return by_pack
 
 
 def resolve_system_message(config: AssistantConfig) -> str:
