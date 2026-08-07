@@ -34,8 +34,8 @@ installable, modular application.
   unattended. Fixed: `[tools] groups = ["all"]` now correctly enables all tool groups for sub-agent
   roles (previously the clamping logic treated `"all"` as a literal group name, leaving roles with no
   tools).
-- **Lean supervisor mode** (opt-in `[assistant] lean_supervisor`, default off): a supervisor/worker
-  architecture that shrinks the per-request tool context. When on, the per-conversation agent keeps
+- **Lean supervisor mode** (`[assistant] lean_supervisor`, **on by default**; set false for the flat
+  agent): a supervisor/worker architecture that shrinks the per-request tool context. When on, the per-conversation agent keeps
   only its cross-cutting tools (memory, skills, MCP management, config, scheduling, date/time) plus the
   single `spawn_subagent` delegate, and delegates all specialized work to workers whose roles carry the
   scoped toolsets — dropping the advertised tool set from ~30+ to ~10-12. Sub-agent roles can now be

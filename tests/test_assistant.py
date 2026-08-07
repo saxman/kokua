@@ -48,6 +48,9 @@ def _config(tmp_path: Path, **overrides) -> AssistantConfig:
         # Memory is on by default in real runs, but off here so the bulk of the tests stay fast and
         # hermetic (no ChromaDB init / state writes). The memory tests opt in with memory=True.
         "memory": False,
+        # lean_supervisor defaults on in production, but most tests here assert the flat toolset (all
+        # tools on the one agent), so pin flat; the lean-mode tests opt in with lean_supervisor=True.
+        "lean_supervisor": False,
     }
     base.update(overrides)
     return AssistantConfig(**base)
@@ -300,6 +303,12 @@ async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypa
     trader_tools = {fn.__name__ for fn in captured["agent_types"]["trader"]["tools"]}
     assert "get_quote" in trader_tools  # worker got the boot-connected server's tool
     assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # not on the lean supervisor
+
+
+def test_lean_supervisor_on_by_default():
+    from kokua.config import AssistantConfig
+
+    assert AssistantConfig().lean_supervisor is True  # production default
 
 
 def test_resolve_system_message_selects_supervisor_guidance(tmp_path):

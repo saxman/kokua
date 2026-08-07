@@ -39,7 +39,8 @@ subagents = true
 # carry the scoped toolsets (see [subagents.roles.*] below). This shrinks the per-request tool context.
 # Important: in this mode [tools].groups below defines the universe of built-in groups WORKERS may use
 # (not the assistant's own tools), so don't set it to ["none"] or your workers have nothing to draw on.
-# lean_supervisor = false
+# On by default; set to false for the flat agent that carries every tool itself.
+# lean_supervisor = true
 
 # Max per-conversation agents kept live in memory (AgentRegistry LRU cap). Evicted agents rebuild
 # from persisted state on next access, so the cap bounds memory, not correctness.

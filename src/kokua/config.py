@@ -172,8 +172,8 @@ class AssistantConfig:
     # single `spawn_subagent` delegate, and delegates all specialized work to workers whose roles carry
     # the scoped toolsets. Off keeps the flat agent that carries every tool itself. In lean mode
     # `tools` (below) becomes the universe of built-in groups workers may draw from, not the
-    # supervisor's own tools.
-    lean_supervisor: bool = False
+    # supervisor's own tools. On by default so the always-on agent's tool context stays small.
+    lean_supervisor: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
     confirm_tools: list[str] = field(

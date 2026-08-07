@@ -203,13 +203,13 @@ turn run concurrently (`[subagents] concurrent`, on by default). A sub-agent's g
 `confirm_tools`, e.g. `execute_python`) are routed to the parent for your approval and are not run
 unattended.
 
-**Lean supervisor mode** (opt-in `[assistant] lean_supervisor`). A supervisor/worker setup that keeps
+**Lean supervisor mode** (`[assistant] lean_supervisor`, on by default). A supervisor/worker setup that keeps
 the always-on agent's tool context small: the assistant mounts only its cross-cutting tools (memory,
 skills, MCP management, config, scheduling, date/time) plus the `spawn_subagent` delegate, answers
 trivial requests itself, and delegates all specialized work to the role-scoped workers above (each
 carrying only its own narrow toolset). In this mode `[tools] groups` defines the universe of built-in
-groups workers may use, rather than the assistant's own tools. Off by default (the assistant carries
-every tool itself).
+groups workers may use, rather than the assistant's own tools. On by default; set
+`lean_supervisor = false` for the flat agent that carries every tool itself.
 
 **Deep planning (per request).** When you ask for it, the assistant drafts an explicit plan before doing
 the work — which tools, skills, and MCP services it will use, what it will web-search for, and where it

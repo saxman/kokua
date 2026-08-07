@@ -13,7 +13,7 @@ from kokua.toolpacks.pdf import _safe_pdf_name, build
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False}
+    base = {"data_dir": tmp_path, "memory": False, "lean_supervisor": False}
     base.update(overrides)
     return AssistantConfig(**base)
 
