@@ -751,71 +751,9 @@ async def test_document_tools_round_trip(tmp_path):
     assert tools["read_document"]("/notes/standup.md") == "Yesterday, Today, Blockers"
 
 
-def test_guard_store_tool_preserves_dispatch_attrs():
-    """The store-tool wrapper must stay a drop-in for AIMU dispatch: name/doc and every __tool_* attr."""
-    import threading
-
-    from kokua.build import _guard_store_tool
-
-    def tool(a, b=1):
-        """Add two numbers."""
-        return a + b
-
-    tool.__tool_spec__ = {"name": "tool"}
-    tool.__tool_injected__ = ["ctx"]
-    tool.__tool_required__ = ["a"]
-    tool.__tool_is_async__ = False
-
-    guarded = _guard_store_tool(tool, threading.Lock())
-    assert guarded.__name__ == "tool"
-    assert guarded.__doc__ == "Add two numbers."
-    assert guarded.__tool_spec__ == {"name": "tool"}
-    assert guarded.__tool_injected__ == ["ctx"]
-    assert guarded.__tool_required__ == ["a"]
-    assert guarded.__tool_is_async__ is False
-    assert guarded(2, 3) == 5
-
-
-def test_guard_store_tool_serializes_concurrent_calls():
-    """Two threads calling a wrapped store tool must not run inside the shared store concurrently."""
-    import threading
-    import time
-
-    from kokua.build import _guard_store_tool
-
-    class FakeStore:
-        def __init__(self):
-            self.active = 0
-            self.max_active = 0
-
-        def record(self):
-            # Guarded by the shared lock, so these increments never interleave; without the guard both
-            # threads would be inside during the sleep and drive max_active to 2.
-            self.active += 1
-            self.max_active = max(self.max_active, self.active)
-            time.sleep(0.02)
-            self.active -= 1
-            return "ok"
-
-    store = FakeStore()
-
-    def tool():
-        return store.record()
-
-    tool.__tool_spec__ = {"name": "tool"}
-    guarded = _guard_store_tool(tool, threading.Lock())
-
-    threads = [threading.Thread(target=guarded) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert store.max_active == 1  # calls were serialized: never two inside the store at once
-
-
-def test_build_memory_wraps_tools_preserving_attrs(tmp_path):
-    """build_memory's real memory + document tools survive wrapping with their dispatch attributes."""
+def test_build_memory_tools_carry_dispatch_attrs(tmp_path):
+    """build_memory returns AIMU's memory + document tools directly (no wrapping); they carry the
+    dispatch attributes AIMU needs. Thread-safety now lives inside the stores (aimu.memory), not here."""
     from kokua.build import build_memory
 
     _, _, tools = build_memory(_config(tmp_path, memory=True))

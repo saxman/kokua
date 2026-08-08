@@ -2,6 +2,10 @@
 
 ## 0.1.0 (unreleased)
 
+- **Memory store thread-safety moved upstream**: concurrent-turn safety for the shared memory and
+  document stores now lives inside AIMU's `SemanticMemoryStore`/`DocumentStore` (a re-entrant per-store
+  lock) rather than a Kokua-side wrapper. `build_memory` returns the stores' tools directly again.
+
 Initial release. Kokua starts from AIMU's `examples/personal-assistant/` and restructures it into an
 installable, modular application.
 
