@@ -20,7 +20,7 @@ from aimu import aio
 from aimu.sessions import Session, TinyDBSessionStore
 
 from kokua.core.agent_registry import AgentRegistry
-from kokua.config.schema import AssistantConfig
+from kokua.config import AssistantConfig
 from kokua.core.messages import compact_message_images, derive_title
 from kokua.core.turn_gate import TurnGate
 

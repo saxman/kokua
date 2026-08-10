@@ -35,7 +35,7 @@ from aimu.models import (
     StreamingContentType,
 )
 
-from ..images import ROUTE_PREFIX
+from kokua.images import ROUTE_PREFIX
 
 # The conversation id of the turn currently running in this task (and its awaited children), set by
 # Assistant._handle for the duration of the turn and unset (default None) outside any turn. WebChannel

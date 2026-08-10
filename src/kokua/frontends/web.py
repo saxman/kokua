@@ -23,9 +23,9 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from kokua import images
 from kokua.core.assistant import Assistant, ModelClientError
-from ..channels.web import WebChannel
-from kokua.config.schema import AssistantConfig
-from ..plugins import FrontEnd
+from kokua.channels.web import WebChannel
+from kokua.config import AssistantConfig
+from kokua.plugins import FrontEnd
 
 logger = logging.getLogger(__name__)
 

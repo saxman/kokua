@@ -82,3 +82,46 @@ def test_cli_frontend_reports_model_client_error(tmp_path, monkeypatch, capsys):
         asyncio.run(cli_frontend.run(_config(tmp_path), args))
     assert exc.value.code == 1
     assert "no default could be resolved" in capsys.readouterr().err
+
+
+# --- main() dispatch --------------------------------------------------------------------------
+
+
+def _run_main(monkeypatch, argv: list[str]):
+    monkeypatch.setattr("sys.argv", ["kokua", *argv])
+    from kokua.cli import main
+
+    return main()
+
+
+def test_main_lists_frontends(monkeypatch, capsys):
+    _run_main(monkeypatch, ["--list-frontends"])
+    out = capsys.readouterr().out
+    assert "cli:" in out and "web:" in out
+
+
+def test_main_lists_tool_packs(monkeypatch, capsys):
+    _run_main(monkeypatch, ["--list-tool-packs"])
+    out = capsys.readouterr().out
+    assert "example:" in out
+
+
+def test_main_listing_does_not_build_an_assistant(monkeypatch, capsys):
+    """A listing must not resolve a model, so it works before anything is configured."""
+
+    def explode(*args, **kwargs):
+        raise AssertionError("main() built a config/assistant for a plain listing")
+
+    monkeypatch.setattr("kokua.cli.resolve_config", explode)
+    _run_main(monkeypatch, ["--list-frontends"])
+    assert "cli:" in capsys.readouterr().out
+
+
+def test_main_reports_an_unknown_frontend_with_the_available_ones(monkeypatch, tmp_path):
+    import pytest
+
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    with pytest.raises(KeyError) as caught:
+        _run_main(monkeypatch, ["--frontend", "nope"])
+    message = str(caught.value)
+    assert "nope" in message and "cli" in message  # names the miss and lists the choices

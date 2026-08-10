@@ -18,7 +18,7 @@ from aimu import aio
 from aimu.tools import tool
 
 from kokua.config import store as config_store
-from kokua.config.schema import AssistantConfig, MCPServerConfig
+from kokua.config import AssistantConfig, MCPServerConfig
 from kokua.mcp.auth import Notify, build_chat_oauth
 
 logger = logging.getLogger(__name__)

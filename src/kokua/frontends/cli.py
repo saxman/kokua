@@ -6,9 +6,9 @@ import argparse
 import sys
 
 from kokua.core.assistant import Assistant, ModelClientError
-from ..channels.cli import CLIChannel
-from kokua.config.schema import AssistantConfig
-from ..plugins import FrontEnd
+from kokua.channels.cli import CLIChannel
+from kokua.config import AssistantConfig
+from kokua.plugins import FrontEnd
 
 _STARTUP_NOTICE = (
     "[notice] This assistant can author and run Python/shell scripts with full access to this "

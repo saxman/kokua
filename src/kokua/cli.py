@@ -16,7 +16,7 @@ import asyncio
 
 from . import plugins
 from kokua.config import file as settings
-from kokua.config.schema import AssistantConfig, MCPServerConfig
+from kokua.config import AssistantConfig, MCPServerConfig
 from .logging_setup import configure_logging
 
 

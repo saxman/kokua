@@ -35,7 +35,7 @@ from kokua.core.build import (
     build_model_client,
     make_agent_builder,
 )
-from kokua.config.schema import AssistantConfig
+from kokua.config import AssistantConfig
 from kokua.core.conversations import ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate

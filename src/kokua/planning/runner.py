@@ -16,7 +16,7 @@ from aimu.aio.channels.base import ChannelMessage
 
 from kokua.planning import reviewers as review
 from kokua.channels.ui import ChannelUI
-from kokua.config.schema import AssistantConfig
+from kokua.config import AssistantConfig
 
 PLAN_PROMPT = """\
 Before doing any work, produce an explicit plan for how you will accomplish the request below. Do NOT \
