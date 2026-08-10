@@ -80,15 +80,6 @@ def _layer_generate_kwargs(client, base: dict, config: AssistantConfig) -> None:
     kwargs.update(config.generation)
 
 
-def _apply_show_flags(channel: Channel, config: AssistantConfig, settings: dict) -> None:
-    """Apply show_thinking / show_tools from a settings dict to the config and channel (if it has them)."""
-    for flag in ("show_thinking", "show_tools"):
-        if flag in settings:
-            setattr(config, flag, settings[flag])
-            if hasattr(channel, flag):
-                setattr(channel, flag, settings[flag])
-
-
 class Assistant:
     """A single-user personal assistant wired from AIMU primitives."""
 
@@ -415,16 +406,19 @@ class Assistant:
 
     def current_settings(self) -> dict:
         """The effective runtime settings for the web panel to display: model, prefs, generate kwargs."""
-        return {
-            "model": str(self._config.model) if self._config.model else "",
-            "show_thinking": getattr(self._channel, "show_thinking", self._config.show_thinking),
-            "show_tools": getattr(self._channel, "show_tools", self._config.show_tools),
-            "plan_review": self._config.plan_review,
-            "plan_review_agent": self._config.plan_review_agent,
-            "result_review": self._config.result_review,
-            "show_reasoning": self._config.show_reasoning,
-            "generate_kwargs": dict(self._agent.model_client.default_generate_kwargs),
-        }
+        settings = {setting.field: self._read_setting(setting) for setting in runtime_settings.RUNTIME_SETTINGS}
+        settings["generate_kwargs"] = dict(self._agent.model_client.default_generate_kwargs)
+        return settings
+
+    def _read_setting(self, setting: runtime_settings.RuntimeSetting):
+        """One runtime setting's effective value: the channel's copy of a mirrored flag wins, since
+        that is the one actually consulted while streaming."""
+        value = getattr(self._config, setting.field)
+        if setting.kind is str:
+            return str(value) if value else ""
+        if setting.mirror_on_channel:
+            return getattr(self._channel, setting.field, value)
+        return value
 
     async def apply_settings(self, incoming: dict) -> None:
         """Apply a settings-panel change at runtime and persist it to config.toml so it survives restarts.
@@ -452,15 +446,12 @@ class Assistant:
         async with self._gate.exclusive():
             if switching:
                 await self._switch_model(new_model)
-            _apply_show_flags(self._channel, self._config, settings)
-            for flag in (
-                "plan_review",
-                "plan_review_agent",
-                "result_review",
-                "show_reasoning",
-            ):  # config-only
-                if flag in settings:
-                    setattr(self._config, flag, settings[flag])
+            for setting in runtime_settings.RUNTIME_SETTINGS:
+                if setting.field not in settings or setting.field == "model":  # model: handled above
+                    continue
+                setattr(self._config, setting.field, settings[setting.field])
+                if setting.mirror_on_channel and hasattr(self._channel, setting.field):
+                    setattr(self._channel, setting.field, settings[setting.field])
             self._config.generation = settings["generate_kwargs"]
             for agent in self._registry.live_agents():
                 _layer_generate_kwargs(agent.model_client, self._base_generate_kwargs, self._config)
@@ -469,14 +460,9 @@ class Assistant:
     def _persist_settings(self, settings: dict) -> None:
         """Write an applied settings dict back into config.toml, keeping [generation] in sync."""
         path = self._config.config_path
-        if "model" in settings:
-            config_store.set_value(path, "assistant", "model", settings["model"])
-        for flag in ("show_thinking", "show_tools"):
-            if flag in settings:
-                config_store.set_value(path, "display", flag, settings[flag])
-        for flag in ("plan_review", "plan_review_agent", "result_review", "show_reasoning"):
-            if flag in settings:
-                config_store.set_value(path, "planning", flag, settings[flag])
+        for setting in runtime_settings.RUNTIME_SETTINGS:
+            if setting.field in settings:
+                config_store.set_value(path, setting.section, setting.toml_key, settings[setting.field])
         generate_kwargs = settings["generate_kwargs"]
         for key in runtime_settings.GENERATION_KEYS:
             if key in generate_kwargs:
@@ -494,10 +480,10 @@ class Assistant:
         applied = {"generate_kwargs": dict(self._config.generation)}
         if section == "generation":
             applied["generate_kwargs"][key] = value
-        elif (section, key) == ("assistant", "model"):
-            applied["model"] = value
-        elif section in ("display", "planning"):
-            applied[key] = value
+        else:
+            setting = runtime_settings.by_toml(section, key)
+            if setting is not None:
+                applied[setting.field] = value
         await self._apply_settings(runtime_settings.sanitize(applied))
 
     async def _switch_model(self, model: str) -> None:

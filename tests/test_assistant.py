@@ -1988,6 +1988,35 @@ async def test_apply_settings_updates_and_persists_to_config(tmp_path):
     assert saved["show_tools"] is False
 
 
+async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
+    """The table's promise, end to end: for EVERY RUNTIME_SETTINGS entry, a panel payload applies to
+    the live config and persists to config.toml under the entry's own [section].key.
+
+    This is what makes adding a setting a one-line change: a new entry is covered here automatically,
+    and an entry whose section/key is wrong fails immediately instead of silently not persisting.
+    """
+    from kokua import runtime_settings, settings
+
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    # A value that differs from the default for every entry, so a no-op write can't pass.
+    payload = {"generate_kwargs": {}}
+    expected = {}
+    for setting in runtime_settings.RUNTIME_SETTINGS:
+        if setting.field == "model":
+            continue  # switching the model rebuilds the client; covered by its own test
+        expected[setting.field] = not getattr(cfg, setting.field)
+        payload[setting.field] = expected[setting.field]
+
+    await assistant.apply_settings(payload)
+
+    saved = settings.load(str(cfg.config_path))
+    for field, value in expected.items():
+        assert getattr(cfg, field) is value, f"{field} was not applied to the live config"
+        assert saved[field] is value, f"{field} did not persist to config.toml"
+
+
 async def test_update_config_tool_applies_generation_live_and_persists(tmp_path):
     from kokua import settings
 

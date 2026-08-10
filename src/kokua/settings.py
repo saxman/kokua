@@ -95,16 +95,12 @@ def _parse_subagent_role(name: str, spec: Any) -> dict:
 
 # (section, key) -> (AssistantConfig field, accepted TOML types, human label, optional converter).
 # `bool` is an int subclass, so it is rejected for numeric fields unless explicitly accepted.
-_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
-    ("assistant", "model"): ("model", (str,), "a string", None),
+#
+# Startup-only keys are declared here; the runtime-mutable ones (model, display and planning flags)
+# are generated from runtime_settings.RUNTIME_SETTINGS below, so the two never drift.
+_STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
     ("assistant", "system_message"): ("system_message", (str,), "a string", None),
-    ("display", "show_thinking"): ("show_thinking", (bool,), "a boolean", None),
-    ("display", "show_tools"): ("show_tools", (bool,), "a boolean", None),
-    ("planning", "plan_review"): ("plan_review", (bool,), "a boolean", None),
-    ("planning", "plan_review_agent"): ("plan_review_agent", (bool,), "a boolean", None),
-    ("planning", "result_review"): ("result_review", (bool,), "a boolean", None),
     ("planning", "review_rounds"): ("review_rounds", (int,), "an integer", None),
-    ("planning", "show_reasoning"): ("show_reasoning", (bool,), "a boolean", None),
     ("assistant", "memory"): ("memory", (bool,), "a boolean", None),
     ("assistant", "load_plugins"): ("load_plugins", (bool,), "a boolean", None),
     ("assistant", "agent_cache_cap"): ("agent_cache_cap", (int,), "an integer", None),
@@ -125,6 +121,14 @@ _SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callab
     ("web", "host"): ("host", (str,), "a string", None),
     ("web", "port"): ("port", (int,), "an integer", None),
     ("logging", "level"): ("log_level", (str,), "a string", None),
+}
+
+_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
+    **_STARTUP_SCHEMA,
+    **{
+        (setting.section, setting.toml_key): (setting.field, (setting.kind,), setting.label, None)
+        for setting in runtime_settings.RUNTIME_SETTINGS
+    },
 }
 
 

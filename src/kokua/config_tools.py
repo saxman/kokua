@@ -16,7 +16,7 @@ from typing import Awaitable, Callable
 
 from aimu.tools import tool
 
-from . import config_store, settings
+from . import config_store, runtime_settings, settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,24 +25,6 @@ logger = logging.getLogger(__name__)
 BLOCKLIST: frozenset[tuple[str, str]] = frozenset(
     {("security", "confirm_tools"), ("email", "to"), ("paths", "data_dir")}
 )
-
-# (section, key) pairs that take effect live (via the apply_hot callback); everything else needs a
-# restart. ``generation`` is hot for every key, so it is matched by section below rather than listed.
-_HOT_KEYS: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("assistant", "model"),
-        ("display", "show_thinking"),
-        ("display", "show_tools"),
-        ("planning", "plan_review"),
-        ("planning", "plan_review_agent"),
-        ("planning", "result_review"),
-        ("planning", "show_reasoning"),
-    }
-)
-
-
-def _is_hot(section: str, key: str) -> bool:
-    return section == "generation" or (section, key) in _HOT_KEYS
 
 
 def make_config_tools(config_path: Path, apply_hot: Callable[[str, str, object], Awaitable[None]]) -> list[Callable]:
@@ -86,7 +68,7 @@ def make_config_tools(config_path: Path, apply_hot: Callable[[str, str, object],
 
         # Apply a hot change to the live session first; only persist if it took (so a bad model, say,
         # is not written to config.toml and left to break the next startup).
-        if _is_hot(section, key):
+        if runtime_settings.is_hot(section, key):
             try:
                 await apply_hot(section, key, coerced)
             except Exception as error:
