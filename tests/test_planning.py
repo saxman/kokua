@@ -79,8 +79,9 @@ async def _resolve_when_pending(assistant, value, *, approve=False):
     otherwise resolves with ``value`` (an edited plan, or None to reject).
     """
     for _ in range(1000):
-        if assistant._pending_plan is not None and not assistant._pending_plan.done():
-            assistant._pending_plan.set_result(assistant._pending_plan_text if approve else value)
+        pending = assistant._human.plan
+        if pending.pending:
+            pending.resolve(pending.context if approve else value)
             return
         await asyncio.sleep(0)
     raise AssertionError("plan review never became pending")

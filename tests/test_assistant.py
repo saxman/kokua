@@ -1082,6 +1082,10 @@ async def test_approve_allows_ungated_tool_without_prompting(tmp_path):
     assert channel.sent == []  # no prompt for an ungated tool
 
 
+async def _noop_prompt() -> None:
+    """A prompt that sends nothing: these tests exercise the pending-request slot, not the channel."""
+
+
 async def test_approve_gated_tool_waits_for_routed_answer(tmp_path):
     from kokua.channels.web import streaming_conversation
 
@@ -1094,9 +1098,9 @@ async def test_approve_gated_tool_waits_for_routed_answer(tmp_path):
     try:
         task = asyncio.create_task(assistant._approve("add_skill_script", {"skill_name": "x"}))
         await asyncio.sleep(0)  # let the policy register the pending approval and prompt
-        assert assistant._pending_approval is not None
+        assert assistant._human.approval.pending
         assert channel.sent  # a prompt was sent to the user
-        assistant._pending_approval.set_result(True)
+        assistant._human.approval.resolve(True)
         assert await task is True
     finally:
         streaming_conversation.reset(token)
@@ -1129,12 +1133,12 @@ async def test_serve_loop_routes_message_to_pending_approval(tmp_path):
             pass
 
     assistant = await Assistant.create(_config(tmp_path), _OneMsg(), client=MockAsyncModelClient([]))
-    fut = asyncio.get_running_loop().create_future()
-    assistant._pending_approval = fut
+    asking = asyncio.create_task(assistant._human.approval.ask(_noop_prompt))
+    await asyncio.sleep(0)  # let it register as pending before the loop reads the "y"
 
     await assistant._serve_channel()
 
-    assert fut.done() and fut.result() is True
+    assert await asking is True
     assert assistant._tracker.get(assistant._active_id) is None  # the answer did not start a new turn
 
 
@@ -1187,7 +1191,7 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
     """Two concurrent gated approvals must not clobber each other's pending future.
 
     Without the lock the interleaved coroutines both call asyncio.gather concurrently. The first
-    call creates self._pending_approval and yields at the sleep; the second then overwrites it with
+    call takes the slot and yields at the sleep; without the lock the second then overwrites it with
     a fresh future before the first has resolved. The first call then calls set_result on the
     already-cleared (None) reference, raising AttributeError ('NoneType' has no attribute
     'set_result'). With the lock the second call waits until the first has fully completed (future
@@ -1205,11 +1209,11 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
     async def fake_prompt(name, arguments):
         prompts.append(name)
         # Yield to the event loop before resolving so the two gathered coroutines can interleave.
-        # Without the lock the second call overwrites self._pending_approval here, causing the
+        # Without the lock the second call overwrites the pending slot here, causing the
         # first call to resolve the wrong future and the second to deadlock (or raise
         # InvalidStateError if its future is resolved twice).
         await asyncio.sleep(0)
-        assistant._pending_approval.set_result(True)
+        assistant._human.approval.resolve(True)
 
     assistant._ui.ask_approval = fake_prompt
 
@@ -1261,8 +1265,8 @@ async def test_foreground_turn_prompts_for_approval(tmp_path):
     try:
         approve_task = asyncio.create_task(assistant._approve("execute_python", {}))
         await asyncio.sleep(0.01)
-        assert assistant._pending_approval is not None and not assistant._pending_approval.done()
-        assistant._pending_approval.set_result(True)
+        assert assistant._human.approval.pending
+        assistant._human.approval.resolve(True)
         assert await approve_task is True
     finally:
         streaming_conversation.reset(token)
@@ -1312,17 +1316,19 @@ async def test_select_conversation_does_not_cancel_running_turn(tmp_path):
 async def test_switch_away_resolves_pending_approval_as_denied(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
-    assistant._pending_approval = asyncio.get_running_loop().create_future()
+    asking = asyncio.create_task(assistant._human.approval.ask(_noop_prompt))
+    await asyncio.sleep(0)
     await assistant.new_conversation()  # switching away
-    assert assistant._pending_approval is None or assistant._pending_approval.result() is False
+    assert await asking is False
 
 
 async def test_switch_away_resolves_pending_plan_as_rejected(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
-    assistant._pending_plan = asyncio.get_running_loop().create_future()
+    asking = asyncio.create_task(assistant._human.plan.ask(_noop_prompt, context="the plan"))
+    await asyncio.sleep(0)
     await assistant.select_conversation(assistant._active_id)  # switching (even to the same id)
-    assert assistant._pending_plan is None or assistant._pending_plan.result() is None
+    assert await asking is None
 
 
 async def test_delete_conversation_cancels_its_own_running_turn(tmp_path):

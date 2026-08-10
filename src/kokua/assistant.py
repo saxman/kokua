@@ -43,6 +43,7 @@ from .planning import PlanResult, PlanRunner
 from .config import AssistantConfig
 from .conversations import ConversationBook
 from .errors import describe_error
+from .interaction import HumanGate
 from .mcp import ServerConnection, reconnect_mcp_servers
 from .messages import derive_title
 from .scheduling import make_scheduler_tools
@@ -109,18 +110,16 @@ class Assistant:
         self._tracker = TurnTracker()
         # A per-turn sequence id for the lifecycle log lines.
         self._turn_seq: int = 0
-        # Tool-approval coordination. At most one approval is pending at a time (enforced by
-        # self._approval_lock in _approve, not the turn gate); the serve loop resolves the future
-        # with the user's answer.
-        self._pending_approval: Optional[asyncio.Future] = None
-        # Serializes the gated-tool approval path so concurrent tool calls (concurrent_tool_calls) can
-        # never have two approvals pending at once (which would clobber self._pending_approval). Only
-        # gated tools acquire it; ungated tools and proactive auto-deny never touch it.
-        self._approval_lock = asyncio.Lock()
-        # Plan-review coordination (deep planning mode): while a plan awaits the user's
-        # approve/edit/reject, the serve loop resolves the future. Mirrors the approval gate.
-        self._pending_plan: Optional[asyncio.Future] = None
-        self._pending_plan_text = ""
+        # Tool approval and plan review: each a single-slot request the serve loop resolves with the
+        # user's next message. Both are lock-guarded, so concurrent tool calls (or concurrent planned
+        # turns) can never clobber the slot the serve loop is about to resolve.
+        self._human = HumanGate(
+            self._ui,
+            config,
+            active_id=lambda: self._book.active_id,
+            is_proactive=proactive_turn.get,
+            turn_conversation=streaming_conversation.get,
+        )
         # The active model client's provider built-in generate kwargs, snapshotted before any override
         # is layered on, so a settings change (or a cleared field) can rebuild from a clean base.
         # Assigned by create() and refreshed on a runtime model switch.
@@ -286,32 +285,20 @@ class Assistant:
             except Exception:
                 pass
 
-    def _abandon_pending_interactions(self) -> None:
-        """Resolve any pending tool approval or plan review as denied/rejected.
-
-        Called before switching the viewed conversation away from the turn that raised them: that
-        turn keeps running in the background (switching does not cancel it), so
-        without this its awaited future would hang forever, and a reply the user types after
-        switching could otherwise be misrouted to it instead of starting a new turn."""
-        if self._pending_approval is not None and not self._pending_approval.done():
-            self._pending_approval.set_result(False)
-        if self._pending_plan is not None and not self._pending_plan.done():
-            self._pending_plan.set_result(None)
-
     async def new_conversation(self) -> str:
         """Start and switch to a new, empty conversation; returns its id."""
-        self._abandon_pending_interactions()
+        self._human.abandon_all()
         return self._book.create()
 
     async def select_conversation(self, conversation_id: str) -> None:
         """Switch the active conversation to an existing one; its agent (re)builds from the store."""
-        self._abandon_pending_interactions()
+        self._human.abandon_all()
         self._book.select(conversation_id)
 
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation, switching away from it if it was the one being viewed."""
         if conversation_id == self._active_id:
-            self._abandon_pending_interactions()
+            self._human.abandon_all()
         await self._book.delete(conversation_id, cancel_turn=self._cancel_turn)
 
     def _cancel_turn(self, conversation_id: str) -> None:
@@ -463,23 +450,9 @@ class Assistant:
                 if text == "/diag":
                     await self._ui.send(self._diag_report())
                     continue
-                # While an approval is pending, the next message is the answer, not a new turn.
-                # (A `/stop` above still takes priority, cancelling the turn that is awaiting it.)
-                pending = self._pending_approval
-                if pending is not None and not pending.done():
-                    pending.set_result(text in ("y", "yes"))
-                    continue
-                # While a plan awaits review, the next message is the approve/edit/reject decision.
-                plan_pending = self._pending_plan
-                if plan_pending is not None and not plan_pending.done():
-                    if text in ("approve", "yes", "y"):
-                        plan_pending.set_result(self._pending_plan_text)
-                    elif text in ("reject", "no", "n"):
-                        plan_pending.set_result(None)
-                    elif text.startswith("edit:"):
-                        plan_pending.set_result(raw.split(":", 1)[1].strip() or self._pending_plan_text)
-                    else:
-                        plan_pending.set_result(raw.strip())  # any other text is an edited plan
+                # While an approval or plan review is outstanding, the next message is its answer,
+                # not a new turn. (A `/stop` above still takes priority, cancelling the waiting turn.)
+                if self._human.resolve_reply(raw, text):
                     continue
                 # `/plan <task>` invokes deep planning for this one turn (the web UI's Plan toggle sends
                 # exactly this). Any other message runs a normal, unplanned turn.
@@ -512,35 +485,7 @@ class Assistant:
         self._cancel_turn(self._active_id)
 
     async def _approve(self, name: str, arguments: dict) -> bool:
-        """Tool-approval gate run before each tool call (published to the model client per run).
-
-        Ungated tools pass. A proactive/scheduled turn (``proactive_turn`` set) always auto-denies a
-        gated tool: it is unattended, so nobody is watching to confirm, and a ``target="active"``
-        scheduled task would otherwise look foreground (its ``streaming_conversation`` equals the viewed
-        conversation) and wrongly prompt. Otherwise a reactive turn is approved only if its conversation
-        is the one the user is currently viewing: ``streaming_conversation`` (set by ``_handle`` for the
-        duration of the turn) must equal ``self._active_id``; a turn backgrounded by a switch auto-denies.
-        Otherwise prompt over the channel and await the answer, which the serve loop routes here.
-
-        Gated approvals are serialized by ``self._approval_lock``: with concurrent tool calls a round can
-        invoke several tools at once, but only one approval is ever pending, so the single
-        ``self._pending_approval`` future the serve loop resolves is never clobbered.
-        """
-        if name not in self._config.confirm_tools:
-            return True
-        if proactive_turn.get():
-            return False
-        if streaming_conversation.get() != self._active_id:
-            return False
-        async with self._approval_lock:
-            self._pending_approval = asyncio.get_running_loop().create_future()
-            try:
-                await self._ui.ask_approval(name, arguments)
-                return await self._pending_approval
-            finally:
-                # Cleared here so a `/stop` that cancels the turn mid-await (raising CancelledError out
-                # of the await) still leaves no stale pending approval.
-                self._pending_approval = None
+        return await self._human.approve(name, arguments)
 
     async def _handle(
         self, msg: ChannelMessage, *, conversation_id: str, plan: bool = False, tid: Optional[int] = None
@@ -566,7 +511,7 @@ class Assistant:
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
                 try:
                     if do_plan:
-                        runner = PlanRunner(agent, self._ui, self._config, self._review_plan)
+                        runner = PlanRunner(agent, self._ui, self._config, self._human.review_plan)
                         self._apply_plan_result(await runner.run(msg), conversation_id)
                     else:
                         stream = await agent.run(msg.text, stream=True, images=msg.images)
@@ -627,8 +572,8 @@ class Assistant:
         else:
             lines.append("- turn in flight: no")
         lines.append(f"- active turns: {self._gate.active_turns()}")
-        approval = self._pending_approval is not None and not self._pending_approval.done()
-        plan = self._pending_plan is not None and not self._pending_plan.done()
+        approval = self._human.approval.pending
+        plan = self._human.plan.pending
         lines.append(f"- pending approval: {'yes' if approval else 'no'} | pending plan: {'yes' if plan else 'no'}")
         for conversation_id, info in turns:
             if info.handle.done:
@@ -651,21 +596,6 @@ class Assistant:
             return buffer.getvalue().strip()
         except Exception:
             return ""
-
-    async def _review_plan(self, plan_text: str, critique: Optional[list[str]] = None) -> Optional[str]:
-        """Await the user's decision on a plan: approve (the plan), edit (their text), or reject (None).
-
-        Mirrors _approve: create a future, prompt the channel, and let the serve loop resolve it. Any
-        adversarial-reviewer critique is surfaced with the prompt so the human can weigh it.
-        """
-        self._pending_plan = asyncio.get_running_loop().create_future()
-        self._pending_plan_text = plan_text
-        try:
-            await self._ui.ask_plan_review(plan_text, critique)
-            return await self._pending_plan
-        finally:
-            self._pending_plan = None
-            self._pending_plan_text = ""
 
     async def _proactive(
         self,
