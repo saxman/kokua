@@ -41,9 +41,10 @@ from .build import (
 )
 from .planning import PlanResult, PlanRunner
 from .config import AssistantConfig
+from .conversations import ConversationBook
 from .errors import describe_error
 from .mcp import ServerConnection, reconnect_mcp_servers
-from .messages import compact_message_images, derive_title
+from .messages import derive_title
 from .scheduling import make_scheduler_tools
 from .turn_gate import TurnGate
 from .turn_registry import TurnInfo, TurnTracker
@@ -53,19 +54,6 @@ logger = logging.getLogger(__name__)
 # Re-exported so front ends can keep catching `assistant.ModelClientError` (build-time, from build) and
 # `assistant.ModelConnectionError` (runtime server-unreachable, from AIMU).
 __all__ = ["Assistant", "ModelClientError", "ModelConnectionError"]
-
-
-def _active_session(store: TinyDBSessionStore) -> Session:
-    """The most-recently-updated session, creating a fresh empty one if the store is empty."""
-    keys = store.list_keys()
-    if keys:
-        sessions = [store.get(key) for key in keys]
-        sessions.sort(key=lambda s: s.metadata.get("updated_at", ""), reverse=True)
-        return sessions[0]
-    now = datetime.now().isoformat()
-    session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
-    store.save(session)
-    return session
 
 
 def _layer_generate_kwargs(client, base: dict, config: AssistantConfig) -> None:
@@ -95,11 +83,9 @@ class Assistant:
         self._scheduler = scheduler
         self._store = store
         self._config = config
-        # A per-conversation agent cache and the active conversation's id (replacing the single shared
-        # agent + swapped-in session). Assigned by create() once the registry's builder can bind
-        # self._approve; _agent / _session are read-only views onto these (see the properties below).
+        # A per-conversation agent cache. Assigned by create() once the registry's builder can bind
+        # self._approve; agents are built lazily, by which point it exists.
         self._registry: Optional[AgentRegistry] = None
-        self._active_id: str = ""
         self._client_factory = None
         # Live remote-MCP connections (startup + runtime-added) kept alive for their lifetime
         # and closed on shutdown. Assigned by create().
@@ -114,6 +100,9 @@ class Assistant:
         # a lambda (not `self._registry.lock` directly) because `self._registry` is still None here;
         # it is assigned by create() well before any turn or exclusive hold runs.
         self._gate = TurnGate(lambda conversation_id: self._registry.lock(conversation_id))
+        # The store, the agent cache, and the active-conversation pointer, kept together so that a
+        # switch moves all three atomically. Its registry is bound by create().
+        self._book = ConversationBook(store, self._gate, config, on_active_change=self._ui.set_active_conversation)
         # Each reactive turn runs as a background task (a RunHandle) so the serve loop stays free to
         # receive a `/stop` while a turn is in flight. Tracks at most one running turn per conversation
         # (the gate enforces that invariant); backs /stop, /diag, and shutdown cancellation.
@@ -149,12 +138,12 @@ class Assistant:
         # Multiple conversations live in a session store. The active conversation is the most
         # recently updated (a fresh empty one if there are none).
         store = TinyDBSessionStore(str(config.sessions_path))
-        session = _active_session(store)
 
         scheduler = Scheduler()
         # Construct the assistant first so the registry's builder can bind its approval gate: agents are
         # built lazily (on first get), by which point assistant._approve exists.
         assistant = cls(channel, scheduler, store, config)
+        initial_id = assistant._book.adopt_most_recent()
         # config.toml is the single source of settings: the panel and update_config write it, and the
         # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
         for setting in runtime_settings.RUNTIME_SETTINGS:
@@ -163,7 +152,6 @@ class Assistant:
         assistant._mcp_servers = connections  # same list the MCP tools append to / remove from
         assistant._memory_store = memory_store
         assistant._document_store = document_store
-        assistant._active_id = session.key
 
         # Per-conversation model clients: an explicit factory wins; else the injected client backs the
         # initial conversation (single-conversation tests) and further conversations build their own;
@@ -171,7 +159,6 @@ class Assistant:
         if client_factory is not None:
             raw_factory = client_factory
         elif client is not None:
-            initial_id = session.key
 
             def raw_factory(conversation_id: str, _client=client, _initial=initial_id):
                 return _client if conversation_id == _initial else build_model_client(config)
@@ -209,6 +196,7 @@ class Assistant:
             ),
             cap=config.agent_cache_cap,
         )
+        assistant._book.bind_registry(assistant._registry)
 
         # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when
         # that agent is built: a flat agent attaches the servers' tools directly, and a lean
@@ -248,18 +236,22 @@ class Assistant:
     @property
     def _agent(self) -> aio.SkillAgent:
         """The active conversation's agent (built on demand by the registry)."""
-        return self._registry.get(self._active_id)
+        return self._book.agent
 
     @property
     def _session(self) -> Session:
         """The active conversation's persisted session (fetched fresh each access)."""
-        return self._store.get(self._active_id)
+        return self._book.session
+
+    @property
+    def _active_id(self) -> str:
+        return self._book.active_id
 
     @property
     def active_id(self) -> str:
         """The conversation currently being viewed. Public accessor so a front end doesn't need to
-        reach into `_active_id` directly."""
-        return self._active_id
+        reach into the conversation book directly."""
+        return self._book.active_id
 
     def turn_running(self, conversation_id: str) -> bool:
         """Whether `conversation_id` has an in-flight turn right now. Public accessor so a front end
@@ -279,19 +271,7 @@ class Assistant:
 
     def list_conversations(self) -> list[dict]:
         """All conversations as {id, title, updated_at, active}, most-recently-updated first."""
-        items = []
-        for key in self._store.list_keys():
-            session = self._store.get(key)
-            items.append(
-                {
-                    "id": key,
-                    "title": session.metadata.get("title") or "New conversation",
-                    "updated_at": session.metadata.get("updated_at", ""),
-                    "active": key == self._active_id,
-                }
-            )
-        items.sort(key=lambda item: item["updated_at"], reverse=True)
-        return items
+        return self._book.list()
 
     async def _cancel_current_turn(self) -> None:
         """Cancel the viewed conversation's in-flight turn (if any) and let it settle, so its partial
@@ -306,13 +286,6 @@ class Assistant:
             except Exception:
                 pass
 
-    def _sync_channel_active_id(self) -> None:
-        """Mirror ``_active_id`` onto the channel's ``active_conversation_id`` (if it tracks one), so
-        ``WebChannel``'s foreground-muting and this class's background-completion notification (in
-        ``_handle``) agree on which conversation is being viewed. A no-op for a channel that doesn't
-        track a viewed conversation (the CLI channel, or a test double)."""
-        self._ui.set_active_conversation(self._active_id)
-
     def _abandon_pending_interactions(self) -> None:
         """Resolve any pending tool approval or plan review as denied/rejected.
 
@@ -326,82 +299,26 @@ class Assistant:
             self._pending_plan.set_result(None)
 
     async def new_conversation(self) -> str:
-        """Start and switch to a new, empty conversation; returns its id.
-
-        The previous conversation's turn (if any) keeps running in the background -- switching does
-        not cancel it. If the new conversation's agent fails to build
-        (``ModelClientError``), the active pointer reverts to the previous conversation before
-        re-raising, so the caller is never left active on a conversation whose agent doesn't work.
-        The new session record itself still lingers in the store, unused but harmless (mirrors an
-        ordinary empty conversation the user never sent to).
-        """
+        """Start and switch to a new, empty conversation; returns its id."""
         self._abandon_pending_interactions()
-        previous_id = self._active_id
-        now = datetime.now().isoformat()
-        session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now})
-        self._store.save(session)
-        self._active_id = session.key
-        self._sync_channel_active_id()
-        try:
-            self._registry.get(self._active_id)  # build the (empty) agent eagerly so it is the live one
-        except Exception:
-            self._active_id = previous_id
-            self._sync_channel_active_id()
-            raise
-        return session.key
+        return self._book.create()
 
     async def select_conversation(self, conversation_id: str) -> None:
-        """Switch the active conversation to an existing one; its agent (re)builds from the store.
-
-        The previous conversation's turn (if any) keeps running in the background -- switching does
-        not cancel it. If the build fails, the active pointer reverts to the previous
-        conversation before re-raising, so the caller is never left active on a conversation whose
-        agent doesn't work.
-        """
+        """Switch the active conversation to an existing one; its agent (re)builds from the store."""
         self._abandon_pending_interactions()
-        previous_id = self._active_id
-        self._active_id = conversation_id
-        self._sync_channel_active_id()
-        try:
-            self._registry.get(self._active_id)
-        except Exception:
-            self._active_id = previous_id
-            self._sync_channel_active_id()
-            raise
+        self._book.select(conversation_id)
 
     async def delete_conversation(self, conversation_id: str) -> None:
-        """Delete a conversation. If it is the active one, switch to the most-recently-updated
-        remaining conversation (or a fresh empty one if none remain).
+        """Delete a conversation, switching away from it if it was the one being viewed."""
+        if conversation_id == self._active_id:
+            self._abandon_pending_interactions()
+        await self._book.delete(conversation_id, cancel_turn=self._cancel_turn)
 
-        Unlike select/new, this DOES cancel a turn -- but only the deleted conversation's own (there
-        is no conversation left for it to keep persisting to). If that replacement's agent fails to
-        build, the active pointer reverts to the just-deleted id before re-raising. Its store record
-        and registry entry are already gone by that point (the delete itself is not rolled back), so
-        this is a best-effort revert: it keeps ``_active_id`` from pointing at some OTHER untested
-        conversation, but a caller that touches ``self._agent`` afterward will hit the same build
-        failure again. The front end is expected to surface the re-raised error and stop, not retry
-        immediately.
-        """
+    def _cancel_turn(self, conversation_id: str) -> None:
+        """Cancel a conversation's in-flight turn without awaiting it."""
         info = self._tracker.get(conversation_id)
         if info is not None and not info.handle.done:
             info.handle.cancel()
-        deleting_active = conversation_id == self._active_id
-        if deleting_active:
-            self._abandon_pending_interactions()
-        previous_id = self._active_id
-        async with self._gate.exclusive():
-            self._store.delete(conversation_id)
-            self._registry.discard(conversation_id)
-            if deleting_active:
-                self._active_id = _active_session(self._store).key
-                self._sync_channel_active_id()
-        if deleting_active:
-            try:
-                self._registry.get(self._active_id)
-            except Exception:
-                self._active_id = previous_id
-                self._sync_channel_active_id()
-                raise
 
     def current_settings(self) -> dict:
         """The effective runtime settings for the web panel to display: model, prefs, generate kwargs."""
@@ -592,9 +509,7 @@ class Assistant:
 
     def _stop_active_turn(self) -> None:
         """Cancel the viewed conversation's tracked turn (if any); the /stop branch's helper."""
-        info = self._tracker.get(self._active_id)
-        if info is not None and not info.handle.done:
-            info.handle.cancel()
+        self._cancel_turn(self._active_id)
 
     async def _approve(self, name: str, arguments: dict) -> bool:
         """Tool-approval gate run before each tool call (published to the model client per run).
@@ -886,36 +801,7 @@ class Assistant:
         return session.key
 
     def _apply_plan_result(self, result: "PlanResult", conversation_id: str) -> None:
-        """Record a planned turn's reviewer verdicts and verbose trace under the turn's user-message
-        index, so reload replays them. Loads the session by id, mutates its metadata, and saves.
-        No-op when the turn did not commit (e.g. plan rejected)."""
-        if not result.committed or result.user_index < 0:
-            return
-        session = self._store.get(conversation_id)
-        changed = False
-        if result.subagent_events:
-            session.metadata.setdefault("subagent", {})[str(result.user_index)] = result.subagent_events
-            changed = True
-        if result.trace:
-            session.metadata.setdefault("trace", {})[str(result.user_index)] = result.trace
-            changed = True
-        if changed:
-            self._store.save(session)
+        return self._book.record_plan_metadata(result, conversation_id)
 
     def _persist(self, conversation_id: str) -> bool:
-        """Snapshot conversation_id's agent messages onto its session and save. Returns True if a
-        title was just derived (first user message), so a caller can refresh the conversation list."""
-        session = self._store.get(conversation_id)
-        agent = self._registry.get(conversation_id)
-        session.messages = compact_message_images(
-            [dict(m) for m in agent.model_client.messages], self._config.images_path
-        )
-        title_set = False
-        if not session.metadata.get("title"):
-            title = derive_title(session.messages)
-            if title:
-                session.metadata["title"] = title
-                title_set = True
-        session.metadata["updated_at"] = datetime.now().isoformat()
-        self._store.save(session)
-        return title_set
+        return self._book.persist(conversation_id)
