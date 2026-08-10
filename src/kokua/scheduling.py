@@ -171,11 +171,23 @@ def make_scheduler_tools(
     schedule persisted tasks).
     """
 
+    def _lookup(id_or_name: str) -> Optional[dict]:
+        """Resolve a handle to its current record, re-read from disk each time.
+
+        Always re-read: a cancel or edit between arming and firing (or during a run) must win over
+        whatever the caller was holding.
+        """
+        return find(load(registry_path), id_or_name)
+
+    def _handle(record: dict) -> str:
+        """How a task is named back to the model and the user: id plus its optional name."""
+        return f"{record['id']} ({record.get('name') or 'unnamed'})"
+
     def _arm(record: dict) -> bool:
         delay = next_fire(record["schedule"], datetime.now())
         if delay is None:  # past-due one-shot
             return False
-        scheduler.at(delay, functools.partial(_fire_job, record["id"]), name=record["id"])
+        scheduler.at(delay, functools.partial(_fire, record["id"], rearm=True), name=record["id"])
         return True
 
     def _remember_session(task_id: str, target: str, used_key) -> None:
@@ -184,13 +196,18 @@ def make_scheduler_tools(
         # write-back must never resurrect a record the user removed mid-run.
         if target != "task" or not used_key:
             return
-        current = find(load(registry_path), task_id)
+        current = _lookup(task_id)
         if current is not None and current.get("session_id") != used_key:
             current["session_id"] = used_key
             add(registry_path, current)
 
-    async def _fire_job(task_id: str) -> None:
-        record = find(load(registry_path), task_id)
+    async def _fire(task_id: str, *, rearm: bool) -> None:
+        """Run a task's prompt through the proactive path, as a scheduled firing would.
+
+        ``rearm=False`` is a manual "run it now": identical execution, but none of the schedule
+        bookkeeping, so running a task by hand must not disturb when it next fires.
+        """
+        record = _lookup(task_id)
         if record is None:  # cancelled between arming and firing
             return
         target = _record_target(record)
@@ -203,30 +220,15 @@ def make_scheduler_tools(
             )
             _remember_session(task_id, target, used_key)
         finally:
-            # Re-read the registry: a cancel during the run (which removes the record) must win over
-            # the re-arm, and any edit is picked up. Recurring tasks re-arm; one-shots are dropped.
-            current = find(load(registry_path), task_id)
-            if current is not None:
-                if current["schedule"].get("type") == "once":
-                    remove(registry_path, task_id)
-                elif current.get("enabled", True):  # a disable during the run wins over the re-arm
-                    _arm(current)
-
-    async def _run_now_job(task_id: str) -> None:
-        # Fire the task's prompt through the same proactive path a scheduled firing uses, but without
-        # _fire_job's re-arm/remove bookkeeping: a manual run must not disturb the schedule. Re-read
-        # the record so a cancel between enqueue and firing wins.
-        record = find(load(registry_path), task_id)
-        if record is None:
-            return
-        target = _record_target(record)
-        used_key = await fire(
-            record["prompt"],
-            target=target,
-            task_name=record.get("name"),
-            session_id=record.get("session_id") or None,
-        )
-        _remember_session(task_id, target, used_key)
+            if rearm:
+                # Re-read the registry: a cancel during the run (which removes the record) must win
+                # over the re-arm, and any edit is picked up. Recurring tasks re-arm; one-shots drop.
+                current = _lookup(task_id)
+                if current is not None:
+                    if current["schedule"].get("type") == "once":
+                        remove(registry_path, task_id)
+                    elif current.get("enabled", True):  # a disable during the run wins over the re-arm
+                        _arm(current)
 
     def arm_all() -> None:
         for record in load(registry_path):
@@ -284,7 +286,7 @@ def make_scheduler_tools(
         }
         add(registry_path, record)
         _arm(record)
-        return f"Scheduled task {record['id']} ({name or 'unnamed'}); first run in ~{int(delay)}s."
+        return f"Scheduled task {_handle(record)}; first run in ~{int(delay)}s."
 
     @tool
     async def list_scheduled_tasks() -> str:
@@ -313,12 +315,32 @@ def make_scheduler_tools(
     @tool
     async def cancel_scheduled_task(id_or_name: str) -> str:
         """Cancel a scheduled task by its id or name."""
-        record = find(load(registry_path), id_or_name)
+        record = _lookup(id_or_name)
         if record is None:
             return f"No scheduled task matches {id_or_name!r}."
         scheduler.cancel(record["id"])
         remove(registry_path, record["id"])
-        return f"Cancelled scheduled task {record['id']} ({record.get('name') or 'unnamed'})."
+        return f"Cancelled scheduled task {_handle(record)}."
+
+    def _set_enabled(id_or_name: str, enabled: bool) -> str:
+        """Flip a task's enabled flag and (un)arm it. Shared by the two tools below, which stay
+        separate because the model needs two names and two descriptions to choose between."""
+        record = _lookup(id_or_name)
+        if record is None:
+            return f"No scheduled task matches {id_or_name!r}."
+        verb = "enabled" if enabled else "disabled"
+        if record.get("enabled", True) is enabled:
+            return f"Scheduled task {_handle(record)} is already {verb}."
+        record["enabled"] = enabled
+        add(registry_path, record)
+        if not enabled:
+            scheduler.cancel(record["id"])
+            return f"Disabled scheduled task {_handle(record)}."
+        if not _arm(record):  # past-due one-shot: flag flipped, but nothing to schedule
+            return (
+                f"Enabled scheduled task {_handle(record)}, but its scheduled time is in the past, so it will not fire."
+            )
+        return f"Enabled scheduled task {_handle(record)}."
 
     @tool
     async def disable_scheduled_task(id_or_name: str) -> str:
@@ -326,30 +348,12 @@ def make_scheduler_tools(
 
         Re-enable it later with ``enable_scheduled_task``. Use ``cancel_scheduled_task`` to remove it.
         """
-        record = find(load(registry_path), id_or_name)
-        if record is None:
-            return f"No scheduled task matches {id_or_name!r}."
-        if not record.get("enabled", True):
-            return f"Scheduled task {record['id']} ({record.get('name') or 'unnamed'}) is already disabled."
-        scheduler.cancel(record["id"])
-        record["enabled"] = False
-        add(registry_path, record)
-        return f"Disabled scheduled task {record['id']} ({record.get('name') or 'unnamed'})."
+        return _set_enabled(id_or_name, False)
 
     @tool
     async def enable_scheduled_task(id_or_name: str) -> str:
         """Re-enable a disabled scheduled task by id or name so it resumes firing on its schedule."""
-        record = find(load(registry_path), id_or_name)
-        if record is None:
-            return f"No scheduled task matches {id_or_name!r}."
-        if record.get("enabled", True):
-            return f"Scheduled task {record['id']} ({record.get('name') or 'unnamed'}) is already enabled."
-        record["enabled"] = True
-        add(registry_path, record)
-        handle = f"{record['id']} ({record.get('name') or 'unnamed'})"
-        if not _arm(record):  # past-due one-shot: flag flipped, but nothing to schedule
-            return f"Enabled scheduled task {handle}, but its scheduled time is in the past, so it will not fire."
-        return f"Enabled scheduled task {handle}."
+        return _set_enabled(id_or_name, True)
 
     @tool
     async def run_scheduled_task(id_or_name: str) -> str:
@@ -361,14 +365,14 @@ def make_scheduler_tools(
         remembers) the task's dedicated conversation. The task's output arrives as a separate message
         shortly after, not as this tool's return value. Works on a disabled task too.
         """
-        record = find(load(registry_path), id_or_name)
+        record = _lookup(id_or_name)
         if record is None:
             return f"No scheduled task matches {id_or_name!r}."
         # at(0) so the firing runs after the current turn releases the assistant lock: fire() re-acquires
         # that lock, so running it inline here would deadlock. A distinct job name avoids colliding with
         # the record's real armed job (name == id).
-        scheduler.at(0, functools.partial(_run_now_job, record["id"]), name=f"run-now:{record['id']}")
-        handle = f"{record['id']} ({record.get('name') or 'unnamed'})"
+        scheduler.at(0, functools.partial(_fire, record["id"], rearm=False), name=f"run-now:{record['id']}")
+        handle = _handle(record)
         suffix = " in a new conversation" if _record_target(record) in ("new", "task") else ""
         note = " (note: this task is disabled)" if not record.get("enabled", True) else ""
         return f"Running task {handle} now; its output will appear shortly{suffix}.{note}"
