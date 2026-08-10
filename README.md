@@ -293,12 +293,36 @@ and only enable it with a model and inputs you trust.
 ## Development
 
 ```bash
-uv sync --all-extras            # installs the editable ../aimu + all extras (see Install)
-ruff check . && ruff format --check .
-pytest -q
+uv sync --all-extras                                  # installs the editable ../aimu + all extras (see Install)
+uv run ruff check . && uv run ruff format --check .
+uv run pytest -q                                      # mock-only: no model, network, or keys
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+### Repository layout
+
+`src/kokua/` is grouped by subsystem, and `tests/` mirrors it exactly:
+
+```
+core/         the transport-agnostic runtime: assistant, conversations, turns, interaction,
+              settings_runtime, diagnostics, build, agent_registry, turn_gate, messages, errors
+config/       the settings schema, the TOML file, the writers, the runtime-settings table
+planning/     the /plan pipeline and the context-free reviewer agents
+mcp/          remote MCP servers and their OAuth
+scheduling/   recurrence math, the durable task registry, the agent-facing tools
+channels/     ChannelUI plus the concrete channels
+frontends/    cli, web        -- registered as plugins, exactly like a third party's would be
+toolpacks/    example, pdf, image, email
+```
+
+The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
+`kokua.channels.web`, and `kokua.images`.
+
+### Further reading
+
+- [Design principles](docs/explanation/design-principles.md): the six that decide what belongs in the
+  core, each with the code that backs it.
+- [Architecture](docs/explanation/architecture.md): the shape that falls out of them.
+- [CONTRIBUTING.md](CONTRIBUTING.md): setup, checks, and conventions.
 
 ## License
 

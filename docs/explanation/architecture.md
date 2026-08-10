@@ -1,0 +1,153 @@
+# Architecture
+
+Kokua wraps [AIMU](https://github.com/saxman/aimu) primitives into a single-user, always-on personal
+assistant. The design goal is a small core with capability pushed into plugins; see
+[design principles](design-principles.md) for why.
+
+## Repository layout
+
+```
+src/kokua/
+  cli.py               argparse surface, CLI-over-TOML merge, `config init`, main()
+  plugins.py           entry-point discovery for front ends and tool-packs
+  images.py            the on-disk image store and the /images/<name> reference
+  logging_setup.py     rotating file log + a SIGUSR1 thread-stack dump
+  config.example.toml  every key at its default, documented
+  web_static/          the single-page web UI plus vendored marked/DOMPurify/KaTeX
+
+  core/          the transport-agnostic runtime
+    assistant.py         composition root + serve loop; delegates everything below
+    conversations.py     ConversationBook: store + agent cache + active pointer
+    turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
+    interaction.py       HumanGate: tool approval and plan review as lock-guarded single slots
+    settings_runtime.py  SettingsApplier: read, apply live, persist, switch model
+    commands are parsed inline in assistant._serve_channel (/stop, /diag, /plan)
+    diagnostics.py       the /diag report
+    build.py             free functions that assemble a model client, memory, tools, an agent
+    agent_registry.py    per-conversation agent cache with LRU eviction and pinning
+    turn_gate.py         writer-preferring readers-writer gate
+    turn_registry.py     in-flight turn bookkeeping
+    messages.py          transcript helpers: text extraction, titles, image compaction
+    errors.py            describe_error: root-cause extraction for user-facing messages
+
+  config/        settings: the schema, the file, the writers
+    schema.py      AssistantConfig, MCPServerConfig, the default prompts
+    paths.py       the three locations that must resolve before config.toml can be read
+    file.py        TOML discovery, parsing, schema validation
+    store.py       comment-preserving tomlkit writes
+    table.py       RUNTIME_SETTINGS: the one declaration of what is changeable at runtime
+    tools.py       the assistant's own read_config / update_config
+
+  planning/      runner.py (the /plan pipeline), reviewers.py (context-free reviewer agents)
+  mcp/           servers.py (connect, attach, reconnect, runtime add/remove), auth.py (ChatOAuth)
+  scheduling/    recurrence.py (pure schedule math), registry.py (the JSON file), tools.py (agent tools)
+  channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
+  frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
+  toolpacks/     example.py, pdf.py, image.py, email.py -- likewise
+```
+
+`tests/` mirrors this layout.
+
+## The core
+
+`Assistant` ([core/assistant.py](../../src/kokua/core/assistant.py)) is the composition root and the
+serve loop, and little else. It owns:
+
+- **`ConversationBook`** -- the session store, the per-conversation agent cache, and which
+  conversation is being viewed. These move together on a switch, which is why they are one object.
+- **`TurnRunner`** -- reactive turns (the user sent something) and proactive turns (a scheduled task
+  fired). The five concurrency invariants are documented at the top of that module.
+- **`HumanGate`** -- tool approval and plan review, each a lock-guarded single-slot request the serve
+  loop resolves with the user's next message.
+- **`SettingsApplier`** -- reading, applying, and persisting the runtime-mutable settings.
+- **`ChannelUI`** -- the only view of the outside world.
+
+Non-obvious control flow: the serve loop runs each reactive turn as a background `aio.RunHandle`, so
+the channel keeps reading during a turn. That is what lets a `/stop` cancel an in-flight reply, and
+what lets a web approval reply be routed back to the waiting tool call. Switching conversations does
+**not** cancel a running turn: each conversation owns its own agent and client, so a backgrounded turn
+persists to its own conversation, streams muted, and posts a notification when it finishes. Only
+`delete_conversation` cancels, and only the deleted conversation's own turn.
+
+## Plugins
+
+Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`) and `kokua.tools` (a
+`ToolPack` with `build(config)`). The built-in `cli`/`web` front ends and the four tool-packs are
+registered in Kokua's own `pyproject.toml` exactly as a third party would register theirs;
+`plugins.py` discovers them at runtime. Add a transport or new tools as a plugin, not by editing the
+core -- see [toolpacks/example.py](../../src/kokua/toolpacks/example.py).
+
+## Configuration
+
+Precedence is **CLI flag > TOML config file > built-in default**. `config/schema.py` holds
+`AssistantConfig` (a plain dataclass, with leaf paths derived from `data_dir`); `config/file.py` finds
+and parses the TOML into validated overrides; `cli.resolve_config` merges the file under the CLI
+flags. Flag defaults are the `None` sentinel, so an unspecified flag defers to the file.
+
+`config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
+comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Three writers: the web
+settings panel, the `add_mcp_server`/`remove_mcp_server` tools, and the assistant's own
+`update_config`. `update_config` refuses a security blocklist (`confirm_tools`, `email.to`,
+`data_dir`) and applies hot-appliable keys live.
+
+Which settings are hot is not a list maintained by hand in several places: it is
+`config/table.py`'s `RUNTIME_SETTINGS`, and every consumer loops over it.
+
+## State
+
+Everything lives under `~/.kokua` (override with `KOKUA_HOME`). `config.toml` sits at the root;
+`data/` holds only content: `sessions.json`, `skills/`, `memory/`, `documents/`, `downloads/`,
+`images/`, `scheduled_tasks.json`.
+
+## Images
+
+`images.py` owns the on-disk store and the `/images/<name>` reference. Input images (web upload/paste,
+CLI `/attach`) and generated images live under `images_path`; the web server serves them at
+`/images/<name>`. Non-obvious: AIMU inlines a base64 data URL into stored message content, but a
+persisted session must stay small and a localhost URL is not fetchable by the provider, so
+`core/messages.py` rewrites data URLs to references on persist and re-inlines them before each
+`agent.restore`.
+
+## MCP
+
+All servers come from `[[mcp.server]]` at startup (`mcp.reconnect_mcp_servers` is a single pass over
+`config.mcp_servers`). The runtime `add_mcp_server` tool appends reconnectable servers (URL only, no
+secret) there via `config/store.py`, so config.toml stays the one source. `mcp/auth.py` handles OAuth
+by posting the authorization link into the chat and persisting tokens to disk.
+
+## Planning
+
+`/plan` (or the web Plan toggle) runs one turn through `planning/runner.py`: draft a plan, optionally
+have an independent reviewer critique it and a human approve it, execute, optionally review the
+result. There is one pipeline; how much of its work is shown is a `Presentation` value with two
+instances, `SUMMARY` and `VERBOSE` (the latter selected by `show_reasoning` on a channel that can
+render phase headers).
+
+## Web front end
+
+`frontends/web.py` is a Starlette + uvicorn WebSocket server (behind the `web` extra);
+`channels/web.py`'s `WebChannel` subclasses AIMU's base `WebChannel`. The streaming transport
+(`token`/`thinking`/`tool`/`done` frames and `send()`) lives in AIMU's base; Kokua's subclass adds the
+`conversations`, `history`, and `approval` frames its richer page needs. The UI is a single
+self-contained `web_static/index.html` served as package data, plus vendored `marked` + `DOMPurify`
+(GitHub-flavored markdown, sanitized, rendered client-side on turn completion) and vendored KaTeX,
+typeset after sanitization with `trust:false`. The server allowlists these assets: JS/CSS by name, the
+woff2 fonts under `/fonts/`.
+
+## Testing
+
+Tests are mock-only. `tests/helpers.py` provides `MockAsyncModelClient`; `tests/channels.py` and
+`tests/fakes.py` hold the shared channel and MCP/client doubles; `tests/conftest.py` redirects
+`KOKUA_HOME` to a temp dir so tests never touch real state. The mock **fakes tool-call rounds** rather
+than running AIMU's real dispatch, so features that hook dispatch (the tool-approval gate) are tested
+by calling `agent._prepare_run()` then `agent.model_client._handle_tool_calls([...])` directly.
+
+Client-side page JS is covered by an **opt-in** end-to-end suite
+(`tests/frontends/test_web_e2e.py`, marked `e2e`, deselected by default): it drives the real
+`index.html` in headless Chromium against a live server backed by a mock client. Run it with
+`uv run pytest -m e2e` (needs the `web` extra + `uv run playwright install chromium`); it is skipped,
+not errored, when those are absent, and it does not gate the default suite.
+
+## See also
+
+- [Design principles](design-principles.md): why the shape above is the shape.
