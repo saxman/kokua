@@ -20,9 +20,10 @@ from typing import Awaitable, Callable, Optional
 
 from aimu import aio
 
-from . import config_store, runtime_settings
-from .build import build_model_client, resolve_system_message
-from .config import AssistantConfig
+from kokua.config import store as config_store
+from kokua.config import table as runtime_settings
+from kokua.core.build import build_model_client, resolve_system_message
+from kokua.config.schema import AssistantConfig
 
 
 def layer_generate_kwargs(client, base: dict, config: AssistantConfig) -> None:

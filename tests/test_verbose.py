@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from helpers import MockAsyncModelClient
-from kokua.assistant import Assistant
+from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
-from kokua.review import Verdict
+from kokua.planning.reviewers import Verdict
 
 from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType
@@ -78,8 +78,8 @@ def _patch_reviewer(monkeypatch, which, verdicts):
     async def fake_finalize(_client):
         return next(seq)
 
-    monkeypatch.setattr(f"kokua.review.stream_{which}", fake_open)
-    monkeypatch.setattr("kokua.review.finalize_verdict", fake_finalize)
+    monkeypatch.setattr(f"kokua.planning.reviewers.stream_{which}", fake_open)
+    monkeypatch.setattr("kokua.planning.reviewers.finalize_verdict", fake_finalize)
 
 
 REJECT = Verdict(approved=False, issues=["needs work"])

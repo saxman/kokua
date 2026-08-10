@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastmcp.client.auth.oauth import OAuth
 
-from kokua.mcp_auth import ChatOAuth, build_chat_oauth
+from kokua.mcp.auth import ChatOAuth, build_chat_oauth
 
 
 async def test_build_chat_oauth_creates_storage_and_provider(tmp_path: Path):

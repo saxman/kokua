@@ -17,9 +17,9 @@ from typing import Any, Callable, Optional
 from aimu import aio
 from aimu.tools import tool
 
-from . import config_store
-from .config import AssistantConfig, MCPServerConfig
-from .mcp_auth import Notify, build_chat_oauth
+from kokua.config import store as config_store
+from kokua.config.schema import AssistantConfig, MCPServerConfig
+from kokua.mcp.auth import Notify, build_chat_oauth
 
 logger = logging.getLogger(__name__)
 

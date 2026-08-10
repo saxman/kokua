@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from helpers import MockAsyncModelClient
-from kokua.assistant import Assistant, ModelConnectionError
-from kokua.errors import describe_error
+from kokua.core.assistant import Assistant, ModelConnectionError
+from kokua.core.errors import describe_error
 
 from aimu.aio.channels.base import ChannelMessage
 

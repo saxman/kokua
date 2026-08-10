@@ -14,9 +14,9 @@ from typing import Awaitable, Callable, Optional
 from aimu import aio
 from aimu.aio.channels.base import ChannelMessage
 
-from . import review
-from .channels.ui import ChannelUI
-from .config import AssistantConfig
+from kokua.planning import reviewers as review
+from kokua.channels.ui import ChannelUI
+from kokua.config.schema import AssistantConfig
 
 PLAN_PROMPT = """\
 Before doing any work, produce an explicit plan for how you will accomplish the request below. Do NOT \

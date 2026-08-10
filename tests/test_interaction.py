@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from kokua.interaction import PendingRequest
+from kokua.core.interaction import PendingRequest
 
 
 async def _noop() -> None:

@@ -5,9 +5,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ..assistant import Assistant, ModelClientError
+from kokua.core.assistant import Assistant, ModelClientError
 from ..channels.cli import CLIChannel
-from ..config import AssistantConfig
+from kokua.config.schema import AssistantConfig
 from ..plugins import FrontEnd
 
 _STARTUP_NOTICE = (

@@ -31,7 +31,7 @@ expect = sync_api.expect
 from aimu.models import StreamChunk, StreamingContentType  # noqa: E402
 from helpers import MockAsyncModelClient  # noqa: E402
 
-from kokua.config import AssistantConfig  # noqa: E402
+from kokua.config.schema import AssistantConfig  # noqa: E402
 from kokua.frontends.web import build_app  # noqa: E402
 
 pytestmark = pytest.mark.e2e

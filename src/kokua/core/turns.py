@@ -45,10 +45,10 @@ from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.aio import ModelConnectionError
 from aimu.aio.channels.base import ChannelMessage
 
-from .channels.web import proactive_turn, streaming_conversation
-from .errors import describe_error
-from .messages import derive_title
-from .planning import PlanRunner
+from kokua.channels.web import proactive_turn, streaming_conversation
+from kokua.core.errors import describe_error
+from kokua.core.messages import derive_title
+from kokua.planning.runner import PlanRunner
 
 logger = logging.getLogger(__name__)
 

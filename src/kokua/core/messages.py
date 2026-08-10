@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from . import images
+from kokua import images
 
 
 def message_text(content) -> str:

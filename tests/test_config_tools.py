@@ -6,7 +6,7 @@ import tomllib
 
 import pytest
 
-from kokua import config_tools
+from kokua.config import tools as config_tools
 
 
 def _read(path):

@@ -21,8 +21,9 @@ import tomllib
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import paths, runtime_settings
-from .config import MCPServerConfig
+from kokua.config import paths as paths
+from kokua.config import table as runtime_settings
+from kokua.config.schema import MCPServerConfig
 
 EXAMPLE_FILENAME = "config.example.toml"
 
@@ -33,7 +34,10 @@ class ConfigError(Exception):
 
 def example_text() -> str:
     """The shipped example config: every key at its built-in default, all documented."""
-    return importlib.resources.files(__package__).joinpath(EXAMPLE_FILENAME).read_text(encoding="utf-8")
+    # `files("kokua")`, not `files(__package__)`: the example ships at the package root (that is what
+    # [tool.setuptools.package-data] declares and what README links to), while this module lives in
+    # kokua.config. An editable install would not notice the difference; a built wheel would.
+    return importlib.resources.files("kokua").joinpath(EXAMPLE_FILENAME).read_text(encoding="utf-8")
 
 
 def _str_list(section: str, key: str, value: list) -> list[str]:

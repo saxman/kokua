@@ -18,9 +18,9 @@ from helpers import MockAsyncModelClient
 
 from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType
-from kokua.assistant import Assistant
+from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
-from kokua.review import Verdict
+from kokua.planning.reviewers import Verdict
 
 
 class RecordingChannel(Channel):
@@ -106,11 +106,11 @@ def reviewers(monkeypatch):
         async def fake_review_result(*args, **kwargs):
             return next(results)
 
-        monkeypatch.setattr("kokua.review.stream_plan_review", fake_stream_open)
-        monkeypatch.setattr("kokua.review.stream_result_review", fake_stream_open)
-        monkeypatch.setattr("kokua.review.finalize_verdict", fake_finalize)
-        monkeypatch.setattr("kokua.review.review_plan", fake_review_plan)
-        monkeypatch.setattr("kokua.review.review_result", fake_review_result)
+        monkeypatch.setattr("kokua.planning.reviewers.stream_plan_review", fake_stream_open)
+        monkeypatch.setattr("kokua.planning.reviewers.stream_result_review", fake_stream_open)
+        monkeypatch.setattr("kokua.planning.reviewers.finalize_verdict", fake_finalize)
+        monkeypatch.setattr("kokua.planning.reviewers.review_plan", fake_review_plan)
+        monkeypatch.setattr("kokua.planning.reviewers.review_result", fake_review_result)
 
     return install
 

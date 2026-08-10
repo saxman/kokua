@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 
-from kokua import runtime_settings, settings
+from kokua.config import table as runtime_settings
+from kokua.config import file as settings
 from kokua.config import AssistantConfig
 
 

@@ -11,7 +11,7 @@ import random
 
 from aimu.tools import tool
 
-from ..config import AssistantConfig
+from kokua.config.schema import AssistantConfig
 from ..plugins import ToolPack
 
 

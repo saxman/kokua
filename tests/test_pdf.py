@@ -6,7 +6,7 @@ from pathlib import Path
 
 from helpers import MockAsyncModelClient
 from kokua import plugins
-from kokua.assistant import Assistant
+from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
 from kokua.plugins import ToolPack
 from kokua.toolpacks.pdf import _safe_pdf_name, build

@@ -14,7 +14,7 @@ import logging
 import signal
 from logging.handlers import RotatingFileHandler
 
-from .config import AssistantConfig
+from kokua.config.schema import AssistantConfig
 
 # Marks the handler this module owns, so repeated calls replace it rather than stacking duplicates.
 _OWNED = "_kokua_file_handler"

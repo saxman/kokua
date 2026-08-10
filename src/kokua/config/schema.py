@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from . import paths
+from kokua.config import paths as paths
 
 DEFAULT_SYSTEM_MESSAGE = (
     "You are a personal assistant running on the user's own machine. Be concise and helpful. "

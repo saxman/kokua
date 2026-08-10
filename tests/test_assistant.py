@@ -9,9 +9,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import kokua.paths
+from kokua.config import paths
 from helpers import MockAsyncModelClient
-from kokua.assistant import Assistant
+from kokua.core.assistant import Assistant
 from kokua.cli import build_arg_parser, resolve_config
 from kokua.config import AssistantConfig, MCPServerConfig
 
@@ -65,7 +65,7 @@ def test_arg_parser_defaults():
 
 def test_default_config_lives_under_state_dir():
     cfg = resolve_config(build_arg_parser().parse_args([]))
-    assert cfg.data_dir == kokua.paths.data_dir()
+    assert cfg.data_dir == paths.data_dir()
     assert cfg.frontend == "cli"
 
 
@@ -149,7 +149,7 @@ async def test_subagent_tool_is_typed_with_default_roles(tmp_path):
 
 
 def test_build_subagent_agent_types_clamps_to_enabled_groups(tmp_path):
-    from kokua.build import _build_subagent_agent_types
+    from kokua.core.build import _build_subagent_agent_types
 
     # coder wants fs+compute; only web enabled globally -> coder ends up with no tools.
     cfg = _config(tmp_path, tools=["web"])
@@ -164,7 +164,7 @@ def test_build_subagent_agent_types_clamps_to_enabled_groups(tmp_path):
 
 
 def test_subagent_roles_nonempty_when_tools_all(tmp_path):
-    from kokua.build import _build_subagent_agent_types
+    from kokua.core.build import _build_subagent_agent_types
 
     cfg = _config(tmp_path, tools=["all"])
     types = _build_subagent_agent_types(cfg)
@@ -176,7 +176,7 @@ def test_subagent_roles_nonempty_when_tools_all(tmp_path):
 def test_worker_role_resolves_mcp_and_tool_pack_sources(tmp_path):
     from types import SimpleNamespace
 
-    from kokua.build import _build_subagent_agent_types
+    from kokua.core.build import _build_subagent_agent_types
     from kokua.config import MCPServerConfig
 
     def stock_quote():  # fake MCP tool callable -- the resolver only reads __name__
@@ -209,7 +209,7 @@ def test_worker_role_resolves_mcp_and_tool_pack_sources(tmp_path):
 def test_worker_role_resolves_mcp_by_raw_url(tmp_path):
     from types import SimpleNamespace
 
-    from kokua.build import _build_subagent_agent_types
+    from kokua.core.build import _build_subagent_agent_types
 
     def remote_tool():
         pass
@@ -221,7 +221,7 @@ def test_worker_role_resolves_mcp_by_raw_url(tmp_path):
 
 
 def test_worker_role_unknown_sources_drop_silently(tmp_path):
-    from kokua.build import _build_subagent_agent_types
+    from kokua.core.build import _build_subagent_agent_types
 
     cfg = _config(
         tmp_path,
@@ -233,7 +233,7 @@ def test_worker_role_unknown_sources_drop_silently(tmp_path):
 
 
 def test_load_plugin_tools_by_pack_groups_by_name(tmp_path):
-    from kokua.build import _load_plugin_tools_by_pack
+    from kokua.core.build import _load_plugin_tools_by_pack
 
     by_pack = _load_plugin_tools_by_pack(_config(tmp_path))  # load_plugins on by default
     assert "example" in by_pack
@@ -262,7 +262,7 @@ async def test_lean_supervisor_drops_worker_tools(tmp_path):
 async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
     """Boot reorder: config [[mcp.server]] servers connect before the first agent is built, so a lean
     supervisor's worker role that names one receives its tools (and the supervisor itself does not)."""
-    import kokua.build as build_mod
+    import kokua.core.build as build_mod
     from aimu import aio
 
     async def fake_connect(*, url=None, auth=None, **kw):
@@ -322,12 +322,12 @@ def _capturing_subagent_factory(captured: list):
 async def test_runtime_added_mcp_server_reaches_lean_worker(tmp_path, monkeypatch):
     """Rebuild trigger: adding an MCP server at runtime rebuilds spawn_subagent, so a lean worker role
     that names the server gets its tools without a restart -- and the raw tools stay off the supervisor."""
-    import kokua.build as build_mod
+    import kokua.core.build as build_mod
 
     captured: list = []
     monkeypatch.setattr(build_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
     monkeypatch.setattr(
-        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
+        "kokua.mcp.servers.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
     )
 
     cfg = _config(
@@ -348,12 +348,12 @@ async def test_runtime_added_mcp_server_reaches_lean_worker(tmp_path, monkeypatc
 async def test_runtime_added_mcp_server_reaches_all_lean_conversations(tmp_path, monkeypatch):
     """The rebuild fans out: a runtime add updates the spawn_subagent of EVERY live conversation's
     supervisor, not just the one whose add_mcp_server ran."""
-    import kokua.build as build_mod
+    import kokua.core.build as build_mod
 
     captured: list = []
     monkeypatch.setattr(build_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
     monkeypatch.setattr(
-        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
+        "kokua.mcp.servers.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
     )
 
     cfg = _config(
@@ -376,12 +376,12 @@ async def test_runtime_added_mcp_server_reaches_all_lean_conversations(tmp_path,
 
 
 async def test_runtime_removed_mcp_server_drops_from_lean_worker(tmp_path, monkeypatch):
-    import kokua.build as build_mod
+    import kokua.core.build as build_mod
 
     captured: list = []
     monkeypatch.setattr(build_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
     monkeypatch.setattr(
-        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
+        "kokua.mcp.servers.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
     )
 
     cfg = _config(
@@ -406,8 +406,8 @@ def test_lean_supervisor_on_by_default():
 
 
 def test_resolve_system_message_selects_supervisor_guidance(tmp_path):
-    from kokua.build import resolve_system_message
-    from kokua.config import SUBAGENT_GUIDANCE, SUPERVISOR_GUIDANCE
+    from kokua.core.build import resolve_system_message
+    from kokua.config.schema import SUBAGENT_GUIDANCE, SUPERVISOR_GUIDANCE
 
     lean = resolve_system_message(_config(tmp_path, lean_supervisor=True))
     assert SUPERVISOR_GUIDANCE.strip() in lean
@@ -431,7 +431,7 @@ async def test_lean_supervisor_requires_subagents_falls_back_to_flat(tmp_path):
 def test_flattened_by_pack_matches_flat_plugin_tools(tmp_path):
     # The flat supervisor mounts _dedup_by_name(by_pack.values()); it must equal the original flat
     # plugin-tool set so flat-mode wiring is unchanged (packs are now built once, shared).
-    from kokua.build import _dedup_by_name, _load_plugin_tools, _load_plugin_tools_by_pack
+    from kokua.core.build import _dedup_by_name, _load_plugin_tools, _load_plugin_tools_by_pack
 
     cfg = _config(tmp_path)
     flat = {fn.__name__ for fn in _load_plugin_tools(cfg)}
@@ -440,7 +440,7 @@ def test_flattened_by_pack_matches_flat_plugin_tools(tmp_path):
 
 
 async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
-    import kokua.build as build_mod
+    import kokua.core.build as build_mod
 
     captured = {}
 
@@ -748,7 +748,7 @@ async def test_document_tools_round_trip(tmp_path):
 def test_build_memory_tools_carry_dispatch_attrs(tmp_path):
     """build_memory returns AIMU's memory + document tools directly (no wrapping); they carry the
     dispatch attributes AIMU needs. Thread-safety now lives inside the stores (aimu.memory), not here."""
-    from kokua.build import build_memory
+    from kokua.core.build import build_memory
 
     _, _, tools = build_memory(_config(tmp_path, memory=True))
     assert tools
@@ -934,7 +934,7 @@ async def test_handle_persists_to_its_own_conversation_not_active(tmp_path):
 
 
 async def test_select_conversation_reverts_active_id_on_build_failure(tmp_path):
-    from kokua.assistant import ModelClientError
+    from kokua.core.assistant import ModelClientError
 
     calls = {"n": 0}
 
@@ -955,7 +955,7 @@ async def test_select_conversation_reverts_active_id_on_build_failure(tmp_path):
 
 
 async def test_new_conversation_reverts_active_id_on_build_failure(tmp_path):
-    from kokua.assistant import ModelClientError
+    from kokua.core.assistant import ModelClientError
 
     calls = {"n": 0}
 
@@ -982,7 +982,7 @@ async def test_delete_conversation_reverts_active_id_to_deleted_id_on_build_fail
     record and registry entry are already gone by the time the replacement's build fails, so
     reverting only restores the id, not a working conversation. This asserts that documented
     behavior (not a full rollback, which would need deferring the delete itself)."""
-    from kokua.assistant import ModelClientError
+    from kokua.core.assistant import ModelClientError
 
     calls = {"n": 0}
 
@@ -1033,7 +1033,7 @@ async def test_model_switch_applies_to_all_live_agents(tmp_path, monkeypatch):
         built.append(model)
         return c
 
-    monkeypatch.setattr("kokua.settings_runtime.aio.client", fake_client)
+    monkeypatch.setattr("kokua.core.settings_runtime.aio.client", fake_client)
     await assistant._settings.switch_model("anthropic:claude-x")
     # Both cached agents got a rebuilt client for the new model.
     assert built.count("anthropic:claude-x") == len(assistant._registry.live_agents())
@@ -1273,7 +1273,7 @@ async def test_foreground_turn_prompts_for_approval(tmp_path):
 
 
 async def test_switch_away_does_not_cancel_running_turn(tmp_path):
-    from kokua.turn_registry import TurnInfo
+    from kokua.core.turn_registry import TurnInfo
     from aimu.aio import RunHandle
 
     cfg = _config(tmp_path)
@@ -1293,7 +1293,7 @@ async def test_switch_away_does_not_cancel_running_turn(tmp_path):
 
 async def test_select_conversation_does_not_cancel_running_turn(tmp_path):
     """Mirrors the new_conversation case: select_conversation must not cancel the turn either."""
-    from kokua.turn_registry import TurnInfo
+    from kokua.core.turn_registry import TurnInfo
     from aimu.aio import RunHandle
 
     cfg = _config(tmp_path)
@@ -1334,7 +1334,7 @@ async def test_switch_away_resolves_pending_plan_as_rejected(tmp_path):
 async def test_delete_conversation_cancels_its_own_running_turn(tmp_path):
     """delete_conversation cancels the DELETED conversation's own turn -- there is no conversation
     left for it to keep persisting to -- even if that conversation isn't the one being viewed."""
-    from kokua.turn_registry import TurnInfo
+    from kokua.core.turn_registry import TurnInfo
     from aimu.aio import RunHandle
 
     cfg = _config(tmp_path)
@@ -1529,7 +1529,7 @@ async def test_stop_cancels_active_conversation_turn(tmp_path):
     needed to exercise it)."""
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
-    from kokua.turn_registry import TurnInfo
+    from kokua.core.turn_registry import TurnInfo
     from aimu.aio import RunHandle
 
     async def forever():
@@ -1680,7 +1680,7 @@ async def test_add_mcp_server_auto_oauth_on_auth_challenge(tmp_path, monkeypatch
     """A tokenless connect that hits a 401 transparently retries with a ChatOAuth provider."""
     from aimu import aio
 
-    from kokua.mcp_auth import ChatOAuth
+    from kokua.mcp.auth import ChatOAuth
 
     attempts = []
 
@@ -1726,7 +1726,7 @@ async def test_add_mcp_server_no_oauth_on_non_auth_failure(tmp_path, monkeypatch
 
 def _persisted_servers(cfg):
     """The [[mcp.server]] entries settings.load reads back from the assistant's config.toml."""
-    from kokua import settings
+    from kokua.config import file as settings
 
     if not cfg.config_path.exists():
         return []
@@ -1765,7 +1765,7 @@ async def test_oauth_server_persists_and_reconnects_with_provider(tmp_path, monk
     """An OAuth server is recorded (URL only) and reconnects via the provider on the auth challenge."""
     from aimu import aio
 
-    from kokua.mcp_auth import ChatOAuth
+    from kokua.mcp.auth import ChatOAuth
 
     async def fake_connect(*, url=None, auth=None, **kw):
         if auth is None:  # unauthenticated attempt -> challenge
@@ -1888,7 +1888,8 @@ async def test_add_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypatch)
     await assistant.select_conversation(first)
 
     monkeypatch.setattr(
-        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none"))
+        "kokua.mcp.servers.connect_mcp",
+        lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none")),
     )
     add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_tool("https://example/mcp")
@@ -1908,7 +1909,8 @@ async def test_remove_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypat
     await assistant.select_conversation(first)
 
     monkeypatch.setattr(
-        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none"))
+        "kokua.mcp.servers.connect_mcp",
+        lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none")),
     )
     add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_tool("https://example/mcp")
@@ -1932,7 +1934,8 @@ async def test_remove_mcp_server_keeps_tool_still_owned_by_another_server(tmp_pa
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
     monkeypatch.setattr(
-        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("shared_tool")]), "none"))
+        "kokua.mcp.servers.connect_mcp",
+        lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("shared_tool")]), "none")),
     )
     add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_tool(url="https://server-a/mcp")
@@ -1951,7 +1954,8 @@ async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeyp
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
 
     monkeypatch.setattr(
-        "kokua.mcp.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none"))
+        "kokua.mcp.servers.connect_mcp",
+        lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none")),
     )
     add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_tool("https://example/mcp")
@@ -1981,7 +1985,7 @@ async def test_boot_does_not_write_config(tmp_path):
 
 
 async def test_apply_settings_updates_and_persists_to_config(tmp_path):
-    from kokua import settings
+    from kokua.config import file as settings
 
     cfg = _config(tmp_path)
     client = MockAsyncModelClient([])
@@ -2001,7 +2005,8 @@ async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
     This is what makes adding a setting a one-line change: a new entry is covered here automatically,
     and an entry whose section/key is wrong fails immediately instead of silently not persisting.
     """
-    from kokua import runtime_settings, settings
+    from kokua.config import table as runtime_settings
+    from kokua.config import file as settings
 
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
@@ -2024,7 +2029,7 @@ async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
 
 
 async def test_update_config_tool_applies_generation_live_and_persists(tmp_path):
-    from kokua import settings
+    from kokua.config import file as settings
 
     cfg = _config(tmp_path)
     client = MockAsyncModelClient([])
@@ -2037,7 +2042,7 @@ async def test_update_config_tool_applies_generation_live_and_persists(tmp_path)
 
 
 async def test_update_config_tool_restart_key_writes_without_applying(tmp_path):
-    from kokua import settings
+    from kokua.config import file as settings
 
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
@@ -2075,7 +2080,7 @@ async def test_apply_settings_switches_model(tmp_path, monkeypatch):
     )  # populate conversation state
 
     second = MockAsyncModelClient([])
-    monkeypatch.setattr("kokua.assistant.aio.client", lambda *a, **k: second)
+    monkeypatch.setattr("kokua.core.assistant.aio.client", lambda *a, **k: second)
 
     await assistant.apply_settings({"model": "m2", "generate_kwargs": {}})
 
@@ -2096,8 +2101,8 @@ async def test_current_settings_reports_effective(tmp_path):
 
 
 async def test_create_wraps_unbuildable_client_as_model_client_error(tmp_path, monkeypatch):
-    import kokua.assistant as assistant_mod
-    from kokua.assistant import ModelClientError
+    import kokua.core.assistant as assistant_mod
+    from kokua.core.assistant import ModelClientError
 
     def boom(*args, **kwargs):
         raise ValueError("No model specified and no default could be resolved.")
@@ -2333,7 +2338,7 @@ async def test_create_arms_persisted_tasks_and_drops_past_once(tmp_path):
 
 
 def test_cli_frontend_reports_model_client_error(tmp_path, monkeypatch, capsys):
-    from kokua.assistant import ModelClientError
+    from kokua.core.assistant import ModelClientError
     from kokua.frontends import cli as cli_frontend
 
     async def boom(*args, **kwargs):
@@ -2349,7 +2354,7 @@ def test_cli_frontend_reports_model_client_error(tmp_path, monkeypatch, capsys):
 
 def test_make_agent_builder_wires_and_restores(tmp_path):
     from aimu.sessions import Session, TinyDBSessionStore
-    from kokua.build import build_memory, make_agent_builder
+    from kokua.core.build import build_memory, make_agent_builder
 
     config = _config(tmp_path)  # existing helper
     store = TinyDBSessionStore(str(config.sessions_path))

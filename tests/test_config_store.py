@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import tomllib
 
-from kokua import config_store, settings
+from kokua.config import store as config_store
+from kokua.config import file as settings
 
 
 def _read(path):

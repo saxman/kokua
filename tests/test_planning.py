@@ -6,8 +6,8 @@ import asyncio
 from pathlib import Path
 
 from helpers import MockAsyncModelClient
-from kokua.assistant import Assistant
-from kokua.planning import PLAN_PROMPT
+from kokua.core.assistant import Assistant
+from kokua.planning.runner import PLAN_PROMPT
 from kokua.config import AssistantConfig
 
 from aimu.aio.channels.base import Channel, ChannelMessage

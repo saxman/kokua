@@ -5,11 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from helpers import MockAsyncModelClient
-from kokua import review, runtime_settings
-from kokua.assistant import Assistant
-from kokua.planning import _tool_evidence
+from kokua.planning import reviewers as review
+from kokua.config import table as runtime_settings
+from kokua.core.assistant import Assistant
+from kokua.planning.runner import _tool_evidence
 from kokua.config import AssistantConfig
-from kokua.review import Verdict
+from kokua.planning.reviewers import Verdict
 
 from aimu import aio
 from aimu.aio.channels.base import Channel, ChannelMessage
@@ -64,7 +65,7 @@ def _verdicts(seq, monkeypatch, which):
         calls["n"] += 1
         return v
 
-    monkeypatch.setattr(f"kokua.review.{which}", fake)
+    monkeypatch.setattr(f"kokua.planning.reviewers.{which}", fake)
     return calls
 
 
@@ -118,7 +119,7 @@ async def test_review_result_includes_evidence_in_prompt(monkeypatch):
         client = MockAsyncModelClient(["assessment", '{"approved": true, "issues": [], "suggestions": ""}'])
         client.model.supports_structured_output = False
         monkeypatch.setattr(
-            "kokua.review._reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
+            "kokua.planning.reviewers._reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
         )
         await review.review_result("mock", "do X", "PLAN", "ANSWER", evidence)
         first_user = client.messages[0]["content"]
@@ -138,7 +139,7 @@ async def test_reviewer_runs_tool_loop_then_extracts_verdict(monkeypatch):
     def fake_reviewer_agent(model, system, tools=None):
         return aio.Agent(client, tools=[])  # tools irrelevant: the mock fakes the tool round
 
-    monkeypatch.setattr("kokua.review._reviewer_agent", fake_reviewer_agent)
+    monkeypatch.setattr("kokua.planning.reviewers._reviewer_agent", fake_reviewer_agent)
 
     verdict = await review.review_plan("mock", "do X", "PLAN")
 
@@ -156,7 +157,9 @@ async def test_streamed_reviewer_streams_then_extracts_verdict(monkeypatch):
         ["tool", "streamed assessment", '{"approved": false, "issues": ["stale date"], "suggestions": ""}']
     )
     client.model.supports_structured_output = False
-    monkeypatch.setattr("kokua.review._reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[]))
+    monkeypatch.setattr(
+        "kokua.planning.reviewers._reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
+    )
 
     rc, stream = await review.stream_plan_review("mock", "do X", "PLAN")
     parts = [ch.content async for ch in stream if ch.phase == StreamingContentType.GENERATING]
@@ -246,7 +249,7 @@ async def test_result_review_receives_executor_evidence(tmp_path, monkeypatch):
         captured["evidence"] = evidence
         return APPROVE
 
-    monkeypatch.setattr("kokua.review.review_result", fake_review_result)
+    monkeypatch.setattr("kokua.planning.reviewers.review_result", fake_review_result)
     channel = FakeChannel()
     # planning: PLAN; executor does a tool round ("tool" -> "ANS") then a continuation turn ("FINAL").
     client = MockAsyncModelClient(["PLAN", "tool", "ANS", "FINAL"])

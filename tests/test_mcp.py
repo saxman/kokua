@@ -3,9 +3,9 @@
 import pytest
 from aimu import aio
 
-from kokua import mcp
+from kokua.mcp import servers as mcp
 from kokua.config import MCPServerConfig
-from kokua.mcp import _looks_like_auth_required, _looks_like_registration_unsupported
+from kokua.mcp.servers import _looks_like_auth_required, _looks_like_registration_unsupported
 
 
 @pytest.mark.parametrize(

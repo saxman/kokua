@@ -19,7 +19,7 @@ from pathlib import Path
 import tomlkit
 from tomlkit import TOMLDocument
 
-from . import settings
+from kokua.config import file as settings
 
 
 def _load(path: Path) -> TOMLDocument:

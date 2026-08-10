@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock
 
-from kokua.agent_registry import AgentRegistry
+from kokua.core.agent_registry import AgentRegistry
 
 
 def _registry(cap=8):

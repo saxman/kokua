@@ -19,11 +19,17 @@ from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_scri
 from aimu.tools import builtin
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
-from .config import DEFAULT_SUBAGENT_ROLES, MEMORY_GUIDANCE, SUBAGENT_GUIDANCE, SUPERVISOR_GUIDANCE, AssistantConfig
-from .config_tools import make_config_tools
-from .mcp import make_mcp_tools
-from .mcp_auth import Notify
-from .plugins import discover_tool_packs
+from kokua.config.schema import (
+    DEFAULT_SUBAGENT_ROLES,
+    MEMORY_GUIDANCE,
+    SUBAGENT_GUIDANCE,
+    SUPERVISOR_GUIDANCE,
+    AssistantConfig,
+)
+from kokua.config.tools import make_config_tools
+from kokua.mcp.servers import make_mcp_tools
+from kokua.mcp.auth import Notify
+from kokua.plugins import discover_tool_packs
 
 logger = logging.getLogger(__name__)
 
@@ -360,7 +366,7 @@ def make_agent_builder(
     Each call to ``client_factory`` must return a fresh model client: agents share no client, since
     a shared client's ``.messages`` would defeat per-conversation isolation.
     """
-    from .messages import expand_message_images
+    from kokua.core.messages import expand_message_images
 
     def build(conversation_id: str) -> aio.SkillAgent:
         client = client_factory(conversation_id)

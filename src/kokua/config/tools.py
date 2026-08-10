@@ -16,7 +16,9 @@ from typing import Awaitable, Callable
 
 from aimu.tools import tool
 
-from . import config_store, runtime_settings, settings
+from kokua.config import store as config_store
+from kokua.config import table as runtime_settings
+from kokua.config import file as settings
 
 logger = logging.getLogger(__name__)
 

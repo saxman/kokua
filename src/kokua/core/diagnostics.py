@@ -10,8 +10,8 @@ from __future__ import annotations
 import io
 import time
 
-from .turn_gate import TurnGate
-from .turn_registry import TurnTracker
+from kokua.core.turn_gate import TurnGate
+from kokua.core.turn_registry import TurnTracker
 
 
 def format_task_stack(task) -> str:

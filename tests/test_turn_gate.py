@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 
-from kokua.turn_gate import TurnGate
+from kokua.core.turn_gate import TurnGate
 
 
 def _gate():

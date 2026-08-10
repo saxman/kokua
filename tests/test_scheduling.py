@@ -3,6 +3,7 @@ from datetime import datetime
 import pytest
 
 from kokua import scheduling
+from kokua.scheduling import registry as _registry
 from kokua.config import AssistantConfig
 
 
@@ -23,13 +24,13 @@ def _record(task_id="abc", name="t1"):
 
 
 def test_record_target_reads_explicit_target():
-    assert scheduling._record_target({"target": "task"}) == "task"
-    assert scheduling._record_target({"target": "new"}) == "new"
-    assert scheduling._record_target({"target": "active"}) == "active"
+    assert _registry._record_target({"target": "task"}) == "task"
+    assert _registry._record_target({"target": "new"}) == "new"
+    assert _registry._record_target({"target": "active"}) == "active"
 
 
 def test_record_target_defaults_to_active():
-    assert scheduling._record_target({}) == "active"
+    assert _registry._record_target({}) == "active"
 
 
 def test_registry_add_load_roundtrip(tmp_path):

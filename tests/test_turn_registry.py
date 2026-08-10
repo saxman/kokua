@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from kokua.turn_registry import TurnInfo, TurnTracker
+from kokua.core.turn_registry import TurnInfo, TurnTracker
 
 
 def _handle(done=False):

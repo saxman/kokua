@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from kokua.config import DEFAULT_SUBAGENT_ROLES, AssistantConfig
+from kokua.config.schema import DEFAULT_SUBAGENT_ROLES, AssistantConfig
 
 
 def test_default_roles_present_and_shaped():
@@ -14,7 +14,7 @@ def test_default_roles_present_and_shaped():
 
 
 def test_role_groups_are_known_builtin_groups():
-    from kokua.build import _TOOL_GROUPS
+    from kokua.core.build import _TOOL_GROUPS
 
     for role in DEFAULT_SUBAGENT_ROLES.values():
         assert set(role["groups"]) <= set(_TOOL_GROUPS)

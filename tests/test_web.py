@@ -441,7 +441,7 @@ def _drain_until(ws, type_):
 def test_ws_sends_history_on_connect(tmp_path):
     from starlette.testclient import TestClient
 
-    from kokua.assistant import Assistant
+    from kokua.core.assistant import Assistant
 
     cfg = _config(tmp_path)
 
@@ -558,7 +558,7 @@ def test_ws_get_and_apply_settings(tmp_path):
 
 
 def test_ws_reports_model_client_error_and_releases_busy(tmp_path, monkeypatch):
-    import kokua.assistant as assistant_mod
+    import kokua.core.assistant as assistant_mod
     from starlette.testclient import TestClient
 
     def boom(*args, **kwargs):
@@ -591,7 +591,7 @@ def test_ws_new_conversation_reports_model_client_error_without_dropping_connect
 
     from starlette.testclient import TestClient
 
-    from kokua.assistant import ModelClientError
+    from kokua.core.assistant import ModelClientError
 
     calls = {"n": 0}
 
@@ -623,7 +623,7 @@ def test_ws_select_conversation_reports_model_client_error_without_dropping_conn
 
     from starlette.testclient import TestClient
 
-    from kokua.assistant import ModelClientError
+    from kokua.core.assistant import ModelClientError
 
     calls = {"n": 0}
 
@@ -653,7 +653,7 @@ def test_ws_delete_conversation_reports_model_client_error_without_dropping_conn
 
     from starlette.testclient import TestClient
 
-    from kokua.assistant import ModelClientError
+    from kokua.core.assistant import ModelClientError
 
     calls = {"n": 0}
 
@@ -751,12 +751,12 @@ def test_ws_plan_review_reject_skips_execution(tmp_path):
 def test_ws_plan_review_agent_surfaces_critique_to_human(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
 
-    from kokua.review import Verdict
+    from kokua.planning.reviewers import Verdict
 
     async def reject(*a, **k):
         return Verdict(approved=False, issues=["needs a verification step"])
 
-    monkeypatch.setattr("kokua.review.review_plan", reject)
+    monkeypatch.setattr("kokua.planning.reviewers.review_plan", reject)
     app = build_app(
         _config(tmp_path, plan_review=True, plan_review_agent=True, review_rounds=0),
         client=MockAsyncModelClient(["THE PLAN"]),
@@ -772,12 +772,12 @@ def test_ws_plan_review_agent_surfaces_critique_to_human(tmp_path, monkeypatch):
 def test_ws_subagent_frames_live_and_replayed(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
 
-    from kokua.review import Verdict
+    from kokua.planning.reviewers import Verdict
 
     async def reject(*a, **k):
         return Verdict(approved=False, issues=["needs a verification step"])
 
-    monkeypatch.setattr("kokua.review.review_plan", reject)
+    monkeypatch.setattr("kokua.planning.reviewers.review_plan", reject)
     # review_rounds=0 -> one plan review (rejected), then proceed autonomously and execute.
     app = build_app(
         _config(tmp_path, plan_review_agent=True, review_rounds=0),
@@ -811,7 +811,7 @@ def test_ws_slash_plan_triggers_planning(tmp_path):
 
 
 async def test_assistant_active_id_and_turn_running_accessors(tmp_path):
-    from kokua.assistant import Assistant
+    from kokua.core.assistant import Assistant
 
     assistant = await Assistant.create(_config(tmp_path), WebChannel(_FakeWS()), client=MockAsyncModelClient([]))
     assert assistant.active_id == assistant._active_id
@@ -822,7 +822,7 @@ async def test_assistant_active_id_and_turn_running_accessors(tmp_path):
 async def test_select_sets_active_conversation_and_streams_from_now(tmp_path):
     # After selecting a conversation, the channel's active_conversation_id matches, so its turn streams
     # (Assistant._sync_channel_active_id, exercised here directly rather than through the pump).
-    from kokua.assistant import Assistant
+    from kokua.core.assistant import Assistant
 
     channel = WebChannel(_FakeWS())
     assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient([]))
@@ -835,7 +835,7 @@ async def test_select_sets_active_conversation_and_streams_from_now(tmp_path):
 
 
 async def test_sync_view_sets_active_conversation_id_and_refreshes_state_without_running_turn(tmp_path):
-    from kokua.assistant import Assistant
+    from kokua.core.assistant import Assistant
     from kokua.frontends.web import _sync_view
 
     ws = _FakeWS()
@@ -854,9 +854,9 @@ async def test_switch_into_running_conversation_sends_working_indicator(tmp_path
     # Selecting (or connecting into) a conversation that has an in-flight turn emits a "working" frame,
     # so the page shows the turn is still going rather than looking idle.
     from aimu.aio import RunHandle
-    from kokua.assistant import Assistant
+    from kokua.core.assistant import Assistant
     from kokua.frontends.web import _sync_view
-    from kokua.turn_registry import TurnInfo
+    from kokua.core.turn_registry import TurnInfo
 
     ws = _FakeWS()
     channel = WebChannel(ws)

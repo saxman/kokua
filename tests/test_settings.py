@@ -6,8 +6,8 @@ import logging
 
 import pytest
 
-import kokua.paths as paths
-from kokua import settings
+from kokua.config import paths
+from kokua.config import file as settings
 from kokua.cli import _init_config, build_arg_parser, resolve_config
 
 
@@ -284,7 +284,7 @@ def test_mcp_unknown_top_level_key_raises(tmp_path):
 def test_agent_cache_cap_parsed(tmp_path, monkeypatch):
     monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
     (tmp_path / "config.toml").write_text("[assistant]\nagent_cache_cap = 3\n")
-    from kokua import settings
+    from kokua.config import file as settings
 
     overrides = settings.load()
     assert overrides["agent_cache_cap"] == 3
