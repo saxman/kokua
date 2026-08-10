@@ -32,7 +32,17 @@ Every rule here was learned from a bug. Read them before changing anything in th
    run still binds to the conversation they are actually looking at, and there is no active id for a
    concurrent switch to race or for a ``finally`` to clobber back.
 
-5. **An unattended turn never lets an exception escape.** A scheduled firing has no user awaiting it
+5. **Record a turn's sub-agent events before its own notification send, in every branch.**
+   ``_record_subagents`` is synchronous, but that only protects it from a cancellation that arrives
+   *after* it runs. A cancelled or failed turn still does one more ``await`` of its own (the
+   "(stopped)" notice, or the failure message) before falling through to the shared ``_persist``
+   call; a second cancellation delivered during that send raises ``CancelledError`` again, which
+   propagates past a record call placed after the send and drops the turn's events. Every branch --
+   cancelled, connection error, generic error, success -- records as its first action, not as a step
+   shared only by the paths that return normally.
+   (Regression: ``test_a_second_cancellation_during_the_stopped_send_still_records``.)
+
+6. **An unattended turn never lets an exception escape.** A scheduled firing has no user awaiting it
    and runs inside a scheduler job with no handler of its own, so a propagating error would take the
    scheduler down with it. Report it on the channel and swallow it.
 """
@@ -111,30 +121,35 @@ class TurnRunner:
                         stream = await agent.run(msg.text, stream=True, images=msg.images)
                         await self._ui.send(stream, reply_to=msg)
                 except asyncio.CancelledError:
-                    # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
-                    # agent snapshots it in a finally), and return so the daemon keeps serving.
+                    # `/stop` (or shutdown) cancelled this turn. Record first: the "(stopped)" send
+                    # below is one more await, and a second cancellation racing it would otherwise
+                    # propagate straight past a record placed after -- see invariant 5. Keep the
+                    # partial state (the agent snapshots it in a finally), and return so the daemon
+                    # keeps serving.
+                    self._record_subagents(conversation_id, user_index)
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                     try:
                         await self._ui.send("(stopped)", reply_to=msg)
                     except Exception:
                         pass
-                    self._record_subagents(conversation_id, user_index)
                     await self._persist(conversation_id)
                     return
                 except ModelConnectionError as exc:
+                    self._record_subagents(conversation_id, user_index)  # before the send: invariant 5
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
                     await self._ui.send(
                         f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
                     )
                 except Exception as exc:
+                    self._record_subagents(conversation_id, user_index)  # before the send: invariant 5
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"failed: {describe_error(exc)}"
                     await self._ui.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
                 else:
+                    self._record_subagents(conversation_id, user_index)
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
-                self._record_subagents(conversation_id, user_index)
                 await self._persist(conversation_id)
         finally:
             subagent_events.reset(collector_token)
@@ -192,10 +207,10 @@ class TurnRunner:
         spec = self._resolve_target(target, prompt, task_name, session_id)
         try:
             await self._run_unattended(prompt, spec)
-        except ModelConnectionError as exc:  # invariant 5
+        except ModelConnectionError as exc:  # invariant 6
             logger.exception("proactive turn connection error")
             await self._report(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
-        except Exception as exc:  # invariant 5
+        except Exception as exc:  # invariant 6
             logger.exception("proactive turn error")
             await self._report(f"A scheduled task failed: {describe_error(exc)}")
         else:
@@ -261,7 +276,7 @@ class TurnRunner:
         """Send an unattended run's own status line, tolerating a channel that cannot take it.
 
         Nobody is awaiting this turn, so a failed notification must not become the error that takes
-        down the scheduler job (invariant 5).
+        down the scheduler job (invariant 6).
         """
         try:
             await self._ui.send(text)

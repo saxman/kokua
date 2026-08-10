@@ -609,6 +609,51 @@ async def test_a_stopped_turn_records_the_events_it_produced(tmp_path):
     assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1"]
 
 
+class _CancelsOnStoppedSendChannel(Channel):
+    """Raises ``CancelledError`` from the "(stopped)" notice, standing in for a second cancellation
+    delivered while that send is in flight -- exactly the race invariant 5 is about."""
+
+    name = "fake"
+
+    def __init__(self):
+        self.sent: list[str] = []
+
+    async def receive(self):
+        return
+        yield  # pragma: no cover - never reached; this channel is driven directly, not via serve
+
+    async def send(self, content, *, reply_to=None):
+        if content == "(stopped)":
+            raise asyncio.CancelledError()
+        if isinstance(content, str):
+            self.sent.append(content)
+            return
+        async for _ in content:  # pragma: no cover - not exercised by this test
+            pass
+
+
+async def test_a_second_cancellation_during_the_stopped_send_still_records(tmp_path):
+    """Regression for invariant 5: a cancellation racing the '(stopped)' notice must not skip the
+    record call. Before the fix, `_record_subagents` ran after that send, so this second
+    CancelledError (an ordinary BaseException, uncaught by the send's `except Exception`) propagated
+    straight past it and the spawn's card was lost."""
+    client = _SpawnsThenHangsClient()
+    channel = _CancelsOnStoppedSendChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    client.reporter = assistant._subagent_reporter
+    active_id = assistant._active_id
+
+    task = asyncio.create_task(
+        assistant._handle(ChannelMessage(text="long task", channel="fake"), conversation_id=active_id)
+    )
+    await client.started.wait()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)  # the second CancelledError propagates out
+
+    metadata = assistant._store.get(active_id).metadata
+    assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1"]
+
+
 async def test_a_proactive_turn_records_its_subagent_events(tmp_path):
     """A scheduled task's delegation is recorded against the message index the run started at."""
     client = _SpawningClient()
