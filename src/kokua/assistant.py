@@ -16,12 +16,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from dataclasses import replace
-from datetime import datetime
 from typing import Callable, Optional
 
-from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE, aio
+from aimu import aio
 from aimu.aio import Channel, ModelConnectionError, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
 from aimu.memory import DocumentStore, SemanticMemoryStore
@@ -37,17 +35,15 @@ from .build import (
     build_model_client,
     make_agent_builder,
 )
-from .planning import PlanResult, PlanRunner
 from .config import AssistantConfig
 from .conversations import ConversationBook
 from .diagnostics import diag_report
-from .errors import describe_error
 from .interaction import HumanGate
 from .mcp import ServerConnection, reconnect_mcp_servers
-from .messages import derive_title
 from .scheduling import make_scheduler_tools
 from .settings_runtime import SettingsApplier
 from .turn_gate import TurnGate
+from .turns import TurnRunner
 from .turn_registry import TurnInfo, TurnTracker
 
 logger = logging.getLogger(__name__)
@@ -117,6 +113,16 @@ class Assistant:
             agent_for=lambda conversation_id: self._registry.get(conversation_id),
             active_agent=lambda: self._book.agent,
             cancel_active_turn=self._cancel_current_turn,
+        )
+        # Turn execution, reactive and proactive. Reaches the store and the agent cache through the
+        # conversation book, which already owns both.
+        self._turns = TurnRunner(
+            self._book,
+            self._ui,
+            self._gate,
+            config,
+            review_plan=self._human.review_plan,
+            push_conversations=self._maybe_push_conversations,
         )
 
     @classmethod
@@ -370,73 +376,7 @@ class Assistant:
     async def _handle(
         self, msg: ChannelMessage, *, conversation_id: str, plan: bool = False, tid: Optional[int] = None
     ) -> None:
-        # Planning is opt-in per turn (the web Plan toggle or a `/plan <task>` message sets plan=True).
-        do_plan = plan
-        started = time.monotonic()
-        agent = self._registry.get(conversation_id)
-        # Pinned for the whole turn so LRU eviction can't drop this conversation's agent out from
-        # under an in-flight turn, even if other conversations' turns push it past the cache cap.
-        self._registry.pin(conversation_id)
-        # Carries this turn's conversation id for the duration of this task (and its awaited children,
-        # e.g. agent.run / a gated tool's _approve call) for two readers: the web channel mutes a
-        # background turn's streaming frames (only the conversation being viewed streams; see
-        # channels/web.py), and _approve auto-denies a gated tool whose turn isn't the viewed
-        # conversation. Set unconditionally -- even the CLI channel (single-view, never switches) needs
-        # it so its turn's conversation_id reads as foreground in _approve.
-        token = streaming_conversation.set(conversation_id)
-        succeeded = False
-        failure_reason = ""  # set on error, so a backgrounded turn's notification can carry the reason
-        try:
-            async with self._gate.turn(conversation_id):
-                logger.info("turn %s gate entered (%s)", tid, conversation_id)
-                try:
-                    if do_plan:
-                        runner = PlanRunner(agent, self._ui, self._config, self._human.review_plan)
-                        self._apply_plan_result(await runner.run(msg), conversation_id)
-                    else:
-                        stream = await agent.run(msg.text, stream=True, images=msg.images)
-                        await self._ui.send(stream, reply_to=msg)
-                except asyncio.CancelledError:
-                    # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
-                    # agent snapshots it in a finally), and return so the daemon keeps serving.
-                    logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
-                    try:
-                        await self._ui.send("(stopped)", reply_to=msg)
-                    except Exception:
-                        pass
-                    if self._persist(conversation_id):
-                        await self._maybe_push_conversations()
-                    return
-                except ModelConnectionError as exc:
-                    logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
-                    failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
-                    await self._ui.send(
-                        f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
-                    )
-                except Exception as exc:
-                    logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
-                    failure_reason = f"failed: {describe_error(exc)}"
-                    await self._ui.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
-                else:
-                    logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
-                    succeeded = True
-                if self._persist(conversation_id):
-                    await self._maybe_push_conversations()
-        finally:
-            streaming_conversation.reset(token)
-            self._registry.unpin(conversation_id)
-        # The user switched away before this turn finished (it ran to completion in the background):
-        # tell them rather than silently updating a conversation they're not looking at. The reply
-        # (or the error message) went out muted, so this notification is the only signal they get.
-        # A cancelled turn returns before this point, so it never notifies. On failure the reason is
-        # carried in the notification because the muted error message is not persisted and so is not
-        # visible on switch-in.
-        if conversation_id != self._active_id:
-            title = self._store.get(conversation_id).metadata.get("title") or "a conversation"
-            if succeeded:
-                await self._ui.notify(f"Reply ready in '{title}'.")
-            else:
-                await self._ui.notify(f"A reply in '{title}' {failure_reason}.")
+        await self._turns.reactive(msg, conversation_id=conversation_id, plan=plan, tid=tid)
 
     def _diag_report(self) -> str:
         return diag_report(
@@ -454,133 +394,4 @@ class Assistant:
         task_name: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> Optional[str]:
-        """Run an unprompted turn with ``prompt`` and surface the reply.
-
-        The substrate for scheduled tasks: a caller (the scheduler) fires this with the task's
-        instruction. ``target`` selects the conversation the turn runs in:
-
-        - ``"active"``: the currently-viewed conversation (``self._active_id``).
-        - ``"new"``: a fresh conversation minted for this firing alone.
-        - ``"task"``: the task's own dedicated conversation, reused across firings -- ``session_id`` is
-          the key it created previously (``None`` on the first firing).
-
-        Returns the key of the conversation the turn ran in for ``"new"``/``"task"`` (so the caller can
-        persist a ``"task"`` conversation's key), or ``None`` for ``"active"``.
-
-        Sets ``streaming_conversation`` to this run's conversation for the duration, so ``_approve``
-        gates a gated tool call the same way it would for any other turn: prompted if that conversation
-        is the one ``self._active_id`` currently points at, auto-denied otherwise (no user watching to
-        confirm). The ``"new"``/``"task"`` branch never touches ``self._active_id`` at all (see
-        ``_run_in_new_session``), so a scheduled run never hijacks whatever the user is currently
-        viewing -- its own gated tool calls always auto-deny, since that conversation is never the one
-        ``self._active_id`` points at.
-        """
-        multi_conversation = self._ui.supports_conversations
-        # Each branch takes at most one gate hold, never both: returning right after
-        # _run_in_new_session leaves it as the only holder of its own gate.turn(new_id); nesting an
-        # outer hold on self._active_id around that call was a latent deadlock (regression-tested by
-        # test_proactive_new_session_holds_at_most_one_gate_turn) -- with the gate's writer-preference,
-        # a concurrent exclusive() could see this task's outer reader stuck waiting to re-enter as an
-        # inner reader on the new conversation, while the writer waits for that outer reader to drop
-        # to zero, and neither side can proceed.
-        if target in ("new", "task") and multi_conversation:
-            # "new" always mints a fresh conversation; "task" reuses its remembered one when present.
-            reuse = session_id if target == "task" else None
-            return await self._run_in_new_session(prompt, task_name, session_id=reuse)
-        # Captured once so the rest of this run is internally consistent even if the user switches
-        # conversations while it's in flight (a switch does not cancel a running turn).
-        conversation_id = self._active_id
-        token = streaming_conversation.set(conversation_id)
-        proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run (unattended)
-        # Pinned for the whole run so LRU eviction can't drop this conversation's agent mid-run (which
-        # would leave _persist rebuilding a stale one and losing this turn's output), mirroring _handle.
-        self._registry.pin(conversation_id)
-        try:
-            async with self._gate.turn(conversation_id):
-                agent = self._registry.get(conversation_id)
-                # Tag every message this unprompted run appends so replayed history can distinguish
-                # it from a user-driven turn. The agent doesn't reset on run (system prompt lives on
-                # the client), so the pre-run length is a stable start index for the exchange.
-                start = len(agent.model_client.messages)
-                reply = await agent.run(prompt)
-                for message in agent.model_client.messages[start:]:
-                    message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
-                await self._ui.send(reply)
-                if self._persist(conversation_id):
-                    await self._maybe_push_conversations()
-        except ModelConnectionError as exc:
-            # Surface the reason and swallow it: a scheduled turn has no user awaiting, and letting it
-            # propagate would crash the scheduler task (`_fire_job` has no except).
-            logger.exception("proactive turn connection error")
-            await self._ui.send(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
-        except Exception as exc:
-            logger.exception("proactive turn error")
-            await self._ui.send(f"A scheduled task failed: {describe_error(exc)}")
-        finally:
-            self._registry.unpin(conversation_id)
-            proactive_turn.reset(proactive_token)
-            streaming_conversation.reset(token)
-
-    async def _run_in_new_session(
-        self, prompt: str, task_name: Optional[str], *, session_id: Optional[str] = None
-    ) -> str:
-        """Run a proactive turn in a task-owned conversation without disturbing the viewed one.
-
-        With ``session_id`` given and still present in the store, the turn reuses that conversation
-        (the registry replays its history, so the task sees its prior firings); otherwise a fresh
-        conversation is minted. A ``session_id`` that no longer exists is treated as absent and
-        recreated -- so a task keeps working after its conversation is deleted. Existence is checked
-        against ``list_keys()`` rather than ``store.get()``, because the store returns an empty
-        ``Session`` for a missing key, which would otherwise resurrect a deleted conversation as a
-        blank one. Returns the key of the conversation the turn actually ran in.
-
-        The caller (``_proactive``) takes no gate hold of its own for this branch; this acquires the
-        only gate hold for the call, on the conversation's id, around the actual run. Unlike
-        select/new_conversation, this never touches ``self._active_id`` -- it is not "switching" to
-        the session, just running a turn on it (the registry looks up any conversation's agent by
-        id, no active-pointer swap needed). Leaving ``self._active_id`` alone is what keeps this turn
-        consistent with every other concurrency invariant: ``streaming_conversation`` (set to
-        ``session.key`` below) then never equals the viewed conversation, so ``_approve`` auto-denies a
-        gated tool call here (no user is watching this session) instead of prompting; the serve loop's
-        `conversation_id = self._active_id` at submit time still binds a message the user sends during
-        this run to the conversation they're actually viewing, not to this one; and there is no active
-        id for a concurrent user switch to race or for a ``finally`` to clobber back.
-        """
-        now = datetime.now().isoformat()
-        if session_id and session_id in self._store.list_keys():
-            session = self._store.get(session_id)
-            session.metadata["updated_at"] = now
-        else:
-            title = task_name or derive_title([{"role": "user", "content": prompt}]) or "Scheduled task"
-            session = Session(key=uuid.uuid4().hex, metadata={"created_at": now, "updated_at": now, "title": title})
-        title = session.metadata.get("title") or "Scheduled task"
-        self._store.save(session)
-        token = streaming_conversation.set(session.key)
-        proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run (unattended)
-        # Pinned for the whole run so LRU eviction can't drop this session's agent mid-run and leave
-        # _persist rebuilding a stale one, mirroring _handle and the non-new-session branch.
-        self._registry.pin(session.key)
-        try:
-            async with self._gate.turn(session.key):
-                agent = self._registry.get(session.key)
-                start = len(agent.model_client.messages)
-                await agent.run(prompt)
-                for message in agent.model_client.messages[start:]:
-                    message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
-                self._persist(session.key)
-        finally:
-            self._registry.unpin(session.key)
-            proactive_turn.reset(proactive_token)
-            streaming_conversation.reset(token)
-        try:
-            await self._maybe_push_conversations()
-            await self._ui.send(f"Scheduled task '{title}' finished; open the '{title}' conversation to review.")
-        except Exception:
-            logger.warning("Scheduled task '%s' ran; its notification could not be delivered", title, exc_info=True)
-        return session.key
-
-    def _apply_plan_result(self, result: "PlanResult", conversation_id: str) -> None:
-        return self._book.record_plan_metadata(result, conversation_id)
-
-    def _persist(self, conversation_id: str) -> bool:
-        return self._book.persist(conversation_id)
+        return await self._turns.proactive(prompt, target=target, task_name=task_name, session_id=session_id)

@@ -2261,6 +2261,50 @@ async def test_proactive_task_target_recreates_when_conversation_deleted(tmp_pat
     assert second_key in assistant._store.list_keys()
 
 
+class _FailingClient(MockAsyncModelClient):
+    """Raises on run, standing in for an unreachable or misconfigured model server."""
+
+    async def chat(self, *args, **kwargs):
+        raise RuntimeError("model exploded")
+
+    async def chat_streamed(self, *args, **kwargs):
+        raise RuntimeError("model exploded")
+
+
+async def test_proactive_task_target_surfaces_errors_and_still_returns_its_key(tmp_path):
+    """A failing scheduled firing must not escape into the scheduler job, which has no handler.
+
+    Before the proactive paths were unified, only target="active" had error handling: the
+    "new"/"task" branch returned early, past _proactive's handlers, so a model error propagated into
+    scheduling._fire_job and would take the scheduler down. It also skipped _remember_session, so a
+    task whose first firing failed forgot the conversation it had just minted and created another one
+    on every later firing.
+    """
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: _FailingClient([]))
+    active_key = assistant._active_id
+
+    key = await assistant._proactive("do it", target="task", task_name="digest")
+
+    assert key is not None and key != active_key  # the key is returned despite the failure...
+    assert key in assistant._store.list_keys()  # ...and names a real conversation to reuse
+    assert any("failed" in str(text) for text in channel.sent)  # the user is told
+    assert assistant._active_id == active_key  # the viewed conversation is untouched
+
+    # The next firing reuses that conversation instead of minting a second one.
+    before = set(assistant._store.list_keys())
+    again = await assistant._proactive("do it", target="task", task_name="digest", session_id=key)
+    assert again == key
+    assert set(assistant._store.list_keys()) == before
+
+
+async def test_proactive_active_target_surfaces_errors(tmp_path):
+    channel = FakeChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: _FailingClient([]))
+    assert await assistant._proactive("do it") is None  # swallowed, not raised
+    assert any("failed" in str(text) for text in channel.sent)
+
+
 async def test_create_registers_scheduling_tools(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     names = {getattr(fn, "__name__", None) for fn in assistant._agent.tools}

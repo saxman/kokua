@@ -98,6 +98,25 @@ class ConversationBook:
         self._store.save(session)
         return session
 
+    # --- agents -------------------------------------------------------------------------------
+
+    def agent_for(self, conversation_id: str) -> aio.SkillAgent:
+        """Any conversation's agent, built on demand. No active-pointer swap: the registry looks up
+        by id, which is what lets a proactive run work on a conversation nobody is viewing."""
+        return self._registry.get(conversation_id)
+
+    def pin(self, conversation_id: str) -> None:
+        """Hold a conversation's agent in the cache for the duration of a turn.
+
+        The registry evicts LRU. Without this, another conversation's turn can evict this one's agent
+        mid-run, and persisting afterwards would rebuild a stale agent from the store and silently
+        lose the turn's output.
+        """
+        self._registry.pin(conversation_id)
+
+    def unpin(self, conversation_id: str) -> None:
+        self._registry.unpin(conversation_id)
+
     def _activate(self, conversation_id: str, *, revert_to: str) -> None:
         """Point the active pointer at ``conversation_id`` and build its agent eagerly.
 
