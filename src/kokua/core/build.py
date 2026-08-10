@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from aimu import aio
-from aimu.aio.tools.builtin import make_async_subagent_tool
+from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
 from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_script_tool
 from aimu.tools import builtin
@@ -238,6 +238,7 @@ def build_agent(
     plugin_tools: Optional[list] = None,
     tool_approval: Optional[Callable] = None,
     plugin_tools_by_pack: Optional[dict[str, list]] = None,
+    subagent_observer: Optional[SubagentObserver] = None,
 ) -> aio.SkillAgent:
     """Build the SkillAgent and its full tool set (skills, MCP management, memory, plugins, built-ins).
 
@@ -268,7 +269,7 @@ def build_agent(
     # snapshot) is applied to siblings too; that is fine because a tool-pack's build() is a pure
     # function of config (no per-call state), so all snapshots hold equivalent tool instances.
     def refresh_workers(a: aio.SkillAgent) -> None:
-        rebuild_subagent_tool(a, config, tool_approval, connections, by_pack)
+        rebuild_subagent_tool(a, config, tool_approval, connections, by_pack, subagent_observer)
 
     # Cross-cutting / parent-only tools the supervisor keeps in both modes (they mutate shared,
     # per-conversation state that workers must not touch: skills, MCP connections, memory, config).
@@ -318,6 +319,7 @@ def wire_agent(
     scheduler_tools: list,
     for_each_agent: Callable,
     reapply_config: Callable,
+    subagent_observer: Optional[SubagentObserver] = None,
 ) -> aio.SkillAgent:
     """Build a fully-wired SkillAgent: base tools + approval gate + subagent tool + scheduler tools.
 
@@ -339,9 +341,17 @@ def wire_agent(
         plugin_tools=_dedup_by_name(plugin_tools_by_pack.values()),
         tool_approval=tool_approval,
         plugin_tools_by_pack=plugin_tools_by_pack,
+        subagent_observer=subagent_observer,
     )
     agent.tool_approval = tool_approval
-    add_subagent_tool(agent, config, tool_approval, connections=connections, plugin_tools_by_pack=plugin_tools_by_pack)
+    add_subagent_tool(
+        agent,
+        config,
+        tool_approval,
+        connections=connections,
+        plugin_tools_by_pack=plugin_tools_by_pack,
+        observer=subagent_observer,
+    )
     agent.tools.extend(scheduler_tools)
     return agent
 
@@ -360,6 +370,7 @@ def make_agent_builder(
     images_path: Path,
     for_each_agent: Callable,
     reapply_config: Callable,
+    subagent_observer: Optional[SubagentObserver] = None,
 ) -> Callable[[str], aio.SkillAgent]:
     """Return a builder that constructs and restores a per-conversation agent on demand.
 
@@ -381,6 +392,7 @@ def make_agent_builder(
             scheduler_tools=scheduler_tools,
             for_each_agent=for_each_agent,
             reapply_config=reapply_config,
+            subagent_observer=subagent_observer,
         )
         session = store.get(conversation_id)
         if session is not None and session.messages:
@@ -397,6 +409,7 @@ def add_subagent_tool(
     *,
     connections: Optional[list] = None,
     plugin_tools_by_pack: Optional[dict[str, list]] = None,
+    observer: Optional[SubagentObserver] = None,
 ) -> None:
     """Append the typed ``spawn_subagent(agent_type, task)`` tool when sub-agents are enabled (no-op otherwise).
 
@@ -406,6 +419,7 @@ def add_subagent_tool(
     skills, MCP management, config, scheduling) are deliberately withheld. Concurrent spawns overlap
     under the parent's ``concurrent_tool_calls``; the approval gate is forwarded so a sub-agent's
     gated-tool calls (e.g. execute_python) prompt via the parent rather than running unattended.
+    ``observer`` is how a front end shows the spawn's work while it runs.
     """
     if not config.subagents:
         return
@@ -414,6 +428,7 @@ def add_subagent_tool(
             agent.model_client.model,
             agent_types=_build_subagent_agent_types(config, connections, plugin_tools_by_pack),
             tool_approval=tool_approval,
+            observer=observer,
         )
     )
 
@@ -424,6 +439,7 @@ def rebuild_subagent_tool(
     tool_approval: Optional[Callable],
     connections: list,
     plugin_tools_by_pack: Optional[dict[str, list]],
+    observer: Optional[SubagentObserver] = None,
 ) -> None:
     """Replace an agent's ``spawn_subagent`` tool with a fresh one built from the CURRENT connections.
 
@@ -431,4 +447,11 @@ def rebuild_subagent_tool(
     add/remove this re-resolves each role (picking up or dropping the changed server's tools). No-op
     when sub-agents are disabled (there is no delegate to rebuild)."""
     agent.tools[:] = [t for t in agent.tools if getattr(t, "__name__", None) != "spawn_subagent"]
-    add_subagent_tool(agent, config, tool_approval, connections=connections, plugin_tools_by_pack=plugin_tools_by_pack)
+    add_subagent_tool(
+        agent,
+        config,
+        tool_approval,
+        connections=connections,
+        plugin_tools_by_pack=plugin_tools_by_pack,
+        observer=observer,
+    )
