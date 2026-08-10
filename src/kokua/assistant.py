@@ -30,6 +30,7 @@ from aimu.sessions import Session, TinyDBSessionStore
 
 from . import config_store, runtime_settings
 from .agent_registry import AgentRegistry
+from .channels.ui import ChannelUI
 from .channels.web import proactive_turn, streaming_conversation
 from .build import (
     ModelClientError,
@@ -90,7 +91,7 @@ class Assistant:
         store: TinyDBSessionStore,
         config: AssistantConfig,
     ):
-        self._channel = channel
+        self._ui = ChannelUI(channel)
         self._scheduler = scheduler
         self._store = store
         self._config = config
@@ -140,12 +141,6 @@ class Assistant:
     async def create(
         cls, config: AssistantConfig, channel: Channel, *, client=None, client_factory=None
     ) -> "Assistant":
-        # config.toml is the single source of settings: the panel and update_config write it, and the
-        # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
-        for flag in ("show_thinking", "show_tools"):
-            if hasattr(channel, flag):
-                setattr(channel, flag, getattr(config, flag))
-
         memory_store, document_store, memory_tools = build_memory(config)
 
         connections: list[ServerConnection] = []
@@ -160,6 +155,11 @@ class Assistant:
         # Construct the assistant first so the registry's builder can bind its approval gate: agents are
         # built lazily (on first get), by which point assistant._approve exists.
         assistant = cls(channel, scheduler, store, config)
+        # config.toml is the single source of settings: the panel and update_config write it, and the
+        # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
+        for setting in runtime_settings.RUNTIME_SETTINGS:
+            if setting.mirror_on_channel:
+                assistant._ui.set_display_flag(setting.field, getattr(config, setting.field))
         assistant._mcp_servers = connections  # same list the MCP tools append to / remove from
         assistant._memory_store = memory_store
         assistant._document_store = document_store
@@ -311,8 +311,7 @@ class Assistant:
         ``WebChannel``'s foreground-muting and this class's background-completion notification (in
         ``_handle``) agree on which conversation is being viewed. A no-op for a channel that doesn't
         track a viewed conversation (the CLI channel, or a test double)."""
-        if hasattr(self._channel, "active_conversation_id"):
-            self._channel.active_conversation_id = self._active_id
+        self._ui.set_active_conversation(self._active_id)
 
     def _abandon_pending_interactions(self) -> None:
         """Resolve any pending tool approval or plan review as denied/rejected.
@@ -417,7 +416,7 @@ class Assistant:
         if setting.kind is str:
             return str(value) if value else ""
         if setting.mirror_on_channel:
-            return getattr(self._channel, setting.field, value)
+            return self._ui.display_flag(setting.field, value)
         return value
 
     async def apply_settings(self, incoming: dict) -> None:
@@ -450,8 +449,8 @@ class Assistant:
                 if setting.field not in settings or setting.field == "model":  # model: handled above
                     continue
                 setattr(self._config, setting.field, settings[setting.field])
-                if setting.mirror_on_channel and hasattr(self._channel, setting.field):
-                    setattr(self._channel, setting.field, settings[setting.field])
+                if setting.mirror_on_channel:
+                    self._ui.set_display_flag(setting.field, settings[setting.field])
             self._config.generation = settings["generate_kwargs"]
             for agent in self._registry.live_agents():
                 _layer_generate_kwargs(agent.model_client, self._base_generate_kwargs, self._config)
@@ -510,9 +509,7 @@ class Assistant:
 
     async def _maybe_push_conversations(self) -> None:
         """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""
-        send = getattr(self._channel, "send_conversations", None)
-        if send is not None:
-            await send(self.list_conversations())
+        await self._ui.push_conversations(self.list_conversations())
 
     async def run(self) -> None:
         """Serve the channel and run the scheduler concurrently until the channel closes."""
@@ -538,7 +535,7 @@ class Assistant:
 
     async def _serve_channel(self) -> None:
         try:
-            async for msg in self._channel.receive():
+            async for msg in self._ui.receive():
                 raw = msg.text or ""
                 text = raw.strip().lower()
                 if text == "/stop":
@@ -547,7 +544,7 @@ class Assistant:
                 # /diag reports live state (and the wedged turn's async stack) without touching the
                 # turn gate, so it still answers when a hung turn is holding it. Handled here, like /stop.
                 if text == "/diag":
-                    await self._channel.send(self._diag_report())
+                    await self._ui.send(self._diag_report())
                     continue
                 # While an approval is pending, the next message is the answer, not a new turn.
                 # (A `/stop` above still takes priority, cancelling the turn that is awaiting it.)
@@ -573,7 +570,7 @@ class Assistant:
                 if text == "/plan" or text.startswith("/plan "):
                     task = raw.strip()[len("/plan") :].strip()
                     if not task:
-                        await self._channel.send("Usage: /plan <task>")
+                        await self._ui.send("Usage: /plan <task>")
                         continue
                     msg = replace(msg, text=task)
                     plan_turn = True
@@ -623,20 +620,12 @@ class Assistant:
         async with self._approval_lock:
             self._pending_approval = asyncio.get_running_loop().create_future()
             try:
-                await self._prompt_approval(name, arguments)
+                await self._ui.ask_approval(name, arguments)
                 return await self._pending_approval
             finally:
                 # Cleared here so a `/stop` that cancels the turn mid-await (raising CancelledError out
                 # of the await) still leaves no stale pending approval.
                 self._pending_approval = None
-
-    async def _prompt_approval(self, name: str, arguments: dict) -> None:
-        """Ask the user to approve a tool call, however the channel can (web frame vs. plain text)."""
-        request = getattr(self._channel, "send_approval_request", None)
-        if request is not None:
-            await request(name, arguments)
-        else:
-            await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
 
     async def _handle(
         self, msg: ChannelMessage, *, conversation_id: str, plan: bool = False, tid: Optional[int] = None
@@ -662,17 +651,17 @@ class Assistant:
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
                 try:
                     if do_plan:
-                        runner = PlanRunner(agent, self._channel, self._config, self._review_plan)
+                        runner = PlanRunner(agent, self._ui, self._config, self._review_plan)
                         self._apply_plan_result(await runner.run(msg), conversation_id)
                     else:
                         stream = await agent.run(msg.text, stream=True, images=msg.images)
-                        await self._channel.send(stream, reply_to=msg)
+                        await self._ui.send(stream, reply_to=msg)
                 except asyncio.CancelledError:
                     # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
                     # agent snapshots it in a finally), and return so the daemon keeps serving.
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                     try:
-                        await self._channel.send("(stopped)", reply_to=msg)
+                        await self._ui.send("(stopped)", reply_to=msg)
                     except Exception:
                         pass
                     if self._persist(conversation_id):
@@ -681,13 +670,13 @@ class Assistant:
                 except ModelConnectionError as exc:
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
-                    await self._channel.send(
+                    await self._ui.send(
                         f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
                     )
                 except Exception as exc:
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"failed: {describe_error(exc)}"
-                    await self._channel.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
+                    await self._ui.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
                 else:
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
@@ -703,13 +692,11 @@ class Assistant:
         # carried in the notification because the muted error message is not persisted and so is not
         # visible on switch-in.
         if conversation_id != self._active_id:
-            notify = getattr(self._channel, "send_notification", None)
-            if notify is not None:
-                title = self._store.get(conversation_id).metadata.get("title") or "a conversation"
-                if succeeded:
-                    await notify(f"Reply ready in '{title}'.")
-                else:
-                    await notify(f"A reply in '{title}' {failure_reason}.")
+            title = self._store.get(conversation_id).metadata.get("title") or "a conversation"
+            if succeeded:
+                await self._ui.notify(f"Reply ready in '{title}'.")
+            else:
+                await self._ui.notify(f"A reply in '{title}' {failure_reason}.")
 
     def _diag_report(self) -> str:
         """A snapshot of live turn/gate state for the `/diag` command, plus each wedged turn's async
@@ -759,21 +746,11 @@ class Assistant:
         self._pending_plan = asyncio.get_running_loop().create_future()
         self._pending_plan_text = plan_text
         try:
-            await self._prompt_plan_review(plan_text, critique)
+            await self._ui.ask_plan_review(plan_text, critique)
             return await self._pending_plan
         finally:
             self._pending_plan = None
             self._pending_plan_text = ""
-
-    async def _prompt_plan_review(self, plan_text: str, critique: Optional[list[str]] = None) -> None:
-        """Ask the user to review a plan, however the channel can (web frame vs. plain text)."""
-        concerns = "\n".join(f"- {i}" for i in critique) if critique else None
-        request = getattr(self._channel, "send_plan_review_request", None)
-        if request is not None:
-            await request(plan_text, concerns)
-        else:
-            note = ("\nReviewer's concerns:\n" + concerns) if concerns else ""
-            await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'." + note)
 
     async def _proactive(
         self,
@@ -804,7 +781,7 @@ class Assistant:
         viewing -- its own gated tool calls always auto-deny, since that conversation is never the one
         ``self._active_id`` points at.
         """
-        multi_conversation = getattr(self._channel, "send_conversations", None) is not None
+        multi_conversation = self._ui.supports_conversations
         # Each branch takes at most one gate hold, never both: returning right after
         # _run_in_new_session leaves it as the only holder of its own gate.turn(new_id); nesting an
         # outer hold on self._active_id around that call was a latent deadlock (regression-tested by
@@ -834,17 +811,17 @@ class Assistant:
                 reply = await agent.run(prompt)
                 for message in agent.model_client.messages[start:]:
                     message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
-                await self._channel.send(reply)
+                await self._ui.send(reply)
                 if self._persist(conversation_id):
                     await self._maybe_push_conversations()
         except ModelConnectionError as exc:
             # Surface the reason and swallow it: a scheduled turn has no user awaiting, and letting it
             # propagate would crash the scheduler task (`_fire_job` has no except).
             logger.exception("proactive turn connection error")
-            await self._channel.send(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
+            await self._ui.send(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
         except Exception as exc:
             logger.exception("proactive turn error")
-            await self._channel.send(f"A scheduled task failed: {describe_error(exc)}")
+            await self._ui.send(f"A scheduled task failed: {describe_error(exc)}")
         finally:
             self._registry.unpin(conversation_id)
             proactive_turn.reset(proactive_token)
@@ -903,7 +880,7 @@ class Assistant:
             streaming_conversation.reset(token)
         try:
             await self._maybe_push_conversations()
-            await self._channel.send(f"Scheduled task '{title}' finished; open the '{title}' conversation to review.")
+            await self._ui.send(f"Scheduled task '{title}' finished; open the '{title}' conversation to review.")
         except Exception:
             logger.warning("Scheduled task '%s' ran; its notification could not be delivered", title, exc_info=True)
         return session.key

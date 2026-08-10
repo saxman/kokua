@@ -15,6 +15,7 @@ from aimu import aio
 from aimu.aio.channels.base import ChannelMessage
 
 from . import review
+from .channels.ui import ChannelUI
 from .config import AssistantConfig
 
 PLAN_PROMPT = """\
@@ -106,12 +107,12 @@ class PlanRunner:
     def __init__(
         self,
         agent: aio.SkillAgent,
-        channel,
+        ui: ChannelUI,
         config: AssistantConfig,
         on_plan_review: Callable[[str, Optional[list[str]]], Awaitable[Optional[str]]],
     ):
         self._agent = agent
-        self._channel = channel
+        self._ui = ui
         self._config = config
         self._on_plan_review = on_plan_review
         # The raw trace of the in-flight verbose turn: a list of {label, detail, text} phase segments,
@@ -121,7 +122,7 @@ class PlanRunner:
     async def run(self, msg: ChannelMessage) -> PlanResult:
         """Deep planning: plan, optionally adversarially review + human review, then execute (optionally
         with adversarial result review). Returns a PlanResult for the caller to persist."""
-        if self._config.show_reasoning and getattr(self._channel, "send_phase", None) is not None:
+        if self._config.show_reasoning and self._ui.supports_phases:
             return await self._verbose_planned_turn(msg)  # verbose trace needs a phase-capable channel
         events: list[dict] = []
         plan_text = await self._make_plan(msg)
@@ -133,18 +134,18 @@ class PlanRunner:
         if self._config.plan_review:
             approved = await self._on_plan_review(plan_text, critique)
             if approved is None:
-                await self._channel.send("(plan rejected)", reply_to=msg)
+                await self._ui.send("(plan rejected)", reply_to=msg)
                 return PlanResult(committed=False)
         if self._config.result_review:
             answer = await self._execute_reviewed(msg, approved, events)
             user_index = len(self._agent.model_client.messages) - 2  # [..., user, assistant]
-            await self._channel.send(answer, reply_to=msg)
+            await self._ui.send(answer, reply_to=msg)
             return PlanResult(committed=True, user_index=user_index, subagent_events=events)
         base_len = len(self._agent.model_client.messages)
         stream = await self._agent.run(
             EXECUTE_PROMPT.format(request=msg.text, plan=approved), stream=True, images=msg.images
         )
-        await self._channel.send(stream, reply_to=msg)
+        await self._ui.send(stream, reply_to=msg)
         msgs = self._agent.model_client.messages
         if len(msgs) > base_len and msgs[base_len].get("role") == "user":
             msgs[base_len]["content"] = msg.text
@@ -165,12 +166,12 @@ class PlanRunner:
             if self._config.plan_review:
                 approved = await self._on_plan_review(plan, critique)
                 if approved is None:
-                    await self._channel.send("(plan rejected)", reply_to=msg)
+                    await self._ui.send("(plan rejected)", reply_to=msg)
                     return PlanResult(committed=False)
             await self._verbose_execute(msg, approved)  # streams + commits the final answer
             user_index = len(self._agent.model_client.messages) - 2  # [..., user, asst]
             trace = self._trace
-            await self._send_done()
+            await self._ui.finish_stream()
             return PlanResult(committed=True, user_index=user_index, trace=trace)
         finally:
             self._trace = None
@@ -228,28 +229,12 @@ class PlanRunner:
         """Stream a reviewer's prose reasoning live (captured into the current phase segment for replay),
         then finalize and return its verdict. Emits no summary card -- the prose is the output."""
         client, stream = await open_coro
-        stream_activity = getattr(self._channel, "stream_activity", None)
-        if stream_activity is not None:
-            text = await stream_activity(stream, show_answer=True)
-        else:  # no streaming channel: drain so the reviewer call completes
-            text = ""
-            async for _ in stream:
-                pass
+        # A channel without live streaming still drains the stream (so the reviewer call completes)
+        # and yields "", which is right here: the prose is display-only, the verdict is what matters.
+        text = await self._ui.stream_activity(stream, show_answer=True)
         if self._trace:  # attach the reviewer's prose to the current phase segment
             self._trace[-1]["text"] = text
         return await review.finalize_verdict(client)
-
-    async def _send_done(self) -> None:
-        """End a verbose turn: finalize the last streamed bubble and clear the processing state."""
-        send = getattr(self._channel, "send_done", None)
-        if send is not None:
-            await send()
-
-    async def _send_subagent(self, event: dict) -> None:
-        """Show a sub-agent activity card if the channel supports it (web); other channels ignore it."""
-        send = getattr(self._channel, "send_subagent", None)
-        if send is not None:
-            await send(event)
 
     async def _make_plan(
         self, msg: ChannelMessage, feedback: Optional[list[str]] = None, *, show_answer: bool = False
@@ -278,13 +263,12 @@ class PlanRunner:
         ``show_answer=True`` (verbose trace) the text is streamed live too. Channels without
         ``stream_activity`` (e.g. the CLI) fall back to a plain non-streaming run.
         """
-        stream_activity = getattr(self._channel, "stream_activity", None)
-        if stream_activity is None:
+        if self._ui.supports_streamed_activity:
+            stream = await self._agent.run(prompt, stream=True, images=images)
+            text = await self._ui.stream_activity(stream, show_answer=show_answer)
+        else:  # the caller needs this text, so run non-streaming rather than draining to ""
             result = await self._agent.run(prompt, images=images)
             text = result if isinstance(result, str) else str(result)
-        else:
-            stream = await self._agent.run(prompt, stream=True, images=images)
-            text = await stream_activity(stream, show_answer=show_answer)
         if self._trace:  # verbose trace: attach this call's output to the current phase segment
             self._trace[-1]["text"] = text
         return text
@@ -297,16 +281,14 @@ class PlanRunner:
         """
         if self._trace is not None:
             self._trace.append({"label": label, "detail": detail, "text": ""})
-        send = getattr(self._channel, "send_phase", None)
-        if send is not None:
-            await send(label, detail)
+        await self._ui.show_phase(label, detail)
 
     async def _run_review(self, sid: str, role: str, round_: int, coro) -> "review.Verdict":
         """Show a running sub-agent card, await the reviewer, then update the card with its verdict."""
-        await self._send_subagent({"id": sid, "role": role, "status": "running", "round": round_})
+        await self._ui.show_subagent({"id": sid, "role": role, "status": "running", "round": round_})
         verdict = await coro
         status = "approved" if verdict.approved else "rejected"
-        await self._send_subagent(
+        await self._ui.show_subagent(
             {"id": sid, "role": role, "status": status, "issues": list(verdict.issues), "round": round_}
         )
         return verdict
@@ -380,8 +362,4 @@ class PlanRunner:
         text = plan_text
         if critique:
             text += "\n\n---\n**Reviewer's remaining concerns:**\n" + _bullets(critique)
-        send = getattr(self._channel, "send_plan", None)
-        if send is not None:
-            await send(text)
-        else:
-            await self._channel.send(f"Plan:\n\n{text}")
+        await self._ui.show_plan(text)

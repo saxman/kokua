@@ -1211,7 +1211,7 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
         await asyncio.sleep(0)
         assistant._pending_approval.set_result(True)
 
-    assistant._prompt_approval = fake_prompt
+    assistant._ui.ask_approval = fake_prompt
 
     async def call(tag):
         result = await assistant._approve("execute_python", {"code": tag})
