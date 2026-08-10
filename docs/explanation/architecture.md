@@ -1,8 +1,16 @@
 # Architecture
 
-Kokua wraps [AIMU](https://github.com/saxman/aimu) primitives into a single-user, always-on personal
+Kokua wraps [AIMU](https://saxman.info/aimu/) primitives into a single-user, always-on personal
 assistant. The design goal is a small core with capability pushed into plugins; see
 [design principles](design-principles.md) for why.
+
+The AIMU pieces Kokua is built from are its
+[personal-assistant primitives](https://saxman.info/aimu/how-to/build-personal-assistant/): a `Channel`
+transport, a `Scheduler`, and a `SkillAgent` that authors its own
+[skills](https://saxman.info/aimu/how-to/use-skills/). Kokua adds persistence, configuration,
+multiple conversations, human-in-the-loop gates, and the plugin system around them. Capability
+questions -- which providers, which tools, which models support vision -- are answered in
+[AIMU's docs](https://saxman.info/aimu/), not here.
 
 ## Repository layout
 
@@ -126,7 +134,8 @@ render phase headers).
 ## Web front end
 
 `frontends/web.py` is a Starlette + uvicorn WebSocket server (behind the `web` extra);
-`channels/web.py`'s `WebChannel` subclasses AIMU's base `WebChannel`. The streaming transport
+`channels/web.py`'s `WebChannel` subclasses
+[AIMU's base `WebChannel`](https://saxman.info/aimu/how-to/build-personal-assistant/). The streaming transport
 (`token`/`thinking`/`tool`/`done` frames and `send()`) lives in AIMU's base; Kokua's subclass adds the
 `conversations`, `history`, and `approval` frames its richer page needs. The UI is a single
 self-contained `web_static/index.html` served as package data, plus vendored `marked` + `DOMPurify`
@@ -151,3 +160,10 @@ not errored, when those are absent, and it does not gate the default suite.
 ## See also
 
 - [Design principles](design-principles.md): why the shape above is the shape.
+- [AIMU documentation](https://saxman.info/aimu/): the library everything above is built on --
+  [providers and model strings](https://saxman.info/aimu/how-to/switch-providers/),
+  [tools](https://saxman.info/aimu/reference/api/tools/),
+  [MCP](https://saxman.info/aimu/how-to/use-mcp-tools/),
+  [memory](https://saxman.info/aimu/how-to/use-semantic-memory/),
+  [sub-agents](https://saxman.info/aimu/how-to/spawn-subagents/), and the
+  [environment variables](https://saxman.info/aimu/reference/env-vars/) Kokua inherits.

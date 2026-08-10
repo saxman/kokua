@@ -1,6 +1,6 @@
 # Contributing to Kokua
 
-Thanks for your interest. Kokua is a small, hackable application built on [AIMU](https://github.com/saxman/aimu).
+Thanks for your interest. Kokua is a small, hackable application built on [AIMU](https://saxman.info/aimu/).
 
 ## Setup
 

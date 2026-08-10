@@ -1,7 +1,7 @@
 # Design principles
 
-Kokua is an *application*, not a library. It is built on [AIMU](https://github.com/saxman/aimu) and
-inherits [AIMU's six library-level principles](https://saxman.github.io/aimu/explanation/design-principles/)
+Kokua is an *application*, not a library. It is built on [AIMU](https://saxman.info/aimu/) and
+inherits [AIMU's six library-level principles](https://saxman.info/aimu/explanation/design-principles/)
 wholesale: plain Python, plain data, uniform interfaces, progressive disclosure, direct paths, loud
 failures. What follows are the six that are Kokua's own, the ones that decide what belongs in this
 repository at all.
@@ -150,5 +150,5 @@ aspirational; when that item lands, this becomes the seventh.
 
 - [Architecture](architecture.md): the shape that falls out of these principles.
 - [CONTRIBUTING.md](../../CONTRIBUTING.md): the mechanics.
-- [AIMU's design principles](https://saxman.github.io/aimu/explanation/design-principles/): the
+- [AIMU's design principles](https://saxman.info/aimu/explanation/design-principles/): the
   library-level six that Kokua inherits rather than restates.
