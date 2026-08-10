@@ -114,10 +114,12 @@ def conversation_to_frames(
 
     Two per-turn maps key a user-message index (as a string) to that turn's recorded reviewer activity,
     interleaved right after the user bubble so it replays in place:
-      - ``subagent``: summary verdict cards (non-verbose turns).
+      - ``subagent``: summary verdict cards (non-verbose turns). A verbose turn's plan reviewers show
+        up in ``trace`` instead, but its executor can still spawn its own sub-agents, and those cards
+        (identified by ``task`` on the create event or ``append`` on later ones) replay regardless.
       - ``trace``: the full raw verbose trace as ``phase`` + ``reasoning`` items. A traced turn shows
-        the raw output instead of cards, and its trace already ends with the final answer, so the
-        committed assistant message for that turn is skipped to avoid showing the answer twice.
+        the raw output instead of reviewer cards, and its trace already ends with the final answer, so
+        the committed assistant message for that turn is skipped to avoid showing the answer twice.
     """
     subagent = subagent or {}
     trace = trace or {}
@@ -147,14 +149,18 @@ def conversation_to_frames(
                 add({"type": "user", "text": text}, ts)
             for url in _image_refs_of(message.get("content")):  # uploaded images, replayed under the bubble
                 add({"type": "image", "url": url, "from": "user"}, ts)
-            if str(index) in trace:  # verbose turn: replay the raw trace, not cards
+            events = subagent.get(str(index), [])
+            if str(index) in trace:  # verbose turn: replay the raw trace, not the verdict cards
                 for segment in trace[str(index)]:
                     add({"type": "phase", "label": segment.get("label", ""), "detail": segment.get("detail", "")}, ts)
                     if segment.get("text"):
                         add({"type": "reasoning", "text": segment["text"]}, ts)
-            else:
-                for event in subagent.get(str(index), []):
-                    add({"type": "subagent", **event}, ts)
+                # A reviewer's verdict is already in the trace, but a sub-agent the turn spawned is
+                # not; those cards carry `task` (create event) or `append` (later events) and are
+                # replayed on their own. Filtering on `task` alone would drop a spawn's later frames.
+                events = [event for event in events if "task" in event or "append" in event]
+            for event in events:
+                add({"type": "subagent", **event}, ts)
         elif role == "assistant":
             if str(index - 1) in trace:
                 # The preceding user turn was verbose; its trace already contains this final answer

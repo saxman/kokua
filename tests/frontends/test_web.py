@@ -269,6 +269,27 @@ def test_conversation_to_frames_replays_verbose_trace_not_committed_answer():
     assert not any(i["type"] in ("subagent", "message") for i in items)
 
 
+def test_a_traced_turn_replays_spawn_cards_but_not_reviewer_cards():
+    """A verbose planned turn shows its raw trace instead of verdict cards, but a sub-agent it
+    spawned is real work that must still appear."""
+    messages = [{"role": "user", "content": "plan something"}]
+    items = conversation_to_frames(
+        messages,
+        show_thinking=False,
+        show_tools=False,
+        subagent={
+            "0": [
+                {"id": "plan-review-0", "role": "reviewer", "status": "done", "issues": ["too vague"]},
+                {"id": "r-1", "role": "researcher", "task": "find X", "status": "running"},
+                {"id": "r-1", "status": "done", "append": {"kind": "answer", "text": "the answer"}},
+            ]
+        },
+        trace={"0": [{"label": "Planner", "detail": "drafting", "text": "a plan"}]},
+    )
+    replayed = [item for item in items if item["type"] == "subagent"]
+    assert [item["id"] for item in replayed] == ["r-1", "r-1"]
+
+
 async def test_web_channel_background_turn_frames_are_muted():
     from kokua.channels.web import streaming_conversation
 
