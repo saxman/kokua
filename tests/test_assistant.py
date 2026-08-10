@@ -1033,8 +1033,8 @@ async def test_model_switch_applies_to_all_live_agents(tmp_path, monkeypatch):
         built.append(model)
         return c
 
-    monkeypatch.setattr("kokua.assistant.aio.client", fake_client)
-    await assistant._switch_model("anthropic:claude-x")
+    monkeypatch.setattr("kokua.settings_runtime.aio.client", fake_client)
+    await assistant._settings.switch_model("anthropic:claude-x")
     # Both cached agents got a rebuilt client for the new model.
     assert built.count("anthropic:claude-x") == len(assistant._registry.live_agents())
 

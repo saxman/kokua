@@ -14,7 +14,6 @@ unchanged. The CLI/web entry points live in `kokua.cli` / `kokua.frontends`.
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import time
 import uuid
@@ -28,7 +27,7 @@ from aimu.aio.channels.base import ChannelMessage
 from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.sessions import Session, TinyDBSessionStore
 
-from . import config_store, runtime_settings
+from . import runtime_settings
 from .agent_registry import AgentRegistry
 from .channels.ui import ChannelUI
 from .channels.web import proactive_turn, streaming_conversation
@@ -37,16 +36,17 @@ from .build import (
     build_memory,
     build_model_client,
     make_agent_builder,
-    resolve_system_message,
 )
 from .planning import PlanResult, PlanRunner
 from .config import AssistantConfig
 from .conversations import ConversationBook
+from .diagnostics import diag_report
 from .errors import describe_error
 from .interaction import HumanGate
 from .mcp import ServerConnection, reconnect_mcp_servers
 from .messages import derive_title
 from .scheduling import make_scheduler_tools
+from .settings_runtime import SettingsApplier
 from .turn_gate import TurnGate
 from .turn_registry import TurnInfo, TurnTracker
 
@@ -55,19 +55,6 @@ logger = logging.getLogger(__name__)
 # Re-exported so front ends can keep catching `assistant.ModelClientError` (build-time, from build) and
 # `assistant.ModelConnectionError` (runtime server-unreachable, from AIMU).
 __all__ = ["Assistant", "ModelClientError", "ModelConnectionError"]
-
-
-def _layer_generate_kwargs(client, base: dict, config: AssistantConfig) -> None:
-    """Rebuild the client's default generate kwargs in place from the config's generation settings.
-
-    Order (later wins): provider built-in defaults (`base`) < config.toml `[generation]`. The settings
-    panel and update_config now write straight into `config.generation`, so it is the single effective
-    layer; a key it never set (e.g. presence_penalty on Anthropic) is never injected.
-    """
-    kwargs = client.default_generate_kwargs
-    kwargs.clear()
-    kwargs.update(base)
-    kwargs.update(config.generation)
 
 
 class Assistant:
@@ -87,7 +74,6 @@ class Assistant:
         # A per-conversation agent cache. Assigned by create() once the registry's builder can bind
         # self._approve; agents are built lazily, by which point it exists.
         self._registry: Optional[AgentRegistry] = None
-        self._client_factory = None
         # Live remote-MCP connections (startup + runtime-added) kept alive for their lifetime
         # and closed on shutdown. Assigned by create().
         self._mcp_servers: list[ServerConnection] = []
@@ -120,10 +106,18 @@ class Assistant:
             is_proactive=proactive_turn.get,
             turn_conversation=streaming_conversation.get,
         )
-        # The active model client's provider built-in generate kwargs, snapshotted before any override
-        # is layered on, so a settings change (or a cleared field) can rebuild from a clean base.
-        # Assigned by create() and refreshed on a runtime model switch.
-        self._base_generate_kwargs: dict = {}
+        # Reads, applies, and persists the runtime-mutable settings. Reaches the agent cache through
+        # callbacks rather than holding it, since the registry does not exist yet (see create()).
+        self._settings = SettingsApplier(
+            config,
+            self._ui,
+            self._gate,
+            live_agents=lambda: self._registry.live_agents(),
+            cached_ids=lambda: self._registry.cached_ids(),
+            agent_for=lambda conversation_id: self._registry.get(conversation_id),
+            active_agent=lambda: self._book.agent,
+            cancel_active_turn=self._cancel_current_turn,
+        )
 
     @classmethod
     async def create(
@@ -168,7 +162,7 @@ class Assistant:
 
         # Wrap the raw factory so every conversation's client carries the effective generation kwargs
         # the active agent has, not bare provider defaults.
-        assistant._client_factory = assistant._make_layered_factory(raw_factory)
+        assistant._settings.layered_factory(raw_factory)
         scheduler_tools, arm_tasks = make_scheduler_tools(scheduler, config.scheduled_tasks_path, assistant._proactive)
 
         # Fan a global tool mutation (MCP add/remove) out across every live conversation's agent. Reads
@@ -181,7 +175,7 @@ class Assistant:
         assistant._registry = AgentRegistry(
             make_agent_builder(
                 config,
-                client_factory=lambda cid: assistant._client_factory(cid),
+                client_factory=lambda cid: assistant._settings.client_factory(cid),
                 notify=channel.send,
                 oauth_storage_dir=oauth_storage_dir,
                 connections=connections,
@@ -191,7 +185,7 @@ class Assistant:
                 store=store,
                 images_path=config.images_path,
                 for_each_agent=for_each_agent,
-                reapply_config=assistant._apply_config_change,
+                reapply_config=assistant._settings.apply_one,
             ),
             cap=config.agent_cache_cap,
         )
@@ -208,29 +202,11 @@ class Assistant:
             logger.warning("lean_supervisor is set but subagents is off; using the flat toolset instead.")
 
         # Build the active conversation's agent (its client is layered by the factory, which also
-        # snapshots the provider base into _base_generate_kwargs).
+        # snapshots the provider base for later re-layering).
         assistant._registry.get(assistant._active_id)
 
         arm_tasks()
         return assistant
-
-    def _make_layered_factory(self, raw_factory: Callable[[str], object]) -> Callable[[str], object]:
-        """Wrap a raw client factory so every built client carries the same effective generation kwargs
-        the active agent has: provider defaults < config.generation.
-
-        Also snapshots the provider built-in defaults into ``_base_generate_kwargs`` (used to re-layer
-        already-live agents on a settings change). Every client the factory returns is the current
-        model, so that base is stable across conversations.
-        """
-
-        def build(conversation_id: str):
-            client = raw_factory(conversation_id)
-            base = dict(client.default_generate_kwargs)
-            self._base_generate_kwargs = base
-            _layer_generate_kwargs(client, base, self._config)
-            return client
-
-        return build
 
     @property
     def _agent(self) -> aio.SkillAgent:
@@ -308,108 +284,12 @@ class Assistant:
             info.handle.cancel()
 
     def current_settings(self) -> dict:
-        """The effective runtime settings for the web panel to display: model, prefs, generate kwargs."""
-        settings = {setting.field: self._read_setting(setting) for setting in runtime_settings.RUNTIME_SETTINGS}
-        settings["generate_kwargs"] = dict(self._agent.model_client.default_generate_kwargs)
-        return settings
-
-    def _read_setting(self, setting: runtime_settings.RuntimeSetting):
-        """One runtime setting's effective value: the channel's copy of a mirrored flag wins, since
-        that is the one actually consulted while streaming."""
-        value = getattr(self._config, setting.field)
-        if setting.kind is str:
-            return str(value) if value else ""
-        if setting.mirror_on_channel:
-            return self._ui.display_flag(setting.field, value)
-        return value
+        """The effective runtime settings for the web panel to display."""
+        return self._settings.current()
 
     async def apply_settings(self, incoming: dict) -> None:
-        """Apply a settings-panel change at runtime and persist it to config.toml so it survives restarts.
-
-        The panel sends the full set of settings it exposes; ``_apply_settings`` applies them to the live
-        session and ``_persist_settings`` writes them back to config.toml (the single source of truth).
-        """
-        applied = await self._apply_settings(runtime_settings.sanitize(incoming))
-        self._persist_settings(applied)
-
-    async def _apply_settings(self, settings: dict) -> dict:
-        """Apply a sanitized settings dict (model, display/planning flags, generation kwargs) live.
-
-        Generation-kwargs and display-pref changes are applied in place under an exclusive gate hold
-        (waits for in-flight turns to drain, blocks new ones). Switching the model rebuilds the model
-        client (mirroring select_conversation: cancel the in-flight turn, then restore conversation
-        state onto the new client). A model that fails to build raises and leaves the running client
-        untouched. Returns the settings that were applied (for the caller to persist).
-        """
-        new_model = settings.get("model")
-        switching = bool(new_model) and new_model != (str(self._config.model) if self._config.model else "")
-
-        if switching:
-            await self._cancel_current_turn()
-        async with self._gate.exclusive():
-            if switching:
-                await self._switch_model(new_model)
-            for setting in runtime_settings.RUNTIME_SETTINGS:
-                if setting.field not in settings or setting.field == "model":  # model: handled above
-                    continue
-                setattr(self._config, setting.field, settings[setting.field])
-                if setting.mirror_on_channel:
-                    self._ui.set_display_flag(setting.field, settings[setting.field])
-            self._config.generation = settings["generate_kwargs"]
-            for agent in self._registry.live_agents():
-                _layer_generate_kwargs(agent.model_client, self._base_generate_kwargs, self._config)
-        return settings
-
-    def _persist_settings(self, settings: dict) -> None:
-        """Write an applied settings dict back into config.toml, keeping [generation] in sync."""
-        path = self._config.config_path
-        for setting in runtime_settings.RUNTIME_SETTINGS:
-            if setting.field in settings:
-                config_store.set_value(path, setting.section, setting.toml_key, settings[setting.field])
-        generate_kwargs = settings["generate_kwargs"]
-        for key in runtime_settings.GENERATION_KEYS:
-            if key in generate_kwargs:
-                config_store.set_value(path, "generation", key, generate_kwargs[key])
-            else:
-                config_store.unset_value(path, "generation", key)
-
-    async def _apply_config_change(self, section: str, key: str, value) -> None:
-        """Apply one hot ``update_config`` change to the live session (no persist; the tool writes disk).
-
-        Builds the panel-shaped settings dict for the single change (always carrying the current
-        generation set so ``_apply_settings`` does not wipe it) and applies it. Raises if it cannot be
-        applied (e.g. an invalid model), so the tool skips persisting a change that did not take.
-        """
-        applied = {"generate_kwargs": dict(self._config.generation)}
-        if section == "generation":
-            applied["generate_kwargs"][key] = value
-        else:
-            setting = runtime_settings.by_toml(section, key)
-            if setting is not None:
-                applied[setting.field] = value
-        await self._apply_settings(runtime_settings.sanitize(applied))
-
-    async def _switch_model(self, model: str) -> None:
-        """Rebuild every live agent's client for the new model, preserving each conversation's messages.
-
-        Tools bind the agent (not the client), so they survive; each agent's own messages are restored
-        onto its new client. ``aio.client`` is called once per cached agent, with the same fixed model
-        string each time, so the first call to fail means every call fails: a bad model raises before
-        any agent is swapped, and no partial swap happens in practice. Also updates the client factory
-        so conversations built later use the new model.
-        """
-        system = resolve_system_message(self._config)
-        for conversation_id in self._registry.cached_ids():
-            agent = self._registry.get(conversation_id)
-            new_client = aio.client(model, system=system)
-            messages = list(agent.model_client.messages)
-            agent.model_client = new_client
-            agent.restore(messages)
-        self._config.model = model
-        self._base_generate_kwargs = dict(self._agent.model_client.default_generate_kwargs)
-        # Later-built conversations go through build_model_client (so a since-broken model raises
-        # ModelClientError, not a raw ValueError/TypeError) and get the same layered generation kwargs.
-        self._client_factory = self._make_layered_factory(lambda cid: build_model_client(self._config))
+        """Apply a settings-panel change at runtime and persist it to config.toml."""
+        await self._settings.apply_and_persist(incoming)
 
     async def _maybe_push_conversations(self) -> None:
         """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""
@@ -559,43 +439,12 @@ class Assistant:
                 await self._ui.notify(f"A reply in '{title}' {failure_reason}.")
 
     def _diag_report(self) -> str:
-        """A snapshot of live turn/gate state for the `/diag` command, plus each wedged turn's async
-        stack. Reads only in-memory state and never awaits the turn gate, so it answers even while a
-        hung turn holds it (the case it exists to diagnose)."""
-        turns = self._tracker.all()
-        lines = ["Diagnostics:"]
-        if turns:
-            lines.append(f"- turn in flight: yes ({len(turns)})")
-            for conversation_id, info in turns:
-                elapsed = time.monotonic() - info.started
-                lines.append(f"  - {conversation_id}: elapsed {elapsed:.1f}s, message: {info.preview!r}")
-        else:
-            lines.append("- turn in flight: no")
-        lines.append(f"- active turns: {self._gate.active_turns()}")
-        approval = self._human.approval.pending
-        plan = self._human.plan.pending
-        lines.append(f"- pending approval: {'yes' if approval else 'no'} | pending plan: {'yes' if plan else 'no'}")
-        for conversation_id, info in turns:
-            if info.handle.done:
-                continue
-            stack = self._format_task_stack(info.handle.task)
-            if stack:
-                lines.append(
-                    f"\nStuck turn stack for {conversation_id} "
-                    f"(async only; run `kill -USR1 <pid>` for full thread stacks):\n```\n{stack}\n```"
-                )
-        return "\n".join(lines)
-
-    @staticmethod
-    def _format_task_stack(task) -> str:
-        """Render an asyncio task's current async stack in-process (a sudo-free py-spy). Best-effort:
-        returns '' if the task finished or the dump fails."""
-        try:
-            buffer = io.StringIO()
-            task.print_stack(file=buffer)
-            return buffer.getvalue().strip()
-        except Exception:
-            return ""
+        return diag_report(
+            self._tracker,
+            self._gate,
+            pending_approval=self._human.approval.pending,
+            pending_plan=self._human.plan.pending,
+        )
 
     async def _proactive(
         self,
