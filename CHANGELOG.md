@@ -270,6 +270,22 @@ installable, modular application.
   via a generic `subagent` WebSocket frame (no change to the model conversation schema); reviewer
   verdicts are recorded per turn in `session.metadata` and replayed in order on reload. (With the verbose
   trace on, the raw streamed reasoning replaces these cards.)
+- **Spawned sub-agent activity, shown live and on reload**: a `spawn_subagent` call now gets its own
+  foldable card in the conversation that spawned it, updated in place as the child agent runs -- nested
+  reasoning (gated by `show_thinking`) and nested tool calls (gated by `show_tools`), with the card and
+  its final answer always shown regardless of those flags. No new setting. `core/subagents.py`'s
+  `SubagentReporter` implements AIMU's `SubagentObserver` and is the one instance every per-conversation
+  agent's `spawn_subagent` reports through, including after a runtime MCP add/remove rebuilds it.
+  Recording (`ConversationBook.record_subagent_events`, a new method sharing the same
+  `metadata["subagent"]` map the reviewer cards above write into) and display are independent: a
+  background turn's cards are muted like everything else it streams, but its spawns are still recorded,
+  so switching into that conversation later shows the work. This depends on AIMU's unreleased `main`
+  (the `SubagentObserver` protocol and the `observer=` parameter on `make_async_subagent_tool`, see
+  AIMU's own changelog); `build.py` imports `SubagentObserver` unconditionally, so an AIMU install that
+  predates this seam fails at Kokua startup with an `ImportError`, not a silent no-cards fallback --
+  another symptom of the stale-same-version-string trap `CLAUDE.md`'s AIMU-dependency section already
+  warns about. Known limitation: a gated tool call inside a sub-agent (e.g. `execute_python`) still
+  prompts at the top level, not inside its card.
 - **Tool-using reviewers**: the adversarial reviewers are now tool-enabled agents rather than a single
   tool-less call. Each runs a bounded tool-calling assessment over a curated verification toolset
   (`review.REVIEWER_TOOLS`: current date/time, web lookup, and computation) and then extracts the typed

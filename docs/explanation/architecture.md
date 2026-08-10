@@ -32,6 +32,7 @@ src/kokua/
     commands are parsed inline in assistant._serve_channel (/stop, /diag, /plan)
     diagnostics.py       the /diag report
     build.py             free functions that assemble a model client, memory, tools, an agent
+    subagents.py         SubagentReporter: sub-agent activity as display frames + recorded events
     agent_registry.py    per-conversation agent cache with LRU eviction and pinning
     turn_gate.py         writer-preferring readers-writer gate
     turn_registry.py     in-flight turn bookkeeping
@@ -64,7 +65,7 @@ serve loop, and little else. It owns:
 - **`ConversationBook`** -- the session store, the per-conversation agent cache, and which
   conversation is being viewed. These move together on a switch, which is why they are one object.
 - **`TurnRunner`** -- reactive turns (the user sent something) and proactive turns (a scheduled task
-  fired). The five concurrency invariants are documented at the top of that module.
+  fired). The six concurrency invariants are documented at the top of that module.
 - **`HumanGate`** -- tool approval and plan review, each a lock-guarded single-slot request the serve
   loop resolves with the user's next message.
 - **`SettingsApplier`** -- reading, applying, and persisting the runtime-mutable settings.
@@ -76,6 +77,31 @@ what lets a web approval reply be routed back to the waiting tool call. Switchin
 **not** cancel a running turn: each conversation owns its own agent and client, so a backgrounded turn
 persists to its own conversation, streams muted, and posts a notification when it finishes. Only
 `delete_conversation` cancels, and only the deleted conversation's own turn.
+
+A turn's spawned sub-agents surface the same way. `core/subagents.py`'s `SubagentReporter` implements
+AIMU's `SubagentObserver` protocol; `Assistant` owns one instance for the process, and `build.py`
+threads it into every per-conversation agent's `spawn_subagent` as the `observer=` argument -- including
+across the rebuild a runtime MCP server add/remove triggers, so a worker role keeps reporting after its
+toolset changes. Displaying and recording are deliberately separate. `TurnRunner` sets a
+`subagent_events` ContextVar collector for the duration of a turn, installed and reset alongside
+`streaming_conversation` under the same invariant (see the module's concurrency invariants): the
+reporter appends each spawn's frames to whichever list is current, and the turn records that list,
+synchronously, as the first action of whichever exit branch runs -- success, cancellation, connection
+error, or generic error. On the cancelled and error branches, which still await one more status send
+afterward (the "(stopped)" notice, or the failure message), recording first means a second cancellation
+racing that send cannot propagate past the completed record call and drop the turn's events.
+`ConversationBook.record_subagent_events`
+persists the result into `session.metadata["subagent"][str(user_index)]`, the same map planning's
+reviewer verdict cards write into (a shared merge helper extends rather than overwrites, since one turn
+can produce both). A background turn's cards are muted like the rest of what it streams, but its spawns
+are still recorded, so switching into that conversation later shows the work.
+
+Two deviations from a literal live replay are deliberate. Reasoning is coalesced into one block when
+recorded -- matching how the page already concatenates consecutive reasoning when it displays it -- but
+streamed token by token when shown live. And a turn's spawn cards replay grouped right after its user
+bubble on reload, not at the exact point mid-turn where they appeared live. Separately, a gated tool
+call inside a sub-agent (e.g. `execute_python`) still prompts at the top level, not inside its card: the
+approval gate is forwarded to the parent's existing prompt, not rendered into the spawn's own card.
 
 ## Plugins
 
@@ -142,6 +168,16 @@ self-contained `web_static/index.html` served as package data, plus vendored `ma
 (GitHub-flavored markdown, sanitized, rendered client-side on turn completion) and vendored KaTeX,
 typeset after sanitization with `trust:false`. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under `/fonts/`.
+
+Planning's reviewer verdicts and a turn's spawned sub-agents share one `subagent` frame type and one
+persisted map (`metadata["subagent"]`); `task` on the create event is what tells the two apart.
+`conversation_to_frames` replays that map on reload, interleaved right after its user bubble; a
+verbose-traced turn suppresses the reviewer verdict cards (their content is already in the raw trace)
+but still replays its own spawn cards, since a sub-agent it spawned is not part of that trace. The
+page's `renderSubagent` builds or updates one foldable card per id, appending nested reasoning and
+tool-call lines to its body as `append` frames arrive; nested reasoning honors `show_thinking` and
+nested tool calls honor `show_tools`, the same flags the top-level turn uses, while the card itself and
+its final answer always show.
 
 ## Testing
 
