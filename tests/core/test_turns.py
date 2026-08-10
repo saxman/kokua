@@ -526,3 +526,96 @@ async def test_proactive_active_target_surfaces_errors(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: _FailingClient([]))
     assert await assistant._proactive("do it") is None  # swallowed, not raised
     assert any("failed" in str(text) for text in channel.sent)
+
+
+class _SpawningClient(MockAsyncModelClient):
+    """A mock client that reports a sub-agent spawn mid-turn, standing in for AIMU's dispatch.
+
+    ``chat(stream=True)`` calls the base client's ``_chat`` twice: once with ``stream=True`` to get
+    the streaming wrapper, then again with ``stream=False`` from inside that wrapper to do the real
+    work (the base mock's own message-appending is likewise skipped on the first call). Reporting
+    only on the ``stream=False`` call keeps this fake to one spawn per turn regardless of whether the
+    turn streams, matching a real spawn (tied to one tool dispatch, not to how many times the model
+    client's transport method is entered).
+    """
+
+    def __init__(self, reply: str = "delegated."):
+        super().__init__([reply])
+        self.reporter = None
+
+    async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
+        if self.reporter is not None and not stream:
+            await self.reporter.spawned("r-1", "researcher", "find X")
+            await self.reporter.finished("r-1", "the answer", None)
+        return await super()._chat(user_message, generate_kwargs, use_tools, stream, images, audio)
+
+
+class _SpawnsThenHangsClient(MockAsyncModelClient):
+    """Reports a spawn as running, then hangs until the turn task is cancelled."""
+
+    def __init__(self):
+        super().__init__([])
+        self.started = asyncio.Event()
+        self.reporter = None
+
+    async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
+        self.messages.append({"role": "user", "content": user_message})
+        if self.reporter is not None:
+            await self.reporter.spawned("r-1", "researcher", "find X")
+        self.started.set()
+        await asyncio.Event().wait()  # hang until cancelled
+
+
+async def test_turn_records_its_subagent_events_under_its_user_index(tmp_path):
+    """The events key to the turn's user message; that index is what places the cards on reload."""
+    client = _SpawningClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._handle(ChannelMessage(text="delegate this", channel="fake"), conversation_id=assistant._active_id)
+
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1", "r-1"]
+    assert metadata["subagent"]["0"][0]["task"] == "find X"
+
+
+async def test_a_turn_on_a_conversation_not_being_viewed_still_records(tmp_path):
+    """Switching away mutes the frames but must not lose the trace: the record is what the user
+    comes back to."""
+    client = _SpawningClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=lambda cid: client)
+    client.reporter = assistant._subagent_reporter
+    background = assistant._book.new_session()
+
+    await assistant._handle(ChannelMessage(text="delegate this", channel="fake"), conversation_id=background.key)
+
+    assert background.key != assistant._active_id
+    assert "subagent" in assistant._store.get(background.key).metadata
+
+
+async def test_a_stopped_turn_records_the_events_it_produced(tmp_path):
+    """`/stop` mid-spawn: the cancelled turn persists the card it had opened."""
+    client = _SpawnsThenHangsClient()
+    channel = _StopChannel(client.started)
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._serve_channel()  # reads "long task" (starts the turn), then "/stop" (cancels it)
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:  # let the cancelled turn finish its (stopped) + persist
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1"]
+
+
+async def test_a_proactive_turn_records_its_subagent_events(tmp_path):
+    """A scheduled task's delegation is recorded against the message index the run started at."""
+    client = _SpawningClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._proactive("delegate this")
+
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1", "r-1"]

@@ -29,6 +29,15 @@ def _now() -> str:
     return datetime.now().isoformat()
 
 
+def _merge_subagent_events(session: Session, user_index: int, events: list[dict]) -> None:
+    """Append a turn's sub-agent cards under its user-message index.
+
+    Extends rather than assigns: one turn can produce both reviewer verdict cards (a planned turn)
+    and spawn cards, recorded by different callers.
+    """
+    session.metadata.setdefault("subagent", {}).setdefault(str(user_index), []).extend(events)
+
+
 class ConversationBook:
     def __init__(
         self,
@@ -226,13 +235,21 @@ class ConversationBook:
         session = self._store.get(conversation_id)
         changed = False
         if result.subagent_events:
-            session.metadata.setdefault("subagent", {})[str(result.user_index)] = result.subagent_events
+            _merge_subagent_events(session, result.user_index, result.subagent_events)
             changed = True
         if result.trace:
             session.metadata.setdefault("trace", {})[str(result.user_index)] = result.trace
             changed = True
         if changed:
             self._store.save(session)
+
+    def record_subagent_events(self, events: list[dict], user_index: int, conversation_id: str) -> None:
+        """Persist a turn's sub-agent activity so reload replays it. No-op when the turn produced none."""
+        if not events or user_index < 0:
+            return
+        session = self._store.get(conversation_id)
+        _merge_subagent_events(session, user_index, events)
+        self._store.save(session)
 
     def exists(self, conversation_id: str) -> bool:
         """Whether a conversation is still in the store.

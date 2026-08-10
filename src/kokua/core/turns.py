@@ -20,6 +20,10 @@ Every rule here was learned from a bug. Read them before changing anything in th
    the web channel mutes frames from a turn that isn't the conversation being viewed, and the
    approval gate auto-denies a gated tool whose turn isn't being watched. Even the CLI channel needs
    it set, so that its single conversation reads as foreground rather than as a background turn.
+   ``subagent_events`` is installed the same way, for the same reason on the recording side: it must
+   be set before a turn's first ``await`` and reset only in the ``finally`` alongside
+   ``streaming_conversation``, or a spawn racing the set/reset window would report into a stale list
+   (or into no list at all) instead of the turn that owns it.
 
 4. **A proactive run never touches the active pointer.** It is not "switching" to a conversation,
    just running a turn on one -- the registry looks up any conversation's agent by id. Leaving the
@@ -48,6 +52,7 @@ from aimu.aio.channels.base import ChannelMessage
 from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.core.errors import describe_error
 from kokua.core.messages import derive_title
+from kokua.core.subagents import subagent_events
 from kokua.planning.runner import PlanRunner
 
 logger = logging.getLogger(__name__)
@@ -88,16 +93,21 @@ class TurnRunner:
         agent = self._book.agent_for(conversation_id)
         self._book.pin(conversation_id)  # invariant 2
         token = streaming_conversation.set(conversation_id)  # invariant 3
+        collector_token = subagent_events.set([])
         succeeded = False
         failure_reason = ""  # set on error, so a backgrounded turn's notification can carry the reason
+        user_index = -1  # recorded unconditionally below, including on the cancellation and error paths
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
                 try:
                     if plan:
                         runner = PlanRunner(agent, self._ui, self._config, self._review_plan)
-                        self._book.record_plan_metadata(await runner.run(msg), conversation_id)
+                        result = await runner.run(msg)
+                        self._book.record_plan_metadata(result, conversation_id)
+                        user_index = result.user_index if result.committed else -1
                     else:
+                        user_index = len(agent.model_client.messages)
                         stream = await agent.run(msg.text, stream=True, images=msg.images)
                         await self._ui.send(stream, reply_to=msg)
                 except asyncio.CancelledError:
@@ -108,6 +118,7 @@ class TurnRunner:
                         await self._ui.send("(stopped)", reply_to=msg)
                     except Exception:
                         pass
+                    self._record_subagents(conversation_id, user_index)
                     await self._persist(conversation_id)
                     return
                 except ModelConnectionError as exc:
@@ -123,11 +134,18 @@ class TurnRunner:
                 else:
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
+                self._record_subagents(conversation_id, user_index)
                 await self._persist(conversation_id)
         finally:
+            subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
+
+    def _record_subagents(self, conversation_id: str, user_index: int) -> None:
+        """Persist whatever the turn's spawns reported. Synchronous, so it also runs on the cancelled
+        path where an await could be cut short."""
+        self._book.record_subagent_events(subagent_events.get() or [], user_index, conversation_id)
 
     async def _notify_if_backgrounded(self, conversation_id: str, *, succeeded: bool, failure_reason: str) -> None:
         """The user switched away before this turn finished: tell them rather than silently updating
@@ -216,6 +234,7 @@ class TurnRunner:
         """The one body every proactive target shares. See the module's concurrency invariants."""
         conversation_id = spec.conversation_id
         token = streaming_conversation.set(conversation_id)  # invariant 3
+        collector_token = subagent_events.set([])
         proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run
         self._book.pin(conversation_id)  # invariant 2
         try:
@@ -230,10 +249,12 @@ class TurnRunner:
                     message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
                 if spec.echo_reply:
                     await self._ui.send(reply)
+                self._record_subagents(conversation_id, start)
                 await self._persist(conversation_id)
         finally:
             self._book.unpin(conversation_id)
             proactive_turn.reset(proactive_token)
+            subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
 
     async def _report(self, text: str) -> None:

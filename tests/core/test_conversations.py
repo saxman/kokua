@@ -289,3 +289,23 @@ async def test_switch_methods_sync_channel_active_conversation_id(tmp_path):
 
     await assistant.delete_conversation(new_id)  # deletes the viewed one -> falls back to a fresh one
     assert channel.active_conversation_id == assistant._active_id
+
+
+async def test_record_subagent_events_extends_rather_than_replaces(tmp_path):
+    """A planned turn can both review a plan and spawn sub-agents; neither may erase the other."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    conversation_id = assistant._active_id
+
+    assistant._book.record_subagent_events([{"id": "a", "status": "done"}], 0, conversation_id)
+    assistant._book.record_subagent_events([{"id": "b", "status": "done"}], 0, conversation_id)
+
+    stored = assistant._store.get(conversation_id).metadata["subagent"]["0"]
+    assert [event["id"] for event in stored] == ["a", "b"]
+
+
+async def test_record_subagent_events_ignores_an_empty_list(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_subagent_events([], 0, assistant._active_id)
+
+    assert "subagent" not in assistant._store.get(assistant._active_id).metadata

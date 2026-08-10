@@ -282,9 +282,10 @@ async def test_web_channel_background_turn_frames_are_muted():
     token = streaming_conversation.set("other")  # a background conversation
     try:
         await channel.send(gen())
+        await channel.send_subagent({"id": "r-1", "role": "researcher", "task": "find X", "status": "running"})
     finally:
         streaming_conversation.reset(token)
-    assert ws.frames == []  # fully muted, including the "done" terminator
+    assert ws.frames == []  # fully muted, including the "done" terminator and sub-agent cards
 
 
 async def test_web_channel_foreground_turn_frames_stream():
