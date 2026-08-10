@@ -54,7 +54,9 @@ show_tools = true
 
 [tools]
 # AIMU built-in tool groups to expose. Also accepts ["all"] or ["none"]. The generative groups
-# (image, audio, speech, transcription) require their AIMU_*_MODEL env var.
+# (image, audio, speech, transcription) each require their AIMU_*_MODEL env var: there is no default,
+# so the tool raises if it is unset rather than downloading weights you did not ask for. Values and
+# accepted formats: https://saxman.info/aimu/reference/env-vars/
 groups = ["web", "fs", "compute", "misc"]
 
 # Images: the assistant reads images you attach (web upload / paste, or the CLI `/attach <path>`

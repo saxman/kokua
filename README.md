@@ -60,7 +60,7 @@ The `web` extra (`uv sync --all-extras`, or `pip install '.[web]'`) adds the bro
 kokua --model ollama:qwen3:8b
 ```
 
-The model string is AIMU's [`provider:model_id`](https://saxman.info/aimu/how-to/switch-providers/) form, so any provider AIMU supports works here. Omit `--model` and AIMU [resolves a default](https://saxman.info/aimu/how-to/switch-providers/#use-whatever-model-is-already-available-locally): `$AIMU_LANGUAGE_MODEL`, else the first already-running local model found (Ollama, then a local OpenAI-compatible server). A cloud model is never auto-selected, and startup fails with an actionable message if nothing resolves. Chat at the prompt; Ctrl-D exits.
+The model string is AIMU's [`provider:model_id`](https://saxman.info/aimu/how-to/switch-providers/) form, so any provider AIMU supports works here. Omit `--model` and AIMU [resolves a default](https://saxman.info/aimu/how-to/switch-providers/#use-whatever-model-is-already-available-locally): [`$AIMU_LANGUAGE_MODEL`](https://saxman.info/aimu/reference/env-vars/) if set, else the first already-running local model found (Ollama, then a local OpenAI-compatible server). A cloud model is never auto-selected, and startup fails with an actionable message if nothing resolves. Chat at the prompt; Ctrl-D exits.
 
 Useful flags: `--tools web,fs,compute,misc` ([AIMU built-in tool groups](https://saxman.info/aimu/reference/api/tools/)), `--mcp <url>` (repeatable), `--no-memory`, `--no-plugins`, `--no-subagents`, `--system`, `--config <path>`, `--host` / `--port` (web).
 
