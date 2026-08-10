@@ -2,6 +2,54 @@
 
 ## 0.1.0 (unreleased)
 
+- **Design principles written down**: [docs/explanation/design-principles.md](docs/explanation/design-principles.md)
+  states the six principles that decide what belongs in Kokua's core, each with the code that backs
+  it, what it excludes, and what it means for a contributor.
+  [docs/explanation/architecture.md](docs/explanation/architecture.md) now holds the architecture
+  narrative that used to live only in `CLAUDE.md`, so there is one place to keep current.
+
+- **Modularization**: `src/kokua` is grouped by subsystem instead of 23 flat modules -- `core/`,
+  `config/`, `planning/`, `mcp/`, `scheduling/`, beside the existing `channels/`, `frontends/`,
+  `toolpacks/`. No entry-point paths changed, so plugin registration and the console scripts are
+  untouched. `kokua.assistant` remains for one release as a `DeprecationWarning` shim re-exporting
+  `Assistant` from `kokua.core`. Retires TODO #6. The stable public import surface is now declared:
+  `kokua.plugins`, `kokua.config`, `kokua.core`, `kokua.channels.web`, `kokua.images`.
+
+- **`Assistant` decomposed** from an 872-line class mixing nine concerns into a composition root plus
+  `ConversationBook` (store + agent cache + active pointer), `TurnRunner` (reactive and proactive
+  turns), `HumanGate` (approval and plan review), `SettingsApplier`, and `ChannelUI`. Its public
+  surface is unchanged: front ends call the same twelve members.
+
+- **Bug fix -- concurrent plan reviews clobbered each other.** Tool approval was guarded by a lock so
+  concurrent gated calls could not overwrite the pending slot; plan review never was, so two
+  concurrent planned turns would lose one of the two prompts (the first waiter hung, and the answer
+  landed on the wrong request). Both now share one lock-guarded `PendingRequest`.
+
+- **Bug fix -- a failing scheduled task could take down the scheduler.** Only `target="active"`
+  firings had error handling; the `"new"`/`"task"` path returned before reaching it, so a model error
+  propagated into the scheduler job, which has no handler. A `target="task"` firing that failed also
+  forgot the conversation it had just created and minted a new one on every later firing. Both fixed
+  by unifying the proactive paths; the key is now returned even on failure.
+
+- **One runtime-settings table.** The set of settings changeable without a restart was spelled out in
+  nine places. `config/table.py`'s `RUNTIME_SETTINGS` is now the single declaration, driving the TOML
+  schema, the panel sanitizer, the hot-apply set, the live-apply loop, the channel mirroring, and the
+  persist path. Adding a setting is one entry, enforced by tests.
+
+- **One planned-turn pipeline.** The verbose and summary `/plan` flows were mirrored implementations
+  (~150 duplicated lines). They are now one pipeline plus a `Presentation` record with two instances.
+  Behavior is unchanged, pinned by frame-sequence characterization tests written before the change.
+
+- **`ChannelUI`** replaces 17 scattered `getattr(channel, "send_x", None)` / `hasattr` sites with one
+  adapter that probes each capability once and gives every optional frame a documented fallback.
+  `channels/protocol.py` declares the rich surface for documentation and typing.
+
+- **Dead code removed**: six unused functions in `paths.py` (every leaf path is a derived
+  `AssistantConfig` property), `images.save_file`, `TurnInfo.background`, two `TurnTracker` methods,
+  and the legacy `new_session` fallback in the scheduled-task registry.
+
+- **Tests** mirror the source layout; the 2346-line `test_assistant.py` is split along the same seams.
+
 - **Memory store thread-safety moved upstream**: concurrent-turn safety for the shared memory and
   document stores now lives inside AIMU's `SemanticMemoryStore`/`DocumentStore` (a re-entrant per-store
   lock) rather than a Kokua-side wrapper. `build_memory` returns the stores' tools directly again.

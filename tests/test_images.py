@@ -6,9 +6,9 @@ import asyncio
 import io
 import json
 
-from helpers import MockAsyncModelClient
+from tests.helpers import MockAsyncModelClient
 from kokua import images
-from kokua.messages import compact_message_images, expand_message_images
+from kokua.core.messages import compact_message_images, expand_message_images
 from kokua.channels.cli import CLIChannel
 from kokua.channels.web import WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig

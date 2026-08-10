@@ -21,11 +21,11 @@ from starlette.responses import FileResponse, HTMLResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from .. import images
-from ..assistant import Assistant, ModelClientError
-from ..channels.web import WebChannel
-from ..config import AssistantConfig
-from ..plugins import FrontEnd
+from kokua import images
+from kokua.core.assistant import Assistant, ModelClientError
+from kokua.channels.web import WebChannel
+from kokua.config import AssistantConfig
+from kokua.plugins import FrontEnd
 
 logger = logging.getLogger(__name__)
 

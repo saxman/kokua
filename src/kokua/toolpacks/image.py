@@ -18,8 +18,8 @@ from pathlib import Path
 
 from aimu.tools import tool
 
-from ..config import AssistantConfig
-from ..plugins import ToolPack
+from kokua.config import AssistantConfig
+from kokua.plugins import ToolPack
 
 # AIMU's image client resolves this env var for the model; without it, generation cannot work, so the
 # tool is not offered at all (the model never sees an option it can't fulfill).

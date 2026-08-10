@@ -1,262 +1,148 @@
-<p>
+<div align="center">
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kokua-horizontal-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/kokua-horizontal-light.svg">
-  <img alt="Kokua — a personal AI assistant that extends itself" src="docs/assets/kokua-horizontal-light.svg" width="360">
+  <img alt="Kokua" src="docs/assets/kokua-horizontal-light.svg" width="420">
 </picture>
-</p>
 
-**Help, assistance** (Hawaiian). A hackable, modular personal-assistant application (OpenClaw / Hermes Agent
-style) built on the [AIMU](https://github.com/saxman/aimu) library. Kokua runs an always-on assistant
-that chats with you, authors and runs its own skills, connects to remote tool services, delegates
-independent subtasks to isolated sub-agents, and remembers facts and documents across conversations.
-Kokua **extends itself**: it writes and runs new skills to take on capabilities it didn't ship with, and
-grows its reach by connecting to remote MCP services on its own. And where it can't extend itself, you
-extend it: front ends and tool-packs are **plugins** you add by installing modules, not by editing the core.
+**A personal AI assistant that extends itself.**
 
-It runs as a single user in a single process, and can run code and connect to remote services with your
-privileges (see [Security](#security)).
+[![CI](https://github.com/saxman/kokua/actions/workflows/ci.yml/badge.svg)](https://github.com/saxman/kokua/actions/workflows/ci.yml) ![GitHub License](https://img.shields.io/github/license/saxman/kokua) ![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fsaxman%2Fkokua%2Frefs%2Fheads%2Fmain%2Fpyproject.toml) [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
+[Design principles](docs/explanation/design-principles.md) · [Architecture](docs/explanation/architecture.md) · [Configuration](src/kokua/config.example.toml) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+
+</div>
+
+**Kokua** (Hawaiian: *help, assistance*) is a hackable, modular personal-assistant application (OpenClaw / Hermes Agent style) built on the [AIMU](https://saxman.info/aimu/) library. It runs an always-on assistant that chats with you, authors and runs its own skills, connects to remote tool services, delegates independent subtasks to isolated sub-agents, schedules its own proactive work, and remembers facts and documents across conversations.
+
+Kokua **extends itself**: it writes and runs new skills to take on capabilities it didn't ship with, and grows its reach by connecting to remote MCP services on its own. Where it can't extend itself, you extend it: front ends and tool-packs are **plugins** you add by installing a package, never by editing the core.
+
+```bash
+kokua                              # chat in the terminal
+kokua --frontend web               # or a browser UI at http://127.0.0.1:8000
+kokua --list-tool-packs            # see what capability is installed
+kokua config init                  # scaffold ~/.kokua/config.toml, every key documented
+```
+
+It runs as a single user in a single process, and can run code and connect to remote services with your privileges (see [Security](#security)).
+
+## Why Kokua
+
+Kokua is small on purpose. Six principles decide what belongs in the core: a **transport-agnostic core** that knows a channel rather than a terminal or a socket, **growth by plugin** rather than core change, **`config.toml` as the single source of settings** that the app itself writes, **all state under one directory you own**, **a single user and one process with concurrency rules written down**, and **verifiability without a model**. These sit on top of, and inherit, [AIMU's six library-level principles](https://saxman.info/aimu/explanation/design-principles/). The reasoning behind each of Kokua's, and the patterns each one excludes, is on the [design principles](docs/explanation/design-principles.md) page; the shape that falls out of them is in [architecture](docs/explanation/architecture.md).
+
+The practical consequence: the assistant core is a few hundred lines that knows nothing about terminals or browsers, and adding a transport or a capability means shipping a package, not patching Kokua.
 
 ## Install
 
-Kokua depends on AIMU. It currently uses AIMU features that are on AIMU's `main` branch but not yet in a
-published release, so it installs AIMU **from source as an editable dependency**, configured via
-`[tool.uv.sources]` in `pyproject.toml`. Clone AIMU as a sibling of this repo, then sync:
+Kokua depends on AIMU, and currently uses AIMU features that are on AIMU's `main` branch but not yet in a published release. It therefore installs AIMU **from source as an editable dependency**. Clone AIMU as a sibling of this repo, then sync:
 
 ```bash
 git clone https://github.com/saxman/aimu        # sibling of kokua/, if you don't have it
-uv sync --all-extras                             # installs the local editable ../aimu automatically
+uv sync --all-extras                            # installs the local editable ../aimu automatically
 ```
 
-`[tool.uv.sources]` pins `aimu = { path = "../aimu", editable = true }`, so `uv sync` always installs the
-local checkout (and picks up your edits live) rather than the PyPI build, which carries the same version
-string but lacks the features Kokua needs. This requires `../aimu` to exist; for CI or a clone without it,
-swap that source for a git one (see the comment in `pyproject.toml`):
+`[tool.uv.sources]` pins `aimu = { path = "../aimu", editable = true }`, so `uv sync` always installs your local checkout (and picks up your edits live) rather than the PyPI build, which carries the same version string but lacks the features Kokua needs.
 
-```toml
-aimu = { git = "https://github.com/saxman/aimu", branch = "main" }
-```
+> **No sibling checkout?** For CI or a clone without `../aimu`, swap that source for the git one (see the comment in `pyproject.toml`):
+>
+> ```toml
+> aimu = { git = "https://github.com/saxman/aimu", branch = "main" }
+> ```
+>
+> Once AIMU publishes a release with the needed features, the override goes away and this becomes a normal `uv add kokua` / `pip install kokua`.
 
-(Once AIMU publishes a release with the needed features, the source override goes away and this becomes a
-normal `uv add kokua` / `pip install kokua`.)
+The `web` extra (`uv sync --all-extras`, or `pip install '.[web]'`) adds the browser front end; without it the CLI works alone.
 
-## Quick Start
+## Quick start
 
 ```bash
 kokua --model ollama:qwen3:8b
 ```
 
-Omit `--model` to use `AIMU_LANGUAGE_MODEL`, or else the first already-running local model found (Ollama,
-then a local OpenAI-compatible server); a cloud model is never auto-selected, and startup fails with an
-actionable message if none is found. Chat at the prompt; Ctrl-D exits.
-Send `/stop` to cancel a reply that's still streaming (the partial turn is kept, so the conversation
-continues); the web UI has a Stop button for the same. Send `/diag` if the assistant ever stops
-responding: it reports the in-flight turn, whether the turn lock is held, and dumps a stuck turn's
-async stack (it is handled without the lock, so it answers even when a hung turn holds it). Diagnostic
-logs are written to `$KOKUA_HOME/data/logs/kokua.log` (rotating); `kill -USR1 <pid>` dumps all thread
-stacks there.
+The model string is AIMU's [`provider:model_id`](https://saxman.info/aimu/how-to/switch-providers/) form, so any provider AIMU supports works here. Omit `--model` and AIMU [resolves a default](https://saxman.info/aimu/how-to/switch-providers/#use-whatever-model-is-already-available-locally): `$AIMU_LANGUAGE_MODEL`, else the first already-running local model found (Ollama, then a local OpenAI-compatible server). A cloud model is never auto-selected, and startup fails with an actionable message if nothing resolves. Chat at the prompt; Ctrl-D exits.
 
-Run the **web** front end instead (needs the `web` extra):
+Useful flags: `--tools web,fs,compute,misc` ([AIMU built-in tool groups](https://saxman.info/aimu/reference/api/tools/)), `--mcp <url>` (repeatable), `--no-memory`, `--no-plugins`, `--no-subagents`, `--system`, `--config <path>`, `--host` / `--port` (web).
 
-```bash
-kokua --frontend web              # or: kokua-web
-# then open http://127.0.0.1:8000
-```
+Two commands worth knowing: **`/stop`** cancels a reply that's still streaming and keeps the partial turn, so the conversation continues (the web UI has a Stop button for the same). **`/diag`** reports the in-flight turn, the gate state, and a stuck turn's async stack; it never takes the turn gate, so it answers even when a hung turn is holding it. Rotating logs go to `$KOKUA_HOME/data/logs/kokua.log`, and `kill -USR1 <pid>` dumps all thread stacks there.
 
-## Using Kokua
+## Key features
 
-Reloading the page replays the prior conversation (the assistant already keeps its context across
-reconnects; this makes it visible again), including reasoning and tool calls when `show_thinking` /
-`show_tools` are on. The transcript's auxiliary blocks (thinking, tool calls, continuation markers,
-phases, sub-agent cards, drafted plans) render collapsed; each has a header showing its label (e.g. the
-tool name) that you click to expand the detail. Direct messages and the approval / plan-review prompts
-stay open. Assistant replies are rendered as GitHub-flavored markdown (tables, nested lists, code, links, task
-lists, etc.) once each turn completes, via vendored `marked` + `DOMPurify` (bundled, no CDN); the HTML
-is sanitized, so model or tool output can't inject scripts or markup. LaTeX math (`$...$`, `$$...$$`) is
-typeset with vendored KaTeX, applied after sanitization with `trust` disabled so untrusted output stays
-safe. Each bubble carries a datetime caption (localized, full precision on hover) recording when the
-message occurred; it survives reloads. Conversations from before this feature show no caption on their
-older messages.
+### Conversation
 
-The web UI holds multiple conversations: the left sidebar lists them (titled automatically from the first
-message) and has a "+ New conversation" button; click any conversation to continue it, or hover a
-conversation and click its `×` to delete it (you are asked to confirm; deleting the current conversation
-drops you into the most recent remaining one). Memory (facts and documents) is shared across all
-conversations. The CLI remains single-conversation for now. The sidebar can be collapsed to an icon rail
-(the `«`/`»` toggle) and resized by dragging the divider next to it; the width and collapsed state are
-remembered per browser.
+- **[Multiple conversations](docs/explanation/architecture.md#the-core).** The web sidebar lists them, titled automatically from the first message, with new/delete and a collapsible, resizable rail whose state is remembered per browser. Memory is shared across all of them; the CLI stays single-conversation.
+- **Concurrent, non-blocking turns.** Switching away from a streaming reply does not cancel it. Only the conversation you are viewing streams live; a turn that finishes elsewhere posts a dismissible notification, and switching into a conversation with work still running shows a "Working…" indicator.
+- **Replayable transcripts.** Reloading replays the prior conversation, including reasoning and tool calls when `show_thinking` / `show_tools` are on. Auxiliary blocks (thinking, tool calls, phases, sub-agent cards, drafted plans) render collapsed behind a labeled header; messages and prompts stay open. Each bubble carries a localized datetime caption that survives reloads.
+- **Safe rendering.** Replies render as GitHub-flavored markdown once a turn completes, via vendored `marked` + `DOMPurify` (no CDN), so model or tool output cannot inject scripts. LaTeX (`$...$`, `$$...$$`) is typeset with vendored KaTeX *after* sanitization, with `trust` disabled.
+- **[Runtime settings panel](src/kokua/config.example.toml).** The gear button changes the model, the generation parameters (`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), and the display prefs mid-session. Changes apply on the next turn and are written back to `config.toml`, so they survive restarts. Leave a field blank for the provider default. Also holds an auto/light/dark theme selector, applied before first paint.
 
-Conversations run concurrently: switching away from a conversation with a reply still streaming does not
-cancel it, and only the conversation you're viewing streams tokens/thinking/tool activity live. A turn
-that finishes while you're looking elsewhere posts a dismissible notification instead of streaming into
-the view you're on; switch back to see the result. If you switch (or reconnect) into a conversation that
-still has a turn running in the background, a "Working…" indicator appears in the header until that
-turn's next update arrives. Tool-approval prompts (see below) only ever appear for the conversation you
-are currently viewing; a backgrounded or scheduled turn auto-denies any gated tool instead of prompting.
+### Capability
 
-The header's gear button opens a settings panel to change, at runtime, the model generation parameters
-(`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), display prefs
-(`show_thinking` / `show_tools`), and the active model. These changes apply on the next turn and are
-remembered across restarts (written back into `config.toml`, which is the single source of settings).
-Leave a generation field blank to use the model/provider default; note
-that thinking models ignore `top_p`/`top_k` and force `temperature`, and Anthropic does not support the
-penalty parameters. The panel also has a theme selector (auto / light / dark; auto follows your OS
-preference); the theme is a per-browser choice remembered locally, applied before first paint to avoid a
-flash.
+- **[Self-authored skills](https://saxman.info/aimu/how-to/use-skills/).** Built on AIMU's `SkillAgent`: the assistant writes `SKILL.md` skills (the same format Claude Code uses), and bundles runnable Python/shell scripts it can author and execute in the same turn, so it takes on capabilities it did not ship with.
+- **[Remote MCP services](https://saxman.info/aimu/how-to/use-mcp-tools/).** Kokua wires AIMU's `MCPClient` to config and to the agent. Connect a server with `--mcp <url>` or `[[mcp.server]]`, or let the assistant connect one itself with its `add_mcp_server` tool. OAuth is handled by posting the authorization link into the chat and persisting the tokens; bearer-token servers read their secret from an env var named by `token_env`, never from the config file.
+- **[Sub-agents](https://saxman.info/aimu/how-to/spawn-subagents/).** AIMU's `spawn_subagent(agent_type, task)` delegates an independent subtask to a fresh, isolated agent. Built-in roles are `researcher`, `coder`, and `generalist`, each cloning the active model with its own tool subset (a role's groups intersected with your enabled `[tools]` groups; parent-only memory/skills/MCP tools are withheld). Define your own under `[subagents.roles.*]`, optionally assigning specific MCP servers and tool-packs. Independent spawns in one turn run concurrently.
+- **Lean supervisor mode** (on by default). Keeps the always-on agent's tool context small: it mounts only cross-cutting tools (memory, skills, MCP management, config, scheduling, date/time) plus `spawn_subagent`, answers trivial requests itself, and delegates specialized work to the role-scoped workers above. Here `[tools] groups` defines the universe workers may draw from rather than the assistant's own toolset. Set `lean_supervisor = false` for a flat agent that carries every tool itself.
+- **Persistent memory.** AIMU's [semantic store](https://saxman.info/aimu/how-to/use-semantic-memory/) for facts and [document store](https://saxman.info/aimu/how-to/use-document-memory/) for text, shared across all conversations and surviving restarts. Both live under [`data/`](#state); `--no-memory` turns them off.
 
-List what's installed:
+### Proactive work
+
+- **[Scheduled tasks](src/kokua/scheduling/).** Ask for something on a schedule ("every weekday at 9am, summarize my calendar") and the assistant persists it to `data/scheduled_tasks.json` via its own `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` tools; it survives restarts. Schedules are one-shot, interval, daily, or weekly.
+- **Where a task runs.** By default a firing lands in whatever conversation you are viewing (shown with amber "proactive" styling). Ask for its own conversation and each firing opens a fresh chat; ask for an ongoing one and every firing writes to the single chat it created first, building on its own history.
+- **Pause, resume, dry-run.** `disable_scheduled_task` stops a task firing while keeping it; `enable_scheduled_task` resumes it; `run_scheduled_task` fires it now without touching its schedule, reproducing exactly what the scheduled run would do. Scheduled runs auto-deny the approval-gated tools, since nobody is present to approve them.
+
+### Deep planning
+
+- **[Plan before doing](src/kokua/planning/).** When you ask for it, the assistant drafts an explicit plan first -- which tools, skills, and MCP services it will use, what it will search for, where it needs to build a skill or connect a server -- then carries it out. Planning is per request, not a global mode: use the **Plan** toggle beside the message box, or send `/plan <task>` (which also works in the CLI).
+- **Human review.** Enable *Review the plan before executing* to pause a planned turn for your Approve / Edit / Reject; otherwise the plan runs automatically.
+- **Adversarial review.** An independent reviewer agent with no conversation context can critique the plan (Kokua re-plans on rejection) and/or the final answer before you see it (Kokua revises, up to `review_rounds`). Both are off by default and combine with human review, whose prompt shows you the critique. Reviewing the result means the answer cannot stream live: the agentic loop still streams, but the answer appears only once it passes.
+- **Reviewers check their claims.** Each reviewer is a tool-using agent that runs a bounded assessment over a curated verification toolset (current date/time, web lookup, computation) before returning a verdict, so it can confirm recency and numeric claims instead of rejecting what it cannot verify from the request alone. The toolset excludes your memory, documents, skills, and MCP servers, keeping the reviewer an independent critic with no access to your state. See [Security](#security) for a known limitation.
+- **Show all reasoning.** Turn it on for the full trace: every LLM call in a planned turn (planner, each reviewer, executor, each revision) streams live under a labeled phase header, and every intermediate version is shown. This overrides result review's hide-until-vetted gate; only the final answer is saved. The raw trace is recorded per turn, so reloading replays exactly what you saw rather than a summary.
+
+### Files and media
+
+- **[Images in and out](src/kokua/images.py).** Attach an image and the assistant reads it (needs a [vision-capable model](https://saxman.info/aimu/reference/model-matrix/)): the composer's paperclip or a paste in the web UI, `/attach <path>` in the CLI. It can also [generate images](https://saxman.info/aimu/how-to/generate-images/) when [`$AIMU_IMAGE_MODEL`](https://saxman.info/aimu/reference/env-vars/) is set (e.g. `gemini:nano-banana`, or a HuggingFace diffusers `hf:<repo>`); without it, no generation tool is offered at all. Images live in `data/images/` and are served at `/images/<name>`; a conversation stores only a short reference, so `sessions.json` stays compact.
+- **[PDFs](src/kokua/toolpacks/pdf.py).** The built-in `pdf` tool-pack adds `markdown_to_pdf`: ask for something as a PDF and it writes to `data/downloads/`, handing back a download link in the web UI or a path from the CLI.
+- **[Email](src/kokua/toolpacks/email.py).** The `email` tool-pack lets the assistant mail information to you -- digests, summaries, reports -- written in Markdown and delivered as formatted HTML with a plain-text fallback, optionally attaching files already in `data/downloads/` or `data/images/`. It can only email **you**: the recipient is fixed to `[email] to`, so the tool takes no recipient argument. Configure `[email]` (`host`, `port`, `from`, `to`, `use_ssl`) and put the password in `$KOKUA_EMAIL_PASSWORD`, never in the config file (for Gmail, an App Password). The tool appears only once host, `to`, and the password are all present. Sending is ungated, so a daily digest can send itself.
+
+## Configuration
+
+Settings come from a TOML file, so you don't repeat flags. Precedence, highest first: **command-line flag > config file > built-in default**. The file is read from `--config <path>`, else `$KOKUA_CONFIG`, else `$KOKUA_HOME/config.toml` (default `~/.kokua/config.toml`); a missing default-location file is fine. Every setting has a built-in default, so the file is optional and you set only what you want to change.
 
 ```bash
-kokua --list-frontends     # cli, web, + any installed plugins
-kokua --list-tool-packs    # example, pdf, image, email, + any installed plugins
+kokua config init           # writes the documented example; --force to overwrite
 ```
 
-Useful flags: `--tools web,fs,compute,misc` (AIMU built-in tool groups), `--mcp <url>` (repeatable, connect
-a remote MCP server; for one needing a bearer token, configure it in `config.toml` under `[[mcp.server]]`
-with `token_env`), `--no-memory`, `--no-plugins`, `--no-subagents`, `--system`, `--config <path>`,
-`--host` / `--port` (web).
+The scaffold comments every key at its default, so changing a default in a later release still reaches keys you left commented. See [`config.example.toml`](src/kokua/config.example.toml) for the full set.
 
-### Configuration file
-
-Settings can also come from a TOML config file, so you don't have to repeat flags. Resolution order,
-highest precedence first: **command-line flag > config file > built-in default**. The file is read from
-`--config <path>`, else `$KOKUA_CONFIG`, else `$KOKUA_HOME/config.toml` (default `~/.kokua/config.toml`); a
-missing default-location file is fine. Every setting has a built-in default, so the file is entirely
-optional and you only set what you want to change. See
-[`config.example.toml`](src/kokua/config.example.toml) for the full set of keys with their defaults.
-
-Scaffold a starter file at the default location with:
-
-```bash
-kokua config init           # writes $KOKUA_CONFIG or $KOKUA_HOME/config.toml; --force to overwrite
-```
-
-It writes the same documented example shown above (every key commented at its default), so changing a
-built-in default in a later release still takes effect for keys you leave commented.
+`config.toml` is also **app-written**: the settings panel, the assistant's own `update_config` tool, and a runtime `add_mcp_server` all write back to it, with your comments preserved. There is no second settings store.
 
 ### State
 
-All state lives under `~/.kokua` (override the root with the `KOKUA_HOME` environment variable). The root
-holds `config.toml` (all settings) and a single `data/` directory for all user content:
+All state lives under `~/.kokua` (override the root with `$KOKUA_HOME`). The root holds `config.toml`; a single `data/` directory holds all content:
 
 ```
 ~/.kokua/
-  config.toml          # all settings (see Configuration file); app-written as well as hand-edited
+  config.toml            # all settings; app-written as well as hand-edited
   data/
-    skills/            # authored skills
-    sessions.json      # conversations (web UI can hold several)
-    memory/            # semantic facts
-    documents/         # saved documents (text; scanned by the DocumentStore)
-    downloads/         # generated files (e.g. PDFs), served by the web UI at /download
-    images/            # uploaded + generated images, served by the web UI at /images
-    scheduled_tasks.json   # durable scheduled tasks (agent-managed)
+    sessions.json        # conversations
+    skills/              # authored skills
+    memory/              # semantic facts
+    documents/           # saved documents
+    downloads/           # generated files (e.g. PDFs), served at /download
+    images/              # uploaded + generated images, served at /images
+    scheduled_tasks.json # durable scheduled tasks
 ```
 
-Point `data/` elsewhere with `[paths] data_dir` in the config file. Nothing is written to your working
-directory.
+Point `data/` elsewhere with `[paths] data_dir`. Nothing is written to your working directory or inside the installed package.
 
-## Features
+## Extending Kokua
 
-A built-in `pdf` tool-pack gives the assistant a `markdown_to_pdf` tool: ask it to turn something into a
-PDF and it writes the file to `data/downloads/`. In the web UI the assistant hands back a download link
-(files are served at `/download/<name>`); from the CLI it reports the file path.
+Kokua discovers two kinds of plugin at runtime through Python entry points, so a third party adds capability by publishing a package, with no change to Kokua's core:
 
-**Images.** Attach an image and the assistant reads it (needs a vision-capable model; Claude models
-qualify). In the web UI, use the composer's paperclip or paste an image; from the CLI, run
-`/attach <path>` before your message. The assistant can also generate images when the `AIMU_IMAGE_MODEL`
-env var is set (e.g. `gemini:nano-banana` or a HuggingFace diffusers `hf:<repo>`); without it, no image
-generation tool is offered. Images are stored under `data/images/` and served at `/images/<name>`; a
-conversation keeps only a small reference, so `sessions.json` stays compact.
+- **Front ends** (`kokua.frontends` group): how the assistant runs -- terminal, web, a future Telegram or Slack. A front end is a `kokua.plugins.FrontEnd` whose `run(config, args)` drives the assistant.
+- **Tool-packs** (`kokua.tools` group): extra agent tools. A tool-pack is a `kokua.plugins.ToolPack` whose `build(config)` returns [`@aimu.tool`](https://saxman.info/aimu/how-to/add-custom-tool/) callables, merged into the agent automatically.
 
-**Email.** A built-in `email` tool-pack gives the assistant a `send_email` tool so it can email
-information to you (digests, summaries, reports). It can only email *you*: the recipient is fixed to the
-`[email] to` address, so the tool takes no recipient and cannot mail anyone else. The body is written in
-Markdown and delivered as formatted HTML with a plain-text fallback; the assistant can attach files that
-already live in `data/downloads/` or `data/images/`. Configure the `[email]` section (SMTP `host`, `port`,
-`from`, `to`, `use_ssl`) and set the password in the `KOKUA_EMAIL_PASSWORD` environment variable, never in
-the config file (for Gmail / Google Workspace, use an App Password). The tool appears only once host, `to`,
-and the password are all present. Sending is ungated, so scheduled/proactive turns can send too, e.g. a
-daily digest.
-
-**Scheduled tasks.** Ask the assistant to do something on a schedule ("every weekday at 9am, summarize
-my calendar") and it uses its `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` tools
-to persist the task to `data/scheduled_tasks.json`; it survives restarts. Schedules can be one-shot, an
-interval, daily at a time, or weekly on a weekday. When a task is due it runs an unprompted turn (shown
-with the amber "proactive" styling). By default a task runs in whatever conversation you are viewing;
-ask for it to run in its own conversation and each firing lands in a fresh chat you can review and
-follow up on, or ask for it to keep its own ongoing conversation and every firing writes to the one
-chat it created the first time it ran, so it builds on its own history. Ask to pause a task and it uses
-`disable_scheduled_task`
-to stop it firing while keeping it around; `enable_scheduled_task` resumes it. Ask for a task to run now
-and it uses `run_scheduled_task` to fire it on demand without touching its schedule, reproducing exactly
-what the scheduled run would do, so you can dry-run a task before it is due. Scheduled runs auto-deny
-the approval-gated tools, since no one is present to approve them.
-
-**Sub-agents.** The assistant can delegate an independent subtask to a fresh, isolated sub-agent via a
-`spawn_subagent(agent_type, task)` tool (on by default; `--no-subagents` to disable). Sub-agents come in
-roles — built-in `researcher` (web lookups), `coder` (files + code), and `generalist` (everything) — each
-cloning the active model with its own tool subset (a role's tools are its groups intersected with the
-enabled `[tools]` groups; parent-only memory/skills/MCP tools are withheld). Define or override roles
-under `[subagents.roles.*]` in the config; a role may also be assigned specific MCP servers
-(`mcp_servers`) and tool-packs (`tool_packs`), not just built-in `groups`. Independent spawns in one
-turn run concurrently (`[subagents] concurrent`, on by default). A sub-agent's gated-tool calls (the
-`confirm_tools`, e.g. `execute_python`) are routed to the parent for your approval and are not run
-unattended.
-
-**Lean supervisor mode** (`[assistant] lean_supervisor`, on by default). A supervisor/worker setup that keeps
-the always-on agent's tool context small: the assistant mounts only its cross-cutting tools (memory,
-skills, MCP management, config, scheduling, date/time) plus the `spawn_subagent` delegate, answers
-trivial requests itself, and delegates all specialized work to the role-scoped workers above (each
-carrying only its own narrow toolset). In this mode `[tools] groups` defines the universe of built-in
-groups workers may use, rather than the assistant's own tools. On by default; set
-`lean_supervisor = false` for the flat agent that carries every tool itself.
-
-**Deep planning (per request).** When you ask for it, the assistant drafts an explicit plan before doing
-the work — which tools, skills, and MCP services it will use, what it will web-search for, and where it
-needs to build a skill or connect a new MCP server — then carries it out. Planning is per request, not a
-global mode: flip the **Plan** toggle next to the message box (it stays on until you turn it off) or send
-`/plan <task>` (the latter also works in the CLI). Enable *Review the plan before executing* in the
-settings panel (or `[planning]` in the config file) to pause a planned turn for your Approve / Edit /
-Reject; otherwise it runs the plan automatically.
-
-For extra rigor, turn on **adversarial review**: an independent reviewer agent with no conversation
-context critiques the plan (*Adversarial plan review* — Kokua re-plans on rejection) and/or the final
-answer before it's shown (*Review the result* — Kokua revises on rejection, up to `review_rounds`).
-Reviewing the result means the final answer can't stream live; the agentic loop (thinking and tool calls)
-still streams, but the answer appears only after it passes review. Both are off by
-default and combine with human plan-review (the critique is shown to you before you decide). In the web
-UI the reviewers appear as their own cards ("Plan reviewer / Result reviewer — reviewing…" → approved /
-rejected with the issues), and those cards replay in order when you reload the conversation. (With **Show
-all reasoning** on, these cards are replaced by the reviewers' full streamed reasoning — see below.)
-
-The reviewers are tool-using agents: each runs a bounded tool-calling assessment over a curated
-verification toolset (the current date/time, web lookup, and computation) before returning its verdict,
-so it can check recency and factual/numeric claims instead of rejecting anything it can't confirm from
-the request alone. (This is why, e.g., a correct "as of today" answer is no longer rejected for
-date-unawareness: the reviewer fetches the date the same way the main agent does.) The toolset excludes
-your memory/documents, skills, and MCP servers, so the reviewer stays an independent critic with no
-access to your state. See [Security](#security) for a known limitation of this toolset.
-
-Turn on **Show all reasoning** for the full trace: every LLM call in a planned turn (planner, each
-reviewer, executor, and each revision) streams its reasoning + output live under a labeled phase header,
-and every intermediate plan and result version is shown (reviewers stream a prose assessment). This
-overrides result review's gate — you see every version — and only the final answer is saved to the
-conversation. The whole raw trace is recorded per turn, so reloading a verbose turn replays the same raw
-output you saw live (not a summary); in this mode the summary reviewer cards are not shown. Thinking is
-shown when the model emits it (adaptive models may skip it on simple requests).
-
-## Modules (plugins)
-
-Kokua discovers two kinds of plugin at runtime via Python entry points, so a third party adds capability by
-publishing a package, with no change to Kokua's core:
-
-- **Front ends** (`kokua.frontends` group): how the assistant runs (terminal, web, future Telegram/Slack).
-  A front end is a `kokua.plugins.FrontEnd` whose `run(config, args)` drives the assistant.
-- **Tool-packs** (`kokua.tools` group): extra agent tools. A tool-pack is a `kokua.plugins.ToolPack` whose
-  `build(config)` returns `@aimu.tool` callables, merged into the agent automatically.
-
-The built-in `cli` / `web` front ends and the `example` tool-pack (a dice roller) are registered exactly
-this way in Kokua's own `pyproject.toml`. To add your own from another package:
+The built-in `cli` / `web` front ends and the four tool-packs are registered exactly this way in Kokua's own `pyproject.toml` -- if the built-in path and the plugin path ever diverge, the plugin path is the broken one. To add your own from another package:
 
 ```toml
 # in your package's pyproject.toml
@@ -264,42 +150,65 @@ this way in Kokua's own `pyproject.toml`. To add your own from another package:
 weather = "my_weather_pack:TOOL_PACK"
 ```
 
-`pip install` it and `kokua --list-tool-packs` shows it; its tools appear on the agent next run. See
-`src/kokua/toolpacks/example.py` for the template.
+`pip install` it, and `kokua --list-tool-packs` shows it; its tools appear on the agent next run. See [`toolpacks/example.py`](src/kokua/toolpacks/example.py) for the template.
 
 ## Security
 
-Kokua can author and run Python/shell scripts as **real subprocesses with your user privileges (no
-sandbox)**, and connect to remote MCP servers and run whatever tools they expose. Real capability is the
-point of a personal assistant, but it means a prompt-injected or mistaken model can run arbitrary code on
-your machine and call arbitrary remote tools. Only run Kokua with a model, inputs, and MCP servers you
-trust. The CLI prints a notice on startup.
+Kokua can author and run Python/shell scripts as **real subprocesses with your user privileges (no sandbox)**, and connect to remote MCP servers and run whatever tools they expose. Real capability is the point of a personal assistant, but it means a prompt-injected or mistaken model can run arbitrary code on your machine and call arbitrary remote tools. Only run Kokua with a model, inputs, and MCP servers you trust. The CLI prints a notice on startup.
 
-**Tool approval.** The riskiest tools require your confirmation before each call: a `y/N` prompt in the
-terminal, or Allow/Deny buttons in the web UI. By default this gates `add_skill_script`, `add_mcp_server`,
-and `execute_python`. Adjust the set with `[security] confirm_tools` in the config file or `--confirm-tools
-name1,name2` (an empty value disables it). Proactive (unprompted) turns auto-deny these regardless, so the
-assistant never runs a full-access tool on its own schedule without you.
+**Tool approval.** The riskiest tools require confirmation before each call -- a `y/N` prompt in the terminal, Allow/Deny buttons in the web UI. By default this gates `add_skill_script`, `add_mcp_server`, and `execute_python`. Adjust with `[security] confirm_tools` or `--confirm-tools name1,name2` (empty disables it). Proactive and backgrounded turns auto-deny these regardless, so the assistant never runs a full-access tool unattended, and an approval prompt only ever appears for the conversation you are currently viewing.
 
-**Known limitation -- reviewer tools bypass the approval gate.** When adversarial review is on (the
-deep planning mode described under [Features](#features)), the reviewer is a tool-using agent, and its
-verification toolset includes `execute_python` (so it can run calculations to check numeric claims). Unlike the main
-agent, the reviewer has **no** approval gate -- an autonomous critic can't pause to ask you mid-review --
-so it can run arbitrary Python unattended while reviewing. This is an intentional short-term tradeoff we
-intend to revisit (e.g. sandboxing the reviewer, or restricting it to safe `calculate`-only arithmetic).
-Until then, treat "review on" as granting the reviewer the same code-execution reach the main agent has,
-and only enable it with a model and inputs you trust.
+**Known limitation -- reviewer tools bypass the approval gate.** With adversarial review on, the reviewer is a tool-using agent whose verification toolset includes `execute_python` (so it can check numeric claims). Unlike the main agent it has **no** approval gate -- an autonomous critic cannot pause to ask you mid-review -- so it can run arbitrary Python unattended while reviewing. This is an intentional short-term tradeoff we intend to revisit (sandboxing the reviewer, or restricting it to `calculate`-only arithmetic). Until then, treat "review on" as granting the reviewer the same code-execution reach the main agent has.
 
 ## Development
 
 ```bash
-uv sync --all-extras            # installs the editable ../aimu + all extras (see Install)
-ruff check . && ruff format --check .
-pytest -q
+uv sync --all-extras                                  # installs the editable ../aimu + all extras
+uv run ruff check . && uv run ruff format --check .
+uv run pytest -q                                      # mock-only: no model, network, or keys
+uv run pytest -m e2e                                  # opt-in browser tests (playwright install chromium)
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+`src/kokua/` is grouped by subsystem, and `tests/` mirrors it exactly:
+
+```
+core/         the transport-agnostic runtime: assistant, conversations, turns, interaction,
+              settings_runtime, diagnostics, build, agent_registry, turn_gate, messages, errors
+config/       the settings schema, the TOML file, the writers, the runtime-settings table
+planning/     the /plan pipeline and the context-free reviewer agents
+mcp/          remote MCP servers and their OAuth
+scheduling/   recurrence math, the durable task registry, the agent-facing tools
+channels/     ChannelUI plus the concrete channels
+frontends/    cli, web        -- registered as plugins, exactly like a third party's would be
+toolpacks/    example, pdf, image, email
+```
+
+The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`, `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
+
+## Resources
+
+### Kokua
+
+- 💡 [Design principles](docs/explanation/design-principles.md): the six that decide what belongs in the core, each with the code that backs it and the patterns it excludes.
+- 🏗️ [Architecture](docs/explanation/architecture.md): module layout, control flow, and the concurrency model.
+- ⚙️ [`config.example.toml`](src/kokua/config.example.toml): every setting, documented at its default.
+- 🧩 [`toolpacks/example.py`](src/kokua/toolpacks/example.py): the tool-pack template.
+- 📋 [CHANGELOG](CHANGELOG.md) · [TODO](TODO.md): what changed, and what's known but not yet scheduled.
+
+### AIMU
+
+Kokua is a thin application over [AIMU](https://saxman.info/aimu/), so most capability questions are really AIMU questions. The primitives Kokua wires together:
+
+- 🔌 [Switch providers](https://saxman.info/aimu/how-to/switch-providers/): the `provider:model_id` string, default-model resolution, timeouts, and failover -- what `--model` accepts and how it resolves when you omit it.
+- 🤖 [Personal-assistant primitives](https://saxman.info/aimu/how-to/build-personal-assistant/): the `Channel` transport, the `Scheduler`, and runtime skill authoring. The three pieces Kokua is built from.
+- 🛠️ [Built-in tools](https://saxman.info/aimu/reference/api/tools/) · [custom tools](https://saxman.info/aimu/how-to/add-custom-tool/) · [MCP](https://saxman.info/aimu/how-to/use-mcp-tools/): what `--tools`, a tool-pack, and `--mcp` draw on.
+- 🧠 [Semantic memory](https://saxman.info/aimu/how-to/use-semantic-memory/) · [documents](https://saxman.info/aimu/how-to/use-document-memory/) · [skills](https://saxman.info/aimu/how-to/use-skills/) · [sub-agents](https://saxman.info/aimu/how-to/spawn-subagents/): the capability layer.
+- 📊 [Model matrix](https://saxman.info/aimu/reference/model-matrix/) · [environment variables](https://saxman.info/aimu/reference/env-vars/): which models support vision, tools, and reasoning, and the AIMU env vars Kokua inherits.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, where a new module goes, and PR conventions.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).

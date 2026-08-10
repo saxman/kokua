@@ -11,8 +11,8 @@ import random
 
 from aimu.tools import tool
 
-from ..config import AssistantConfig
-from ..plugins import ToolPack
+from kokua.config import AssistantConfig
+from kokua.plugins import ToolPack
 
 
 def build(config: AssistantConfig) -> list:

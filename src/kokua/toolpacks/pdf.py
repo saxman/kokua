@@ -16,8 +16,8 @@ from pathlib import Path
 
 from aimu.tools import tool
 
-from ..config import AssistantConfig
-from ..plugins import ToolPack
+from kokua.config import AssistantConfig
+from kokua.plugins import ToolPack
 
 # fpdf2's built-in fonts (helvetica, ...) are Latin-1 only, so LLM-authored Markdown full of smart
 # quotes / dashes would raise. Map the common offenders to ASCII, then drop anything else outside

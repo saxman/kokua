@@ -29,8 +29,8 @@ from typing import Optional
 
 from aimu.tools import tool
 
-from ..config import AssistantConfig
-from ..plugins import ToolPack
+from kokua.config import AssistantConfig
+from kokua.plugins import ToolPack
 
 # The SMTP password lives only in the environment, never in the config file. See module docstring.
 _PASSWORD_ENV = "KOKUA_EMAIL_PASSWORD"

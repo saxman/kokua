@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ..assistant import Assistant, ModelClientError
-from ..channels.cli import CLIChannel
-from ..config import AssistantConfig
-from ..plugins import FrontEnd
+from kokua.core.assistant import Assistant, ModelClientError
+from kokua.channels.cli import CLIChannel
+from kokua.config import AssistantConfig
+from kokua.plugins import FrontEnd
 
 _STARTUP_NOTICE = (
     "[notice] This assistant can author and run Python/shell scripts with full access to this "

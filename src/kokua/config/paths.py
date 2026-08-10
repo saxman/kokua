@@ -1,0 +1,44 @@
+"""The three state locations that must resolve *before* a config file can be read.
+
+The reference example stored everything under ``aimu.paths.output``; a standalone app owns
+its own directory instead. The state root defaults to ``~/.kokua`` and is overridable with the
+``KOKUA_HOME`` environment variable. The root holds ``config.toml`` (all settings; hand-authored and
+app-written) and a single ``data/`` directory holding only content (conversations, memory, etc.)::
+
+    $KOKUA_HOME/
+      config.toml          # all settings (created on first write if absent)
+      data/
+        sessions.json
+        memory/
+        documents/
+        skills/
+
+Only the root, ``data/``, and ``config.toml`` live here, because those three are needed to *find*
+the settings. Every leaf below ``data/`` is a derived property on ``AssistantConfig``
+(``sessions_path``, ``skills_dir``, ``memory_path``, ...) so that a ``[paths] data_dir`` override in
+config.toml moves all of them at once. Adding a leaf function here would silently bypass that.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+
+def state_dir() -> Path:
+    """Root for all of Kokua's state: ``$KOKUA_HOME`` if set, else ``~/.kokua``.
+
+    Configurable only via the env var, since the config file lives inside this directory and so
+    must be locatable before it is read. Not created here; callers create what they write.
+    """
+    env = os.environ.get("KOKUA_HOME")
+    return Path(env).expanduser() if env else Path.home() / ".kokua"
+
+
+def data_dir() -> Path:
+    """Directory holding all transient and user-provided content."""
+    return state_dir() / "data"
+
+
+def config_path() -> Path:
+    return state_dir() / "config.toml"
