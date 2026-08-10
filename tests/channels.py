@@ -47,6 +47,19 @@ class _ConvCapturingChannel(FakeChannel):
         self.conversation_pushes.append(items)
 
 
+class SubagentCapturingChannel(FakeChannel):
+    """A channel that records ``subagent`` frames, with the display flags a reporter reads."""
+
+    def __init__(self, *, show_thinking: bool = False, show_tools: bool = False):
+        super().__init__()
+        self.show_thinking = show_thinking
+        self.show_tools = show_tools
+        self.subagent_frames: list[dict] = []
+
+    async def send_subagent(self, event: dict) -> None:
+        self.subagent_frames.append(event)
+
+
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
     base = {
         # All leaf paths derive from data_dir; point it at the test's tmp dir.
