@@ -131,6 +131,10 @@
     .plan { align-self: flex-start; max-width: 85%; background: var(--approval-bg); border: 1px solid var(--approval-border); border-radius: 12px; padding: 8px 14px; }
     .subagent { align-self: flex-start; max-width: 85%; font-size: 0.9em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 10px; padding: 6px 12px; }
     .subagent[data-status="running"] { opacity: 0.75; font-style: italic; }
+    .subagent .sa-task { color: var(--muted); font-style: italic; margin-bottom: 4px; }
+    .subagent .sa-reasoning { color: var(--muted); white-space: pre-wrap; margin: 2px 0; }
+    .subagent .sa-tool { font-family: ui-monospace, monospace; font-size: 0.95em; margin: 2px 0; }
+    .subagent .sa-error { color: var(--error-fg, crimson); margin: 2px 0; }
     .phase { align-self: stretch; max-width: 100%; background: transparent; border: none; border-top: 1px solid var(--border);
       border-radius: 0; padding: 10px 2px 2px; margin-top: 6px; font-size: 0.72em; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--muted); }
@@ -522,29 +526,95 @@
     let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
     let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
 
-    // Render/update a sub-agent (reviewer) card as a foldable block: the header shows role + status,
-    // the body lists the reviewer's issues (markdown). Live frames carry an id so the "running" card
-    // updates in place on its verdict; replayed history items have no id and just render a static card.
+    // Render/update a sub-agent card as a foldable block. Two producers share this frame type: a
+    // planning reviewer (role + status + issues) and a spawned sub-agent (role + task + status, its
+    // body built up from `append` frames). A spawn card is the one carrying `task`.
     function renderSubagent(frame, ts) {
       let card = frame.id ? subagentCards[frame.id] : null;
       if (!card) {
         card = addFoldable("subagent", "", { md: true }, ts);  // stamp once, when first created
         if (frame.id) subagentCards[frame.id] = card;
+        card.spawn = !!frame.task;
+        if (frame.task) {
+          const task = document.createElement("div");
+          task.className = "sa-task";
+          task.textContent = "“" + frame.task + "”";
+          card.body.appendChild(task);
+        }
       }
-      const role = frame.role || "Sub-agent";
-      const status = frame.status === "running" ? "reviewing…" : (frame.status || "done");
-      card.label.textContent = "🔎 " + role + " — " + status;
-      const issuesMd = (frame.status !== "running" && frame.issues && frame.issues.length)
-        ? frame.issues.map((i) => "- " + i).join("\n")
-        : "";
-      const html = renderMarkdown(issuesMd);
-      if (html === null) card.body.textContent = issuesMd;
-      else {
-        card.body.innerHTML = html;
-        typesetMath(card.body);
+      if (frame.append) appendSubagentEntry(card, frame.append);
+      // A spawn's finish frame carries both `status` and `append` together, and no `role` of its own
+      // (see the frame shapes above) -- remember role/task on the card so a status-only update still
+      // has the identity to re-render, rather than either skipping the label update (frame.append is
+      // truthy) or falling back to "Sub-agent" (frame.role is absent).
+      if (frame.role || frame.status) {
+        if (frame.role) card.role = frame.role;
+        if (frame.task) card.task = frame.task;
+        const role = card.role || "Sub-agent";
+        const status = subagentStatusLabel(frame.status, card.spawn);
+        card.label.textContent = "🤖 " + role + " — " + status;
+        if (card.task) card.label.textContent += " · " + truncate(card.task, 60);
+        if (frame.issues && frame.issues.length && frame.status !== "running") {
+          const issuesMd = frame.issues.map((i) => "- " + i).join("\n");
+          const html = renderMarkdown(issuesMd);
+          if (html === null) card.body.textContent = issuesMd;
+          else {
+            card.body.innerHTML = html;
+            typesetMath(card.body);
+          }
+        }
       }
-      card.outer.dataset.status = frame.status || "";
+      if (frame.status) card.outer.dataset.status = frame.status;
       autoscroll();
+    }
+
+    function subagentStatusLabel(status, isSpawn) {
+      if (status === "running") return isSpawn ? "working…" : "reviewing…";
+      return status || "done";
+    }
+
+    function truncate(text, limit) {
+      return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
+    }
+
+    // One entry inside a card's body. Consecutive reasoning extends the open block, so streamed
+    // thinking reads as prose rather than as one div per token.
+    function appendSubagentEntry(card, entry) {
+      if (entry.kind === "reasoning") {
+        const last = card.body.lastElementChild;
+        if (last && last.classList.contains("sa-reasoning")) {
+          last.textContent += entry.text || "";
+          return;
+        }
+        const el = document.createElement("div");
+        el.className = "sa-reasoning";
+        el.textContent = entry.text || "";
+        card.body.appendChild(el);
+        return;
+      }
+      if (entry.kind === "tool") {
+        const el = document.createElement("div");
+        el.className = "sa-tool";
+        el.textContent = (entry.name || "tool") + "(" + toolArgs(entry.arguments) + ")";
+        card.body.appendChild(el);
+        return;
+      }
+      if (entry.kind === "error") {
+        const el = document.createElement("div");
+        el.className = "sa-error";
+        el.textContent = entry.text || "";
+        card.body.appendChild(el);
+        return;
+      }
+      const el = document.createElement("div");
+      el.className = "sa-answer md";
+      const html = renderMarkdown(entry.text || "");
+      if (html === null) el.textContent = entry.text || "";
+      else {
+        el.innerHTML = html;
+        typesetMath(el);
+      }
+      card.body.appendChild(el);
     }
 
     // Stop is only meaningful while a reactive turn is being processed: enabled when the user sends,

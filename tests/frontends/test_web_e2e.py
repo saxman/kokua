@@ -79,13 +79,17 @@ def _free_port() -> int:
 def live_server():
     """Factory: start the real web app (backed by a `_SlowClient`) under uvicorn in a thread.
 
-    Returns a callable `start(delay=0.0) -> base_url`. Servers are torn down after the test. Memory,
-    plugins, and sub-agents are off so startup is fast and model-free; the mock client handles turns.
+    Returns a callable `start(delay=0.0, seed=None) -> base_url`. Servers are torn down after the
+    test. Memory, plugins, and sub-agents are off so startup is fast and model-free; the mock client
+    handles turns. `seed`, if given, is called with the `AssistantConfig` before the app is built, so
+    a test can plant a conversation (e.g. a session with recorded sub-agent events) ahead of startup.
     """
     started: list[tuple] = []
 
-    def start(delay: float = 0.0) -> str:
+    def start(delay: float = 0.0, seed=None) -> str:
         config = AssistantConfig(memory=False, subagents=False, load_plugins=False, tools=["none"])
+        if seed is not None:
+            seed(config)
         app = build_app(config, client_factory=lambda conversation_id: _SlowClient(delay))
         port = _free_port()
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
@@ -210,3 +214,42 @@ def test_working_indicator_on_switch_into_running(page, live_server):
     expect(working).not_to_have_class(_HIDDEN)
 
     expect(working).to_have_class(_HIDDEN, timeout=10_000)  # clears once the turn completes
+
+
+def test_subagent_card_replays_with_its_nested_trace(page, live_server):
+    """A recorded spawn replays as one foldable card: header collapsed, nested trace on expand."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    def seed(config):
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[{"role": "user", "content": "research the vendors"}],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                    "subagent": {
+                        "0": [
+                            {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+                            {"id": "r-1", "append": {"kind": "tool", "name": "get_webpage", "arguments": {"url": "u"}}},
+                            {
+                                "id": "r-1",
+                                "status": "done",
+                                "append": {"kind": "answer", "text": "Vendor A is cheaper."},
+                            },
+                        ]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    card = page.locator(".bubble.subagent")
+    expect(card).to_have_count(1)
+    expect(card.locator(".fold-label")).to_contain_text("researcher")
+    expect(card.locator(".fold-label")).to_contain_text("done")
+    card.locator(".fold-header").click()
+    expect(card.locator(".sa-tool")).to_contain_text("get_webpage")
+    expect(card.locator(".sa-answer")).to_contain_text("Vendor A is cheaper.")
