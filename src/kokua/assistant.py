@@ -144,11 +144,6 @@ class Assistant:
         # is layered on, so a settings change (or a cleared field) can rebuild from a clean base.
         # Assigned by create() and refreshed on a runtime model switch.
         self._base_generate_kwargs: dict = {}
-        # The current runtime generate-kwargs override (what the settings panel last set), layered over
-        # config.generation on every client the factory builds. Assigned by create(), updated by
-        # apply_settings, so a conversation built at any time carries the same effective kwargs as the
-        # active agent.
-        self._runtime_generate_kwargs: dict = {}
 
     @classmethod
     async def create(
@@ -332,7 +327,7 @@ class Assistant:
         """Resolve any pending tool approval or plan review as denied/rejected.
 
         Called before switching the viewed conversation away from the turn that raised them: that
-        turn keeps running in the background (Task 6 drops the old cancel-on-switch behavior), so
+        turn keeps running in the background (switching does not cancel it), so
         without this its awaited future would hang forever, and a reply the user types after
         switching could otherwise be misrouted to it instead of starting a new turn."""
         if self._pending_approval is not None and not self._pending_approval.done():
@@ -343,8 +338,8 @@ class Assistant:
     async def new_conversation(self) -> str:
         """Start and switch to a new, empty conversation; returns its id.
 
-        The previous conversation's turn (if any) keeps running in the background -- switching no
-        longer cancels it (Task 6). If the new conversation's agent fails to build
+        The previous conversation's turn (if any) keeps running in the background -- switching does
+        not cancel it. If the new conversation's agent fails to build
         (``ModelClientError``), the active pointer reverts to the previous conversation before
         re-raising, so the caller is never left active on a conversation whose agent doesn't work.
         The new session record itself still lingers in the store, unused but harmless (mirrors an
@@ -368,8 +363,8 @@ class Assistant:
     async def select_conversation(self, conversation_id: str) -> None:
         """Switch the active conversation to an existing one; its agent (re)builds from the store.
 
-        The previous conversation's turn (if any) keeps running in the background -- switching no
-        longer cancels it (Task 6). If the build fails, the active pointer reverts to the previous
+        The previous conversation's turn (if any) keeps running in the background -- switching does
+        not cancel it. If the build fails, the active pointer reverts to the previous
         conversation before re-raising, so the caller is never left active on a conversation whose
         agent doesn't work.
         """
@@ -836,7 +831,7 @@ class Assistant:
             reuse = session_id if target == "task" else None
             return await self._run_in_new_session(prompt, task_name, session_id=reuse)
         # Captured once so the rest of this run is internally consistent even if the user switches
-        # conversations while it's in flight (Task 6 no longer cancels a turn on switch).
+        # conversations while it's in flight (a switch does not cancel a running turn).
         conversation_id = self._active_id
         token = streaming_conversation.set(conversation_id)
         proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run (unattended)
@@ -887,7 +882,7 @@ class Assistant:
         select/new_conversation, this never touches ``self._active_id`` -- it is not "switching" to
         the session, just running a turn on it (the registry looks up any conversation's agent by
         id, no active-pointer swap needed). Leaving ``self._active_id`` alone is what keeps this turn
-        consistent with every other Phase B concurrency invariant: ``streaming_conversation`` (set to
+        consistent with every other concurrency invariant: ``streaming_conversation`` (set to
         ``session.key`` below) then never equals the viewed conversation, so ``_approve`` auto-denies a
         gated tool call here (no user is watching this session) instead of prompting; the serve loop's
         `conversation_id = self._active_id` at submit time still binds a message the user sends during

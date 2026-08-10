@@ -206,8 +206,8 @@ def build_memory(config: AssistantConfig) -> tuple[Optional[SemanticMemoryStore]
     (unlike per-conversation history). Their tools have distinct names, so both sets coexist on the
     one agent.
 
-    The stores are shared across every per-conversation agent, and Phase B lets turns on different
-    conversations run concurrently, so two turns can invoke these sync tools in parallel (each via
+    The stores are shared across every per-conversation agent, and turns on different conversations
+    run concurrently, so two turns can invoke these sync tools in parallel (each via
     ``asyncio.to_thread``). That is safe because AIMU's stores serialize their own methods internally
     (a re-entrant per-store lock), so no wrapping is needed here.
     """

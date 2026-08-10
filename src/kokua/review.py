@@ -123,7 +123,7 @@ def _result_input(request: str, plan: str, answer: str, evidence: str) -> str:
 async def review_result(model: Optional[str], request: str, plan: str, answer: str, evidence: str = "") -> Verdict:
     """Independently review a final result against the request and plan (no conversation context).
 
-    ``evidence`` is the agent's tool-result transcript (see ``assistant._tool_evidence``); when given, the
+    ``evidence`` is the agent's tool-result transcript (see ``planning._tool_evidence``); when given, the
     reviewer weighs it as fresher than its own memory instead of rejecting on stale-knowledge suspicion."""
     return await _review(model, RESULT_REVIEW_SYSTEM, _result_input(request, plan, answer, evidence))
 

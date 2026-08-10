@@ -5,7 +5,7 @@ frame protocol, and the ``send_frame`` seam) lives in :class:`aimu.aio.channels.
 subclass adds the frames Kokua's richer page needs: a conversation-list sidebar, conversation-history
 replay, and tool-call approval prompts. Each is sent through the inherited public ``send_frame``.
 
-Phase B lets turns on different conversations run concurrently, but only the conversation the user is
+Turns on different conversations run concurrently, but only the conversation the user is
 currently viewing should stream token/thinking/tool frames; a background turn runs silently and posts a
 ``notification`` frame on completion instead. The module-level :data:`streaming_conversation` contextvar
 carries the running turn's conversation id (set by ``Assistant._handle``/``_proactive`` for the task
@@ -64,7 +64,7 @@ def _text_of(content: Any) -> str:
 
 
 # A stored image reference: our own /images/<name> route, the compacted form persisted in place of inline
-# base64 (see images.py / assistant._compact_images). Bounded to a bare filename (no slashes) so the match
+# base64 (see images.py / messages.compact_message_images). Bounded to a bare filename (no slashes) so the match
 # can't run past the reference into surrounding prose.
 _IMAGE_REF_RE = re.compile(r"/images/[\w.\-]+")
 
@@ -182,8 +182,8 @@ class WebChannel(BaseWebChannel):
 
     def __init__(self, websocket: Any, *, show_thinking: bool = False, show_tools: bool = False):
         super().__init__(websocket, show_thinking=show_thinking, show_tools=show_tools)
-        # The conversation this socket is currently viewing (set by the front end, Task 6/7). None
-        # until then, which _foreground() treats as "always foreground" (nothing to compare against).
+        # The conversation this socket is currently viewing (set by the front end). None until then,
+        # which _foreground() treats as "always foreground" (nothing to compare against).
         self.active_conversation_id: Optional[str] = None
 
     def _foreground(self) -> bool:
@@ -191,9 +191,9 @@ class WebChannel(BaseWebChannel):
 
         ``streaming_conversation`` is None outside any turn context (a direct push, or a proactive send
         that isn't wrapped by ``Assistant._handle``), which is always foreground. ``active_conversation_id``
-        is None until the front end starts tracking the viewed conversation (Task 6/7); until then there is
-        nothing to mute against, so every turn is foreground -- the pre-Phase-B behavior for the one
-        connection Kokua allows at a time."""
+        is None until the front end starts tracking the viewed conversation; until then there is nothing
+        to mute against, so every turn is foreground -- correct for the one connection Kokua allows at a
+        time."""
         if self.active_conversation_id is None:
             return True
         viewing = streaming_conversation.get()

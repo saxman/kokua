@@ -1,4 +1,4 @@
-"""App-owned state locations.
+"""The three state locations that must resolve *before* a config file can be read.
 
 The reference example stored everything under ``aimu.paths.output``; a standalone app owns
 its own directory instead. The state root defaults to ``~/.kokua`` and is overridable with the
@@ -12,6 +12,11 @@ app-written) and a single ``data/`` directory holding only content (conversation
         memory/
         documents/
         skills/
+
+Only the root, ``data/``, and ``config.toml`` live here, because those three are needed to *find*
+the settings. Every leaf below ``data/`` is a derived property on ``AssistantConfig``
+(``sessions_path``, ``skills_dir``, ``memory_path``, ...) so that a ``[paths] data_dir`` override in
+config.toml moves all of them at once. Adding a leaf function here would silently bypass that.
 """
 
 from __future__ import annotations
@@ -37,27 +42,3 @@ def data_dir() -> Path:
 
 def config_path() -> Path:
     return state_dir() / "config.toml"
-
-
-def skills_dir() -> Path:
-    return data_dir() / "skills"
-
-
-def sessions_path() -> Path:
-    return data_dir() / "sessions.json"
-
-
-def memory_dir() -> Path:
-    return data_dir() / "memory"
-
-
-def documents_dir() -> Path:
-    return data_dir() / "documents"
-
-
-def images_dir() -> Path:
-    return data_dir() / "images"
-
-
-def scheduled_tasks_path() -> Path:
-    return data_dir() / "scheduled_tasks.json"

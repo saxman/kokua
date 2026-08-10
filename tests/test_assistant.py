@@ -66,8 +66,6 @@ def test_arg_parser_defaults():
 def test_default_config_lives_under_state_dir():
     cfg = resolve_config(build_arg_parser().parse_args([]))
     assert cfg.data_dir == kokua.paths.data_dir()
-    assert cfg.skills_dir == kokua.paths.skills_dir()
-    assert cfg.sessions_path == kokua.paths.sessions_path()
     assert cfg.frontend == "cli"
 
 
@@ -94,10 +92,6 @@ def test_arg_parser_overrides():
 def test_sessions_path_under_data_dir(tmp_path):
     cfg = AssistantConfig(data_dir=tmp_path, memory=False)
     assert cfg.sessions_path == tmp_path / "sessions.json"
-
-
-def test_paths_sessions_path_is_data_dir_leaf():
-    assert kokua.paths.sessions_path() == kokua.paths.data_dir() / "sessions.json"
 
 
 def test_default_tools_groups():
@@ -1236,7 +1230,7 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
     assert set(order) == {"a", "b"}
 
 
-# --- foreground-gated approval + switch-away concurrency (Task 6) -----------------------------
+# --- foreground-gated approval + switch-away concurrency --------------------------------------
 
 
 async def test_background_turn_auto_denies_gated_tool(tmp_path):
@@ -2153,7 +2147,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
     """Critical regression: _run_in_new_session must never touch self._active_id.
 
     Before the fix it swapped self._active_id to the new session's id for the run's duration (restored
-    in a finally). Under Phase B concurrency that made _approve see streaming_conversation ==
+    in a finally). With concurrent per-conversation turns that made _approve see streaming_conversation ==
     self._active_id (both the new session) -- i.e. foreground -- so a gated tool call inside a
     scheduled new-session run would PROMPT instead of auto-denying, and a concurrent user switch
     during the run would be silently clobbered back by the finally. Asserts both the auto-deny and

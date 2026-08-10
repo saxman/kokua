@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from kokua import paths, scheduling
+from kokua import scheduling
 from kokua.config import AssistantConfig
 
 
@@ -11,18 +11,12 @@ def test_scheduled_tasks_path_under_data_dir(tmp_path):
     assert cfg.scheduled_tasks_path == tmp_path / "scheduled_tasks.json"
 
 
-def test_paths_scheduled_tasks_path_under_state(monkeypatch, tmp_path):
-    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
-    assert paths.scheduled_tasks_path() == tmp_path / "data" / "scheduled_tasks.json"
-
-
 def _record(task_id="abc", name="t1"):
     return {
         "id": task_id,
         "name": name,
         "prompt": "hi",
         "schedule": {"type": "interval", "seconds": 60},
-        "new_session": False,
         "created_at": "2026-07-15T00:00:00",
         "enabled": True,
     }
@@ -34,14 +28,8 @@ def test_record_target_reads_explicit_target():
     assert scheduling._record_target({"target": "active"}) == "active"
 
 
-def test_record_target_migrates_legacy_new_session():
-    assert scheduling._record_target({"new_session": True}) == "new"
-    assert scheduling._record_target({"new_session": False}) == "active"
+def test_record_target_defaults_to_active():
     assert scheduling._record_target({}) == "active"
-
-
-def test_record_target_prefers_target_over_legacy_flag():
-    assert scheduling._record_target({"target": "task", "new_session": True}) == "task"
 
 
 def test_registry_add_load_roundtrip(tmp_path):
@@ -284,27 +272,6 @@ async def test_fire_job_task_target_skips_writeback_if_cancelled_during_run(tmp_
         assert scheduling.load(path) == []  # not resurrected by the write-back
     finally:
         _noop_fire.return_key = None
-
-
-async def test_fire_job_migrates_legacy_new_session_record(tmp_path):
-    _noop_fire.calls = []
-    scheduler, path, _, arm_all = _make(tmp_path)
-    scheduling.add(
-        path,
-        {
-            "id": "legacy",
-            "name": "L",
-            "prompt": "p",
-            "schedule": {"type": "interval", "seconds": 60},
-            "new_session": True,  # legacy record, no "target"
-            "created_at": "x",
-            "enabled": True,
-        },
-    )
-    arm_all()
-    _delay, job = scheduler.jobs["legacy"]
-    await job()
-    assert _noop_fire.calls[-1] == ("p", "new", "L", None)  # legacy new_session=True migrates to "new"
 
 
 async def test_fire_job_once_removes(tmp_path):

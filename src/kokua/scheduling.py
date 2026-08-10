@@ -80,15 +80,8 @@ def next_fire(schedule: dict, now: datetime) -> Optional[float]:
 
 
 def _record_target(record: dict) -> str:
-    """Return a task record's effective proactive-turn target: one of "active", "new", "task".
-
-    Reads the ``target`` field written by current code, falling back to the legacy ``new_session``
-    boolean so registries written before ``target`` existed keep working without a file rewrite.
-    """
-    target = record.get("target")
-    if target:
-        return target
-    return "new" if record.get("new_session") else "active"
+    """Return a task record's effective proactive-turn target: one of "active", "new", "task"."""
+    return record.get("target") or "active"
 
 
 def load(path: Path) -> list[dict]:

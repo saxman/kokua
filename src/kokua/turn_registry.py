@@ -18,7 +18,6 @@ class TurnInfo:
     handle: RunHandle
     started: float
     preview: str
-    background: bool = False
 
 
 class TurnTracker:
@@ -30,9 +29,6 @@ class TurnTracker:
 
     def get(self, conversation_id: str) -> Optional[TurnInfo]:
         return self._turns.get(conversation_id)
-
-    def remove(self, conversation_id: str) -> None:
-        self._turns.pop(conversation_id, None)
 
     def remove_if(self, conversation_id: str, handle: RunHandle) -> None:
         """Remove ``conversation_id``'s entry only when it is the one holding ``handle``.
@@ -47,9 +43,6 @@ class TurnTracker:
     def running(self, conversation_id: str) -> bool:
         info = self._turns.get(conversation_id)
         return info is not None and not info.handle.done
-
-    def active_ids(self) -> list[str]:
-        return list(self._turns.keys())
 
     def all(self) -> list[tuple[str, "TurnInfo"]]:
         return list(self._turns.items())

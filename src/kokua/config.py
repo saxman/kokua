@@ -52,7 +52,7 @@ SUPERVISOR_GUIDANCE = (
 )
 
 # Built-in sub-agent roles (AIMU agent_types). Each role's tools are its groups intersected with the
-# assistant's enabled tool groups (see assistant._build_subagent_tool), so a role never grants a tool
+# assistant's enabled tool groups (see build._build_subagent_agent_types), so a role never grants a tool
 # the user disabled globally. `description` becomes the role's menu line shown to the model; the
 # `system_message` body guides the sub-agent. Users override or extend these via [subagents.roles.*].
 DEFAULT_SUBAGENT_ROLES: dict[str, dict] = {
