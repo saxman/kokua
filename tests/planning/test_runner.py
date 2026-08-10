@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from helpers import MockAsyncModelClient
+from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant
 from kokua.planning.runner import PLAN_PROMPT
 from kokua.config import AssistantConfig

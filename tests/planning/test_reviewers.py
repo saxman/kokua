@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from helpers import MockAsyncModelClient
+from tests.helpers import MockAsyncModelClient
 from kokua.planning import reviewers as review
 from kokua.config import table as runtime_settings
 from kokua.core.assistant import Assistant

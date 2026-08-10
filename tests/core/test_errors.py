@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from helpers import MockAsyncModelClient
+from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant, ModelConnectionError
 from kokua.core.errors import describe_error
 
 from aimu.aio.channels.base import ChannelMessage
 
-from test_assistant import FakeChannel, _config
+from tests.channels import FakeChannel, _config
 
 
 def _connection_error() -> ModelConnectionError:

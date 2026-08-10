@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from helpers import MockAsyncModelClient
+from tests.helpers import MockAsyncModelClient
 
 from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from helpers import MockAsyncModelClient
+from tests.helpers import MockAsyncModelClient
 from kokua.channels.web import WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
 from kokua.frontends.web import build_app
