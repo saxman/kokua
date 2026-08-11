@@ -387,8 +387,15 @@ class WebChannel(BaseWebChannel):
         await self.send_frame({"type": "phase", "label": label, "detail": detail})
 
     async def send_subagent(self, event: dict) -> None:
-        """Show sub-agent (reviewer) activity as its own card. ``event`` carries an ``id`` (so a
-        'running' card updates in place on its verdict), a ``role``, a ``status``, and any ``issues``.
+        """Show one ``id``-keyed foldable card of sub-agent-style activity, updated in place.
+
+        Two producers share this frame type, told apart by ``task`` (present on a spawn's create
+        event, and on every later event of its lineage) versus its absence (a planning reviewer's
+        verdict card): a spawn's create event carries ``id``/``role``/``task``/``status: "running"``
+        and grows with ``{"id", "append": {"kind": "reasoning" | "tool" | "answer" | "error", ...}}``
+        entries; a reviewer's card carries ``id``/``role``/``status``/``issues`` instead, sent once per
+        round with no ``append``. Either kind closes with a terminal ``status`` of ``"done"``,
+        ``"stopped"``, or ``"error"``.
 
         Muted for a background turn (see the module docstring)."""
         if not self._foreground():

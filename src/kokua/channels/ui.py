@@ -123,7 +123,21 @@ class ChannelUI:
             await self._done()
 
     async def show_subagent(self, event: dict) -> None:
-        """Show a reviewer activity card. A no-op where cards aren't rendered."""
+        """Show one foldable card's worth of activity, updated in place by ``event["id"]``.
+
+        Two independent producers share this one frame type and its ``id``-keyed card: a planning
+        reviewer's verdict (``role``/``status``/``issues``) and a delegated sub-agent's nested trace
+        (``role``/``task``/``status``, built up from ``append`` entries). ``task`` on the create event
+        (and ``append`` on every later one) is the discriminator a renderer uses to tell them apart --
+        a reviewer card never carries either.
+
+        A card opens with a create event carrying ``id``, ``role`` (plus ``task`` for a spawn) and
+        ``status: "running"``; grows with zero or more ``{"id", "append": {"kind": ..., ...}}`` entries
+        (``append.kind`` is ``"reasoning"``, ``"tool"``, ``"answer"``, or ``"error"`` for a spawn; a
+        reviewer instead sends its verdict as ``issues`` alongside a terminal ``status`` and no
+        ``append``); and closes with a terminal ``status`` of ``"done"``, ``"stopped"``, or
+        ``"error"``. A no-op where cards aren't rendered.
+        """
         if self._subagent is not None:
             await self._subagent(event)
 

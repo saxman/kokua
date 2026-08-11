@@ -79,19 +79,19 @@ persists to its own conversation, streams muted, and posts a notification when i
 `delete_conversation` cancels, and only the deleted conversation's own turn.
 
 A turn's spawned sub-agents surface the same way. `core/subagents.py`'s `SubagentReporter` implements
-AIMU's `SubagentObserver` protocol; `Assistant` owns one instance for the process, and `build.py`
-threads it into every per-conversation agent's `spawn_subagent` as the `observer=` argument -- including
-across the rebuild a runtime MCP server add/remove triggers, so a worker role keeps reporting after its
-toolset changes. Displaying and recording are deliberately separate. `TurnRunner` sets a
-`subagent_events` ContextVar collector for the duration of a turn, installed and reset alongside
-`streaming_conversation` under the same invariant (see the module's concurrency invariants): the
-reporter appends each spawn's frames to whichever list is current, and the turn records that list,
-synchronously, as the first action of whichever exit branch runs -- success, cancellation, connection
-error, or generic error. On the cancelled and error branches, which still await one more status send
-afterward (the "(stopped)" notice, or the failure message), recording first means a second cancellation
-racing that send cannot propagate past the completed record call and drop the turn's events.
-`ConversationBook.record_subagent_events`
-persists the result into `session.metadata["subagent"][str(user_index)]`, the same map planning's
+AIMU's `SubagentObserver` protocol; `Assistant` owns one instance per connection (`Assistant.create`
+runs once per WebSocket connection), and `build.py` threads it into every per-conversation agent's
+`spawn_subagent` as the `observer=` argument -- including across the rebuild a runtime MCP server
+add/remove triggers, so a worker role keeps reporting after its toolset changes. Displaying and
+recording are deliberately separate. `TurnRunner` sets a `subagent_events` ContextVar collector for the
+duration of a turn, installed and reset alongside `streaming_conversation` under the same invariant (see
+the module's concurrency invariants): the reporter appends each spawn's frames to whichever list is
+current, and the turn records that list, synchronously, as the first action of whichever exit branch
+runs -- success, cancellation, connection error, or generic error. On the cancelled and error branches,
+which still await one more status send afterward (the "(stopped)" notice, or the failure message),
+recording first means a second cancellation racing that send cannot propagate past the completed record
+call and drop the turn's events. `ConversationBook.record_subagent_events` persists the result into
+`session.metadata["subagent"][str(user_index)]`, the same map planning's
 reviewer verdict cards write into (a shared merge helper extends rather than overwrites, since one turn
 can produce both). A background turn's cards are muted like the rest of what it streams, but its spawns
 are still recorded, so switching into that conversation later shows the work.
