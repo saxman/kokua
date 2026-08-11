@@ -285,7 +285,11 @@ installable, modular application.
   predates this seam fails at Kokua startup with an `ImportError`, not a silent no-cards fallback --
   another symptom of the stale-same-version-string trap `CLAUDE.md`'s AIMU-dependency section already
   warns about. Known limitation: a gated tool call inside a sub-agent (e.g. `execute_python`) still
-  prompts at the top level, not inside its card.
+  prompts at the top level, not inside its card. The parent's own `🔧 spawn_subagent(...)` tool card is
+  suppressed (its role/task/result are pure duplication of the `🤖` card): `WebChannel.send_frame`
+  drops the `tool` frame for `spawn_subagent` specifically (covering both live paths, since the base
+  `send()` and Kokua's `stream_activity()` both route through it), and `conversation_to_frames` drops
+  the matching replay item.
 - **Tool-using reviewers**: the adversarial reviewers are now tool-enabled agents rather than a single
   tool-less call. Each runs a bounded tool-calling assessment over a curated verification toolset
   (`review.REVIEWER_TOOLS`: current date/time, web lookup, and computation) and then extracts the typed

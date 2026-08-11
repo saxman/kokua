@@ -26,6 +26,7 @@ from kokua.config.schema import (
     SUPERVISOR_GUIDANCE,
     AssistantConfig,
 )
+from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.config.tools import make_config_tools
 from kokua.mcp.servers import make_mcp_tools
 from kokua.mcp.auth import Notify
@@ -446,7 +447,7 @@ def rebuild_subagent_tool(
     Worker roles snapshot their toolset when ``spawn_subagent`` is built, so after a runtime MCP
     add/remove this re-resolves each role (picking up or dropping the changed server's tools). No-op
     when sub-agents are disabled (there is no delegate to rebuild)."""
-    agent.tools[:] = [t for t in agent.tools if getattr(t, "__name__", None) != "spawn_subagent"]
+    agent.tools[:] = [t for t in agent.tools if getattr(t, "__name__", None) != SPAWN_SUBAGENT_TOOL_NAME]
     add_subagent_tool(
         agent,
         config,

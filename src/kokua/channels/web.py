@@ -53,6 +53,14 @@ proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)
 # ordinary user messages except for this provenance tag, so display keys off the tag alone.
 _LOOP_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
 
+# AIMU's make_async_subagent_tool (aimu/aio/tools/builtin.py) defaults its built tool's name to this
+# literal; kokua never overrides it. A spawn's own `subagent` card already shows its role, task, and
+# result, so the parent's `tool` frame for this one tool name is pure duplication and is suppressed
+# wherever a tool call becomes a display frame: send_frame() below (both live streaming paths route
+# through it) and conversation_to_frames()'s replay of a stored message's tool_calls. build.py imports
+# this same constant to find and replace the tool on a runtime rebuild.
+SPAWN_SUBAGENT_TOOL_NAME = "spawn_subagent"
+
 
 def _text_of(content: Any) -> str:
     """Extract display text from a message's content (a plain string or a list of content blocks)."""
@@ -171,7 +179,10 @@ def conversation_to_frames(
             if show_tools:
                 for call in message.get("tool_calls") or []:
                     fn = call.get("function", {})
-                    add({"type": "tool", "name": fn.get("name"), "arguments": fn.get("arguments")}, ts)
+                    name = fn.get("name")
+                    if name == SPAWN_SUBAGENT_TOOL_NAME:
+                        continue  # shown as its own subagent card instead; see SPAWN_SUBAGENT_TOOL_NAME
+                    add({"type": "tool", "name": name, "arguments": fn.get("arguments")}, ts)
             text = _text_of(message.get("content"))
             if text:
                 add({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE}, ts)
@@ -204,6 +215,19 @@ class WebChannel(BaseWebChannel):
             return True
         viewing = streaming_conversation.get()
         return viewing is None or viewing == self.active_conversation_id
+
+    async def send_frame(self, frame: dict) -> None:
+        """Send ``frame``, dropping a ``tool`` frame for ``spawn_subagent`` (see SPAWN_SUBAGENT_TOOL_NAME).
+
+        The base class's ``send()`` and this class's own ``stream_activity()`` both map a live
+        TOOL_CALLING chunk to a ``tool`` frame by calling this inherited method, so overriding it here
+        is the one choke point that covers both live paths without duplicating the chunk-to-frame
+        mapping. Replay is handled separately, in ``conversation_to_frames``, since a stored turn's
+        tool calls reach the browser batched inside one ``history`` frame rather than through here.
+        """
+        if frame.get("type") == "tool" and frame.get("name") == SPAWN_SUBAGENT_TOOL_NAME:
+            return
+        await super().send_frame(frame)
 
     async def send_notification(self, text: str) -> None:
         """A background turn finished; tell the user without stealing the current view."""
