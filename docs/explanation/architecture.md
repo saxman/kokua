@@ -96,10 +96,13 @@ reviewer verdict cards write into (a shared merge helper extends rather than ove
 can produce both). A background turn's cards are muted like the rest of what it streams, but its spawns
 are still recorded, so switching into that conversation later shows the work.
 
-Two deviations from a literal live replay are deliberate. Reasoning is coalesced into one block when
-recorded -- matching how the page already concatenates consecutive reasoning when it displays it -- but
-streamed token by token when shown live. And a turn's spawn cards replay grouped right after its user
-bubble on reload, not at the exact point mid-turn where they appeared live. Separately, a gated tool
+Two deviations from a literal live replay are deliberate. Reasoning and generated text are coalesced
+into one entry per block when recorded -- matching how the page already concatenates consecutive chunks
+of one kind when it displays them -- but streamed chunk by chunk when shown live, which keeps the stored
+JSON proportional to text length rather than to token count. A block is closed by anything recorded
+after it, so a multi-round spawn gets one answer entry per round for free: the round's own tool call
+sits in between. And a turn's spawn cards replay grouped right after its user bubble on reload, not at
+the exact point mid-turn where they appeared live. Separately, a gated tool
 call inside a sub-agent (e.g. `execute_python`) still prompts at the top level, not inside its card: the
 approval gate is forwarded to the parent's existing prompt, not rendered into the spawn's own card.
 
@@ -174,10 +177,19 @@ persisted map (`metadata["subagent"]`); `task` on the create event is what tells
 `conversation_to_frames` replays that map on reload, interleaved right after its user bubble; a
 verbose-traced turn suppresses the reviewer verdict cards (their content is already in the raw trace)
 but still replays its own spawn cards, since a sub-agent it spawned is not part of that trace. The
-page's `renderSubagent` builds or updates one foldable card per id, appending nested reasoning and
-tool-call lines to its body as `append` frames arrive; nested reasoning honors `show_thinking` and
-nested tool calls honor `show_tools`, the same flags the top-level turn uses, while the card itself and
-its final answer always show.
+page's `renderSubagent` builds or updates one foldable card per id, filling its body as `append` frames
+arrive; nested reasoning honors `show_thinking` and nested tool calls honor `show_tools`, the same flags
+the top-level turn uses, while the card itself and its generated text always show.
+
+A card's body is built from the page's own top-level components, not from card-specific markup:
+`addFoldable` and `renderTool` take an optional parent element, so a nested `💭 thinking` or
+`🔧 <name>` block is literally the same builder (and the same CSS) as its top-level counterpart, and the
+generated text is an assistant-styled markdown block. Each nests as its own foldable: thinking and tool
+calls start collapsed, as they do at the top level, and the answer starts expanded, since it is what a
+reader opens the card for. The card itself starts collapsed, showing only its role, status, and
+truncated task. Generated text streams in chunk by chunk as plain text and is re-rendered as markdown
+when the spawn hits its terminal status, the same two steps the assistant's own reply takes, so a
+replayed card (which also ends with a terminal status) lands on the same DOM.
 
 ## Testing
 
