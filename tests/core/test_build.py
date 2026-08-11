@@ -28,7 +28,7 @@ async def test_assistant_wires_builtin_tools_by_default(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
     # Default groups are present...
-    assert {"get_weather", "read_file", "calculate", "get_current_date_and_time"} <= names
+    assert {"get_weather", "read_file", "calculate", "get_current_date_and_time", "convert_time"} <= names
     # ...and the generative groups (opt-in, need AIMU_*_MODEL) are not.
     assert "generate_image" not in names
 
@@ -91,6 +91,46 @@ def test_subagent_roles_nonempty_when_tools_all(tmp_path):
     assert types["coder"]["tools"]  # non-empty: fs+compute groups now enabled
     assert any(fn.__name__ == "execute_python" for fn in types["coder"]["tools"])
     assert types["generalist"]["tools"]  # non-empty: all groups enabled
+
+
+def test_every_role_gets_the_time_tools_whatever_its_own_groups(tmp_path):
+    """A worker that cannot tell the time is broken whatever its domain, so the time group is added to
+    every role rather than each role having to remember to ask for it."""
+    from kokua.core.build import _build_subagent_agent_types
+
+    cfg = _config(
+        tmp_path,
+        tools=["fs", "compute", "time"],
+        subagent_roles={"trader": {"description": "Trades.", "groups": ["compute"]}},
+    )
+    types = _build_subagent_agent_types(cfg)
+    # `coder` names fs+compute and `trader` names only compute; neither asks for the time group.
+    for role in ("coder", "trader"):
+        names = {fn.__name__ for fn in types[role]["tools"]}
+        assert {"get_current_date_and_time", "convert_time"} <= names, role
+        assert "echo" not in names, role  # the clock arrives without misc riding along
+
+
+def test_a_role_with_no_sources_still_gets_the_time_tools(tmp_path):
+    """A role defined only by a tool-pack or MCP server (no `groups` at all) is the case that silently
+    produced a clockless worker."""
+    from kokua.core.build import _build_subagent_agent_types
+
+    cfg = _config(tmp_path, subagent_roles={"reporter": {"description": "Writes reports."}})
+    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg)["reporter"]["tools"]}
+    assert names == {"get_current_date_and_time", "convert_time"}
+
+
+def test_disabling_the_time_group_withholds_it_from_every_role(tmp_path):
+    """The ambient add is gated on the global set, so it never grants a tool the user turned off."""
+    from kokua.core.build import _build_subagent_agent_types
+
+    cfg = _config(tmp_path, tools=["fs", "compute"])
+    types = _build_subagent_agent_types(cfg)
+    for role in ("coder", "generalist"):
+        names = {fn.__name__ for fn in types[role]["tools"]}
+        assert "get_current_date_and_time" not in names, role
+        assert "convert_time" not in names, role
 
 
 def test_worker_role_resolves_mcp_and_tool_pack_sources(tmp_path):
@@ -170,8 +210,9 @@ async def test_lean_supervisor_drops_worker_tools(tmp_path):
     flat_names = {fn.__name__ for fn in flat._agent.tools}
     lean_names = {fn.__name__ for fn in lean._agent.tools}
     assert lean_names < flat_names  # strictly smaller
-    # The delegate + date/time + cross-cutting tools stay; worker/built-in/plugin tools are gone.
-    assert {"spawn_subagent", "get_current_date_and_time"} <= lean_names
+    # The delegate + the whole time group + cross-cutting tools stay; worker/built-in/plugin tools are
+    # gone. The supervisor answers "when" questions itself, so delegating a clock read would cost a spawn.
+    assert {"spawn_subagent", "get_current_date_and_time", "convert_time"} <= lean_names
     for kept in ("author_skill", "add_mcp_server", "store_memory", "update_config"):
         assert kept in lean_names
     for gone in ("web_search", "read_file", "calculate", "echo", "roll_dice"):
@@ -256,7 +297,9 @@ async def test_runtime_added_mcp_server_reaches_lean_worker(tmp_path, monkeypatc
         subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
     )
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
-    assert captured[-1]["trader"]["tools"] == []  # server not connected at create -> worker has nothing yet
+    # Server not connected at create -> the worker has none of its tools yet (only the ambient clock,
+    # which every role gets regardless of its own groups).
+    assert "get_quote" not in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}
 
     add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_mcp(url="https://broker/mcp")

@@ -46,8 +46,8 @@ def test_arg_parser_overrides():
 
 
 def test_default_tools_groups():
-    assert AssistantConfig().tools == ["web", "fs", "compute", "misc"]
-    assert resolve_config(build_arg_parser().parse_args([])).tools == ["web", "fs", "compute", "misc"]
+    assert AssistantConfig().tools == ["web", "fs", "compute", "time", "misc"]
+    assert resolve_config(build_arg_parser().parse_args([])).tools == ["web", "fs", "compute", "time", "misc"]
 
 
 def test_tools_flag_parses_groups():

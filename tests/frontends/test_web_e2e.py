@@ -217,10 +217,12 @@ def test_working_indicator_on_switch_into_running(page, live_server):
 
 
 def test_subagent_card_replays_with_its_nested_trace(page, live_server):
-    """A recorded spawn replays as one foldable card whose nested reasoning, tool call, and generated
-    text are the page's own thinking/tool/assistant blocks, each individually foldable. Thinking and
-    tool calls start collapsed as they do at the top level; the answer starts open, since it is what
-    the reader opened the card for."""
+    """A recorded spawn replays as one foldable card shaped like the `spawn_subagent` tool block it
+    stands in for: the tool's name and the role on the collapsed header, its arguments on the first
+    body line. Below those, the nested reasoning, tool call, and generated text are the page's own
+    thinking/tool/assistant blocks, each individually foldable. Thinking and tool calls start
+    collapsed as they do at the top level; the answer starts open, since it is what the reader
+    opened the card for."""
     from aimu.sessions import Session, TinyDBSessionStore
 
     def seed(config):
@@ -249,10 +251,16 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     _open(page, live_server(delay=0.0, seed=seed))
     card = page.locator(".bubble.subagent")
     expect(card).to_have_count(1)
+    expect(card).to_have_class(re.compile(r"\bspawn\b"))
     header_label = card.locator("> .fold-header > .fold-label")
-    expect(header_label).to_contain_text("researcher")
+    expect(header_label).to_contain_text("spawn_subagent(researcher)")
     expect(header_label).to_contain_text("done")
+    # The task rides the argument line, not the header, so it is not truncated.
+    expect(header_label).not_to_contain_text("compare pricing")
     card.locator("> .fold-header").click()
+
+    args = card.locator("> .fold-body > .sa-args")
+    expect(args).to_have_text('agent_type="researcher", task="compare pricing"')
 
     nested = card.locator("> .fold-body > .bubble")
     expect(nested).to_have_count(3)
@@ -277,7 +285,8 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
 def test_reviewer_card_still_renders_with_its_own_icon(page, live_server):
     """A planning reviewer's verdict shares the same card frame and persisted map as a spawn's card
     (see `renderSubagent`), which is exactly the regression risk finding C caught: the icon is the
-    only at-a-glance way to tell the two apart, and it must stay 🔎 for a reviewer, not 🤖."""
+    only at-a-glance way to tell the two apart, and it must stay 🔎 for a reviewer rather than take
+    the tool-call look a spawn gets: no tool call backs a reviewer's verdict."""
     from aimu.sessions import Session, TinyDBSessionStore
 
     def seed(config):
@@ -300,7 +309,9 @@ def test_reviewer_card_still_renders_with_its_own_icon(page, live_server):
     _open(page, live_server(delay=0.0, seed=seed))
     card = page.locator(".bubble.subagent")
     expect(card).to_have_count(1)
+    expect(card).not_to_have_class(re.compile(r"\bspawn\b"))
     expect(card.locator(".fold-label")).to_contain_text("🔎")
     expect(card.locator(".fold-label")).to_contain_text("Plan reviewer")
+    expect(card.locator(".sa-args")).to_have_count(0)
     card.locator(".fold-header").click()
     expect(card.locator("li", has_text="too vague")).to_have_count(1)
