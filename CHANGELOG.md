@@ -289,7 +289,11 @@ installable, modular application.
   suppressed (its role/task/result are pure duplication of the `🤖` card): `WebChannel.send_frame`
   drops the `tool` frame for `spawn_subagent` specifically (covering both live paths, since the base
   `send()` and Kokua's `stream_activity()` both route through it), and `conversation_to_frames` drops
-  the matching replay item.
+  the matching replay item. Inside a card, nested reasoning/tool-call/error entries now carry the same
+  💭/🔧 language and coloring the top-level stream uses for the same thing (`.thinking`/`.tool`), instead
+  of running together as one uniform color of text, and the answer is set off below a separating rule
+  so it reads as the card's result rather than another line of trace. The task is no longer duplicated
+  between the (still-visible-when-collapsed) header and the body.
 - **Tool-using reviewers**: the adversarial reviewers are now tool-enabled agents rather than a single
   tool-less call. Each runs a bounded tool-calling assessment over a curated verification toolset
   (`review.REVIEWER_TOOLS`: current date/time, web lookup, and computation) and then extracts the typed
