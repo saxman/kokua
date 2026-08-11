@@ -135,8 +135,9 @@ class ChannelUI:
         ``status: "running"``; grows with zero or more ``{"id", "append": {"kind": ..., ...}}`` entries
         (``append.kind`` is ``"reasoning"``, ``"tool"``, ``"answer"``, or ``"error"`` for a spawn; a
         reviewer instead sends its verdict as ``issues`` alongside a terminal ``status`` and no
-        ``append``); and closes with a terminal ``status`` of ``"done"``, ``"stopped"``, or
-        ``"error"``. A no-op where cards aren't rendered.
+        ``append``); and closes with a terminal ``status`` -- ``"done"``, ``"stopped"``, or ``"error"``
+        for a spawn, ``"approved"`` or ``"rejected"`` for a reviewer. A no-op where cards aren't
+        rendered.
         """
         if self._subagent is not None:
             await self._subagent(event)

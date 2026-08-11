@@ -393,9 +393,9 @@ class WebChannel(BaseWebChannel):
         event, and on every later event of its lineage) versus its absence (a planning reviewer's
         verdict card): a spawn's create event carries ``id``/``role``/``task``/``status: "running"``
         and grows with ``{"id", "append": {"kind": "reasoning" | "tool" | "answer" | "error", ...}}``
-        entries; a reviewer's card carries ``id``/``role``/``status``/``issues`` instead, sent once per
-        round with no ``append``. Either kind closes with a terminal ``status`` of ``"done"``,
-        ``"stopped"``, or ``"error"``.
+        entries, closing with a terminal ``status`` of ``"done"``, ``"stopped"``, or ``"error"``; a
+        reviewer's card carries ``id``/``role``/``status``/``issues`` instead, sent once per round with
+        no ``append``, closing with a terminal ``status`` of ``"approved"`` or ``"rejected"``.
 
         Muted for a background turn (see the module docstring)."""
         if not self._foreground():
