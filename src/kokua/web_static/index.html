@@ -44,7 +44,7 @@
       --tool-fg: #92400e; --tool-bg: #fffbeb; --tool-border: #fde68a;
       --approval-bg: #fff7ed; --approval-border: #fdba74;
       --code-bg: #f3f4f6; --quote-fg: #4b5563; --quote-border: #d1d5db;
-      --muted: #6b7280;
+      --muted: #6b7280; --error-fg: crimson;
     }
     :root[data-theme="dark"] {
       color-scheme: dark;
@@ -57,7 +57,7 @@
       --tool-fg: #fbbf24; --tool-bg: #241d10; --tool-border: #78350f;
       --approval-bg: #2a2012; --approval-border: #b45309;
       --code-bg: #0b0e13; --quote-fg: #9ca3af; --quote-border: #4b5563;
-      --muted: #9ca3af;
+      --muted: #9ca3af; --error-fg: #f87171;
     }
     :root { --sidebar-bg: #ececef; --sidebar-active: #d8dade; }
     :root[data-theme="dark"] { --sidebar-bg: #161a22; --sidebar-active: #232a36; }
@@ -113,7 +113,9 @@
     #log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
     .bubble { max-width: 70%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; line-height: 1.4; }
     .user { align-self: flex-end; background: var(--accent); color: var(--accent-fg); border-bottom-right-radius: 4px; }
-    .assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+    /* Full-strength text is stated, not inherited, so the block reads the same nested inside a
+       sub-agent card (whose own text is tinted) as it does at the top level. */
+    .assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; color: var(--fg); }
     .proactive { align-self: flex-start; background: var(--proactive-bg); border: 1px solid var(--proactive-border); }
     .proactive::before { content: "proactive "; font-size: 0.7em; text-transform: uppercase; opacity: 0.6; letter-spacing: 0.05em; }
     .notice { align-self: center; font-size: 0.85em; opacity: 0.6; }
@@ -131,6 +133,16 @@
     .plan { align-self: flex-start; max-width: 85%; background: var(--approval-bg); border: 1px solid var(--approval-border); border-radius: 12px; padding: 8px 14px; }
     .subagent { align-self: flex-start; max-width: 85%; font-size: 0.9em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 10px; padding: 6px 12px; }
     .subagent[data-status="running"] { opacity: 0.75; font-style: italic; }
+    /* A card's nested blocks ARE the top-level thinking/tool/answer components (see .thinking, .tool
+       and .assistant above), so they need no styling of their own -- only placement inside the card's
+       body: indented under it, and released from the transcript's width cap, which the card itself
+       already applies. */
+    .subagent .fold-body > .bubble { max-width: none; margin: 8px 0 8px 12px; }
+    /* Not a foldable: a failure is one short line and the reason the reader is looking, so it stays
+       visible rather than hiding behind a disclosure triangle. */
+    .subagent .sa-error {
+      color: var(--error-fg); margin: 10px 0; padding: 2px 0 2px 10px; border-left: 2px solid var(--error-fg);
+    }
     .phase { align-self: stretch; max-width: 100%; background: transparent; border: none; border-top: 1px solid var(--border);
       border-radius: 0; padding: 10px 2px 2px; margin-top: 6px; font-size: 0.72em; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--muted); }
@@ -522,29 +534,108 @@
     let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
     let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
 
-    // Render/update a sub-agent (reviewer) card as a foldable block: the header shows role + status,
-    // the body lists the reviewer's issues (markdown). Live frames carry an id so the "running" card
-    // updates in place on its verdict; replayed history items have no id and just render a static card.
+    // Render/update a sub-agent card as a foldable block. Two producers share this frame type: a
+    // planning reviewer (role + status + issues) and a spawned sub-agent (role + task + status, its
+    // body built up from `append` frames). A spawn card is the one carrying `task`.
     function renderSubagent(frame, ts) {
       let card = frame.id ? subagentCards[frame.id] : null;
       if (!card) {
         card = addFoldable("subagent", "", { md: true }, ts);  // stamp once, when first created
         if (frame.id) subagentCards[frame.id] = card;
+        card.spawn = !!frame.task;
+        card.answers = [];  // every generated-text block, re-rendered as markdown when the spawn ends
+        // The task is shown truncated on the header below (visible even collapsed, which is all a
+        // reader sees by default) and deliberately not repeated here -- a second, untruncated copy in
+        // the body would read as the card's first line of content rather than as its own label.
       }
-      const role = frame.role || "Sub-agent";
-      const status = frame.status === "running" ? "reviewing…" : (frame.status || "done");
-      card.label.textContent = "🔎 " + role + " — " + status;
-      const issuesMd = (frame.status !== "running" && frame.issues && frame.issues.length)
-        ? frame.issues.map((i) => "- " + i).join("\n")
-        : "";
-      const html = renderMarkdown(issuesMd);
-      if (html === null) card.body.textContent = issuesMd;
-      else {
-        card.body.innerHTML = html;
-        typesetMath(card.body);
+      if (frame.append) appendSubagentEntry(card, frame.append);
+      // A spawn's finish frame carries both `status` and `append` together, and no `role` of its own
+      // (see the frame shapes above) -- remember role/task on the card so a status-only update still
+      // has the identity to re-render, rather than either skipping the label update (frame.append is
+      // truthy) or falling back to "Sub-agent" (frame.role is absent).
+      if (frame.role || frame.status) {
+        if (frame.role) card.role = frame.role;
+        if (frame.task) card.task = frame.task;
+        const role = card.role || "Sub-agent";
+        const status = subagentStatusLabel(frame.status, card.spawn);
+        card.label.textContent = (card.spawn ? "🤖 " : "🔎 ") + role + " — " + status;
+        if (card.task) card.label.textContent += " · " + truncate(card.task, 60);
+        if (frame.issues && frame.issues.length && frame.status !== "running") {
+          const issuesMd = frame.issues.map((i) => "- " + i).join("\n");
+          const html = renderMarkdown(issuesMd);
+          if (html === null) card.body.textContent = issuesMd;
+          else {
+            card.body.innerHTML = html;
+            typesetMath(card.body);
+          }
+        }
       }
-      card.outer.dataset.status = frame.status || "";
+      if (frame.status) card.outer.dataset.status = frame.status;
+      if (frame.status && frame.status !== "running") finalizeSubagentCard(card);
       autoscroll();
+    }
+
+    function subagentStatusLabel(status, isSpawn) {
+      if (status === "running") return isSpawn ? "working…" : "reviewing…";
+      return status || "done";
+    }
+
+    function truncate(text, limit) {
+      return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
+    }
+
+    // One entry inside a card's body, built from the very same components the top level uses for the
+    // same thing: a 💭 thinking foldable, a 🔧 <name> tool foldable, and the generated text as its own
+    // foldable rendered as markdown. Consecutive entries of one kind extend the open block, so
+    // streamed text reads as prose rather than as one block per token, and an entry of another kind
+    // closes it -- which is what gives a multi-round sub-agent one thinking and one answer block per
+    // round, the way the parent's own ↻ continuation marker separates its iterations.
+    function appendSubagentEntry(card, entry) {
+      if (entry.kind === "reasoning") {
+        card.answer = null;
+        if (!card.reasoning) card.reasoning = addFoldable("thinking", "💭 thinking", { parent: card.body }).body;
+        card.reasoning.appendChild(document.createTextNode(entry.text || ""));
+        return;
+      }
+      card.reasoning = null;
+      if (entry.kind === "tool") {
+        card.answer = null;
+        renderTool(entry.name, entry.arguments, undefined, card.body);
+        return;
+      }
+      if (entry.kind === "error") {
+        card.answer = null;
+        const el = document.createElement("div");
+        el.className = "sa-error";
+        el.textContent = "⚠️ " + (entry.text || "");
+        card.body.appendChild(el);
+        return;
+      }
+      // Generated text: appended as plain text while it streams and re-rendered as markdown at the
+      // terminal status, the same two steps the assistant's own reply takes (see finalizeStreaming).
+      // Expanded from the start, since it is the result a reader opens the card for.
+      if (!card.answer) {
+        const block = addFoldable("assistant", "💬 answer", { parent: card.body, expanded: true });
+        card.answer = { body: block.body, text: "" };
+        card.answers.push(card.answer);
+      }
+      card.answer.text += entry.text || "";
+      card.answer.body.textContent = card.answer.text;
+    }
+
+    // Close a card's open blocks and render each of its answer blocks as markdown. Runs on the
+    // spawn's terminal status, which a replayed card also ends with, so live and replayed cards end
+    // up with the same DOM.
+    function finalizeSubagentCard(card) {
+      card.reasoning = null;
+      card.answer = null;
+      for (const answer of card.answers) {
+        const html = renderMarkdown(answer.text);
+        if (html === null) continue;  // markdown libs absent: the streamed plain text stands
+        answer.body.classList.add("md");
+        answer.body.innerHTML = html;
+        typesetMath(answer.body);
+      }
     }
 
     // Stop is only meaningful while a reactive turn is being processed: enabled when the user sends,
@@ -612,16 +703,20 @@
     // detail, hidden until expanded). Starts collapsed. Returns handles so callers can populate/stream
     // into `body` and update `label` (e.g. a sub-agent card whose status changes). `opts.md` marks the
     // body as markdown-rendered content (drops plain-text pre-wrap; see the .md rules).
+    // `opts.parent` places the block inside another element instead of the transcript, which is how a
+    // sub-agent card's nested blocks are the very same components as their top-level counterparts;
+    // `opts.expanded` starts it open, for a block whose content is the point rather than the detail.
     function addFoldable(cls, headerText, opts, ts) {
+      const expanded = !!(opts && opts.expanded);
       const outer = document.createElement("div");
-      outer.className = "bubble foldable collapsed " + cls;
+      outer.className = "bubble foldable " + (expanded ? "" : "collapsed ") + cls;
       const header = document.createElement("button");
       header.type = "button";
       header.className = "fold-header";
-      header.setAttribute("aria-expanded", "false");
+      header.setAttribute("aria-expanded", expanded ? "true" : "false");
       const tri = document.createElement("span");
       tri.className = "fold-tri";
-      tri.textContent = "▸";
+      tri.textContent = expanded ? "▾" : "▸";
       const label = document.createElement("span");
       label.className = "fold-label";
       label.textContent = headerText || "";
@@ -638,7 +733,7 @@
       });
       outer.appendChild(header);
       outer.appendChild(body);
-      log.appendChild(outer);
+      ((opts && opts.parent) || log).appendChild(outer);
       autoscroll();
       return { outer, header, body, label };
     }
@@ -757,9 +852,10 @@
     }
 
     // Foldable tool / continuation blocks. Header carries the identifying name; body holds the verbose
-    // detail (arguments, injected prompt). Shared by live frames and history replay.
-    function renderTool(name, args, ts) {
-      const f = addFoldable("tool", "🔧 " + (name || "tool"), undefined, ts);
+    // detail (arguments, injected prompt). Shared by live frames, history replay, and (via `parent`)
+    // a sub-agent card's nested tool calls.
+    function renderTool(name, args, ts, parent) {
+      const f = addFoldable("tool", "🔧 " + (name || "tool"), { parent }, ts);
       f.body.textContent = toolArgs(args);
       return f;
     }
@@ -1023,7 +1119,7 @@
       const text = input.value.trim();
       if ((!text && attached.length === 0) || ws.readyState !== WebSocket.OPEN) return;
       stickToBottom = true;  // sending snaps back to the bottom to follow the reply
-      subagentCards = {};  // new turn: reviewer card ids (plan-review-0, ...) start fresh
+      subagentCards = {};  // new turn: card ids (reviewer's plan-review-0, ... or a spawn's id) start fresh
       const now = new Date();
       if (text) addBubble("user", text, now);  // show the user's own words, not the /plan wrapper
       for (const item of attached) addImageBubble(item.dataUrl, "user", now);  // echo attachments locally

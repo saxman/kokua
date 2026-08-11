@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from tests.helpers import MockAsyncModelClient
-from kokua.channels.web import WebChannel, conversation_to_frames
+from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME, WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
 from kokua.frontends.web import build_app
 
@@ -84,6 +84,21 @@ async def test_web_channel_emits_thinking_and_tool_frames_when_enabled():
         {"type": "token", "text": "4"},
         {"type": "done"},
     ]
+
+
+async def test_web_channel_send_suppresses_spawn_subagent_tool_frame():
+    """The spawn's own `subagent` card already shows role/task/result, so the parent's `tool` frame
+    for spawn_subagent specifically is dropped -- it would otherwise arrive after the card (AIMU emits
+    TOOL_CALLING only once the tool returns) and duplicate what the card already shows."""
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_tools=True)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": SPAWN_SUBAGENT_TOOL_NAME, "arguments": {}})
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 2}})
+
+    await channel.send(gen())
+    assert ws.frames == [{"type": "tool", "name": "calc", "arguments": {"x": 2}}, {"type": "done"}]
 
 
 async def test_web_channel_send_emits_loop_marker_on_iteration_increment():
@@ -180,6 +195,18 @@ async def test_web_channel_stream_activity_show_answer_emits_tokens():
     assert "done" not in types  # no terminator; caller ends the turn
 
 
+async def test_web_channel_stream_activity_suppresses_spawn_subagent_tool_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_tools=True)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": SPAWN_SUBAGENT_TOOL_NAME, "arguments": {}})
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 2}})
+
+    await channel.stream_activity(gen())
+    assert ws.frames == [{"type": "tool", "name": "calc", "arguments": {"x": 2}}]
+
+
 async def test_web_channel_send_phase_and_done():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -269,6 +296,27 @@ def test_conversation_to_frames_replays_verbose_trace_not_committed_answer():
     assert not any(i["type"] in ("subagent", "message") for i in items)
 
 
+def test_a_traced_turn_replays_spawn_cards_but_not_reviewer_cards():
+    """A verbose planned turn shows its raw trace instead of verdict cards, but a sub-agent it
+    spawned is real work that must still appear."""
+    messages = [{"role": "user", "content": "plan something"}]
+    items = conversation_to_frames(
+        messages,
+        show_thinking=False,
+        show_tools=False,
+        subagent={
+            "0": [
+                {"id": "plan-review-0", "role": "reviewer", "status": "done", "issues": ["too vague"]},
+                {"id": "r-1", "role": "researcher", "task": "find X", "status": "running"},
+                {"id": "r-1", "status": "done", "append": {"kind": "answer", "text": "the answer"}},
+            ]
+        },
+        trace={"0": [{"label": "Planner", "detail": "drafting", "text": "a plan"}]},
+    )
+    replayed = [item for item in items if item["type"] == "subagent"]
+    assert [item["id"] for item in replayed] == ["r-1", "r-1"]
+
+
 async def test_web_channel_background_turn_frames_are_muted():
     from kokua.channels.web import streaming_conversation
 
@@ -282,9 +330,10 @@ async def test_web_channel_background_turn_frames_are_muted():
     token = streaming_conversation.set("other")  # a background conversation
     try:
         await channel.send(gen())
+        await channel.send_subagent({"id": "r-1", "role": "researcher", "task": "find X", "status": "running"})
     finally:
         streaming_conversation.reset(token)
-    assert ws.frames == []  # fully muted, including the "done" terminator
+    assert ws.frames == []  # fully muted, including the "done" terminator and sub-agent cards
 
 
 async def test_web_channel_foreground_turn_frames_stream():
@@ -374,6 +423,25 @@ def test_conversation_to_frames_full_replay():
         {"type": "tool", "name": "calc", "arguments": {"x": 2}},
         {"type": "message", "text": "4", "proactive": False},
     ]
+
+
+def test_conversation_to_frames_omits_spawn_subagent_tool_call():
+    """Replay must not resurrect the spawn_subagent tool card either -- only its subagent card (fed
+    separately via the `subagent` map) represents the spawn."""
+    messages = [
+        {"role": "user", "content": "do X"},
+        {
+            "role": "assistant",
+            "content": "done",
+            "tool_calls": [
+                {"type": "function", "function": {"name": SPAWN_SUBAGENT_TOOL_NAME, "arguments": {}}, "id": "1"},
+                {"type": "function", "function": {"name": "calc", "arguments": {"x": 2}}, "id": "2"},
+            ],
+        },
+    ]
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    tools = [item for item in items if item["type"] == "tool"]
+    assert tools == [{"type": "tool", "name": "calc", "arguments": {"x": 2}}]
 
 
 def test_conversation_to_frames_gating():

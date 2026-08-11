@@ -39,6 +39,7 @@ from kokua.config import AssistantConfig
 from kokua.core.conversations import ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
+from kokua.core.subagents import SubagentReporter
 from kokua.mcp.servers import ServerConnection, reconnect_mcp_servers
 from kokua.scheduling import make_scheduler_tools
 from kokua.core.settings_runtime import SettingsApplier
@@ -64,6 +65,10 @@ class Assistant:
         config: AssistantConfig,
     ):
         self._ui = ChannelUI(channel)
+        # One reporter for this connection (Assistant.create runs once per WebSocket connection): every
+        # conversation's spawn_subagent reports through it, and it resolves the turn to record into
+        # from a contextvar rather than from construction.
+        self._subagent_reporter = SubagentReporter(self._ui)
         self._scheduler = scheduler
         self._store = store
         self._config = config
@@ -192,6 +197,7 @@ class Assistant:
                 images_path=config.images_path,
                 for_each_agent=for_each_agent,
                 reapply_config=assistant._settings.apply_one,
+                subagent_observer=assistant._subagent_reporter,
             ),
             cap=config.agent_cache_cap,
         )

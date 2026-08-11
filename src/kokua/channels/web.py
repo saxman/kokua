@@ -53,6 +53,14 @@ proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)
 # ordinary user messages except for this provenance tag, so display keys off the tag alone.
 _LOOP_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
 
+# AIMU's make_async_subagent_tool (aimu/aio/tools/builtin.py) defaults its built tool's name to this
+# literal; kokua never overrides it. A spawn's own `subagent` card already shows its role, task, and
+# result, so the parent's `tool` frame for this one tool name is pure duplication and is suppressed
+# wherever a tool call becomes a display frame: send_frame() below (both live streaming paths route
+# through it) and conversation_to_frames()'s replay of a stored message's tool_calls. build.py imports
+# this same constant to find and replace the tool on a runtime rebuild.
+SPAWN_SUBAGENT_TOOL_NAME = "spawn_subagent"
+
 
 def _text_of(content: Any) -> str:
     """Extract display text from a message's content (a plain string or a list of content blocks)."""
@@ -114,10 +122,12 @@ def conversation_to_frames(
 
     Two per-turn maps key a user-message index (as a string) to that turn's recorded reviewer activity,
     interleaved right after the user bubble so it replays in place:
-      - ``subagent``: summary verdict cards (non-verbose turns).
+      - ``subagent``: summary verdict cards (non-verbose turns). A verbose turn's plan reviewers show
+        up in ``trace`` instead, but its executor can still spawn its own sub-agents, and those cards
+        (identified by ``task`` on the create event or ``append`` on later ones) replay regardless.
       - ``trace``: the full raw verbose trace as ``phase`` + ``reasoning`` items. A traced turn shows
-        the raw output instead of cards, and its trace already ends with the final answer, so the
-        committed assistant message for that turn is skipped to avoid showing the answer twice.
+        the raw output instead of reviewer cards, and its trace already ends with the final answer, so
+        the committed assistant message for that turn is skipped to avoid showing the answer twice.
     """
     subagent = subagent or {}
     trace = trace or {}
@@ -147,14 +157,18 @@ def conversation_to_frames(
                 add({"type": "user", "text": text}, ts)
             for url in _image_refs_of(message.get("content")):  # uploaded images, replayed under the bubble
                 add({"type": "image", "url": url, "from": "user"}, ts)
-            if str(index) in trace:  # verbose turn: replay the raw trace, not cards
+            events = subagent.get(str(index), [])
+            if str(index) in trace:  # verbose turn: replay the raw trace, not the verdict cards
                 for segment in trace[str(index)]:
                     add({"type": "phase", "label": segment.get("label", ""), "detail": segment.get("detail", "")}, ts)
                     if segment.get("text"):
                         add({"type": "reasoning", "text": segment["text"]}, ts)
-            else:
-                for event in subagent.get(str(index), []):
-                    add({"type": "subagent", **event}, ts)
+                # A reviewer's verdict is already in the trace, but a sub-agent the turn spawned is
+                # not; those cards carry `task` (create event) or `append` (later events) and are
+                # replayed on their own. Filtering on `task` alone would drop a spawn's later frames.
+                events = [event for event in events if "task" in event or "append" in event]
+            for event in events:
+                add({"type": "subagent", **event}, ts)
         elif role == "assistant":
             if str(index - 1) in trace:
                 # The preceding user turn was verbose; its trace already contains this final answer
@@ -165,7 +179,10 @@ def conversation_to_frames(
             if show_tools:
                 for call in message.get("tool_calls") or []:
                     fn = call.get("function", {})
-                    add({"type": "tool", "name": fn.get("name"), "arguments": fn.get("arguments")}, ts)
+                    name = fn.get("name")
+                    if name == SPAWN_SUBAGENT_TOOL_NAME:
+                        continue  # shown as its own subagent card instead; see SPAWN_SUBAGENT_TOOL_NAME
+                    add({"type": "tool", "name": name, "arguments": fn.get("arguments")}, ts)
             text = _text_of(message.get("content"))
             if text:
                 add({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE}, ts)
@@ -198,6 +215,19 @@ class WebChannel(BaseWebChannel):
             return True
         viewing = streaming_conversation.get()
         return viewing is None or viewing == self.active_conversation_id
+
+    async def send_frame(self, frame: dict) -> None:
+        """Send ``frame``, dropping a ``tool`` frame for ``spawn_subagent`` (see SPAWN_SUBAGENT_TOOL_NAME).
+
+        The base class's ``send()`` and this class's own ``stream_activity()`` both map a live
+        TOOL_CALLING chunk to a ``tool`` frame by calling this inherited method, so overriding it here
+        is the one choke point that covers both live paths without duplicating the chunk-to-frame
+        mapping. Replay is handled separately, in ``conversation_to_frames``, since a stored turn's
+        tool calls reach the browser batched inside one ``history`` frame rather than through here.
+        """
+        if frame.get("type") == "tool" and frame.get("name") == SPAWN_SUBAGENT_TOOL_NAME:
+            return
+        await super().send_frame(frame)
 
     async def send_notification(self, text: str) -> None:
         """A background turn finished; tell the user without stealing the current view."""
@@ -381,8 +411,20 @@ class WebChannel(BaseWebChannel):
         await self.send_frame({"type": "phase", "label": label, "detail": detail})
 
     async def send_subagent(self, event: dict) -> None:
-        """Show sub-agent (reviewer) activity as its own card. ``event`` carries an ``id`` (so a
-        'running' card updates in place on its verdict), a ``role``, a ``status``, and any ``issues``.
+        """Show one ``id``-keyed foldable card of sub-agent-style activity, updated in place.
+
+        Two producers share this frame type, told apart by ``task`` (present on a spawn's create
+        event, and on every later event of its lineage) versus its absence (a planning reviewer's
+        verdict card): a spawn's create event carries ``id``/``role``/``task``/``status: "running"``
+        and grows with ``{"id", "append": {"kind": "reasoning" | "tool" | "answer" | "error", ...}}``
+        entries, closing with a terminal ``status`` of ``"done"``, ``"stopped"``, or ``"error"``; a
+        reviewer's card carries ``id``/``role``/``status``/``issues`` instead, sent once per round with
+        no ``append``, closing with a terminal ``status`` of ``"approved"`` or ``"rejected"``.
+
+        ``reasoning`` and ``answer`` entries each carry one chunk of streamed text; the page appends
+        each into the block currently open for that kind, and an entry of another kind closes it. The
+        terminal event repeats no already-streamed text, and carries the answer only when a provider
+        streamed none.
 
         Muted for a background turn (see the module docstring)."""
         if not self._foreground():

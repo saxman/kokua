@@ -31,6 +31,26 @@ def derive_title(messages: list[dict]) -> Optional[str]:
     return None
 
 
+def resolve_user_index(messages: list[dict], base_len: int) -> int:
+    """Where a turn's user message sits in ``messages``, or -1 if the turn committed none.
+
+    ``base_len`` is the transcript length before the turn ran, so the turn's own user message is the
+    first ``user`` entry at or after it. Resolved by scanning rather than assumed to be ``base_len``
+    itself, because AIMU appends the system message as part of a conversation's *first* turn (see
+    ``_append_user_turn``), which puts that turn's user message one position later than the pre-run
+    length. The index is the key ``channels.web.conversation_to_frames`` replays a turn's sub-agent
+    cards and verbose trace under, so an index that misses by one lands on another message and the
+    replay is silently dropped.
+
+    Every caller shares this so the reactive, planned, and unattended paths cannot drift apart; -1 is
+    the sentinel the recording no-op guards already understand.
+    """
+    for index in range(max(base_len, 0), len(messages)):
+        if messages[index].get("role") == "user":
+            return index
+    return -1
+
+
 def _map_image_block_urls(messages: list[dict], transform) -> list[dict]:
     """Return a copy of *messages* with each ``image_url`` block's url passed through *transform*.
 

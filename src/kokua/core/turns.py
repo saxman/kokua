@@ -20,6 +20,10 @@ Every rule here was learned from a bug. Read them before changing anything in th
    the web channel mutes frames from a turn that isn't the conversation being viewed, and the
    approval gate auto-denies a gated tool whose turn isn't being watched. Even the CLI channel needs
    it set, so that its single conversation reads as foreground rather than as a background turn.
+   ``subagent_events`` is installed the same way, for the same reason on the recording side: it must
+   be set before a turn's first ``await`` and reset only in the ``finally`` alongside
+   ``streaming_conversation``, or a spawn racing the set/reset window would report into a stale list
+   (or into no list at all) instead of the turn that owns it.
 
 4. **A proactive run never touches the active pointer.** It is not "switching" to a conversation,
    just running a turn on one -- the registry looks up any conversation's agent by id. Leaving the
@@ -28,7 +32,23 @@ Every rule here was learned from a bug. Read them before changing anything in th
    run still binds to the conversation they are actually looking at, and there is no active id for a
    concurrent switch to race or for a ``finally`` to clobber back.
 
-5. **An unattended turn never lets an exception escape.** A scheduled firing has no user awaiting it
+5. **Record a turn's sub-agent events before its own notification send, in every branch.**
+   ``_record_subagents`` is synchronous, but that only protects it from a cancellation that arrives
+   *after* it runs. A cancelled or failed turn still does one more ``await`` of its own (the
+   "(stopped)" notice, or the failure message) before falling through to the shared ``_persist``
+   call; a second cancellation delivered during that send raises ``CancelledError`` again, which
+   propagates past a record call placed after the send and drops the turn's events. Every branch --
+   cancelled, connection error, generic error, success -- records as its first action, not as a step
+   shared only by the paths that return normally. Recording under the right index is half of this,
+   and every path resolves that index with ``resolve_user_index`` (the pre-run length is not it: a
+   first turn seeds the system message ahead of the user message). A planned turn's index cannot come
+   from the ``PlanResult`` either, since a cancelled or failed run raises instead of returning one, so
+   ``PlanRunner`` publishes the index as it commits and the plan branch reads it back in a ``finally``.
+   (Regressions: ``test_a_second_cancellation_during_the_stopped_send_still_records``,
+   ``test_a_stopped_planned_turn_records_the_events_it_produced``,
+   ``test_a_first_turns_cards_anchor_to_its_user_message_past_the_system_message``.)
+
+6. **An unattended turn never lets an exception escape.** A scheduled firing has no user awaiting it
    and runs inside a scheduler job with no handler of its own, so a propagating error would take the
    scheduler down with it. Report it on the channel and swallow it.
 """
@@ -47,7 +67,8 @@ from aimu.aio.channels.base import ChannelMessage
 
 from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.core.errors import describe_error
-from kokua.core.messages import derive_title
+from kokua.core.messages import derive_title, resolve_user_index
+from kokua.core.subagents import subagent_events
 from kokua.planning.runner import PlanRunner
 
 logger = logging.getLogger(__name__)
@@ -88,21 +109,48 @@ class TurnRunner:
         agent = self._book.agent_for(conversation_id)
         self._book.pin(conversation_id)  # invariant 2
         token = streaming_conversation.set(conversation_id)  # invariant 3
+        collector_token = subagent_events.set([])
         succeeded = False
         failure_reason = ""  # set on error, so a backgrounded turn's notification can carry the reason
+        # Where this turn's sub-agent cards anchor. Both branches settle it in a `finally`, so the
+        # cancellation and error paths below record under the index a completed turn would use; -1
+        # means the turn committed no user message, and recording no-ops.
+        user_index = -1
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
                 try:
                     if plan:
                         runner = PlanRunner(agent, self._ui, self._config, self._review_plan)
-                        self._book.record_plan_metadata(await runner.run(msg), conversation_id)
+                        try:
+                            result = await runner.run(msg)
+                        finally:
+                            # A cancelled or failed planned turn raises instead of returning a
+                            # PlanResult, and the runner publishes the index as it commits, so read it
+                            # from the runner rather than from a result that may never arrive.
+                            user_index = runner.user_index
+                        self._book.record_plan_metadata(result, conversation_id)
                     else:
-                        stream = await agent.run(msg.text, stream=True, images=msg.images)
-                        await self._ui.send(stream, reply_to=msg)
+                        # Taken here rather than before the gate: it is the lower bound the turn's own
+                        # user message is searched for from, so anything another turn appended first
+                        # has to be behind it.
+                        base_len = len(agent.model_client.messages)
+                        try:
+                            stream = await agent.run(msg.text, stream=True, images=msg.images)
+                            await self._ui.send(stream, reply_to=msg)
+                        finally:
+                            # Resolved after the run, not taken as base_len itself: the user message
+                            # this anchors to does not exist until the run appends it, and a first turn
+                            # seeds the system message ahead of it. Reached on the cancelled path too,
+                            # where the agent has already snapshotted the partial turn in its finally.
+                            user_index = resolve_user_index(agent.model_client.messages, base_len)
                 except asyncio.CancelledError:
-                    # `/stop` (or shutdown) cancelled this turn. Note it, keep the partial state (the
-                    # agent snapshots it in a finally), and return so the daemon keeps serving.
+                    # `/stop` (or shutdown) cancelled this turn. Record first: the "(stopped)" send
+                    # below is one more await, and a second cancellation racing it would otherwise
+                    # propagate straight past a record placed after -- see invariant 5. Keep the
+                    # partial state (the agent snapshots it in a finally), and return so the daemon
+                    # keeps serving.
+                    self._record_subagents(conversation_id, user_index)
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                     try:
                         await self._ui.send("(stopped)", reply_to=msg)
@@ -111,23 +159,32 @@ class TurnRunner:
                     await self._persist(conversation_id)
                     return
                 except ModelConnectionError as exc:
+                    self._record_subagents(conversation_id, user_index)  # before the send: invariant 5
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
                     await self._ui.send(
                         f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
                     )
                 except Exception as exc:
+                    self._record_subagents(conversation_id, user_index)  # before the send: invariant 5
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"failed: {describe_error(exc)}"
                     await self._ui.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
                 else:
+                    self._record_subagents(conversation_id, user_index)
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
                 await self._persist(conversation_id)
         finally:
+            subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
+
+    def _record_subagents(self, conversation_id: str, user_index: int) -> None:
+        """Persist whatever the turn's spawns reported. Synchronous, so it also runs on the cancelled
+        path where an await could be cut short."""
+        self._book.record_subagent_events(subagent_events.get() or [], user_index, conversation_id)
 
     async def _notify_if_backgrounded(self, conversation_id: str, *, succeeded: bool, failure_reason: str) -> None:
         """The user switched away before this turn finished: tell them rather than silently updating
@@ -174,10 +231,10 @@ class TurnRunner:
         spec = self._resolve_target(target, prompt, task_name, session_id)
         try:
             await self._run_unattended(prompt, spec)
-        except ModelConnectionError as exc:  # invariant 5
+        except ModelConnectionError as exc:  # invariant 6
             logger.exception("proactive turn connection error")
             await self._report(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
-        except Exception as exc:  # invariant 5
+        except Exception as exc:  # invariant 6
             logger.exception("proactive turn error")
             await self._report(f"A scheduled task failed: {describe_error(exc)}")
         else:
@@ -216,6 +273,7 @@ class TurnRunner:
         """The one body every proactive target shares. See the module's concurrency invariants."""
         conversation_id = spec.conversation_id
         token = streaming_conversation.set(conversation_id)  # invariant 3
+        collector_token = subagent_events.set([])
         proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run
         self._book.pin(conversation_id)  # invariant 2
         try:
@@ -230,17 +288,19 @@ class TurnRunner:
                     message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
                 if spec.echo_reply:
                     await self._ui.send(reply)
+                self._record_subagents(conversation_id, resolve_user_index(agent.model_client.messages, start))
                 await self._persist(conversation_id)
         finally:
             self._book.unpin(conversation_id)
             proactive_turn.reset(proactive_token)
+            subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
 
     async def _report(self, text: str) -> None:
         """Send an unattended run's own status line, tolerating a channel that cannot take it.
 
         Nobody is awaiting this turn, so a failed notification must not become the error that takes
-        down the scheduler job (invariant 5).
+        down the scheduler job (invariant 6).
         """
         try:
             await self._ui.send(text)

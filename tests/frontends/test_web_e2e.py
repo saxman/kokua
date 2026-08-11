@@ -79,13 +79,17 @@ def _free_port() -> int:
 def live_server():
     """Factory: start the real web app (backed by a `_SlowClient`) under uvicorn in a thread.
 
-    Returns a callable `start(delay=0.0) -> base_url`. Servers are torn down after the test. Memory,
-    plugins, and sub-agents are off so startup is fast and model-free; the mock client handles turns.
+    Returns a callable `start(delay=0.0, seed=None) -> base_url`. Servers are torn down after the
+    test. Memory, plugins, and sub-agents are off so startup is fast and model-free; the mock client
+    handles turns. `seed`, if given, is called with the `AssistantConfig` before the app is built, so
+    a test can plant a conversation (e.g. a session with recorded sub-agent events) ahead of startup.
     """
     started: list[tuple] = []
 
-    def start(delay: float = 0.0) -> str:
+    def start(delay: float = 0.0, seed=None) -> str:
         config = AssistantConfig(memory=False, subagents=False, load_plugins=False, tools=["none"])
+        if seed is not None:
+            seed(config)
         app = build_app(config, client_factory=lambda conversation_id: _SlowClient(delay))
         port = _free_port()
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
@@ -210,3 +214,93 @@ def test_working_indicator_on_switch_into_running(page, live_server):
     expect(working).not_to_have_class(_HIDDEN)
 
     expect(working).to_have_class(_HIDDEN, timeout=10_000)  # clears once the turn completes
+
+
+def test_subagent_card_replays_with_its_nested_trace(page, live_server):
+    """A recorded spawn replays as one foldable card whose nested reasoning, tool call, and generated
+    text are the page's own thinking/tool/assistant blocks, each individually foldable. Thinking and
+    tool calls start collapsed as they do at the top level; the answer starts open, since it is what
+    the reader opened the card for."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    def seed(config):
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[{"role": "user", "content": "research the vendors"}],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                    "subagent": {
+                        "0": [
+                            {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+                            {"id": "r-1", "append": {"kind": "reasoning", "text": "fetch each page"}},
+                            {"id": "r-1", "append": {"kind": "tool", "name": "get_webpage", "arguments": {"url": "u"}}},
+                            {"id": "r-1", "append": {"kind": "answer", "text": "**Vendor A** is cheaper."}},
+                            {"id": "r-1", "status": "done"},
+                        ]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    card = page.locator(".bubble.subagent")
+    expect(card).to_have_count(1)
+    header_label = card.locator("> .fold-header > .fold-label")
+    expect(header_label).to_contain_text("researcher")
+    expect(header_label).to_contain_text("done")
+    card.locator("> .fold-header").click()
+
+    nested = card.locator("> .fold-body > .bubble")
+    expect(nested).to_have_count(3)
+    thinking, tool, answer = nested.nth(0), nested.nth(1), nested.nth(2)
+    expect(thinking).to_have_class(re.compile(r"\bthinking\b"))
+    expect(thinking).to_have_class(re.compile(r"\bcollapsed\b"))
+    expect(tool).to_have_class(re.compile(r"\btool\b"))
+    expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
+    expect(tool.locator(".fold-label")).to_contain_text("get_webpage")
+    # The answer block: open, and its markdown rendered as it is for the assistant's own reply.
+    expect(answer).to_have_class(re.compile(r"\bassistant\b"))
+    expect(answer).not_to_have_class(re.compile(r"\bcollapsed\b"))
+    expect(answer.locator(".fold-body")).to_be_visible()
+    expect(answer.locator("strong", has_text="Vendor A")).to_have_count(1)
+    # Expanding a nested block leaves the others closed: each folds on its own.
+    thinking.locator(".fold-header").click()
+    expect(thinking).not_to_have_class(re.compile(r"\bcollapsed\b"))
+    expect(thinking.locator(".fold-body")).to_contain_text("fetch each page")
+    expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
+
+
+def test_reviewer_card_still_renders_with_its_own_icon(page, live_server):
+    """A planning reviewer's verdict shares the same card frame and persisted map as a spawn's card
+    (see `renderSubagent`), which is exactly the regression risk finding C caught: the icon is the
+    only at-a-glance way to tell the two apart, and it must stay 🔎 for a reviewer, not 🤖."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    def seed(config):
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[{"role": "user", "content": "plan the launch"}],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                    "subagent": {
+                        "0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["too vague"], "round": 0}]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    card = page.locator(".bubble.subagent")
+    expect(card).to_have_count(1)
+    expect(card.locator(".fold-label")).to_contain_text("🔎")
+    expect(card.locator(".fold-label")).to_contain_text("Plan reviewer")
+    card.locator(".fold-header").click()
+    expect(card.locator("li", has_text="too vague")).to_have_count(1)

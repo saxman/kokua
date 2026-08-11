@@ -270,6 +270,36 @@ installable, modular application.
   via a generic `subagent` WebSocket frame (no change to the model conversation schema); reviewer
   verdicts are recorded per turn in `session.metadata` and replayed in order on reload. (With the verbose
   trace on, the raw streamed reasoning replaces these cards.)
+- **Spawned sub-agent activity, shown live and on reload**: a `spawn_subagent` call now gets its own
+  foldable card in the conversation that spawned it, updated in place as the child agent runs -- nested
+  reasoning (gated by `show_thinking`) and nested tool calls (gated by `show_tools`), with the card and
+  its final answer always shown regardless of those flags. No new setting. `core/subagents.py`'s
+  `SubagentReporter` implements AIMU's `SubagentObserver` and is the one instance every per-conversation
+  agent's `spawn_subagent` reports through, including after a runtime MCP add/remove rebuilds it.
+  Recording (`ConversationBook.record_subagent_events`, a new method sharing the same
+  `metadata["subagent"]` map the reviewer cards above write into) and display are independent: a
+  background turn's cards are muted like everything else it streams, but its spawns are still recorded,
+  so switching into that conversation later shows the work. This depends on AIMU's unreleased `main`
+  (the `SubagentObserver` protocol and the `observer=` parameter on `make_async_subagent_tool`, see
+  AIMU's own changelog); `build.py` imports `SubagentObserver` unconditionally, so an AIMU install that
+  predates this seam fails at Kokua startup with an `ImportError`, not a silent no-cards fallback --
+  another symptom of the stale-same-version-string trap `CLAUDE.md`'s AIMU-dependency section already
+  warns about. Known limitation: a gated tool call inside a sub-agent (e.g. `execute_python`) still
+  prompts at the top level, not inside its card. The parent's own `🔧 spawn_subagent(...)` tool card is
+  suppressed (its role/task/result are pure duplication of the `🤖` card): `WebChannel.send_frame`
+  drops the `tool` frame for `spawn_subagent` specifically (covering both live paths, since the base
+  `send()` and Kokua's `stream_activity()` both route through it), and `conversation_to_frames` drops
+  the matching replay item. Inside a card, the nested reasoning, tool calls, and generated text are the
+  page's own top-level blocks reused: `addFoldable` and `renderTool` take a parent element, so a nested
+  `💭 thinking` or `🔧 <name>` block is the same builder and the same CSS as its top-level counterpart
+  rather than a card-specific style, and the generated text is its own assistant-styled markdown block.
+  Each nests as an individually foldable block: thinking and tool calls start collapsed as at the top
+  level, the answer starts expanded (it is what the reader opened the card for), and the card itself
+  still starts collapsed showing only role, status, and the truncated task. The sub-agent's text now
+  streams in live token by token and is re-rendered as markdown when the spawn ends, exactly as the
+  assistant's own reply is; recorded events coalesce consecutive chunks into one entry per block, so a
+  reloaded card looks the same while the stored JSON stays proportional to text length. The task is no
+  longer duplicated between the (still-visible-when-collapsed) header and the body.
 - **Tool-using reviewers**: the adversarial reviewers are now tool-enabled agents rather than a single
   tool-less call. Each runs a bounded tool-calling assessment over a curated verification toolset
   (`review.REVIEWER_TOOLS`: current date/time, web lookup, and computation) and then extracts the typed

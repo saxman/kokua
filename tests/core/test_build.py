@@ -502,3 +502,52 @@ def test_make_agent_builder_wires_and_restores(tmp_path):
     assert "author_skill" in tool_names
     # Messages for this conversation were restored onto the fresh agent's client.
     assert any(m.get("content") == "hello" for m in agent.model_client.messages)
+
+
+def _observer_capturing_factory(captured: list):
+    """A make_async_subagent_tool stand-in that records the `observer` each build received."""
+
+    def fake_make(model, *, agent_types, tool_approval, observer=None, **kwargs):
+        captured.append(observer)
+
+        async def spawn_subagent(agent_type: str, task: str) -> str:
+            """menu"""
+            return "ok"
+
+        spawn_subagent.__name__ = "spawn_subagent"
+        spawn_subagent.__tool_is_async__ = True
+        spawn_subagent.__tool_is_streaming__ = False
+        spawn_subagent.__tool_spec__ = {"function": {"name": "spawn_subagent"}}
+        return spawn_subagent
+
+    return fake_make
+
+
+async def test_spawn_subagent_is_built_with_the_activity_reporter(tmp_path, monkeypatch):
+    """The reporter must reach AIMU's factory, or a spawn stays invisible in the UI."""
+    import kokua.core.build as build_mod
+
+    captured: list = []
+    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _observer_capturing_factory(captured))
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert captured and captured[-1] is assistant._subagent_reporter
+
+
+async def test_runtime_mcp_rebuild_keeps_the_activity_reporter(tmp_path, monkeypatch):
+    """A runtime MCP add rebuilds spawn_subagent; dropping the observer there would silently stop
+    sub-agent display for the rest of the process."""
+    import kokua.core.build as build_mod
+
+    captured: list = []
+    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _observer_capturing_factory(captured))
+    monkeypatch.setattr(
+        "kokua.mcp.servers.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
+    )
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    await add_mcp(url="https://broker/mcp")
+
+    assert captured[-1] is assistant._subagent_reporter
