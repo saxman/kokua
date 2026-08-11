@@ -136,10 +136,11 @@ class ChannelUI:
         A card opens with a create event carrying ``id``, ``role`` (plus ``task`` for a spawn) and
         ``status: "running"``; grows with zero or more ``{"id", "append": {"kind": ..., ...}}`` entries
         (``append.kind`` is ``"reasoning"``, ``"tool"``, ``"answer"``, or ``"error"`` for a spawn; a
-        reviewer instead sends its verdict as ``issues`` alongside a terminal ``status`` and no
-        ``append``); and closes with a terminal ``status`` -- ``"done"``, ``"stopped"``, or ``"error"``
-        for a spawn, ``"approved"`` or ``"rejected"`` for a reviewer. A no-op where cards aren't
-        rendered.
+        ``"tool"`` entry carries ``name``/``arguments``/``response``, the last being what the call
+        returned; a reviewer instead sends its verdict as ``issues`` alongside a terminal ``status`` and
+        no ``append``); and closes with a terminal ``status`` -- ``"done"``, ``"stopped"``, or
+        ``"error"`` for a spawn, ``"approved"`` or ``"rejected"`` for a reviewer. A no-op where cards
+        aren't rendered.
 
         A spawn's reasoning and generated text stream one chunk per event, each chunk carrying only its
         own text; a renderer concatenates consecutive chunks of one kind into one block, and anything

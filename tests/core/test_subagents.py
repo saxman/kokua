@@ -27,8 +27,8 @@ def _thinking(text):
     return StreamChunk(StreamingContentType.THINKING, text)
 
 
-def _tool_call(name, arguments):
-    return StreamChunk(StreamingContentType.TOOL_CALLING, {"name": name, "arguments": arguments})
+def _tool_call(name, arguments, response=None):
+    return StreamChunk(StreamingContentType.TOOL_CALLING, {"name": name, "arguments": arguments, "response": response})
 
 
 def _generating(text):
@@ -82,8 +82,23 @@ async def test_nested_tool_calls_need_show_tools():
     await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "https://example.com"}))
     assert channel.subagent_frames[-1] == {
         "id": "r-1",
-        "append": {"kind": "tool", "name": "get_webpage", "arguments": {"url": "https://example.com"}},
+        "append": {
+            "kind": "tool",
+            "name": "get_webpage",
+            "arguments": {"url": "https://example.com"},
+            "response": None,
+        },
     }
+
+
+async def test_a_nested_tool_entry_carries_what_the_call_returned():
+    """A sub-agent's card is the only place its nested calls are ever shown, so dropping the result
+    would leave no way to see what the spawn actually retrieved."""
+    reporter, channel = _reporter(show_tools=True)
+    _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "https://example.com"}, "<html>X</html>"))
+    assert channel.subagent_frames[-1]["append"]["response"] == "<html>X</html>"
 
 
 async def test_generated_text_streams_chunk_by_chunk_and_is_not_gated():

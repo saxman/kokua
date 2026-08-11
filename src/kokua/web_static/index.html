@@ -130,6 +130,14 @@
       color: var(--thinking-fg); background: transparent; border-left: 2px solid var(--thinking-border); padding: 2px 10px; white-space: pre-wrap;
     }
     .tool { align-self: flex-start; max-width: 70%; font-family: ui-monospace, monospace; font-size: 0.8em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 8px; padding: 4px 10px; word-break: break-word; }
+    /* A tool call's result, nested inside its own card: released from the transcript's width cap (the
+       card already applies it) and stripped of the second border and background it would otherwise
+       draw inside the first. `.bubble` supplies the pre-wrap that keeps the result's own line breaks. */
+    .tool > .fold-body > .tool-output { max-width: none; margin: 4px 0 0; padding: 0; background: transparent; border: none; }
+    .tool-output .output-text { display: block; max-height: 24em; overflow: auto; opacity: 0.85; }
+    .tool-output .output-more { display: block; margin-top: 4px; padding: 1px 6px; font: inherit; color: inherit;
+      background: transparent; border: 1px solid var(--tool-border); border-radius: 4px; cursor: pointer; }
+    .tool-output .output-more:hover { text-decoration: underline; }
     .plan { align-self: flex-start; max-width: 85%; background: var(--approval-bg); border: 1px solid var(--approval-border); border-radius: 12px; padding: 8px 14px; }
     .subagent { align-self: flex-start; max-width: 85%; font-size: 0.9em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 10px; padding: 6px 12px; }
     .subagent[data-status="running"] { opacity: 0.75; font-style: italic; }
@@ -619,7 +627,7 @@
       card.reasoning = null;
       if (entry.kind === "tool") {
         card.answer = null;
-        renderTool(entry.name, entry.arguments, undefined, card.body);
+        renderTool(entry.name, entry.arguments, undefined, { parent: card.body, response: entry.response });
         return;
       }
       if (entry.kind === "error") {
@@ -745,10 +753,18 @@
       stampHeader(header, ts);  // rides the header so it stays visible while collapsed
       const body = document.createElement("div");
       body.className = "fold-body" + (opts && opts.md ? " md" : "");
+      // `opts.onFirstExpand` fills the body the first time it is opened and never again, so a block
+      // holding something expensive (a large tool result) costs nothing until a reader asks for it.
+      let fill = (opts && opts.onFirstExpand) || null;
       header.addEventListener("click", () => {
         const collapsed = outer.classList.toggle("collapsed");
         header.setAttribute("aria-expanded", collapsed ? "false" : "true");
         tri.textContent = collapsed ? "▸" : "▾";
+        if (!collapsed && fill) {
+          const run = fill;
+          fill = null;
+          run(body);
+        }
       });
       outer.appendChild(header);
       outer.appendChild(body);
@@ -870,12 +886,50 @@
       return `${name || "tool"}(${toolArgs(args)})`;
     }
 
+    // How much of a tool result is rendered before a reader has to ask for the rest. Output travels
+    // whole (the frame carries it all), so this bounds only the DOM: a multi-megabyte result must not
+    // become a multi-megabyte text node just because someone opened its card.
+    const OUTPUT_CLAMP = 4000;
+
+    // What a tool call returned, as its own nested foldable below the arguments, so the arguments stay
+    // scannable when the card is opened. Populated on first expand, and clamped to OUTPUT_CLAMP with a
+    // button for the rest. Plain text only, never markdown: a tool result is untrusted input.
+    function renderToolOutput(parent, response) {
+      const size = response.length.toLocaleString();
+      // Not also `.tool`: that would make `.bubble.tool` match a card and its own output. The monospace
+      // type and colour are inherited properties, so they arrive from the enclosing card regardless.
+      addFoldable("tool-output", `↳ output (${size} chars)`, {
+        parent,
+        onFirstExpand: (body) => {
+          const text = document.createElement("span");
+          text.className = "output-text";
+          text.textContent = response.slice(0, OUTPUT_CLAMP);
+          body.appendChild(text);
+          if (response.length <= OUTPUT_CLAMP) return;
+          const more = document.createElement("button");
+          more.type = "button";
+          more.className = "output-more";
+          more.textContent = `show all (${size} chars)`;
+          more.addEventListener("click", () => {
+            text.textContent = response;
+            more.remove();
+          });
+          body.appendChild(more);
+        },
+      });
+    }
+
     // Foldable tool / continuation blocks. Header carries the identifying name; body holds the verbose
-    // detail (arguments, injected prompt). Shared by live frames, history replay, and (via `parent`)
-    // a sub-agent card's nested tool calls.
-    function renderTool(name, args, ts, parent) {
-      const f = addFoldable("tool", "🔧 " + (name || "tool"), { parent }, ts);
-      f.body.textContent = toolArgs(args);
+    // detail (arguments, injected prompt) and, for a tool call, the result it returned. Shared by live
+    // frames, history replay, and (via `opts.parent`) a sub-agent card's nested tool calls.
+    function renderTool(name, args, ts, opts) {
+      const f = addFoldable("tool", "🔧 " + (name || "tool"), { parent: opts && opts.parent }, ts);
+      f.body.appendChild(document.createTextNode(toolArgs(args)));
+      // An absent response means no result was recorded (a transcript stored before results were
+      // replayed, a turn cut short mid-dispatch); an empty one means the tool returned nothing. Neither
+      // has anything to show, and an "output (0 chars)" row on every such card would be noise.
+      const response = opts && opts.response;
+      if (typeof response === "string" && response) renderToolOutput(f.body, response);
       return f;
     }
     function renderLoop(text, ts) {
@@ -917,7 +971,7 @@
         autoscroll();
       } else if (frame.type === "tool") {
         thinkingBlock = null;
-        renderTool(frame.name, frame.arguments, new Date());
+        renderTool(frame.name, frame.arguments, new Date(), { response: frame.response });
       } else if (frame.type === "loop") {
         // Agent-loop continuation boundary. Leave streamingBubble open so the answer keeps
         // accumulating and floats below this marker (same float-to-bottom rule as tool blocks).
@@ -993,7 +1047,7 @@
           else if (item.type === "plan") renderPlan(item.text);
           else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user", item.ts);
           else if (item.type === "thinking") addFoldable("thinking", "💭 thinking", undefined, item.ts).body.textContent = item.text || "";
-          else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts);
+          else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response });
           else if (item.type === "loop") renderLoop(item.text, item.ts);
           else if (item.type === "subagent") renderSubagent(item, item.ts);
           else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);

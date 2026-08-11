@@ -2,6 +2,35 @@
 
 ## 0.1.0 (unreleased)
 
+- **A tool card shows what the call returned, not just what it was asked to do.** The result was
+  reaching the channel all along -- AIMU yields `TOOL_CALLING` only once a call has been dispatched, so
+  the chunk carries the result -- and was being dropped. Worse, it wasn't even reconstructible on
+  reload: a stored `role: "tool"` message was skipped entirely by replay, except for the `/images/`
+  reference a generated image carries.
+
+  The result now rides the `tool` frame as `response` and renders in a nested foldable below the
+  arguments, labeled with its size (`↳ output (2,148 chars)`) so a reader knows what opening it costs.
+  The body fills on first open and clamps at 4000 characters with a `show all` button for the rest, as
+  plain text and never markdown, since a tool result is untrusted input. An error, an argument-binding
+  failure, and a denied approval are results too and arrive on the same key, so there is no separate
+  failure rendering to learn.
+
+  All four surfaces that render a tool call carry it: a live card, a background turn's catch-up replay,
+  a sub-agent card's nested calls, and a reloaded transcript. Replay rejoins a stored call to its result
+  by `tool_call_id` rather than by position, since concurrent dispatch appends results in completion
+  order. A call with no matching result -- a conversation stored before this shipped, a turn cut short
+  mid-dispatch -- renders the card exactly as it always did. `show_tools` still gates the whole card,
+  output included, and the tool-approval prompt is unchanged: it fires before dispatch, so there is no
+  result yet.
+
+  One cost worth knowing: output travels whole and only the DOM clamps, so a `history` frame grows by
+  every tool result in the conversation and is re-sent on every conversation *switch*, not only on
+  reload. A conversation with dozens of large results (PDF extractions, email fetches, big MCP
+  responses) makes that frame correspondingly large.
+
+  Requires the matching AIMU change (`response` on its base web `tool` frame), which is on AIMU's
+  `main`.
+
 - **Breaking: one agent shape, and roles are the only switch.** The `subagents` and `lean_supervisor`
   flags are gone, along with the `--subagents` / `--no-subagents` CLI flags and flat mode entirely.
   Every agent is now a lean supervisor: it mounts the cross-cutting tools (skills, MCP management,

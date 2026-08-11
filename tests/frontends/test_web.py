@@ -81,7 +81,7 @@ async def test_web_channel_emits_thinking_and_tool_frames_when_enabled():
     await channel.send(gen())
     assert ws.frames == [
         {"type": "thinking", "text": "hmm"},
-        {"type": "tool", "name": "calc", "arguments": {"x": 2}},
+        {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None},
         {"type": "token", "text": "4"},
         {"type": "done"},
     ]
@@ -99,7 +99,10 @@ async def test_web_channel_send_suppresses_spawn_subagent_tool_frame():
         yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 2}})
 
     await channel.send(gen())
-    assert ws.frames == [{"type": "tool", "name": "calc", "arguments": {"x": 2}}, {"type": "done"}]
+    assert ws.frames == [
+        {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None},
+        {"type": "done"},
+    ]
 
 
 async def test_web_channel_send_emits_loop_marker_on_iteration_increment():
@@ -205,7 +208,20 @@ async def test_web_channel_stream_activity_suppresses_spawn_subagent_tool_frame(
         yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 2}})
 
     await channel.stream_activity(gen())
-    assert ws.frames == [{"type": "tool", "name": "calc", "arguments": {"x": 2}}]
+    assert ws.frames == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}]
+
+
+async def test_web_channel_stream_activity_tool_frame_carries_the_response():
+    """`stream_activity` maps chunks to frames itself rather than reusing the base loop, so the result
+    has to be carried on this path too or a planned turn's trace shows calls without their output."""
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_tools=True)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 2}, "response": "4"})
+
+    await channel.stream_activity(gen())
+    assert ws.frames == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": "4"}]
 
 
 async def test_web_channel_send_phase_and_done():
@@ -433,6 +449,31 @@ async def test_switching_back_mid_turn_replays_the_turn_so_far():
     assert "ts" not in items[2]  # still being written, so it carries no completion caption
 
 
+async def test_a_muted_turns_catch_up_keeps_the_tool_output():
+    """A background turn's tool frames are recorded verbatim, so the switch-in that replays them shows
+    the same output the user would have seen live."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_tools=True)
+    channel.active_conversation_id = "other"  # the turn below runs out of view
+    channel.begin_catch_up("running", "look it up")
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 2}, "response": "4"})
+
+    token = streaming_conversation.set("running")
+    try:
+        await channel.send(gen())
+        channel.active_conversation_id = "running"
+        await channel.send_history([], {})
+    finally:
+        streaming_conversation.reset(token)
+
+    tool = next(item for item in ws.frames[-1]["items"] if item["type"] == "tool")
+    assert tool["response"] == "4"
+
+
 async def test_the_replayed_answer_floats_below_later_reasoning():
     """`partial` mirrors the page's own append rule -- the answer bubble moves below a tool call that
     arrives after it -- so a replay reads in the order a live render would have produced."""
@@ -605,7 +646,7 @@ def test_conversation_to_frames_full_replay():
     assert items == [
         {"type": "user", "text": "what's 2+2?"},
         {"type": "thinking", "text": "adding the numbers"},
-        {"type": "tool", "name": "calc", "arguments": {"x": 2}},
+        {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": "4"},
         {"type": "message", "text": "4", "proactive": False},
     ]
 
@@ -626,7 +667,53 @@ def test_conversation_to_frames_omits_spawn_subagent_tool_call():
     ]
     items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
     tools = [item for item in items if item["type"] == "tool"]
-    assert tools == [{"type": "tool", "name": "calc", "arguments": {"x": 2}}]
+    assert tools == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}]
+
+
+def test_conversation_to_frames_attaches_the_tool_result_to_its_call():
+    """A stored transcript keeps the call and its result in separate messages, so replay has to rejoin
+    them or a reloaded card loses the output a live one showed."""
+    items = conversation_to_frames(_CONVERSATION, show_thinking=True, show_tools=True)
+    tool = next(item for item in items if item["type"] == "tool")
+    assert tool["response"] == "4"
+
+
+def test_conversation_to_frames_omits_the_response_when_no_result_message_exists():
+    """Conversations stored before results were replayed have the call but no matching result, and a
+    turn cut short mid-dispatch never records one. Those cards render as they always did."""
+    messages = [
+        {"role": "user", "content": "what's 2+2?"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"type": "function", "function": {"name": "calc", "arguments": {"x": 2}}, "id": "1"}],
+        },
+    ]
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    assert items[-1] == {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}
+
+
+def test_conversation_to_frames_matches_results_to_calls_by_id_not_position():
+    """Concurrent dispatch appends results in completion order, so a positional pairing would hand a
+    card the wrong call's output."""
+    messages = [
+        {"role": "user", "content": "look both up"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"type": "function", "function": {"name": "first", "arguments": {}}, "id": "a"},
+                {"type": "function", "function": {"name": "second", "arguments": {}}, "id": "b"},
+            ],
+        },
+        {"role": "tool", "name": "second", "content": "B", "tool_call_id": "b"},
+        {"role": "tool", "name": "first", "content": "A", "tool_call_id": "a"},
+    ]
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    assert [(item["name"], item["response"]) for item in items if item["type"] == "tool"] == [
+        ("first", "A"),
+        ("second", "B"),
+    ]
 
 
 def test_conversation_to_frames_gating():

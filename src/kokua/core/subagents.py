@@ -66,7 +66,12 @@ class SubagentReporter:
                 await self._report(
                     {
                         "id": spawn_id,
-                        "append": {"kind": "tool", "name": call.get("name"), "arguments": call.get("arguments")},
+                        "append": {
+                            "kind": "tool",
+                            "name": call.get("name"),
+                            "arguments": call.get("arguments"),
+                            "response": call.get("response"),
+                        },
                     }
                 )
         elif chunk.phase == StreamingContentType.GENERATING:

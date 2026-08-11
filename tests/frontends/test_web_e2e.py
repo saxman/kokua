@@ -52,13 +52,18 @@ class _SlowClient(MockAsyncModelClient):
     `tail`, if given, is streamed as a second chunk *after* the delay, i.e. after the test has switched
     conversations. That is what makes a test of muting mean anything: with the reply alone, the only
     frame still in flight across the switch is the turn's `done` terminator, which renders no content,
-    so a leak of the reply's remaining tokens would go unnoticed."""
+    so a leak of the reply's remaining tokens would go unnoticed.
 
-    def __init__(self, delay: float = 0.0, reply: str = REPLY, tail: str = ""):
+    `tool_response`, if given, streams one TOOL_CALLING chunk carrying it ahead of the reply. AIMU yields
+    that phase only once a call has returned, so the chunk carries the call and its result together --
+    which is what a live tool card renders from."""
+
+    def __init__(self, delay: float = 0.0, reply: str = REPLY, tail: str = "", tool_response: str = ""):
         super().__init__([])
         self._delay = delay
         self._reply = reply
         self._tail = tail
+        self._tool_response = tool_response
 
     async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
         if stream:
@@ -70,6 +75,11 @@ class _SlowClient(MockAsyncModelClient):
 
     async def _chat_streamed(self, user_message, generate_kwargs=None, use_tools=True, images=None):
         self.messages.append({"role": "user", "content": user_message})
+        if self._tool_response:
+            yield StreamChunk(
+                StreamingContentType.TOOL_CALLING,
+                {"name": "get_webpage", "arguments": {"url": "u"}, "response": self._tool_response},
+            )
         yield StreamChunk(StreamingContentType.GENERATING, self._reply)  # renders now in the viewed conversation
         await asyncio.sleep(self._delay)  # hold the turn open so a test can switch away mid-reply
         if self._tail:
@@ -96,13 +106,16 @@ def live_server():
     """
     started: list[tuple] = []
 
-    def start(delay: float = 0.0, seed=None, tail: str = "") -> str:
+    def start(delay: float = 0.0, seed=None, tail: str = "", tool_response: str = "") -> str:
         config = AssistantConfig(
             memory=False, subagent_roles=example_subagent_roles(), load_plugins=False, tools=["none"]
         )
         if seed is not None:
             seed(config)
-        app = build_app(config, client_factory=lambda conversation_id: _SlowClient(delay, tail=tail))
+        app = build_app(
+            config,
+            client_factory=lambda conversation_id: _SlowClient(delay, tail=tail, tool_response=tool_response),
+        )
         port = _free_port()
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
         thread = threading.Thread(target=server.run, daemon=True)
@@ -325,6 +338,99 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(thinking).not_to_have_class(re.compile(r"\bcollapsed\b"))
     expect(thinking.locator(".fold-body")).to_contain_text("fetch each page")
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
+
+
+def _seed_tool_call(result: str | None):
+    """Return a `seed` planting one conversation whose turn called a tool, with `result` as the tool's
+    reply (or no result message at all when it is None)."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    messages: list[dict] = [
+        {"role": "user", "content": "look it up"},
+        {
+            "role": "assistant",
+            "content": "done",
+            "tool_calls": [
+                {"type": "function", "function": {"name": "get_webpage", "arguments": {"url": "u"}}, "id": "1"}
+            ],
+        },
+    ]
+    if result is not None:
+        messages.append({"role": "tool", "name": "get_webpage", "content": result, "tool_call_id": "1"})
+
+    def seed(config):
+        TinyDBSessionStore(str(config.sessions_path)).save(
+            Session(
+                key="seeded",
+                messages=messages,
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                },
+            )
+        )
+
+    return seed
+
+
+def test_tool_card_shows_what_the_call_returned(page, live_server):
+    """The output rides a nested foldable of its own, so the arguments stay scannable when the card is
+    opened and the result is one more click away rather than a wall of text."""
+    _open(page, live_server(delay=0.0, seed=_seed_tool_call("the page body")))
+    tool = page.locator(".bubble.tool")
+    expect(tool).to_have_count(1)
+    output = tool.locator(".bubble.tool-output")
+    expect(output).to_have_count(1)
+    expect(output).to_have_class(re.compile(r"\bcollapsed\b"))
+    # The size is on the collapsed header, so a reader knows what opening it costs.
+    expect(output.locator(".fold-label")).to_contain_text("13 chars")
+
+    tool.locator("> .fold-header").click()
+    expect(tool.locator("> .fold-body")).to_contain_text('url="u"')
+    output.locator("> .fold-header").click()
+    expect(output.locator(".output-text")).to_have_text("the page body")
+
+
+def test_a_large_tool_output_is_clamped_until_asked_for(page, live_server):
+    """Output travels whole but renders clamped: a multi-megabyte result must not become a
+    multi-megabyte DOM node just because someone opened its card."""
+    _open(page, live_server(delay=0.0, seed=_seed_tool_call("x" * 4500)))
+    tool = page.locator(".bubble.tool")
+    output = tool.locator(".bubble.tool-output")
+    expect(output.locator(".fold-label")).to_contain_text("4,500 chars")
+
+    tool.locator("> .fold-header").click()
+    output.locator("> .fold-header").click()
+    assert len(output.locator(".output-text").inner_text()) == 4000
+
+    output.locator("button.output-more").click()
+    assert len(output.locator(".output-text").inner_text()) == 4500
+    expect(output.locator("button.output-more")).to_have_count(0)
+
+
+def test_a_live_tool_card_shows_the_output_as_it_arrives(page, live_server):
+    """The streamed path, not just replay: a `tool` frame carries the result with the call, so the card
+    is complete the moment it appears and needs no later update."""
+    _open(page, live_server(delay=0.0, tool_response="the page body"))
+    page.fill("#msg", "look it up")
+    page.click("#send")
+    tool = page.locator(".bubble.tool")
+    expect(tool).to_have_count(1, timeout=10_000)
+    output = tool.locator(".bubble.tool-output")
+    expect(output.locator(".fold-label")).to_contain_text("13 chars")
+    tool.locator("> .fold-header").click()
+    output.locator("> .fold-header").click()
+    expect(output.locator(".output-text")).to_have_text("the page body")
+
+
+def test_a_call_with_no_recorded_result_renders_no_output_section(page, live_server):
+    """A conversation stored before results were replayed has calls but no results, and must still
+    render the card it always did rather than an empty output row."""
+    _open(page, live_server(delay=0.0, seed=_seed_tool_call(None)))
+    tool = page.locator(".bubble.tool")
+    expect(tool).to_have_count(1)
+    expect(tool.locator(".bubble.tool-output")).to_have_count(0)
 
 
 def test_reviewer_card_still_renders_with_its_own_icon(page, live_server):

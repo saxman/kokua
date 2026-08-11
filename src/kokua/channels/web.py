@@ -132,6 +132,21 @@ def _image_refs_of(content: Any) -> list[str]:
     return list(dict.fromkeys(refs))  # de-dupe, preserving order
 
 
+def _tool_results_by_call_id(messages: list[dict]) -> dict[str, str]:
+    """Map each tool result in ``messages`` to the id of the call it answers.
+
+    A live ``tool`` frame carries the call and its result together (AIMU emits ``TOOL_CALLING`` only once
+    the call has returned), but a stored transcript splits them across an assistant message's
+    ``tool_calls`` and a later ``role: "tool"`` message, joined by id. Concurrent dispatch appends those
+    results in completion order, so the join has to be by id and not by position.
+    """
+    return {
+        message["tool_call_id"]: str(message.get("content", ""))
+        for message in messages
+        if message.get("role") == "tool" and message.get("tool_call_id")
+    }
+
+
 def conversation_to_frames(
     messages: list[dict],
     *,
@@ -143,8 +158,14 @@ def conversation_to_frames(
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
     Mirrors the live stream order per assistant message: reasoning, then tool calls, then the answer,
-    each gated by the same ``show_thinking`` / ``show_tools`` flags the live stream uses. Tool results
-    and the system message are omitted (live chat shows neither).
+    each gated by the same ``show_thinking`` / ``show_tools`` flags the live stream uses. The system
+    message is omitted (live chat shows none).
+
+    A ``role: "tool"`` message is not replayed as an item of its own, but its content is rejoined to the
+    call it answers (see :func:`_tool_results_by_call_id`) and rides that call's item as ``response``, so
+    a replayed tool card carries the output a live one showed. ``response`` is ``None`` where no result
+    message exists -- a transcript stored before results were replayed, or a turn cut short mid-dispatch
+    -- and the page then renders the card exactly as it always did.
 
     Two per-turn maps key a user-message index (as a string) to that turn's recorded reviewer activity,
     interleaved right after the user bubble so it replays in place:
@@ -158,6 +179,7 @@ def conversation_to_frames(
     subagent = subagent or {}
     trace = trace or {}
     items: list[dict] = []
+    results = _tool_results_by_call_id(messages)
 
     def add(item: dict, timestamp) -> None:
         # Attach the source message's append-time timestamp (AIMU's inert ``timestamp`` key) so the page
@@ -208,7 +230,15 @@ def conversation_to_frames(
                     name = fn.get("name")
                     if name == SPAWN_SUBAGENT_TOOL_NAME:
                         continue  # shown as its own subagent card instead; see SPAWN_SUBAGENT_TOOL_NAME
-                    add({"type": "tool", "name": name, "arguments": fn.get("arguments")}, ts)
+                    add(
+                        {
+                            "type": "tool",
+                            "name": name,
+                            "arguments": fn.get("arguments"),
+                            "response": results.get(call.get("id")),
+                        },
+                        ts,
+                    )
             text = _text_of(message.get("content"))
             if text:
                 add({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE}, ts)
@@ -436,7 +466,14 @@ class WebChannel(BaseWebChannel):
                 await self.send_frame({"type": "thinking", "text": chunk.content})
             elif chunk.phase == StreamingContentType.TOOL_CALLING and self.show_tools:
                 call = chunk.content if isinstance(chunk.content, dict) else {}
-                await self.send_frame({"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")})
+                await self.send_frame(
+                    {
+                        "type": "tool",
+                        "name": call.get("name"),
+                        "arguments": call.get("arguments"),
+                        "response": call.get("response"),
+                    }
+                )
             else:
                 image = _image_frame_for(chunk)
                 if image is not None:
@@ -532,7 +569,8 @@ class WebChannel(BaseWebChannel):
         event, and on every later event of its lineage) versus its absence (a planning reviewer's
         verdict card): a spawn's create event carries ``id``/``role``/``task``/``status: "running"``
         and grows with ``{"id", "append": {"kind": "reasoning" | "tool" | "answer" | "error", ...}}``
-        entries, closing with a terminal ``status`` of ``"done"``, ``"stopped"``, or ``"error"``; a
+        entries (a ``"tool"`` entry carrying ``name``/``arguments``/``response``, the last being what the
+        call returned), closing with a terminal ``status`` of ``"done"``, ``"stopped"``, or ``"error"``; a
         reviewer's card carries ``id``/``role``/``status``/``issues`` instead, sent once per round with
         no ``append``, closing with a terminal ``status`` of ``"approved"`` or ``"rejected"``.
 

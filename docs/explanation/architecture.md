@@ -211,6 +211,24 @@ self-contained `web_static/index.html` served as package data, plus vendored `ma
 typeset after sanitization with `trust:false`. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under `/fonts/`.
 
+A `tool` frame carries what the call returned as well as what it was asked to do (`response`, added to
+AIMU's base frame), because AIMU yields `TOOL_CALLING` only once the call has been dispatched. An error,
+an argument-binding failure, and a denied approval are results too and arrive on that same key, so the
+page needs no separate failure path and no second frame updating a card in place: the card is complete
+when it appears. `renderTool` puts the result in a nested foldable of its own below the arguments, filled
+on first expand and clamped to `OUTPUT_CLAMP` characters with a button for the rest, as plain text --
+never markdown, since a tool result is untrusted input. Output travels whole and only the DOM clamps, so
+a `history` frame grows by every tool result in the conversation and is re-sent on every conversation
+switch; if that becomes a problem the fix is a server-side cap in `conversation_to_frames`, the path that
+re-sends.
+
+Replay reaches the same card by a different route. A stored transcript splits a call from its result
+across an assistant message's `tool_calls` and a later `role: "tool"` message, joined by
+`tool_call_id`; `_tool_results_by_call_id` builds that map so each replayed call carries its own output.
+The join has to be by id rather than by position, since concurrent dispatch appends results in completion
+order. A call with no matching result -- a transcript stored before results were replayed, a turn cut
+short mid-dispatch -- gets `response: None` and renders the card exactly as it always did.
+
 Muting a background turn happens per frame, in `WebChannel.send_frame`, which every live frame passes
 through. The rule is a property of the frame's *type*: the `_TURN_FRAMES` set is turn output (tokens,
 thinking, tool calls, the message, `done`, loop markers, images, plan bubbles, phases, sub-agent cards)
@@ -245,8 +263,9 @@ arrive; nested reasoning honors `show_thinking` and nested tool calls honor `sho
 the top-level turn uses, while the card itself and its generated text always show.
 
 A card's body is built from the page's own top-level components, not from card-specific markup:
-`addFoldable` and `renderTool` take an optional parent element, so a nested `💭 thinking` or
-`🔧 <name>` block is literally the same builder (and the same CSS) as its top-level counterpart, and the
+`addFoldable` and `renderTool` take an optional parent element (`opts.parent`), so a nested `💭 thinking`
+or `🔧 <name>` block is literally the same builder (and the same CSS) as its top-level counterpart --
+including the nested output foldable, so a spawn's own tool calls show their results too. The
 generated text is an assistant-styled markdown block. Each nests as its own foldable: thinking and tool
 calls start collapsed, as they do at the top level, and the answer starts expanded, since it is what a
 reader opens the card for. The card itself starts collapsed, and a spawn card takes the shape of the
