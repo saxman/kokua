@@ -551,6 +551,26 @@ class _SpawningClient(MockAsyncModelClient):
         return await super()._chat(user_message, generate_kwargs, use_tools, stream, images, audio)
 
 
+class _InterleavingSpawningClient(MockAsyncModelClient):
+    """Spawns a sub-agent under a request-specific id (looked up by the turn's own message text), and
+    yields control between the spawn and its finish. Two turns sharing this one client -- as the mock
+    `client_factory` does below, one client standing in for every conversation's -- genuinely
+    interleave their reporter calls this way, rather than one completing before the other starts."""
+
+    def __init__(self, spawn_ids: dict[str, str], reply: str = "delegated."):
+        super().__init__([reply, reply])
+        self.reporter = None
+        self._spawn_ids = spawn_ids
+
+    async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
+        spawn_id = self._spawn_ids.get(user_message)
+        if self.reporter is not None and spawn_id is not None and not stream:
+            await self.reporter.spawned(spawn_id, "researcher", "find X")
+            await asyncio.sleep(0)  # yield, so the other conversation's turn interleaves right here
+            await self.reporter.finished(spawn_id, "the answer", None)
+        return await super()._chat(user_message, generate_kwargs, use_tools, stream, images, audio)
+
+
 class _SpawnsThenHangsClient(MockAsyncModelClient):
     """Reports a spawn as running, then hangs until the turn task is cancelled."""
 
@@ -592,6 +612,29 @@ async def test_a_turn_on_a_conversation_not_being_viewed_still_records(tmp_path)
 
     assert background.key != assistant._active_id
     assert "subagent" in assistant._store.get(background.key).metadata
+
+
+async def test_two_conversations_concurrent_spawns_stay_isolated(tmp_path):
+    """Cross-conversation isolation is the premise the whole feature rests on: one reporter and one
+    `subagent_events` ContextVar mechanism serve every conversation's turns, and those turns run
+    concurrently by default. The sequential-await test above can't catch a leak between conversations;
+    this drives both turns as real overlapping tasks (the same class of bug fixed in
+    SubagentReporter._record, which used to let a reporter-level slot bleed across turns)."""
+    client = _InterleavingSpawningClient({"delegate a": "r-a", "delegate b": "r-b"})
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=lambda cid: client)
+    client.reporter = assistant._subagent_reporter
+    conv_a = assistant._active_id
+    conv_b = assistant._book.new_session().key
+
+    await asyncio.gather(
+        assistant._handle(ChannelMessage(text="delegate a", channel="fake"), conversation_id=conv_a),
+        assistant._handle(ChannelMessage(text="delegate b", channel="fake"), conversation_id=conv_b),
+    )
+
+    meta_a = assistant._store.get(conv_a).metadata
+    meta_b = assistant._store.get(conv_b).metadata
+    assert [event["id"] for event in meta_a["subagent"]["0"]] == ["r-a", "r-a"]
+    assert [event["id"] for event in meta_b["subagent"]["0"]] == ["r-b", "r-b"]
 
 
 async def test_a_stopped_turn_records_the_events_it_produced(tmp_path):
