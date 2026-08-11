@@ -141,6 +141,36 @@ async def test_coalescing_never_merges_across_two_concurrent_spawns():
     assert reasoning == ["one", "two", "three"]
 
 
+async def test_coalescing_survives_interleaving_with_another_turns_activity():
+    """One reporter serves every conversation's turns, and those run concurrently by default. A
+    reporter-level 'last reasoning' slot (the old design) would let one turn's events clobber another
+    turn's coalescing state; this drives two turns as real overlapping tasks, each with its own
+    subagent_events list, and asserts each still coalesces its own consecutive chunks into one entry,
+    in order, despite the interleaving."""
+    reporter, _channel = _reporter(show_thinking=True)
+
+    async def run_turn(spawn_id, chunks):
+        events: list[dict] = []
+        subagent_events.set(events)
+        await reporter.spawned(spawn_id, "researcher", "find X")
+        for text in chunks:
+            await reporter.chunk(spawn_id, _thinking(text))
+            await asyncio.sleep(0)  # yield, so the two turns' record() calls genuinely interleave
+        await reporter.finished(spawn_id, "done", None)
+        return events
+
+    events_a, events_b = await asyncio.gather(
+        run_turn("r-1", ["one ", "two ", "three"]),
+        run_turn("r-2", ["uno ", "dos"]),
+    )
+
+    def reasoning_of(events):
+        return [e["append"]["text"] for e in events if e.get("append", {}).get("kind") == "reasoning"]
+
+    assert reasoning_of(events_a) == ["one two three"]
+    assert reasoning_of(events_b) == ["uno dos"]
+
+
 async def test_recording_is_a_copy_so_coalescing_cannot_mutate_a_sent_frame():
     reporter, channel = _reporter(show_thinking=True)
     _collect()

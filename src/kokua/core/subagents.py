@@ -13,7 +13,10 @@ best-effort because the reporter is running inside the cancelled task.
 
 Nested reasoning is coalesced when recorded and streamed when displayed: the page concatenates
 consecutive reasoning into one block either way, so this keeps the stored JSON proportional to text
-length rather than to token count.
+length rather than to token count. Coalescing looks only at the turn's own collected list, never at
+state kept on the reporter itself, so one turn's coalescing is immune to another turn's interleaved
+activity even though every conversation's turns share this one reporter and, by default
+(``subagents.concurrent``), run concurrently.
 """
 
 from __future__ import annotations
@@ -40,11 +43,6 @@ class SubagentReporter:
 
     def __init__(self, ui: ChannelUI):
         self._ui = ui
-        # The (spawn id, entry) most recently appended to the collected list, but only while that
-        # entry is a reasoning block still open for coalescing. Anything else recorded in between --
-        # another spawn's event, or this spawn's own tool call or finish -- clears it, so coalescing
-        # only ever extends the literal last item in the list rather than reopening an older block.
-        self._last_reasoning: Optional[tuple[str, dict]] = None
 
     async def spawned(self, spawn_id: str, agent_type: Optional[str], task: str) -> None:
         await self._report({"id": spawn_id, "role": agent_type or "subagent", "task": task, "status": "running"})
@@ -88,18 +86,29 @@ class SubagentReporter:
             logger.debug("A sub-agent's closing frame could not be sent; it is still recorded.", exc_info=True)
 
     def _record(self, event: dict) -> None:
+        """Append ``event`` to the running turn's own collected list, coalescing a spawn's
+        consecutive reasoning chunks into one entry.
+
+        Coalescing is decided by looking only at ``collected``'s own last element -- never at state
+        kept on the reporter itself. One reporter serves every conversation's turns, and those turns
+        run concurrently by default (``subagents.concurrent``), but each turn's ``collected`` is its
+        own list (see the ``subagent_events`` contextvar above), so a check scoped to that list keeps
+        one turn's coalescing immune to another turn's interleaved activity on the same reporter.
+        Within a single turn, an entry is extended only while it remains that list's literal last
+        item; anything else appended after it -- another spawn's event, or this spawn's own tool call
+        or finish -- closes the block for good, since reopening it would put a later chunk's text
+        ahead of whatever was appended in between.
+        """
         collected = subagent_events.get()
         if collected is None:
             return
         append = event.get("append")
         if append is not None and append.get("kind") == "reasoning":
-            if self._last_reasoning is not None and self._last_reasoning[0] == event["id"]:
-                self._last_reasoning[1]["append"]["text"] += append["text"]
+            tail = collected[-1] if collected else None
+            if tail is not None and tail.get("id") == event["id"] and tail.get("append", {}).get("kind") == "reasoning":
+                tail["append"]["text"] += append["text"]
                 return
             # A copy, so extending the recorded text can never mutate a frame already sent.
-            entry = {**event, "append": dict(append)}
-            self._last_reasoning = (event["id"], entry)
-            collected.append(entry)
+            collected.append({**event, "append": dict(append)})
             return
-        self._last_reasoning = None
         collected.append(event)
