@@ -534,3 +534,125 @@ async def test_arm_all_arms_and_drops_past_once(tmp_path):
     assert "keep" in scheduler.jobs and "stale" not in scheduler.jobs
     ids = {r["id"] for r in scheduling.load(path)}
     assert ids == {"keep"}  # stale past-due one-shot dropped from the registry
+
+
+LONG_PROMPT = "Search the web for at least five verified AI news articles, then summarize each in two sentences."
+
+
+async def test_get_scheduled_task_returns_the_whole_prompt(tmp_path):
+    # Editing a task requires reading its current prompt; the listing's preview is not enough.
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"](LONG_PROMPT, "daily", time_of_day="09:00", name="news", target="task")
+    out = await tools["get_scheduled_task"]("news")
+    assert LONG_PROMPT in out
+    assert "news" in out and "daily" in out and "target: task" in out
+
+
+async def test_get_scheduled_task_unknown(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    assert "No scheduled task" in await tools["get_scheduled_task"]("nope")
+
+
+async def test_list_marks_a_truncated_prompt(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"](LONG_PROMPT, "daily", time_of_day="09:00", name="news")
+    listing = await tools["list_scheduled_tasks"]()
+    assert LONG_PROMPT not in listing  # still a preview
+    assert "..." in listing and "get_scheduled_task" in listing
+
+
+async def test_update_prompt_keeps_identity_and_schedule(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("old", "daily", time_of_day="09:00", name="news", target="task")
+    before = scheduling.load(path)[0]
+    out = await tools["update_scheduled_task"]("news", prompt="new and longer")
+    record = scheduling.load(path)[0]
+    assert record["prompt"] == "new and longer"
+    assert record["id"] == before["id"] and record["created_at"] == before["created_at"]
+    assert record["schedule"] == {"type": "daily", "at": "09:00"} and record["target"] == "task"
+    assert "Updated" in out and "prompt" in out
+
+
+async def test_update_prompt_does_not_disturb_the_schedule(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("old", "interval", interval_seconds=60, name="r")
+    task_id = scheduling.load(path)[0]["id"]
+    await tools["update_scheduled_task"]("r", prompt="new")
+    assert scheduler.at_count[task_id] == 1  # an interval countdown must not restart on a prompt edit
+
+
+async def test_update_partial_schedule_keeps_the_existing_type_and_fields(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("p", "weekly", weekday="mon", time_of_day="09:00", name="w")
+    task_id = scheduling.load(path)[0]["id"]
+    await tools["update_scheduled_task"]("w", time_of_day="10:30")
+    assert scheduling.load(path)[0]["schedule"] == {"type": "weekly", "day": "mon", "at": "10:30"}
+    assert scheduler.at_count[task_id] == 2  # re-armed, because the schedule changed
+
+
+async def test_update_can_change_the_schedule_type(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("p", "daily", time_of_day="09:00", name="d")
+    await tools["update_scheduled_task"]("d", schedule_type="weekly", weekday="Friday")
+    assert scheduling.load(path)[0]["schedule"] == {"type": "weekly", "day": "fri", "at": "09:00"}
+
+
+async def test_update_rejects_an_invalid_schedule_and_changes_nothing(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("p", "daily", time_of_day="09:00", name="d")
+    before = scheduling.load(path)
+    out = await tools["update_scheduled_task"]("d", prompt="edited", time_of_day="99:99")
+    assert "Invalid schedule" in out
+    assert scheduling.load(path) == before  # the prompt edit is not applied either
+
+
+async def test_update_rejects_a_past_one_shot(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("p", "once", at_datetime="2999-01-01T00:00:00", name="o")
+    before = scheduling.load(path)
+    out = await tools["update_scheduled_task"]("o", at_datetime="2000-01-01T00:00:00")
+    assert "past" in out.lower() and scheduling.load(path) == before
+
+
+async def test_update_rejects_a_duplicate_name_but_allows_the_same_name(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("a", "interval", interval_seconds=60, name="one")
+    await tools["schedule_task"]("b", "interval", interval_seconds=60, name="two")
+    out = await tools["update_scheduled_task"]("two", name="one")
+    assert "already exists" in out
+    assert {r["name"] for r in scheduling.load(path)} == {"one", "two"}
+    assert "Updated" in await tools["update_scheduled_task"]("two", name="two", prompt="c")
+
+
+async def test_update_a_disabled_task_does_not_arm_it(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("p", "daily", time_of_day="09:00", name="d")
+    await tools["disable_scheduled_task"]("d")
+    task_id = scheduling.load(path)[0]["id"]
+    out = await tools["update_scheduled_task"]("d", time_of_day="10:00")
+    assert task_id not in scheduler.jobs and "disabled" in out.lower()
+    assert scheduling.load(path)[0]["schedule"] == {"type": "daily", "at": "10:00"}
+
+
+async def test_update_target_keeps_the_dedicated_conversation(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("p", "interval", interval_seconds=60, name="t", target="task")
+    record = scheduling.load(path)[0]
+    record["session_id"] = "sess-1"
+    scheduling.add(path, record)
+    await tools["update_scheduled_task"]("t", target="new")
+    assert scheduling.load(path)[0]["target"] == "new"
+    assert scheduling.load(path)[0]["session_id"] == "sess-1"  # reused if the target flips back
+
+
+async def test_update_with_no_fields_reports_and_changes_nothing(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    await tools["schedule_task"]("p", "interval", interval_seconds=60, name="r")
+    before = scheduling.load(path)
+    out = await tools["update_scheduled_task"]("r")
+    assert "Nothing to update" in out and scheduling.load(path) == before
+
+
+async def test_update_unknown_task(tmp_path):
+    scheduler, path, tools, _ = _make(tmp_path)
+    assert "No scheduled task" in await tools["update_scheduled_task"]("nope", prompt="x")

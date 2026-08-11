@@ -89,6 +89,7 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 - **[Scheduled tasks](src/kokua/scheduling/).** Ask for something on a schedule ("every weekday at 9am, summarize my calendar") and the assistant persists it to `data/scheduled_tasks.json` via its own `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` tools; it survives restarts. Schedules are one-shot, interval, daily, or weekly.
 - **Where a task runs.** By default a firing lands in whatever conversation you are viewing (shown with amber "proactive" styling). Ask for its own conversation and each firing opens a fresh chat; ask for an ongoing one and every firing writes to the single chat it created first, building on its own history.
 - **Pause, resume, dry-run.** `disable_scheduled_task` stops a task firing while keeping it; `enable_scheduled_task` resumes it; `run_scheduled_task` fires it now without touching its schedule, reproducing exactly what the scheduled run would do. Scheduled runs auto-deny the approval-gated tools, since nobody is present to approve them.
+- **Edit a task in place.** `get_scheduled_task` shows one task in full, prompt included; `update_scheduled_task` revises any subset of its fields, keeping its id, its dedicated conversation, and everything you leave out. Ask to change a task's wording or its time and it edits that task rather than rewriting it from memory.
 
 ### Deep planning
 

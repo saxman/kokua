@@ -27,6 +27,18 @@
   work. **On upgrade, an existing `config.toml` with no `[subagents.roles.*]` section will fail to
   start** -- copy the roles from the updated `config.example.toml`.
 
+- **A scheduled task can be read in full and edited in place.** Asking to change a task's wording
+  produced a rewritten-from-scratch prompt, because nothing could show the model the original: the only
+  view was `list_scheduled_tasks`, which cut every prompt to 60 characters with no mark to say it had
+  cut anything, and the only way to "edit" was `cancel_scheduled_task` plus a fresh `schedule_task`.
+  Two new tools close that. **`get_scheduled_task`** shows one task whole -- complete prompt, schedule,
+  target, next fire, dedicated conversation. **`update_scheduled_task`** edits any subset of a task's
+  fields in place, keeping its id, `created_at`, and dedicated conversation, and re-deriving the
+  schedule fields you omit from the record, so changing a weekly task's time keeps its day. It re-arms
+  only when the schedule actually changes, so editing a prompt never restarts an interval countdown, and
+  it rejects an invalid schedule, a past one-shot, or a name another task holds without writing anything.
+  The listing now marks a truncated prompt with `...` and points at `get_scheduled_task`.
+
 - **Startup warns about an MCP server no role names.** Since the supervisor mounts no MCP callables, a
   server that no `[subagents.roles.*]` lists in `mcp_servers` connects, spends its token on the
   handshake, and is then reachable by nobody. That was silent; it is now a warning naming the server.

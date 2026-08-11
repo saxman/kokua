@@ -50,6 +50,25 @@ def _build_schedule(
     raise ValueError(f"schedule_type must be one of once, interval, daily, weekly; got {schedule_type!r}")
 
 
+def _flatten_schedule(schedule: dict) -> dict:
+    """The flat ``_build_schedule`` arguments equivalent to a persisted schedule dict.
+
+    This is what lets ``update_scheduled_task`` accept one field: the arguments the caller omits are
+    re-derived from the record instead of being dropped, so changing a weekly task's time keeps its day.
+    """
+    kind = schedule.get("type")
+    return {
+        "schedule_type": kind,
+        "time_of_day": schedule.get("at") if kind in ("daily", "weekly") else None,
+        "at_datetime": schedule.get("at") if kind == "once" else None,
+        "interval_seconds": schedule.get("seconds") if kind == "interval" else None,
+        "weekday": schedule.get("day") if kind == "weekly" else None,
+    }
+
+
+PROMPT_PREVIEW_CHARS = 60
+
+
 def make_scheduler_tools(
     scheduler,
     registry_path: Path,
@@ -181,29 +200,153 @@ def make_scheduler_tools(
         _arm(record)
         return f"Scheduled task {_handle(record)}; first run in ~{int(delay)}s."
 
+    def _next_fire_text(record: dict, now: datetime) -> str:
+        if not record.get("enabled", True):
+            return "disabled"
+        try:
+            delay = next_fire(record["schedule"], now)
+        except ValueError:
+            return "invalid schedule"
+        return "past" if delay is None else f"~{int(delay)}s"
+
     @tool
     async def list_scheduled_tasks() -> str:
-        """List the scheduled tasks: id, name, schedule, next fire, and prompt."""
+        """List the scheduled tasks: id, name, schedule, next fire, and the start of each prompt.
+
+        Prompts are shown as previews. Use ``get_scheduled_task`` to read one in full.
+        """
         records = load(registry_path)
         if not records:
             return "No scheduled tasks."
         now = datetime.now()
         lines = []
+        truncated_any = False
         for record in records:
-            if not record.get("enabled", True):
-                when = "disabled"
-            else:
-                try:
-                    delay = next_fire(record["schedule"], now)
-                except ValueError:
-                    delay = None
-                when = "past" if delay is None else f"~{int(delay)}s"
-            preview = record["prompt"][:60]
+            prompt = record["prompt"]
+            preview = prompt[:PROMPT_PREVIEW_CHARS]
+            if len(prompt) > PROMPT_PREVIEW_CHARS:
+                # Mark the cut explicitly: an unmarked preview reads as the whole prompt, and a model
+                # asked to edit the task then rewrites it from scratch instead of fetching the original.
+                preview += "..."
+                truncated_any = True
             lines.append(
                 f"- {record['id']} [{record.get('name') or 'unnamed'}] {record['schedule']} "
-                f"next {when} target={_record_target(record)}: {preview}"
+                f"next {_next_fire_text(record, now)} target={_record_target(record)}: {preview}"
             )
+        if truncated_any:
+            lines.append("(prompts truncated; call get_scheduled_task for the full text before editing one)")
         return "\n".join(lines)
+
+    @tool
+    async def get_scheduled_task(id_or_name: str) -> str:
+        """Show one scheduled task in full, including its complete prompt, by id or name.
+
+        Read a task with this before editing it, so ``update_scheduled_task`` can revise the existing
+        prompt rather than replace it with a guess.
+        """
+        record = _lookup(id_or_name)
+        if record is None:
+            return f"No scheduled task matches {id_or_name!r}."
+        lines = [
+            f"id: {record['id']}",
+            f"name: {record.get('name') or 'unnamed'}",
+            f"enabled: {record.get('enabled', True)}",
+            f"schedule: {record['schedule']}",
+            f"next fire: {_next_fire_text(record, datetime.now())}",
+            f"target: {_record_target(record)}",
+            f"created_at: {record.get('created_at', 'unknown')}",
+            f"prompt: {record['prompt']}",
+        ]
+        if record.get("session_id"):
+            lines.insert(-1, f"conversation: {record['session_id']}")
+        return "\n".join(lines)
+
+    @tool
+    async def update_scheduled_task(
+        id_or_name: str,
+        prompt: Optional[str] = None,
+        schedule_type: Optional[Literal["once", "interval", "daily", "weekly"]] = None,
+        time_of_day: Optional[str] = None,
+        at_datetime: Optional[str] = None,
+        interval_seconds: Optional[float] = None,
+        weekday: Optional[str] = None,
+        name: Optional[str] = None,
+        target: Optional[Literal["active", "new", "task"]] = None,
+    ) -> str:
+        """Edit an existing scheduled task in place, keeping its id, history, and any fields you omit.
+
+        Call ``get_scheduled_task`` first and pass the full revised text as ``prompt``: this replaces
+        the prompt outright, it does not append to it. Omitted schedule fields keep their current
+        values, so changing a weekly task's ``time_of_day`` keeps its ``weekday``. The task is re-armed
+        only when the schedule actually changes, so editing a prompt never resets an interval countdown.
+
+        Args:
+            id_or_name: The task to edit.
+            prompt: The complete new instruction, replacing the old one.
+            schedule_type: One of "once", "interval", "daily", or "weekly".
+            time_of_day: For "daily" or "weekly", a 24-hour "HH:MM".
+            at_datetime: For "once", an ISO-8601 local datetime.
+            interval_seconds: For "interval", the number of seconds between runs (>= 1).
+            weekday: For "weekly", one of mon/tue/wed/thu/fri/sat/sun.
+            name: A new unique handle for the task.
+            target: Where each firing runs; see ``schedule_task``.
+        """
+        record = _lookup(id_or_name)
+        if record is None:
+            return f"No scheduled task matches {id_or_name!r}."
+
+        schedule_args = {
+            "schedule_type": schedule_type,
+            "time_of_day": time_of_day,
+            "at_datetime": at_datetime,
+            "interval_seconds": interval_seconds,
+            "weekday": weekday,
+        }
+        changed = []
+        schedule = record["schedule"]
+        if any(value is not None for value in schedule_args.values()):
+            current = _flatten_schedule(schedule)
+            merged = {key: (value if value is not None else current[key]) for key, value in schedule_args.items()}
+            try:
+                schedule = _build_schedule(**merged)
+                delay = next_fire(schedule, datetime.now())
+            except ValueError as exc:
+                return f"Invalid schedule: {exc}"
+            if delay is None:
+                return "That time is in the past; choose a future time."
+            if schedule != record["schedule"]:
+                changed.append("schedule")
+
+        if name is not None:
+            new_name = name.strip() or None
+            if new_name != record.get("name"):
+                if new_name and find(load(registry_path), new_name) is not None:
+                    return f"A task named {new_name!r} already exists; choose a different name."
+                record["name"] = new_name
+                changed.append("name")
+        if prompt is not None and prompt != record["prompt"]:
+            record["prompt"] = prompt
+            changed.append("prompt")
+        if target is not None:
+            if target not in ("active", "new", "task"):
+                return f"target must be one of active, new, task; got {target!r}."
+            if target != _record_target(record):
+                # The dedicated conversation is kept even when the target moves off "task", so flipping
+                # back resumes that history instead of minting a second one.
+                record["target"] = target
+                changed.append("target")
+
+        if not changed:
+            return f"Nothing to update on scheduled task {_handle(record)}."
+        record["schedule"] = schedule
+        add(registry_path, record)
+        summary = f"Updated {', '.join(changed)} on scheduled task {_handle(record)}."
+        if not record.get("enabled", True):
+            return f"{summary} It stays disabled; enable it to resume firing."
+        if "schedule" in changed:
+            scheduler.cancel(record["id"])
+            _arm(record)
+        return summary
 
     @tool
     async def cancel_scheduled_task(id_or_name: str) -> str:
@@ -273,6 +416,8 @@ def make_scheduler_tools(
     return [
         schedule_task,
         list_scheduled_tasks,
+        get_scheduled_task,
+        update_scheduled_task,
         cancel_scheduled_task,
         disable_scheduled_task,
         enable_scheduled_task,
