@@ -51,37 +51,17 @@ SUPERVISOR_GUIDANCE = (
     "when subtasks are independent."
 )
 
-# Built-in sub-agent roles (AIMU agent_types). Each role's tools are its groups intersected with the
-# assistant's enabled tool groups (see build._build_subagent_agent_types), so a role never grants a tool
-# the user disabled globally. `description` becomes the role's menu line shown to the model; the
-# `system_message` body guides the sub-agent. Users override or extend these via [subagents.roles.*].
-DEFAULT_SUBAGENT_ROLES: dict[str, dict] = {
-    "researcher": {
-        "description": "Research specialist: gather and verify information from the web.",
-        "groups": ["web", "misc"],
-        "system_message": (
-            "You are a research sub-agent. Investigate the task with web search and page lookups, "
-            "verify claims against sources rather than memory, and return a concise, well-organized "
-            "findings summary that names its sources."
-        ),
-    },
-    "coder": {
-        "description": "Coding specialist: read/write files and run code to complete a task.",
-        "groups": ["fs", "compute"],
-        "system_message": (
-            "You are a coding sub-agent. Complete the task by reading and writing files and running "
-            "code (Python, shell, or calculations). Report exactly what you did and the concrete result."
-        ),
-    },
-    "generalist": {
-        "description": "General-purpose helper with the full built-in toolset; use when no specialist fits.",
-        "groups": ["web", "fs", "compute", "misc"],
-        "system_message": (
-            "You are a general-purpose sub-agent. Complete the self-contained task you are given and "
-            "return a single, complete answer."
-        ),
-    },
-}
+# Replaces SUPERVISOR_GUIDANCE when no [subagents.roles.*] are configured. With no roles the delegate
+# is AIMU's untyped `spawn_subagent(task)`, so the role-picking wording above would name a parameter
+# that does not exist and describe a worker menu that is not there.
+SUPERVISOR_GUIDANCE_GENERIC = (
+    " You are a lean supervisor. Answer trivial or conversational requests directly using your own "
+    "tools (date/time, memory, skills, config, scheduling, MCP management). For any specialized work "
+    "-- web research, reading or writing files, running code, or anything needing a domain tool -- you "
+    "have almost no direct tools, so you MUST delegate by calling `spawn_subagent(task)`: give it a "
+    "complete, self-contained task (it shares no history with you), then relay or synthesize its answer "
+    "for the user. Emit several `spawn_subagent` calls when subtasks are independent."
+)
 
 # Appended to the system message when memory is enabled, so the model actually uses the two stores
 # (without explicit direction the tools sit unused). Two distinct stores: short facts about the user
@@ -162,8 +142,11 @@ class AssistantConfig:
     # Sub-agents: give the assistant a spawn_subagent tool so it can delegate an independent subtask to
     # a fresh, isolated agent (its own context/history) and get back a single answer. On by default.
     subagents: bool = True
-    # Sub-agent roles (AIMU agent_types). User definitions here merge over DEFAULT_SUBAGENT_ROLES by
-    # name (override an existing role or add a new one); empty means "just the defaults".
+    # Sub-agent roles (AIMU agent_types), read whole from [subagents.roles.*]; nothing is defaulted in
+    # code, so this is the entire menu spawn_subagent offers. The roles a normal install runs with are
+    # the ones config.example.toml ships. Empty means no menu at all: build.add_subagent_tool falls back
+    # to AIMU's untyped spawn_subagent(task) over every enabled tool, since an empty agent_types dict is
+    # an error there and a lean supervisor with no workers has no way to do specialized work.
     subagent_roles: dict[str, dict] = field(default_factory=dict)
     # Run independent tool calls in one turn concurrently (so several spawn_subagent calls overlap).
     subagents_concurrent: bool = True

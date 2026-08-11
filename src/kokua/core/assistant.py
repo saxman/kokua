@@ -212,6 +212,11 @@ class Assistant:
         )
         if config.lean_supervisor and not config.subagents:
             logger.warning("lean_supervisor is set but subagents is off; using the flat toolset instead.")
+        if config.subagents and not config.subagent_roles:
+            logger.info(
+                "no [subagents.roles.*] configured; spawn_subagent will use a single generic worker. "
+                "Run `kokua config init` or copy the roles from config.example.toml to get specialists."
+            )
 
         # Build the active conversation's agent (its client is layered by the factory, which also
         # snapshots the provider base for later re-layering).

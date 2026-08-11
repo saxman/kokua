@@ -72,18 +72,42 @@ groups = ["web", "fs", "compute", "time", "misc"]
 # Run independent tool calls in one turn concurrently, so several spawn_subagent calls overlap.
 concurrent = true
 
-# Sub-agent roles the model can pick via spawn_subagent(agent_type, task). These merge over the
-# built-in defaults (researcher, coder, generalist) by name: reuse a name to override it, or add a
-# new name. A role's worker toolset is the union of: its `groups` (intersected with [tools] groups
-# above, so a role narrows within the enabled tools but never exceeds them); the tools of any MCP
-# servers it lists in `mcp_servers` (by the server's `name` below, or its raw URL); and the tools of
-# any tool-packs it lists in `tool_packs` (installed kokua.tools plugins, e.g. "pdf", "email").
-# `system_message` is optional. Roles matter most with lean_supervisor = true, where the assistant
-# only delegates and the workers carry the tools. No role needs to list "time": it is added to every
-# role from [tools].groups above.
-# [subagents.roles.researcher]
-# description = "Research specialist: gather and verify information from the web."
-# groups = ["web", "misc"]
+# Sub-agent roles the model can pick via spawn_subagent(agent_type, task). These are the whole set:
+# nothing is defaulted in code, so edit, delete, or add to the three below and that is what you get.
+# Delete them all and spawn_subagent falls back to a single untyped worker carrying every enabled tool.
+#
+# A role's worker toolset is the union of: its `groups` (intersected with [tools] groups above, so a
+# role narrows within the enabled tools but never exceeds them); the tools of any MCP servers it lists
+# in `mcp_servers` (by the server's `name` below, or its raw URL); and the tools of any tool-packs it
+# lists in `tool_packs` (installed kokua.tools plugins, e.g. "pdf", "email"). `system_message` is
+# optional. Roles matter most with lean_supervisor = true, where the assistant only delegates and the
+# workers carry the tools. No role needs to list "time": it is added to every role from [tools].groups.
+
+[subagents.roles.researcher]
+description = "Research specialist: gather and verify information from the web."
+groups = ["web", "misc"]
+system_message = """\
+You are a research sub-agent. Investigate the task with web search and page lookups, verify claims \
+against sources rather than memory, and return a concise, well-organized findings summary that names \
+its sources."""
+
+[subagents.roles.coder]
+description = "Coding specialist: read/write files and run code to complete a task."
+groups = ["fs", "compute"]
+system_message = """\
+You are a coding sub-agent. Complete the task by reading and writing files and running code (Python, \
+shell, or calculations). Report exactly what you did and the concrete result."""
+
+[subagents.roles.generalist]
+description = "General-purpose helper with the full built-in toolset; use when no specialist fits."
+groups = ["web", "fs", "compute", "misc"]
+system_message = """\
+You are a general-purpose sub-agent. Complete the self-contained task you are given and return a \
+single, complete answer."""
+
+# More roles to copy. A role can draw on an MCP server or a tool-pack instead of (or as well as)
+# built-in groups -- `reviewer` below is the worked example of mounting an agent built with AIMU,
+# via the `aimu_agents` tool-pack (see README, "Tool packs").
 # [subagents.roles.stock-trader]
 # description = "Looks up quotes and places trades."
 # mcp_servers = ["stocks"]        # matches [[mcp.server]].name below
@@ -91,6 +115,9 @@ concurrent = true
 # [subagents.roles.report-writer]
 # description = "Builds and emails PDF reports."
 # tool_packs = ["pdf", "email"]
+# [subagents.roles.reviewer]
+# description = "Reviews code for security, performance, and readability."
+# tool_packs = ["aimu_agents"]
 
 # Remote MCP servers to connect at startup. Each server is its own [[mcp.server]] table.
 # `url` is required. `token_env` (optional) names an environment variable holding a bearer token,

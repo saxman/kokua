@@ -109,10 +109,18 @@ approval gate is forwarded to the parent's existing prompt, not rendered into th
 ## Plugins
 
 Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`) and `kokua.tools` (a
-`ToolPack` with `build(config)`). The built-in `cli`/`web` front ends and the four tool-packs are
+`ToolPack` with `build(config)`). The built-in `cli`/`web` front ends and the five tool-packs are
 registered in Kokua's own `pyproject.toml` exactly as a third party would register theirs;
 `plugins.py` discovers them at runtime. Add a transport or new tools as a plugin, not by editing the
 core -- see [toolpacks/example.py](../../src/kokua/toolpacks/example.py).
+
+A tool-pack is also how a whole *agent* arrives. Every AIMU `Runner` exposes `.run(task) -> str`, so
+mounting one needs no core surface at all: `build()` returns a callable that runs it.
+[toolpacks/aimu_agents.py](../../src/kokua/toolpacks/aimu_agents.py) does this for AIMU's three
+prebuilt orchestrators and is the reference for wiring your own. It builds its agent inside the tool
+call rather than in `build()`, because `build()` runs once per conversation agent and constructing a
+sync `ModelClient` is what loads weights on an in-process provider -- and because a cached
+orchestrator's `messages` would be shared across concurrent calls.
 
 ## Configuration
 

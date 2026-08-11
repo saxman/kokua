@@ -20,10 +20,10 @@ from aimu.tools import builtin
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
 from kokua.config.schema import (
-    DEFAULT_SUBAGENT_ROLES,
     MEMORY_GUIDANCE,
     SUBAGENT_GUIDANCE,
     SUPERVISOR_GUIDANCE,
+    SUPERVISOR_GUIDANCE_GENERIC,
     AssistantConfig,
 )
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME
@@ -83,9 +83,24 @@ def _resolve_builtin_tools(names: list[str]) -> list:
     return resolved
 
 
-def _effective_subagent_roles(config: AssistantConfig) -> dict[str, dict]:
-    """Built-in roles with the user's config roles merged over them by name."""
-    return {**DEFAULT_SUBAGENT_ROLES, **config.subagent_roles}
+def _generic_worker_tools(
+    config: AssistantConfig,
+    connections: Optional[list] = None,
+    plugin_tools_by_pack: Optional[dict[str, list]] = None,
+) -> list:
+    """The toolset for the single untyped worker used when no roles are configured.
+
+    With no role to scope it, the worker gets what a flat agent would: every enabled built-in group,
+    every tool-pack tool, and every connected MCP server's callables. Parent-only stateful tools
+    (memory, skills, MCP management, config, scheduling) stay off, exactly as they do for a role.
+    """
+    return _dedup_by_name(
+        [
+            _resolve_builtin_tools(config.tools),
+            *(plugin_tools_by_pack or {}).values(),
+            *(getattr(conn, "callables", []) for conn in connections or []),
+        ]
+    )
 
 
 def _build_subagent_agent_types(
@@ -93,7 +108,10 @@ def _build_subagent_agent_types(
     connections: Optional[list] = None,
     plugin_tools_by_pack: Optional[dict[str, list]] = None,
 ) -> dict[str, dict]:
-    """Build AIMU ``agent_types`` (worker specs) from the effective roles.
+    """Build AIMU ``agent_types`` (worker specs) from ``config.subagent_roles``.
+
+    Empty in, empty out: with no configured roles there is no worker menu, and ``add_subagent_tool``
+    builds an untyped delegate instead.
 
     A role's worker toolset is the union, deduped by ``__name__``, of:
       - its ``groups`` intersected with the assistant's enabled ``config.tools`` (a role narrows within
@@ -124,7 +142,7 @@ def _build_subagent_agent_types(
     # global set, so this still never grants a tool the user disabled in [tools].groups.
     ambient_tools = _TOOL_GROUPS["time"] if "time" in enabled else []
     agent_types: dict[str, dict] = {}
-    for name, role in _effective_subagent_roles(config).items():
+    for name, role in config.subagent_roles.items():
         sources: list[list] = [_resolve_builtin_tools([g for g in role.get("groups", []) if g in enabled])]
         for ref in role.get("mcp_servers", []):
             sources.append(callables_by_url.get(url_by_name.get(ref, ref), []))
@@ -195,10 +213,15 @@ def _load_plugin_tools_by_pack(config: AssistantConfig) -> dict[str, list]:
 
 def resolve_system_message(config: AssistantConfig) -> str:
     """The system prompt for the model client: base message plus the memory/subagent guidance the
-    enabled features need. Shared by the initial build and a runtime model switch."""
+    enabled features need. Shared by the initial build and a runtime model switch.
+
+    The lean variant names the delegate's exact call, so it has to follow the same role/no-role split
+    ``add_subagent_tool`` makes: with no configured roles the delegate is ``spawn_subagent(task)``, and
+    the role-picking wording would name a parameter that is not there.
+    """
     system = config.system_message + (MEMORY_GUIDANCE if config.memory else "")
     if config.subagents and config.lean_supervisor:
-        return system + SUPERVISOR_GUIDANCE  # "delegate everything specialized" prompt for lean mode
+        return system + (SUPERVISOR_GUIDANCE if config.subagent_roles else SUPERVISOR_GUIDANCE_GENERIC)
     return system + (SUBAGENT_GUIDANCE if config.subagents else "")
 
 
@@ -424,22 +447,35 @@ def add_subagent_tool(
     plugin_tools_by_pack: Optional[dict[str, list]] = None,
     observer: Optional[SubagentObserver] = None,
 ) -> None:
-    """Append the typed ``spawn_subagent(agent_type, task)`` tool when sub-agents are enabled (no-op otherwise).
+    """Append the ``spawn_subagent`` tool when sub-agents are enabled (no-op otherwise).
 
-    Each spawn clones the active model and gets its role's scoped tool subset -- built-in groups
-    (intersected with ``config.tools``) plus any MCP servers / tool-packs the role names, resolved
-    against ``connections`` and ``plugin_tools_by_pack``. The parent-only stateful tools (memory,
-    skills, MCP management, config, scheduling) are deliberately withheld. Concurrent spawns overlap
-    under the parent's ``concurrent_tool_calls``; the approval gate is forwarded so a sub-agent's
-    gated-tool calls (e.g. execute_python) prompt via the parent rather than running unattended.
-    ``observer`` is how a front end shows the spawn's work while it runs.
+    With roles configured this is the typed ``spawn_subagent(agent_type, task)``: each spawn clones the
+    active model and gets its role's scoped tool subset -- built-in groups (intersected with
+    ``config.tools``) plus any MCP servers / tool-packs the role names, resolved against ``connections``
+    and ``plugin_tools_by_pack``.
+
+    With no roles configured it is AIMU's untyped ``spawn_subagent(task)`` over one worker holding every
+    enabled tool. Roles come only from ``[subagents.roles.*]``, so that case is reachable (a fresh
+    install with no config file), and it cannot be left to fall through: AIMU rejects an empty
+    ``agent_types`` dict outright, and a lean supervisor whose workers have no tools cannot do
+    specialized work at all. ``resolve_system_message`` follows the same split, so the prompt names the
+    signature that actually exists.
+
+    Either way the parent-only stateful tools (memory, skills, MCP management, config, scheduling) are
+    deliberately withheld. Concurrent spawns overlap under the parent's ``concurrent_tool_calls``; the
+    approval gate is forwarded so a sub-agent's gated-tool calls (e.g. execute_python) prompt via the
+    parent rather than running unattended. ``observer`` is how a front end shows the spawn's work while
+    it runs.
     """
     if not config.subagents:
         return
+    agent_types = _build_subagent_agent_types(config, connections, plugin_tools_by_pack)
+    generic = not agent_types
     agent.tools.append(
         make_async_subagent_tool(
             agent.model_client.model,
-            agent_types=_build_subagent_agent_types(config, connections, plugin_tools_by_pack),
+            agent_types=None if generic else agent_types,
+            tools=_generic_worker_tools(config, connections, plugin_tools_by_pack) if generic else None,
             tool_approval=tool_approval,
             observer=observer,
         )
