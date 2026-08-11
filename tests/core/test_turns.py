@@ -9,7 +9,7 @@ from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
-from tests.fakes import _BlockingStreamClient, _RequestsToolOnce
+from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
 from tests.helpers import MockAsyncModelClient
 
 
@@ -793,3 +793,126 @@ async def test_a_proactive_turn_records_its_subagent_events(tmp_path):
 
     metadata = assistant._store.get(assistant._active_id).metadata
     assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1", "r-1"]
+
+
+# --- the first turn of a conversation, where a real client seeds the system message ----------------
+#
+# The clients below mix in _SeedsSystemMessage, so their transcripts look like a real run's: the first
+# turn is [system, user, assistant, ...] and its user message is at 1, not at the pre-run length of 0.
+# That is the position conversation_to_frames looks a turn's cards up by, so anything else drops them.
+
+
+def _user_positions(messages: list[dict]) -> list[int]:
+    """The real positions of the user messages, as ``conversation_to_frames`` enumerates them."""
+    return [index for index, message in enumerate(messages) if message.get("role") == "user"]
+
+
+class _SeedingSpawningClient(_SeedsSystemMessage, MockAsyncModelClient):
+    """``_SpawningClient`` that also seeds the system message, with one spawn per turn under a
+    per-turn id so a recorded key can be traced back to the turn that produced it."""
+
+    def __init__(self, turns: int = 2):
+        super().__init__(["delegated."] * turns)
+        self.reporter = None
+        self.spawns = 0
+
+    async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
+        if self.reporter is not None and not stream:  # see _SpawningClient on the two _chat entries
+            self.spawns += 1
+            await self.reporter.spawned(f"r-{self.spawns}", "researcher", "find X")
+            await self.reporter.finished(f"r-{self.spawns}", "the answer", None)
+        return await super()._chat(user_message, generate_kwargs, use_tools, stream, images, audio)
+
+
+class _SeedingPlansThenSpawnsClient(_SeedsSystemMessage, MockAsyncModelClient):
+    """Drafts a plan, then reports a spawn from the executor, seeding the system message as a real
+    client does. Only the executor delegates: the planning exchange is rolled back."""
+
+    def __init__(self):
+        super().__init__(["THE PLAN", "delegated."])
+        self.reporter = None
+
+    async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
+        if self.reporter is not None and self._call_count > 0 and not stream:
+            await self.reporter.spawned("r-1", "researcher", "find X")
+            await self.reporter.finished("r-1", "the answer", None)
+        return await super()._chat(user_message, generate_kwargs, use_tools, stream, images, audio)
+
+
+class _SeedingSpawnsThenHangsClient(_SeedsSystemMessage, _SpawnsThenHangsClient):
+    """``_SpawnsThenHangsClient`` on a first turn's transcript."""
+
+
+async def test_a_first_turns_cards_anchor_to_its_user_message_past_the_system_message(tmp_path):
+    """The index came from the transcript length captured before the run, but the first turn's own run
+    appends the system message ahead of its user message: the cards were filed under "0", which is the
+    system message, and the reload replay (which only consults user positions) never saw them."""
+    client = _SeedingSpawningClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+    client.reporter = assistant._subagent_reporter
+    active_id = assistant._active_id
+
+    await assistant._handle(ChannelMessage(text="delegate this", channel="fake"), conversation_id=active_id)
+
+    session = assistant._store.get(active_id)
+    assert session.messages[0]["role"] == "system"  # the seeding the mock used to skip
+    assert _user_positions(session.messages) == [1]
+    assert [event["id"] for event in session.metadata["subagent"]["1"]] == ["r-1", "r-1"]
+
+    # The second turn, on the same conversation: no seeding this time, so the index is unchanged from
+    # what the pre-run length would have given, and it must still land on the new user message.
+    await assistant._handle(ChannelMessage(text="delegate again", channel="fake"), conversation_id=active_id)
+
+    session = assistant._store.get(active_id)
+    assert _user_positions(session.messages) == [1, 3]
+    assert sorted(session.metadata["subagent"]) == ["1", "3"]
+    assert [event["id"] for event in session.metadata["subagent"]["3"]] == ["r-2", "r-2"]
+
+
+async def test_a_first_planned_turns_cards_anchor_to_its_user_message(tmp_path):
+    """The streaming plan path guarded on a user message sitting exactly at the pre-run length, so on
+    a first turn the guard failed outright: no index (the cards were dropped) and no rewrite (the
+    transcript kept the executor's scaffolding prompt in place of the request)."""
+    client = _SeedingPlansThenSpawnsClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+    client.reporter = assistant._subagent_reporter
+    active_id = assistant._active_id
+
+    await assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=active_id, plan=True)
+
+    session = assistant._store.get(active_id)
+    assert _user_positions(session.messages) == [1]
+    assert session.messages[1]["content"] == "do X"  # the user's own words, not EXECUTE_PROMPT
+    assert [event["id"] for event in session.metadata["subagent"]["1"]] == ["r-1", "r-1"]
+
+
+async def test_a_proactive_first_turns_cards_anchor_to_its_user_message(tmp_path):
+    """A scheduled task firing into a conversation that has never run a turn seeds the system message
+    too, so the unattended path needs the same resolution the reactive one does."""
+    client = _SeedingSpawningClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._proactive("delegate this")
+
+    session = assistant._store.get(assistant._active_id)
+    assert _user_positions(session.messages) == [1]
+    assert [event["id"] for event in session.metadata["subagent"]["1"]] == ["r-1", "r-1"]
+
+
+async def test_a_stopped_first_turns_cards_anchor_to_its_user_message(tmp_path):
+    """`/stop` on a first turn: the agent's snapshot holds [system, user], so the partial turn's card
+    anchors at 1 just as a completed one would."""
+    client = _SeedingSpawnsThenHangsClient()
+    channel = _StopChannel(client.started)
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._serve_channel()  # reads "long task" (starts the turn), then "/stop" (cancels it)
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:  # let the cancelled turn finish its (stopped) + persist
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    session = assistant._store.get(assistant._active_id)
+    assert _user_positions(session.messages) == [1]
+    assert [event["id"] for event in session.metadata["subagent"]["1"]] == ["r-1"]

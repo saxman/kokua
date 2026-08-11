@@ -39,6 +39,27 @@ async def _await_value(value):
     return value
 
 
+class _SeedsSystemMessage:
+    """Mixin: seed the system message into an empty transcript, the way the real clients do.
+
+    AIMU's ``_append_user_turn`` prepends the system message when ``messages`` is empty, so a
+    conversation's *first* turn produces ``[system, user, assistant, ...]`` and its user message sits
+    one past the pre-run length. ``MockAsyncModelClient`` overrides ``_chat`` and so never seeds one,
+    which is why the suite could not see a first-turn off-by-one in the index a turn's sub-agent cards
+    are filed under. Mix in ahead of the client to get the real transcript:
+    ``class C(_SeedsSystemMessage, MockAsyncModelClient)``.
+    """
+
+    def __init__(self, *args, system_message: str = "You are a test assistant.", **kwargs):
+        super().__init__(*args, **kwargs)
+        self._system_message = system_message  # after super(), which sets it to None
+
+    async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
+        if len(self.messages) == 0 and self._system_message:
+            self._append_message({"role": "system", "content": self._system_message})
+        return await super()._chat(user_message, generate_kwargs, use_tools, stream, images, audio)
+
+
 class _BlockingStreamClient(MockAsyncModelClient):
     """Records the user turn, signals it started, then hangs until the turn task is cancelled."""
 

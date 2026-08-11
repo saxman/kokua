@@ -39,12 +39,14 @@ Every rule here was learned from a bug. Read them before changing anything in th
    call; a second cancellation delivered during that send raises ``CancelledError`` again, which
    propagates past a record call placed after the send and drops the turn's events. Every branch --
    cancelled, connection error, generic error, success -- records as its first action, not as a step
-   shared only by the paths that return normally. Recording under the right index is half of this: a
-   planned turn's index cannot come from the ``PlanResult``, since a cancelled or failed run raises
-   instead of returning one, so ``PlanRunner`` publishes the index as it commits and the plan branch
-   reads it back in a ``finally``.
+   shared only by the paths that return normally. Recording under the right index is half of this,
+   and every path resolves that index with ``resolve_user_index`` (the pre-run length is not it: a
+   first turn seeds the system message ahead of the user message). A planned turn's index cannot come
+   from the ``PlanResult`` either, since a cancelled or failed run raises instead of returning one, so
+   ``PlanRunner`` publishes the index as it commits and the plan branch reads it back in a ``finally``.
    (Regressions: ``test_a_second_cancellation_during_the_stopped_send_still_records``,
-   ``test_a_stopped_planned_turn_records_the_events_it_produced``.)
+   ``test_a_stopped_planned_turn_records_the_events_it_produced``,
+   ``test_a_first_turns_cards_anchor_to_its_user_message_past_the_system_message``.)
 
 6. **An unattended turn never lets an exception escape.** A scheduled firing has no user awaiting it
    and runs inside a scheduler job with no handler of its own, so a propagating error would take the
@@ -65,7 +67,7 @@ from aimu.aio.channels.base import ChannelMessage
 
 from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.core.errors import describe_error
-from kokua.core.messages import derive_title
+from kokua.core.messages import derive_title, resolve_user_index
 from kokua.core.subagents import subagent_events
 from kokua.planning.runner import PlanRunner
 
@@ -110,9 +112,9 @@ class TurnRunner:
         collector_token = subagent_events.set([])
         succeeded = False
         failure_reason = ""  # set on error, so a backgrounded turn's notification can carry the reason
-        # Where this turn's sub-agent cards anchor. Both branches settle it before they can raise, so
-        # the cancellation and error paths below record under the index a completed turn would use;
-        # -1 means the turn committed no user message, and recording no-ops.
+        # Where this turn's sub-agent cards anchor. Both branches settle it in a `finally`, so the
+        # cancellation and error paths below record under the index a completed turn would use; -1
+        # means the turn committed no user message, and recording no-ops.
         user_index = -1
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
@@ -129,9 +131,19 @@ class TurnRunner:
                             user_index = runner.user_index
                         self._book.record_plan_metadata(result, conversation_id)
                     else:
-                        user_index = len(agent.model_client.messages)
-                        stream = await agent.run(msg.text, stream=True, images=msg.images)
-                        await self._ui.send(stream, reply_to=msg)
+                        # Taken here rather than before the gate: it is the lower bound the turn's own
+                        # user message is searched for from, so anything another turn appended first
+                        # has to be behind it.
+                        base_len = len(agent.model_client.messages)
+                        try:
+                            stream = await agent.run(msg.text, stream=True, images=msg.images)
+                            await self._ui.send(stream, reply_to=msg)
+                        finally:
+                            # Resolved after the run, not taken as base_len itself: the user message
+                            # this anchors to does not exist until the run appends it, and a first turn
+                            # seeds the system message ahead of it. Reached on the cancelled path too,
+                            # where the agent has already snapshotted the partial turn in its finally.
+                            user_index = resolve_user_index(agent.model_client.messages, base_len)
                 except asyncio.CancelledError:
                     # `/stop` (or shutdown) cancelled this turn. Record first: the "(stopped)" send
                     # below is one more await, and a second cancellation racing it would otherwise
@@ -276,7 +288,7 @@ class TurnRunner:
                     message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
                 if spec.echo_reply:
                     await self._ui.send(reply)
-                self._record_subagents(conversation_id, start)
+                self._record_subagents(conversation_id, resolve_user_index(agent.model_client.messages, start))
                 await self._persist(conversation_id)
         finally:
             self._book.unpin(conversation_id)

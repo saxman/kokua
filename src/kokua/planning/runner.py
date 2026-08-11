@@ -212,16 +212,28 @@ class PlanRunner:
             self._commit_user_message(base_len, msg.text)
         return PlanResult(committed=True, user_index=self.user_index, subagent_events=events)
 
+    def _publish_user_index(self, base_len: int) -> int:
+        """Resolve where this turn's committed user message sits, publish it, and return it.
+
+        Imported inside the method because importing the ``kokua.core`` *package* pulls in the
+        assistant, which imports this module: at module scope this would be an import cycle.
+        """
+        from kokua.core.messages import resolve_user_index
+
+        self.user_index = resolve_user_index(self._agent.model_client.messages, base_len)
+        return self.user_index
+
     def _commit_user_message(self, base_len: int, request: str) -> None:
         """Restore the user's own words over the executor's scaffolding prompt and publish the index.
 
-        Guarded rather than assumed, so ``user_index`` is published only when a user message really
-        sits at ``base_len``: a run cancelled before the executor appended anything must leave it -1.
+        The executor's user message is found rather than assumed to sit at ``base_len``, since a
+        conversation's first turn seeds the system message ahead of it: assuming the position both
+        left the scaffolding prompt in the transcript and dropped the turn's cards. A run cancelled
+        before the executor appended anything resolves to -1, and nothing is rewritten.
         """
-        messages = self._agent.model_client.messages
-        if len(messages) > base_len and messages[base_len].get("role") == "user":
-            messages[base_len]["content"] = request
-            self.user_index = base_len
+        index = self._publish_user_index(base_len)
+        if index >= 0:
+            self._agent.model_client.messages[index]["content"] = request
 
     async def _execute_with_review(
         self, msg: ChannelMessage, plan: str, mode: "Presentation", events: list[dict]
@@ -277,13 +289,13 @@ class PlanRunner:
             # Runs on the cancelled and failed paths too, which is where the published index earns its
             # keep: an answer from an earlier round still commits, and its spawn cards need anchoring.
             # The pair replaces everything the executor and its revisions appended, so the user message
-            # lands back at the pre-execution length however many rounds ran. Nothing to show means
-            # nothing committed, and then no index either: len(base) is where the *next* turn will
-            # commit, so publishing it would file this turn's cards under that one.
+            # lands back at the pre-execution length however many rounds ran. Resolving from the
+            # committed list is what makes "nothing to show" self-evidently unanchored: with no pair
+            # there is no user message at or after len(base), so the index stays -1 rather than
+            # pointing at where the *next* turn will commit.
             pair = [{"role": "user", "content": msg.text}, {"role": "assistant", "content": answer}]
             self._agent.model_client.messages = base + (pair if answer else [])
-            if answer:
-                self.user_index = len(base)
+            self._publish_user_index(len(base))
 
         if mode.stream_intermediate:
             await self._ui.finish_stream()  # already shown live; just terminate the streamed bubble
