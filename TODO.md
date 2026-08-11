@@ -104,3 +104,14 @@ high-frequency or long-lived task it means steadily rising token cost and, event
 model's context window. Decide on a mitigation: e.g. cap/trim the reused conversation (drop or
 summarize older firings), roll over to a fresh conversation past a size threshold, or expose the choice
 per task. No cap exists today.
+
+## 12. Change the default model to a local model
+`config.example.toml` already documents the fallback as "$AIMU_LANGUAGE_MODEL / a local model", but
+`AssistantConfig.model` defaults to `None`. Verify what `None` actually resolves to at agent-build
+time, then make a concrete local model the effective default. Update `config.example.toml`, README,
+and tests/mocks.
+
+Watch-out: CI and mock-only tests run without `../aimu` or a local model available
+(see CLAUDE.md). A local default must not cause a real client to be instantiated at import/build time.
+
+Recovered 2026-08-11 from a 2026-07-14 snapshot that was never committed; renumbered from 4 to 12.
