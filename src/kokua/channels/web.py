@@ -421,6 +421,11 @@ class WebChannel(BaseWebChannel):
         reviewer's card carries ``id``/``role``/``status``/``issues`` instead, sent once per round with
         no ``append``, closing with a terminal ``status`` of ``"approved"`` or ``"rejected"``.
 
+        ``reasoning`` and ``answer`` entries each carry one chunk of streamed text; the page appends
+        each into the block currently open for that kind, and an entry of another kind closes it. The
+        terminal event repeats no already-streamed text, and carries the answer only when a provider
+        streamed none.
+
         Muted for a background turn (see the module docstring)."""
         if not self._foreground():
             return

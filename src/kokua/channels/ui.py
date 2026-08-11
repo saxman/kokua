@@ -138,6 +138,12 @@ class ChannelUI:
         ``append``); and closes with a terminal ``status`` -- ``"done"``, ``"stopped"``, or ``"error"``
         for a spawn, ``"approved"`` or ``"rejected"`` for a reviewer. A no-op where cards aren't
         rendered.
+
+        A spawn's reasoning and generated text stream one chunk per event, each chunk carrying only its
+        own text; a renderer concatenates consecutive chunks of one kind into one block, and anything
+        else in between closes that block. The terminal event therefore carries no ``answer`` text once
+        text has streamed (repeating it would show the answer twice), and does carry it when nothing
+        streamed at all.
         """
         if self._subagent is not None:
             await self._subagent(event)
