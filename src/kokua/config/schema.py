@@ -136,7 +136,7 @@ class AssistantConfig:
     # every intermediate version. Overrides result_review's "hide until vetted" gate. Off by default.
     show_reasoning: bool = False
     # AIMU built-in tool groups to expose (see build._TOOL_GROUPS; "all"/"none" also accepted).
-    tools: list[str] = field(default_factory=lambda: ["web", "fs", "compute", "misc"])
+    tools: list[str] = field(default_factory=lambda: ["web", "fs", "compute", "time", "misc"])
     # Remote MCP servers to connect at startup; each may name an env var holding its bearer token.
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     # Email (SMTP send). Recipients are LOCKED to email_to: the send_email tool takes no recipient, so

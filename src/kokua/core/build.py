@@ -49,6 +49,7 @@ _TOOL_GROUPS = {
     "web": builtin.web,
     "fs": builtin.fs,
     "compute": builtin.compute,
+    "time": builtin.time,
     "misc": builtin.misc,
     "image": builtin.image,
     "audio": builtin.audio,
@@ -99,7 +100,10 @@ def _build_subagent_agent_types(
         what is enabled, never exceeds it);
       - the tools of any MCP servers it names in ``mcp_servers``, matched against the live
         ``connections`` by the server's configured ``name`` first, then its raw URL;
-      - the tools of any tool-packs it names in ``tool_packs`` (from ``plugin_tools_by_pack``).
+      - the tools of any tool-packs it names in ``tool_packs`` (from ``plugin_tools_by_pack``);
+      - the ``time`` group, added to every role when it is globally enabled, because a worker that
+        cannot tell the time is broken whatever its domain. This is the one addition a role does not
+        ask for, and it still respects the global set rather than exceeding it.
     Unknown group/server/pack references drop silently, mirroring the forgiving contract for unknown
     groups. ``connections``/``plugin_tools_by_pack`` default to empty (so a role's built-in groups
     resolve even before the MCP/plugin sources are wired). The role ``description`` becomes the first
@@ -114,6 +118,11 @@ def _build_subagent_agent_types(
         enabled = {g for g in config.tools if g != "none"}
     url_by_name = {s.name: s.url for s in config.mcp_servers if getattr(s, "name", None)}
     callables_by_url = {getattr(c, "url", None): getattr(c, "callables", []) for c in connections}
+    # Every role also gets the time group, on top of whatever its own `groups` name. A worker scoped to
+    # compute or to a single tool-pack still has to resolve "by tomorrow morning", and a role that
+    # forgot to ask for a clock produced a worker that silently could not tell the time. Gated on the
+    # global set, so this still never grants a tool the user disabled in [tools].groups.
+    ambient_tools = _TOOL_GROUPS["time"] if "time" in enabled else []
     agent_types: dict[str, dict] = {}
     for name, role in _effective_subagent_roles(config).items():
         sources: list[list] = [_resolve_builtin_tools([g for g in role.get("groups", []) if g in enabled])]
@@ -121,6 +130,7 @@ def _build_subagent_agent_types(
             sources.append(callables_by_url.get(url_by_name.get(ref, ref), []))
         for pack in role.get("tool_packs", []):
             sources.append(plugin_tools_by_pack.get(pack, []))
+        sources.append(ambient_tools)
         tools: list = []
         seen: set[str] = set()
         for fns in sources:
@@ -290,10 +300,12 @@ def build_agent(
         *make_config_tools(config.config_path, reapply_config),
     ]
     if lean:
-        # Lean supervisor: keep only the cross-cutting tools + date/time (and, added by wire_agent, the
-        # single spawn_subagent delegate + scheduler tools). The built-in groups, tool-packs, and
+        # Lean supervisor: keep only the cross-cutting tools + the time group (and, added by wire_agent,
+        # the single spawn_subagent delegate + scheduler tools). The built-in groups, tool-packs, and
         # connected-MCP callables are NOT mounted here -- they live on the workers, scoped per role.
-        agent.tools = [*base_parent_tools, builtin.get_current_date_and_time]
+        # The time tools are the exception because the supervisor answers scheduling and "when" questions
+        # itself; delegating a clock read would cost a whole spawn.
+        agent.tools = [*base_parent_tools, *builtin.time]
         return agent
     if plugin_tools is None:
         plugin_tools = _load_plugin_tools(config) if config.load_plugins else []

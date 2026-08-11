@@ -2,6 +2,21 @@
 
 ## 0.1.0 (unreleased)
 
+- **Every agent can tell the time.** AIMU's clock and timezone converter moved out of `builtin.misc`
+  into their own `builtin.time` group, which Kokua now exposes as the `time` tool group and adds to the
+  default set (`web,fs,compute,time,misc`). Two agents previously could not reach these tools at all,
+  which is what prompted the change: the **lean supervisor** mounts no built-in groups, and force-added
+  only `get_current_date_and_time`, so `convert_time` never reached the assistant no matter what
+  `[tools].groups` said; and any **sub-agent role** whose `groups` omitted `misc` (the built-in `coder`,
+  which is `fs`+`compute`, and every role defined purely by a tool-pack or MCP server) got a worker with
+  no clock. The lean supervisor now mounts the whole `time` group, and the group is added to *every*
+  sub-agent role on top of its own `groups`, since a worker that cannot resolve "by tomorrow morning" is
+  broken whatever its domain and a role should not have to remember to ask. That addition is gated on
+  `time` being in `[tools].groups`, so it still never grants a tool the user disabled globally; drop
+  `time` there and no agent gets it, workers included. Roles need not list `time` themselves. Note that
+  a model with a calculator is not the same as one that uses it: the lean supervisor still has no
+  `calculate`/`execute_python` of its own by design, and must delegate arithmetic to a worker.
+
 - **Design principles written down**: [docs/explanation/design-principles.md](docs/explanation/design-principles.md)
   states the six principles that decide what belongs in Kokua's core, each with the code that backs
   it, what it excludes, and what it means for a contributor.

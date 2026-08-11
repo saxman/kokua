@@ -57,7 +57,10 @@ show_tools = true
 # (image, audio, speech, transcription) each require their AIMU_*_MODEL env var: there is no default,
 # so the tool raises if it is unset rather than downloading weights you did not ask for. Values and
 # accepted formats: https://saxman.info/aimu/reference/env-vars/
-groups = ["web", "fs", "compute", "misc"]
+# "time" (the clock + timezone conversion) is also added to every sub-agent role, whatever that role's
+# own `groups` say, since a worker that cannot tell the time is broken regardless of its domain. Drop
+# "time" here and no agent gets it, including the workers.
+groups = ["web", "fs", "compute", "time", "misc"]
 
 # Images: the assistant reads images you attach (web upload / paste, or the CLI `/attach <path>`
 # command); a vision-capable model is needed (Claude models qualify). It can also generate images when
@@ -76,7 +79,8 @@ concurrent = true
 # servers it lists in `mcp_servers` (by the server's `name` below, or its raw URL); and the tools of
 # any tool-packs it lists in `tool_packs` (installed kokua.tools plugins, e.g. "pdf", "email").
 # `system_message` is optional. Roles matter most with lean_supervisor = true, where the assistant
-# only delegates and the workers carry the tools.
+# only delegates and the workers carry the tools. No role needs to list "time": it is added to every
+# role from [tools].groups above.
 # [subagents.roles.researcher]
 # description = "Research specialist: gather and verify information from the web."
 # groups = ["web", "misc"]

@@ -69,9 +69,10 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
     parser.add_argument(
         "--tools",
         default=None,
-        help="Comma-separated AIMU built-in tool groups to expose: web, fs, compute, misc, image, "
-        "audio, speech, transcription (or 'all' / 'none'). Default: web,fs,compute,misc. The "
-        "generative groups (image/audio/speech/transcription) require their AIMU_*_MODEL env var.",
+        help="Comma-separated AIMU built-in tool groups to expose: web, fs, compute, time, misc, image, "
+        "audio, speech, transcription (or 'all' / 'none'). Default: web,fs,compute,time,misc. The "
+        "generative groups (image/audio/speech/transcription) require their AIMU_*_MODEL env var. "
+        "Enabling 'time' also gives every sub-agent role the clock, whatever its own groups.",
     )
     parser.add_argument(
         "--mcp",
