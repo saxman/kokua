@@ -44,7 +44,7 @@
       --tool-fg: #92400e; --tool-bg: #fffbeb; --tool-border: #fde68a;
       --approval-bg: #fff7ed; --approval-border: #fdba74;
       --code-bg: #f3f4f6; --quote-fg: #4b5563; --quote-border: #d1d5db;
-      --muted: #6b7280;
+      --muted: #6b7280; --error-fg: crimson;
     }
     :root[data-theme="dark"] {
       color-scheme: dark;
@@ -57,7 +57,7 @@
       --tool-fg: #fbbf24; --tool-bg: #241d10; --tool-border: #78350f;
       --approval-bg: #2a2012; --approval-border: #b45309;
       --code-bg: #0b0e13; --quote-fg: #9ca3af; --quote-border: #4b5563;
-      --muted: #9ca3af;
+      --muted: #9ca3af; --error-fg: #f87171;
     }
     :root { --sidebar-bg: #ececef; --sidebar-active: #d8dade; }
     :root[data-theme="dark"] { --sidebar-bg: #161a22; --sidebar-active: #232a36; }
@@ -552,7 +552,7 @@
         if (frame.task) card.task = frame.task;
         const role = card.role || "Sub-agent";
         const status = subagentStatusLabel(frame.status, card.spawn);
-        card.label.textContent = "🤖 " + role + " — " + status;
+        card.label.textContent = (card.spawn ? "🤖 " : "🔎 ") + role + " — " + status;
         if (card.task) card.label.textContent += " · " + truncate(card.task, 60);
         if (frame.issues && frame.issues.length && frame.status !== "running") {
           const issuesMd = frame.issues.map((i) => "- " + i).join("\n");
@@ -595,7 +595,7 @@
       if (entry.kind === "tool") {
         const el = document.createElement("div");
         el.className = "sa-tool";
-        el.textContent = (entry.name || "tool") + "(" + toolArgs(entry.arguments) + ")";
+        el.textContent = toolLine(entry.name, entry.arguments);
         card.body.appendChild(el);
         return;
       }
@@ -1093,7 +1093,7 @@
       const text = input.value.trim();
       if ((!text && attached.length === 0) || ws.readyState !== WebSocket.OPEN) return;
       stickToBottom = true;  // sending snaps back to the bottom to follow the reply
-      subagentCards = {};  // new turn: reviewer card ids (plan-review-0, ...) start fresh
+      subagentCards = {};  // new turn: card ids (reviewer's plan-review-0, ... or a spawn's id) start fresh
       const now = new Date();
       if (text) addBubble("user", text, now);  // show the user's own words, not the /plan wrapper
       for (const item of attached) addImageBubble(item.dataUrl, "user", now);  // echo attachments locally

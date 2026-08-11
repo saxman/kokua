@@ -253,3 +253,35 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     card.locator(".fold-header").click()
     expect(card.locator(".sa-tool")).to_contain_text("get_webpage")
     expect(card.locator(".sa-answer")).to_contain_text("Vendor A is cheaper.")
+
+
+def test_reviewer_card_still_renders_with_its_own_icon(page, live_server):
+    """A planning reviewer's verdict shares the same card frame and persisted map as a spawn's card
+    (see `renderSubagent`), which is exactly the regression risk finding C caught: the icon is the
+    only at-a-glance way to tell the two apart, and it must stay 🔎 for a reviewer, not 🤖."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    def seed(config):
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[{"role": "user", "content": "plan the launch"}],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                    "subagent": {
+                        "0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["too vague"], "round": 0}]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    card = page.locator(".bubble.subagent")
+    expect(card).to_have_count(1)
+    expect(card.locator(".fold-label")).to_contain_text("🔎")
+    expect(card.locator(".fold-label")).to_contain_text("Plan reviewer")
+    card.locator(".fold-header").click()
+    expect(card.locator("li", has_text="too vague")).to_have_count(1)
