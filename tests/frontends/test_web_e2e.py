@@ -217,7 +217,10 @@ def test_working_indicator_on_switch_into_running(page, live_server):
 
 
 def test_subagent_card_replays_with_its_nested_trace(page, live_server):
-    """A recorded spawn replays as one foldable card: header collapsed, nested trace on expand."""
+    """A recorded spawn replays as one foldable card whose nested reasoning, tool call, and generated
+    text are the page's own thinking/tool/assistant blocks, each individually foldable. Thinking and
+    tool calls start collapsed as they do at the top level; the answer starts open, since it is what
+    the reader opened the card for."""
     from aimu.sessions import Session, TinyDBSessionStore
 
     def seed(config):
@@ -233,12 +236,10 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
                     "subagent": {
                         "0": [
                             {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+                            {"id": "r-1", "append": {"kind": "reasoning", "text": "fetch each page"}},
                             {"id": "r-1", "append": {"kind": "tool", "name": "get_webpage", "arguments": {"url": "u"}}},
-                            {
-                                "id": "r-1",
-                                "status": "done",
-                                "append": {"kind": "answer", "text": "Vendor A is cheaper."},
-                            },
+                            {"id": "r-1", "append": {"kind": "answer", "text": "**Vendor A** is cheaper."}},
+                            {"id": "r-1", "status": "done"},
                         ]
                     },
                 },
@@ -248,11 +249,29 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     _open(page, live_server(delay=0.0, seed=seed))
     card = page.locator(".bubble.subagent")
     expect(card).to_have_count(1)
-    expect(card.locator(".fold-label")).to_contain_text("researcher")
-    expect(card.locator(".fold-label")).to_contain_text("done")
-    card.locator(".fold-header").click()
-    expect(card.locator(".sa-tool")).to_contain_text("get_webpage")
-    expect(card.locator(".sa-answer")).to_contain_text("Vendor A is cheaper.")
+    header_label = card.locator("> .fold-header > .fold-label")
+    expect(header_label).to_contain_text("researcher")
+    expect(header_label).to_contain_text("done")
+    card.locator("> .fold-header").click()
+
+    nested = card.locator("> .fold-body > .bubble")
+    expect(nested).to_have_count(3)
+    thinking, tool, answer = nested.nth(0), nested.nth(1), nested.nth(2)
+    expect(thinking).to_have_class(re.compile(r"\bthinking\b"))
+    expect(thinking).to_have_class(re.compile(r"\bcollapsed\b"))
+    expect(tool).to_have_class(re.compile(r"\btool\b"))
+    expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
+    expect(tool.locator(".fold-label")).to_contain_text("get_webpage")
+    # The answer block: open, and its markdown rendered as it is for the assistant's own reply.
+    expect(answer).to_have_class(re.compile(r"\bassistant\b"))
+    expect(answer).not_to_have_class(re.compile(r"\bcollapsed\b"))
+    expect(answer.locator(".fold-body")).to_be_visible()
+    expect(answer.locator("strong", has_text="Vendor A")).to_have_count(1)
+    # Expanding a nested block leaves the others closed: each folds on its own.
+    thinking.locator(".fold-header").click()
+    expect(thinking).not_to_have_class(re.compile(r"\bcollapsed\b"))
+    expect(thinking.locator(".fold-body")).to_contain_text("fetch each page")
+    expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
 
 
 def test_reviewer_card_still_renders_with_its_own_icon(page, live_server):
