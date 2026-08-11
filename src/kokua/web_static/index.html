@@ -884,6 +884,19 @@
       return f;
     }
 
+    // A deep-planning plan as its own foldable, markdown-rendered. Shared by the live `plan` frame and
+    // the catch-up replay of a planned turn still in flight.
+    function renderPlan(text) {
+      const f = addFoldable("plan", "📋 plan", { md: true });
+      const html = renderMarkdown(text);
+      if (html === null) f.body.textContent = text || "";
+      else {
+        f.body.innerHTML = html;
+        typesetMath(f.body);
+      }
+      return f;
+    }
+
     // Verbose-trace phase header: a labeled divider (e.g. "Planner · drafting a plan"). Shared by the
     // live `phase` frame and history replay so both render the raw trace identically.
     function renderPhase(label, detail, ts) {
@@ -951,13 +964,7 @@
       } else if (frame.type === "approval") {
         renderApproval(frame.name, frame.arguments);
       } else if (frame.type === "plan") {
-        const f = addFoldable("plan", "📋 plan", { md: true });
-        const html = renderMarkdown(frame.text);
-        if (html === null) f.body.textContent = frame.text || "";
-        else {
-          f.body.innerHTML = html;
-          typesetMath(f.body);
-        }
+        renderPlan(frame.text);
       } else if (frame.type === "subagent") {
         renderSubagent(frame, new Date());
       } else if (frame.type === "plan_review") {
@@ -970,10 +977,20 @@
         // Replay a conversation (on connect or after switching), reusing the live renderers.
         log.innerHTML = "";  // replace any current transcript
         subagentCards = {};  // fresh view: drop any live sub-agent card references
+        // Drop the references to the bubbles just removed. Without this they stay live but detached, and
+        // the next token or thinking frame -- from any conversation -- re-attaches the old conversation's
+        // partial bubble into this view and keeps writing into it. A `partial` item below re-opens the
+        // streaming bubble when the conversation being replayed is the one that owns the running turn.
+        streamingBubble = null;
+        streamingText = "";
+        thinkingBlock = null;
         stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
         setWorking(false);  // reset; a "working" frame right behind this one re-shows it if still running
         for (const item of frame.items) {
           if (item.type === "user") addBubble("user", item.text, item.ts);
+          // An in-flight turn's answer so far: left open (and unstamped), so the rest streams into it.
+          else if (item.type === "partial") { streamingText = item.text || ""; streamingBubble = addBubble("assistant", streamingText); }
+          else if (item.type === "plan") renderPlan(item.text);
           else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user", item.ts);
           else if (item.type === "thinking") addFoldable("thinking", "💭 thinking", undefined, item.ts).body.textContent = item.text || "";
           else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts);

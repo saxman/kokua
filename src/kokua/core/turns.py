@@ -23,7 +23,10 @@ Every rule here was learned from a bug. Read them before changing anything in th
    ``subagent_events`` is installed the same way, for the same reason on the recording side: it must
    be set before a turn's first ``await`` and reset only in the ``finally`` alongside
    ``streaming_conversation``, or a spawn racing the set/reset window would report into a stale list
-   (or into no list at all) instead of the turn that owns it.
+   (or into no list at all) instead of the turn that owns it. The channel's catch-up record is opened
+   in the same place and for the same reason, but it is *ended by ``_persist``* rather than by the
+   ``finally``: the store and the record stand for the same output, so ending it next to the write that
+   supersedes it is what keeps a switch-in from replaying both.
 
 4. **A proactive run never touches the active pointer.** It is not "switching" to a conversation,
    just running a turn on one -- the registry looks up any conversation's agent by id. Leaving the
@@ -110,6 +113,9 @@ class TurnRunner:
         self._book.pin(conversation_id)  # invariant 2
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
+        # Record this turn's output for a user who switches into its conversation before it finishes;
+        # ended below by `_persist` (and again in the `finally`, for a turn that never got that far).
+        self._ui.begin_catch_up(conversation_id, msg.text, msg.images)
         succeeded = False
         failure_reason = ""  # set on error, so a backgrounded turn's notification can carry the reason
         # Where this turn's sub-agent cards anchor. Both branches settle it in a `finally`, so the
@@ -178,6 +184,9 @@ class TurnRunner:
         finally:
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
+            # Normally already done by `_persist`; this covers a turn that raised before reaching it,
+            # whose record would otherwise linger and replay a phantom user bubble on the next switch-in.
+            self._ui.end_catch_up(conversation_id)
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
 
@@ -309,5 +318,10 @@ class TurnRunner:
 
     async def _persist(self, conversation_id: str) -> None:
         """Snapshot the turn onto its session, refreshing the sidebar if a title was just derived."""
-        if self._book.persist(conversation_id):
+        title_derived = self._book.persist(conversation_id)
+        # The store now holds what the catch-up record stood in for. Dropped here, between the write and
+        # the next await, rather than in the caller's `finally`: a switch-in landing in between would
+        # otherwise replay the turn twice, once from history and once from the record.
+        self._ui.end_catch_up(conversation_id)
+        if title_derived:
             await self._push_conversations()

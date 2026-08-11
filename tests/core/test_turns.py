@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 
 from aimu.aio.channels.base import Channel, ChannelMessage
 
@@ -963,3 +964,49 @@ async def test_a_stopped_first_turns_cards_anchor_to_its_user_message(tmp_path):
     session = assistant._store.get(assistant._active_id)
     assert _user_positions(session.messages) == [1]
     assert [event["id"] for event in session.metadata["subagent"]["1"]] == ["r-1"]
+
+
+class _CatchUpChannel(FakeChannel):
+    """Logs the catch-up bookkeeping calls and the sidebar push, in arrival order."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls: list[tuple] = []
+
+    def begin_catch_up(self, conversation_id, text, image_paths=None):
+        self.calls.append(("begin", conversation_id, text))
+
+    def end_catch_up(self, conversation_id):
+        self.calls.append(("end", conversation_id))
+
+    async def send_conversations(self, items):
+        self.calls.append(("conversations",))
+
+
+async def test_a_turn_opens_a_catch_up_record_and_ends_it_at_the_persist(tmp_path):
+    """The record stands in for the turn's output until the store holds it, so it must end next to that
+    write -- before the sidebar push that follows it -- or a switch-in landing in between replays the
+    turn twice, once from history and once from the record."""
+    channel = _CatchUpChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["ok"]))
+    active_id = assistant._active_id
+
+    await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=active_id)
+
+    assert channel.calls[0] == ("begin", active_id, "hi")
+    assert channel.calls[1] == ("end", active_id)  # at the persist, ahead of the first-turn title push
+    assert ("conversations",) in channel.calls[2:]
+
+
+async def test_a_turn_that_fails_before_persisting_still_ends_its_catch_up_record(tmp_path):
+    """Otherwise the record lingers and the next switch-in replays a phantom user bubble for a turn
+    that produced nothing."""
+    channel = _CatchUpChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    active_id = assistant._active_id
+    assistant._book.persist = lambda conversation_id: (_ for _ in ()).throw(RuntimeError("store is gone"))
+
+    with pytest.raises(RuntimeError):  # proves the persist never reached its own end_catch_up call
+        await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=active_id)
+
+    assert ("end", active_id) in channel.calls

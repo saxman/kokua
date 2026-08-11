@@ -211,6 +211,30 @@ self-contained `web_static/index.html` served as package data, plus vendored `ma
 typeset after sanitization with `trust:false`. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under `/fonts/`.
 
+Muting a background turn happens per frame, in `WebChannel.send_frame`, which every live frame passes
+through. The rule is a property of the frame's *type*: the `_TURN_FRAMES` set is turn output (tokens,
+thinking, tool calls, the message, `done`, loop markers, images, plan bubbles, phases, sub-agent cards)
+and is dropped when `streaming_conversation` names a conversation other than the one being viewed;
+everything else is channel state (the sidebar, replayed history, settings, notifications, human-decision
+prompts) and always goes out. Neither half can be decided by task context alone. Hoisting the check out
+of a streaming loop -- taking it once when a reply starts -- is what let a switch mid-reply append the
+rest of the old turn's tokens to the conversation the user had just moved to, since the viewed
+conversation changes *during* the send that is being gated. And gating purely on the contextvar would
+drop a background turn's sidebar refresh, because `TurnRunner._persist` pushes the conversation list from
+inside that turn's own task.
+
+Muting a turn is not losing it. Every turn frame is also folded into a per-conversation
+`_CatchUpRecord`, which models the page's own append rules (consecutive thinking text collects into one
+foldable; answer text collects into one open `partial` bubble that floats below later reasoning) and is
+appended to the items of the `history` frame a switch-in sends. That is why a conversation whose turn is
+still running replays the turn so far and then streams the rest into the same bubble: none of it is in
+the store until `_persist`, and a `history` frame replaces the transcript wholesale. Riding on the
+existing frame rather than replaying separate frames is deliberate -- a live frame from the running turn
+can land between two awaits, which would both misorder the catch-up and duplicate that frame. The core
+owns the record's lifetime (`ChannelUI.begin_catch_up` / `end_catch_up`), since only it knows when a turn
+starts; it ends the record inside `_persist`, next to the write that supersedes it, so no switch-in can
+land in a window where both the store and the record would render the same turn.
+
 Planning's reviewer verdicts and a turn's spawned sub-agents share one `subagent` frame type and one
 persisted map (`metadata["subagent"]`); `task` on the create event is what tells the two apart.
 `conversation_to_frames` replays that map on reload, interleaved right after its user bubble; a

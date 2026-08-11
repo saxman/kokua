@@ -64,6 +64,12 @@ class RichChannelDouble(BareChannel):
         self.calls.append(("stream_activity", (show_answer,)))
         return "".join(parts)
 
+    def begin_catch_up(self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None) -> None:
+        self.calls.append(("begin_catch_up", (conversation_id, text, image_paths)))
+
+    def end_catch_up(self, conversation_id: str) -> None:
+        self.calls.append(("end_catch_up", (conversation_id,)))
+
 
 async def _chunks(*items):
     for item in items:
@@ -191,6 +197,17 @@ def test_mirrored_attributes_reach_a_rich_channel():
     ui = ChannelUI(channel)
     ui.set_active_conversation("c1")
     ui.set_display_flag("show_thinking", True)
+    ui.begin_catch_up("c1", "hi", ["/tmp/a.png"])
+    ui.end_catch_up("c1")
     assert channel.active_conversation_id == "c1"
     assert channel.show_thinking is True
     assert ui.display_flag("show_thinking", False) is True  # the channel's copy wins
+    assert channel.calls == [("begin_catch_up", ("c1", "hi", ["/tmp/a.png"])), ("end_catch_up", ("c1",))]
+
+
+def test_catch_up_bookkeeping_is_a_no_op_on_a_bare_channel():
+    """A transport showing one conversation has nothing to catch up on, so the core's calls must be
+    harmless rather than guarded at each call site."""
+    ui = ChannelUI(BareChannel())
+    ui.begin_catch_up("c1", "hi", None)
+    ui.end_catch_up("c1")

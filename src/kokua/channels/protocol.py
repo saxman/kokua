@@ -54,3 +54,12 @@ class RichChannel(Protocol):
 
     async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
         """Stream an agentic loop live without terminating it, returning the generated text."""
+
+    def begin_catch_up(self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None) -> None:
+        """Start recording a turn's output, so switching into its conversation mid-turn shows the turn.
+
+        Synchronous, and paired with ``end_catch_up``: both are bookkeeping calls from the core rather
+        than frames. Only a channel that can replay a conversation has any use for them."""
+
+    def end_catch_up(self, conversation_id: str) -> None:
+        """Stop recording: the turn's output is in the store, or the turn ended without getting there."""

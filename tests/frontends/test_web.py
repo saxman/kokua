@@ -355,6 +355,190 @@ async def test_web_channel_foreground_turn_frames_stream():
     assert ws.frames == [{"type": "token", "text": "hello"}, {"type": "done"}]
 
 
+async def test_a_switch_mid_stream_mutes_the_rest_of_the_reply():
+    """The muting decision is per frame, not once per send: switching conversations mid-reply must
+    not append the rest of that turn's tokens to the conversation now on screen."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel.active_conversation_id = "viewed"
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "before")
+        channel.active_conversation_id = "other"  # the user switches away mid-reply
+        yield StreamChunk(StreamingContentType.GENERATING, "after")
+        yield StreamChunk(StreamingContentType.THINKING, "thought")
+
+    token = streaming_conversation.set("viewed")
+    try:
+        await channel.send(gen())
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == [{"type": "token", "text": "before"}]  # no "after", no thinking, no "done"
+
+
+async def test_a_switch_mid_activity_stream_mutes_the_rest_but_keeps_the_text():
+    """Same per-frame rule for the planning path, which still has to return the full text: its
+    caller needs the answer regardless of who is watching."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel.active_conversation_id = "viewed"
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "before")
+        channel.active_conversation_id = "other"
+        yield StreamChunk(StreamingContentType.GENERATING, "after")
+
+    token = streaming_conversation.set("viewed")
+    try:
+        text = await channel.stream_activity(gen(), show_answer=True)
+    finally:
+        streaming_conversation.reset(token)
+    assert text == "beforeafter"
+    assert ws.frames == [{"type": "token", "text": "before"}]
+
+
+async def test_switching_back_mid_turn_replays_the_turn_so_far():
+    """The whole point of recording a muted turn: a switch-in has to show what the `history` frame it
+    rides on cannot, since none of it is in the store until the turn ends."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel.active_conversation_id = "viewed"
+    channel.begin_catch_up("viewed", "ping")
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.THINKING, "hmm")
+        yield StreamChunk(StreamingContentType.GENERATING, "seen ")
+        channel.active_conversation_id = "other"  # switch away mid-reply
+        yield StreamChunk(StreamingContentType.GENERATING, "unseen")
+
+    token = streaming_conversation.set("viewed")
+    try:
+        await channel.send(gen())
+        channel.active_conversation_id = "viewed"  # ...and back, while the turn is still in flight
+        await channel.send_history([], {})
+    finally:
+        streaming_conversation.reset(token)
+
+    items = ws.frames[-1]["items"]
+    assert [item["type"] for item in items] == ["user", "thinking", "partial"]
+    assert items[0]["text"] == "ping"
+    assert items[1]["text"] == "hmm"
+    assert items[2]["text"] == "seen unseen"  # both halves: the one the user saw and the muted one
+    assert "ts" not in items[2]  # still being written, so it carries no completion caption
+
+
+async def test_the_replayed_answer_floats_below_later_reasoning():
+    """`partial` mirrors the page's own append rule -- the answer bubble moves below a tool call that
+    arrives after it -- so a replay reads in the order a live render would have produced."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel.active_conversation_id = "other"  # background for the whole turn
+    channel.begin_catch_up("running", "ping")
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "first ")
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "search", "arguments": {"q": "x"}})
+        yield StreamChunk(StreamingContentType.GENERATING, "second")
+
+    token = streaming_conversation.set("running")
+    try:
+        await channel.send(gen())
+        channel.active_conversation_id = "running"
+        await channel.send_history([], {})
+    finally:
+        streaming_conversation.reset(token)
+
+    items = ws.frames[-1]["items"]
+    assert [item["type"] for item in items] == ["user", "tool", "partial"]
+    assert items[-1]["text"] == "first second"  # one bubble, sitting after the tool call
+
+
+async def test_a_persisted_turn_is_not_replayed_twice():
+    """`end_catch_up` is what keeps the record from double-rendering: once the turn is in the store, the
+    history frame carries it, and the record must no longer add its own copy."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    channel.begin_catch_up("viewed", "ping")
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "hello")
+
+    token = streaming_conversation.set("viewed")
+    try:
+        await channel.send(gen())
+    finally:
+        streaming_conversation.reset(token)
+    channel.end_catch_up("viewed")
+    channel.end_catch_up("viewed")  # idempotent: the core calls it on persist and again on turn exit
+
+    await channel.send_history([{"role": "user", "content": "ping"}, {"role": "assistant", "content": "hello"}], {})
+    items = ws.frames[-1]["items"]
+    assert [item["type"] for item in items] == ["user", "message"]  # from the store alone
+
+
+async def test_a_conversation_with_no_running_turn_replays_only_the_store():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    await channel.send_history([{"role": "user", "content": "ping"}], {})
+    assert [item["type"] for item in ws.frames[-1]["items"]] == ["user"]
+
+
+async def test_catch_up_records_the_turns_uploaded_images_and_generated_ones():
+    """A user's upload replays under their bubble and a generated image as the assistant's, matching how
+    `conversation_to_frames` aligns each when the same turn is later replayed from the store."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "other"
+    channel.begin_catch_up("running", "look", ["/tmp/kokua-images/abc.png"])
+
+    token = streaming_conversation.set("running")
+    try:
+        await channel.send_frame({"type": "image", "url": "/images/generated.png"})
+    finally:
+        streaming_conversation.reset(token)
+    channel.active_conversation_id = "running"
+    await channel.send_history([], {})
+
+    images = [item for item in ws.frames[-1]["items"] if item["type"] == "image"]
+    assert images == [
+        {"type": "image", "url": "/images/abc.png", "from": "user", "ts": images[0]["ts"]},
+        {"type": "image", "url": "/images/generated.png", "from": "assistant", "ts": images[1]["ts"]},
+    ]
+
+
+async def test_a_background_turns_sidebar_refresh_is_not_muted():
+    """`_persist` pushes the conversation list from inside the turn's own task, so a background
+    turn's sidebar and history frames carry its conversation in the contextvar. Muting those would
+    stop a background turn from ever showing up in the sidebar."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "viewed"
+    token = streaming_conversation.set("other")
+    try:
+        await channel.send_conversations([{"key": "other", "title": "Background"}])
+        await channel.send_history([], {})
+        await channel.send_settings({"show_tools": True})
+    finally:
+        streaming_conversation.reset(token)
+    assert [frame["type"] for frame in ws.frames] == ["conversations", "history", "settings"]
+
+
 async def test_web_channel_send_notification_always_sends():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -1011,3 +1195,32 @@ def test_vendored_katex_js_css_and_fonts_served(tmp_path):
     # The allowlist rejects anything that is not a vendored KaTeX font.
     assert client.get("/fonts/evil.woff2").status_code == 404
     assert client.get("/fonts/KaTeX_Main-Regular.ttf").status_code == 404
+
+
+async def test_a_second_answer_after_a_phase_replays_as_its_own_bubble():
+    """A verbose planned turn closes the answer at each phase, so a second one is a second bubble --
+    including when both hold the same text, where floating the open one by equality would move the
+    wrong item."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws, show_tools=True)
+    channel.active_conversation_id = "other"
+    channel.begin_catch_up("running", "plan it")
+
+    token = streaming_conversation.set("running")
+    try:
+        await channel.send_frame({"type": "token", "text": "same"})
+        await channel.send_frame({"type": "phase", "label": "Reviewer", "detail": ""})
+        await channel.send_frame({"type": "token", "text": "same"})
+        await channel.send_frame({"type": "tool", "name": "search", "arguments": {}})
+        await channel.send_frame({"type": "token", "text": " more"})
+    finally:
+        streaming_conversation.reset(token)
+    channel.active_conversation_id = "running"
+    await channel.send_history([], {})
+
+    items = ws.frames[-1]["items"]
+    assert [item["type"] for item in items] == ["user", "partial", "phase", "tool", "partial"]
+    assert items[1]["text"] == "same"  # the first answer stayed where the phase closed it
+    assert items[4]["text"] == "same more"  # the second floated below the tool call

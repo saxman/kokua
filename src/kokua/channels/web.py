@@ -15,12 +15,25 @@ means "no turn context" (e.g. a direct push, or the CLI channel, which has no mu
 always treated as foreground. ``Assistant._approve`` reads the same contextvar (against
 ``Assistant._active_id`` rather than this channel's ``active_conversation_id``) to gate tool approval on
 foreground: a background turn auto-denies a gated tool since no user is watching to confirm it.
+
+**That decision is made per frame, in :meth:`WebChannel.send_frame`, not once per send.** The viewed
+conversation changes mid-turn -- that is the whole point of backgrounding one -- so a check hoisted out
+of a streaming loop keeps emitting for a turn the user has already switched away from, and the page
+appends the rest of that reply to the conversation now on screen. Muting a frame is therefore keyed off
+its *type* (:data:`_TURN_FRAMES`) rather than off when the send started.
+
+Muting a turn is not losing it. Every turn frame is also folded into that conversation's
+:class:`_CatchUpRecord`, and a switch-in replays the record on the end of the ``history`` frame, so a
+conversation whose turn is still running shows the turn so far and then streams the rest live. The core
+opens and drops those records (``begin_catch_up`` / ``end_catch_up``), because only it knows when a turn
+starts and when its state reaches the store.
 """
 
 from __future__ import annotations
 
 import re
 from contextvars import ContextVar
+from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional, Union
 
@@ -60,6 +73,19 @@ _LOOP_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
 # through it) and conversation_to_frames()'s replay of a stored message's tool_calls. build.py imports
 # this same constant to find and replace the tool on a runtime rebuild.
 SPAWN_SUBAGENT_TOOL_NAME = "spawn_subagent"
+
+# Frames that belong to a running turn, and so are muted when that turn is not the conversation being
+# viewed. Every other frame type describes the channel's own state -- the sidebar, replayed history,
+# settings, a background turn's completion notification, a human-decision prompt -- and is sent no
+# matter which turn's task emits it. That distinction has to be drawn by frame type rather than by task
+# context: `TurnRunner._persist` pushes the conversation list from inside the turn's own task, so a
+# background turn's sidebar refresh carries a muted conversation in the contextvar and would be dropped.
+_TURN_FRAMES = frozenset({"token", "thinking", "tool", "message", "done", "loop", "image", "plan", "phase", "subagent"})
+
+
+def _now() -> str:
+    """Now, in the ISO form the page's timestamp captions parse (the same form persisted messages use)."""
+    return datetime.now().isoformat()
 
 
 def _text_of(content: Any) -> str:
@@ -194,6 +220,76 @@ def conversation_to_frames(
     return items
 
 
+class _CatchUpRecord:
+    """One in-flight turn's output, kept as the display items a conversation replay would express it as.
+
+    A ``history`` frame replaces the page's whole transcript, so switching into a conversation whose turn
+    is still running would otherwise show that turn as though it had never started: its messages are not
+    in the store yet (``TurnRunner._persist`` runs at the end of the turn), and the frames that carried
+    them either went to a view that has since been replaced or were muted while the user looked
+    elsewhere. This is the stand-in, appended to that conversation's history items so the switch-in
+    catches up, after which live frames stream into the same bubble.
+
+    Items follow the page's own append rules, so the replay reads like the render it stands in for:
+    consecutive thinking text collects into one foldable; answer text collects into one still-open
+    ``partial`` bubble that floats to the end each time it grows (matching the page moving the streaming
+    bubble below any later reasoning); anything else closes the thinking block; and ``phase``, ``done``,
+    and ``message`` close the answer too, as ``finalizeStreaming()`` does on the page.
+    """
+
+    def __init__(self):
+        self._items: list[dict] = []
+        self._thinking: Optional[dict] = None
+        self._partial: Optional[dict] = None
+
+    def record_user(self, text: str, image_references: list[str], ts: str) -> None:
+        """Open the record with the turn's own user bubble, which the page renders locally on send and
+        so is the one item no frame ever carries."""
+        if text:
+            self._items.append({"type": "user", "text": text, "ts": ts})
+        for reference in image_references:
+            self._items.append({"type": "image", "url": reference, "from": "user", "ts": ts})
+
+    def record(self, frame: dict, ts: str) -> None:
+        """Fold one outgoing display frame into the items, muted or not.
+
+        A muted frame has to be recorded because the user never saw it; a sent one has to be recorded
+        too, because the ``history`` frame that arrives on the next switch-in wipes it from the page.
+        """
+        kind = frame.get("type")
+        if kind == "thinking":
+            if self._thinking is None:
+                self._thinking = {"type": "thinking", "text": "", "ts": ts}
+                self._items.append(self._thinking)
+            self._thinking["text"] += frame.get("text", "")
+            return
+        self._thinking = None
+        if kind == "token":
+            if self._partial is None:
+                self._partial = {"type": "partial", "text": ""}  # unstamped: it is still being written
+                self._items.append(self._partial)
+            elif self._items[-1] is not self._partial:
+                # Float the answer below later reasoning, as the page does. By identity, not equality:
+                # a `phase` closes one partial and the next answer opens another, and two of them can
+                # hold the same text.
+                self._items = [item for item in self._items if item is not self._partial]
+                self._items.append(self._partial)
+            self._partial["text"] += frame.get("text", "")
+            return
+        if kind in ("phase", "done", "message"):
+            self._partial = None
+        if kind == "done":
+            return  # a terminator has no rendered form to replay
+        item = {**frame, "ts": ts}
+        if kind == "image":
+            item["from"] = "assistant"  # a live image frame is always generated; replay aligns on this
+        self._items.append(item)
+
+    def items(self) -> list[dict]:
+        """The recorded items, copied so a replay cannot be mutated by the turn still running."""
+        return [dict(item) for item in self._items]
+
+
 class WebChannel(BaseWebChannel):
     """AIMU's ``WebChannel`` plus Kokua's conversation-sidebar, history-replay, and approval frames."""
 
@@ -202,6 +298,24 @@ class WebChannel(BaseWebChannel):
         # The conversation this socket is currently viewing (set by the front end). None until then,
         # which _foreground() treats as "always foreground" (nothing to compare against).
         self.active_conversation_id: Optional[str] = None
+        # Per-conversation catch-up records for the turns in flight right now, opened and dropped by the
+        # core (begin_catch_up / end_catch_up). A conversation with no running turn has no entry.
+        self._catch_up: dict[str, _CatchUpRecord] = {}
+
+    def begin_catch_up(self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None) -> None:
+        """Start recording a turn's output, so switching into its conversation mid-turn shows the turn.
+
+        Replaces any previous record for the conversation: one turn runs per conversation at a time, so
+        an older record can only be a leftover from a turn that failed before it persisted.
+        """
+        record = _CatchUpRecord()
+        record.record_user(text, [ROUTE_PREFIX + Path(path).name for path in image_paths or []], _now())
+        self._catch_up[conversation_id] = record
+
+    def end_catch_up(self, conversation_id: str) -> None:
+        """Drop a conversation's record, once the store holds what it stood in for (or the turn is over
+        without ever getting there). Idempotent, since the core calls it on both of those events."""
+        self._catch_up.pop(conversation_id, None)
 
     def _foreground(self) -> bool:
         """Whether the running turn's frames belong to the conversation this socket is viewing.
@@ -217,16 +331,25 @@ class WebChannel(BaseWebChannel):
         return viewing is None or viewing == self.active_conversation_id
 
     async def send_frame(self, frame: dict) -> None:
-        """Send ``frame``, dropping a ``tool`` frame for ``spawn_subagent`` (see SPAWN_SUBAGENT_TOOL_NAME).
+        """Send ``frame`` unless it belongs to a turn the user isn't watching, or stands in for a card.
 
-        The base class's ``send()`` and this class's own ``stream_activity()`` both map a live
-        TOOL_CALLING chunk to a ``tool`` frame by calling this inherited method, so overriding it here
-        is the one choke point that covers both live paths without duplicating the chunk-to-frame
-        mapping. Replay is handled separately, in ``conversation_to_frames``, since a stored turn's
-        tool calls reach the browser batched inside one ``history`` frame rather than through here.
+        Every live frame passes through here -- the base class's ``send()`` and this class's own
+        ``stream_activity()`` both map chunks to frames by calling this inherited method -- which is
+        what makes it the one place both the muting rule (:data:`_TURN_FRAMES`, re-evaluated per frame
+        so a switch mid-reply takes effect immediately) and the ``spawn_subagent`` suppression (see
+        SPAWN_SUBAGENT_TOOL_NAME) can live without duplicating the chunk-to-frame mapping. Replay is
+        handled separately, in ``conversation_to_frames``, since a stored turn's tool calls reach the
+        browser batched inside one ``history`` frame rather than through here.
         """
-        if frame.get("type") == "tool" and frame.get("name") == SPAWN_SUBAGENT_TOOL_NAME:
+        frame_type = frame.get("type")
+        if frame_type == "tool" and frame.get("name") == SPAWN_SUBAGENT_TOOL_NAME:
             return
+        if frame_type in _TURN_FRAMES:
+            record = self._catch_up.get(streaming_conversation.get())
+            if record is not None:
+                record.record(frame, _now())
+            if not self._foreground():
+                return
         await super().send_frame(frame)
 
     async def send_notification(self, text: str) -> None:
@@ -235,9 +358,9 @@ class WebChannel(BaseWebChannel):
 
     async def send_working(self, active: bool) -> None:
         """Tell the page whether the conversation it is now viewing has a turn already running in
-        the background (started before this switch). Not gated by ``_foreground()``: this describes
-        the viewed conversation's own state, not a running turn's streamed content, so it is sent
-        regardless of what ``streaming_conversation`` currently names."""
+        the background (started before this switch). Never muted (``working`` is not in
+        ``_TURN_FRAMES``): this describes the viewed conversation's own state, not a running turn's
+        streamed content, so it is sent regardless of what ``streaming_conversation`` names."""
         await self.send_frame({"type": "working", "active": active})
 
     async def feed_input(self, text: str, image_paths: list[str]) -> None:
@@ -272,17 +395,13 @@ class WebChannel(BaseWebChannel):
         """Stream a reply, emitting a ``loop`` marker at each agent-loop iteration boundary.
 
         Wraps the chunk iterator so the base ``send`` loop is reused unchanged (it has no per-chunk
-        hook); strings (including proactive pushes) pass straight through. Muted for a background turn
-        (see the module docstring): a string is dropped, and a stream is still fully drained -- so the
-        agent run completes and its state persists -- but emits no frames.
+        hook); strings (including proactive pushes) pass straight through. A background turn needs no
+        special path here: the base loop drains the whole stream either way -- so the agent run
+        completes and its state persists -- and each frame it produces is muted or not on its own, as
+        the view stands when that frame is sent (see the module docstring).
         """
         if isinstance(content, str):
-            if self._foreground():
-                await super().send(content, reply_to=reply_to)
-            return
-        if not self._foreground():
-            async for _ in content:  # drain so the agent run completes, but emit nothing
-                pass
+            await super().send(content, reply_to=reply_to)
             return
         await super().send(self._mark_loop_boundaries(content), reply_to=reply_to)
 
@@ -296,38 +415,32 @@ class WebChannel(BaseWebChannel):
         plan bubble); with ``show_answer=True`` it is also streamed as ``token`` frames (verbose trace,
         where every version and each reviewer's prose is shown live).
 
-        Muted for a background turn: still fully drains ``chunks`` and returns the accumulated text (the
-        caller needs it regardless of who's watching), but emits no frames.
+        Muted for a background turn, per frame as it is sent (see the module docstring), so a switch
+        mid-stream stops the rest. ``chunks`` is fully drained and the accumulated text returned either
+        way: the caller needs it regardless of who's watching.
         """
         from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
 
-        foreground = self._foreground()
         parts: list[str] = []
         last_iteration = 0
         async for chunk in chunks:
             if chunk.iteration > last_iteration:
-                if foreground:
-                    await self.send_frame({"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT})
+                await self.send_frame({"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT})
                 last_iteration = chunk.iteration
             if chunk.phase == StreamingContentType.GENERATING:
                 if isinstance(chunk.content, str):
                     parts.append(chunk.content)
-                    if foreground and show_answer and chunk.content:
+                    if show_answer and chunk.content:
                         await self.send_frame({"type": "token", "text": chunk.content})
             elif chunk.phase == StreamingContentType.THINKING and self.show_thinking and chunk.content:
-                if foreground:
-                    await self.send_frame({"type": "thinking", "text": chunk.content})
+                await self.send_frame({"type": "thinking", "text": chunk.content})
             elif chunk.phase == StreamingContentType.TOOL_CALLING and self.show_tools:
-                if foreground:
-                    call = chunk.content if isinstance(chunk.content, dict) else {}
-                    await self.send_frame(
-                        {"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")}
-                    )
+                call = chunk.content if isinstance(chunk.content, dict) else {}
+                await self.send_frame({"type": "tool", "name": call.get("name"), "arguments": call.get("arguments")})
             else:
-                if foreground:
-                    image = _image_frame_for(chunk)
-                    if image is not None:
-                        await self.send_frame(image)
+                image = _image_frame_for(chunk)
+                if image is not None:
+                    await self.send_frame(image)
         return "".join(parts)
 
     async def _mark_loop_boundaries(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
@@ -360,6 +473,11 @@ class WebChannel(BaseWebChannel):
         Always sent, even when empty, so switching to a new/empty conversation clears the page.
         ``metadata`` is the active session's metadata; its ``subagent`` map interleaves reviewer cards
         (non-verbose turns) and its ``trace`` map replays the raw verbose trace (verbose turns).
+
+        A turn in flight on this conversation contributes its catch-up items (see
+        :class:`_CatchUpRecord`) on the end of the same frame. One frame rather than a replay of separate
+        frames is what makes that safe: a live frame from the running turn can land between two awaits,
+        which would both misorder the catch-up and duplicate the frame it interleaved with.
         """
         meta = metadata or {}
         items = conversation_to_frames(
@@ -369,6 +487,9 @@ class WebChannel(BaseWebChannel):
             subagent=meta.get("subagent"),
             trace=meta.get("trace"),
         )
+        record = self._catch_up.get(self.active_conversation_id)
+        if record is not None:
+            items.extend(record.items())
         await self.send_frame({"type": "history", "items": items})
 
     async def send_settings(self, values: dict) -> None:
@@ -387,8 +508,6 @@ class WebChannel(BaseWebChannel):
         """Show a deep-planning plan as its own bubble (rendered as markdown by the page).
 
         Muted for a background turn (see the module docstring)."""
-        if not self._foreground():
-            return
         await self.send_frame({"type": "plan", "text": plan})
 
     async def send_done(self) -> None:
@@ -396,8 +515,6 @@ class WebChannel(BaseWebChannel):
         page's processing state, since the streamed answer isn't followed by a ``message``.
 
         Muted for a background turn (see the module docstring)."""
-        if not self._foreground():
-            return
         await self.send_frame({"type": "done"})
 
     async def send_phase(self, label: str, detail: str = "") -> None:
@@ -406,8 +523,6 @@ class WebChannel(BaseWebChannel):
         The page finalizes any open streaming bubble and starts a fresh one under this header, so each
         LLM call's streamed output reads as its own labeled block. Muted for a background turn (see the
         module docstring)."""
-        if not self._foreground():
-            return
         await self.send_frame({"type": "phase", "label": label, "detail": detail})
 
     async def send_subagent(self, event: dict) -> None:
@@ -427,8 +542,6 @@ class WebChannel(BaseWebChannel):
         streamed none.
 
         Muted for a background turn (see the module docstring)."""
-        if not self._foreground():
-            return
         await self.send_frame({"type": "subagent", **event})
 
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:

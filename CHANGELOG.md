@@ -39,6 +39,26 @@
   it rejects an invalid schedule, a past one-shot, or a name another task holds without writing anything.
   The listing now marks a truncated prompt with `...` and points at `get_scheduled_task`.
 
+- **Fixed: switching conversations mid-reply streamed the rest of that reply into the conversation you
+  switched to.** Backgrounding a turn is supposed to mute it, but the mute decision was taken once, when
+  the reply's send began, and the streaming loop then ran to completion under that stale answer. Switching
+  away mid-reply replaced the page with the new conversation's history and every later token, thinking
+  block, tool call, plan bubble, and sub-agent card of the old turn was appended there. The decision is
+  now made per frame, as each is sent, so a switch takes effect on the next token: the abandoned turn
+  finishes silently and announces itself with the usual "Reply ready in ..." notification. The page had a
+  matching bug of its own -- replaying a conversation removed the streaming bubble from the transcript but
+  kept writing into it, so the *next* turn in any conversation resurrected the abandoned reply's text
+  above its own.
+
+- **Switching into a conversation mid-turn now shows the turn.** Its messages aren't in the store until
+  the turn ends, so a switch-in used to replay the conversation as though the turn had never started: no
+  user bubble, and (before the fix above) the answer resuming mid-sentence with its beginning missing,
+  staying truncated until the next reload. The turn's output is now recorded as it is produced -- the user
+  bubble, reasoning, tool calls, sub-agent cards, uploaded and generated images, and the answer so far --
+  and rides along on the same frame the switch-in replays, after which the rest of the reply streams into
+  the bubble that replay left open. The record is dropped the moment the turn reaches the store, so
+  nothing is ever shown twice.
+
 - **Startup warns about an MCP server no role names.** Since the supervisor mounts no MCP callables, a
   server that no `[subagents.roles.*]` lists in `mcp_servers` connects, spends its token on the
   handshake, and is then reachable by nobody. That was silent; it is now a warning naming the server.

@@ -29,6 +29,7 @@ sync_api = pytest.importorskip("playwright.sync_api")
 expect = sync_api.expect
 
 from aimu.models import StreamChunk, StreamingContentType  # noqa: E402
+from tests.channels import example_subagent_roles  # noqa: E402
 from tests.helpers import MockAsyncModelClient  # noqa: E402
 
 from kokua.config.schema import AssistantConfig  # noqa: E402
@@ -46,27 +47,34 @@ class _SlowClient(MockAsyncModelClient):
     Streaming the reply token up front makes the turn *observably* live and bound to the conversation
     it started in (the token renders there), so a test can wait for it before switching away -- which
     both eliminates the send-then-switch bind race and lets it then drive background muting, the
-    completion notification, and the switch-in "working" indicator deterministically. The turn's
-    `done` frame is what's delayed, so it is still in flight while the test switches conversations."""
+    completion notification, and the switch-in "working" indicator deterministically.
 
-    def __init__(self, delay: float = 0.0, reply: str = REPLY):
+    `tail`, if given, is streamed as a second chunk *after* the delay, i.e. after the test has switched
+    conversations. That is what makes a test of muting mean anything: with the reply alone, the only
+    frame still in flight across the switch is the turn's `done` terminator, which renders no content,
+    so a leak of the reply's remaining tokens would go unnoticed."""
+
+    def __init__(self, delay: float = 0.0, reply: str = REPLY, tail: str = ""):
         super().__init__([])
         self._delay = delay
         self._reply = reply
+        self._tail = tail
 
     async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
         if stream:
             return self._chat_streamed(user_message, generate_kwargs, use_tools, images=images)
         await asyncio.sleep(self._delay)
         self.messages.append({"role": "user", "content": user_message})
-        self.messages.append({"role": "assistant", "content": self._reply})
-        return self._reply
+        self.messages.append({"role": "assistant", "content": self._reply + self._tail})
+        return self._reply + self._tail
 
     async def _chat_streamed(self, user_message, generate_kwargs=None, use_tools=True, images=None):
         self.messages.append({"role": "user", "content": user_message})
         yield StreamChunk(StreamingContentType.GENERATING, self._reply)  # renders now in the viewed conversation
-        await asyncio.sleep(self._delay)  # hold the turn open (its `done` is delayed) so a test can switch away
-        self.messages.append({"role": "assistant", "content": self._reply})
+        await asyncio.sleep(self._delay)  # hold the turn open so a test can switch away mid-reply
+        if self._tail:
+            yield StreamChunk(StreamingContentType.GENERATING, self._tail)  # arrives after that switch
+        self.messages.append({"role": "assistant", "content": self._reply + self._tail})
 
 
 def _free_port() -> int:
@@ -79,18 +87,22 @@ def _free_port() -> int:
 def live_server():
     """Factory: start the real web app (backed by a `_SlowClient`) under uvicorn in a thread.
 
-    Returns a callable `start(delay=0.0, seed=None) -> base_url`. Servers are torn down after the
-    test. Memory, plugins, and sub-agents are off so startup is fast and model-free; the mock client
-    handles turns. `seed`, if given, is called with the `AssistantConfig` before the app is built, so
-    a test can plant a conversation (e.g. a session with recorded sub-agent events) ahead of startup.
+    Returns a callable `start(delay=0.0, seed=None, tail="") -> base_url`. Servers are torn down after the
+    test. Memory and plugins are off so startup is fast and model-free; the mock client handles turns.
+    Roles are the shipped ones (`Assistant.create` refuses an empty set), and nothing here spawns a
+    sub-agent, so they only need to exist. `seed`, if given, is called with the `AssistantConfig`
+    before the app is built, so a test can plant a conversation (e.g. a session with recorded
+    sub-agent events) ahead of startup.
     """
     started: list[tuple] = []
 
-    def start(delay: float = 0.0, seed=None) -> str:
-        config = AssistantConfig(memory=False, subagents=False, load_plugins=False, tools=["none"])
+    def start(delay: float = 0.0, seed=None, tail: str = "") -> str:
+        config = AssistantConfig(
+            memory=False, subagent_roles=example_subagent_roles(), load_plugins=False, tools=["none"]
+        )
         if seed is not None:
             seed(config)
-        app = build_app(config, client_factory=lambda conversation_id: _SlowClient(delay))
+        app = build_app(config, client_factory=lambda conversation_id: _SlowClient(delay, tail=tail))
         port = _free_port()
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
         thread = threading.Thread(target=server.run, daemon=True)
@@ -134,26 +146,59 @@ def test_bubbles_show_timestamp_caption(page, live_server):
     expect(page.locator(".bubble.assistant .bubble-ts")).to_be_visible(timeout=10_000)
 
 
+TAIL = "And here is the rest of it."
+
+
 def test_background_turn_notifies_and_does_not_leak(page, live_server):
-    """Switching away mid-turn: the reply is muted (never rendered in the now-viewed conversation) and
-    the turn's completion surfaces as a dismissible notification banner instead."""
-    _open(page, live_server(delay=2.0))
+    """Switching away mid-turn: the rest of the reply is muted (never rendered in the now-viewed
+    conversation) and the turn's completion surfaces as a dismissible notification banner instead.
+
+    `tail` is the part of the reply that streams *after* the switch, which is the part a once-per-send
+    mute decision would have leaked into the conversation the user moved to."""
+    _open(page, live_server(delay=2.0, tail=TAIL))
     page.fill("#msg", "ping")
     page.click("#send")
     # Wait until the turn is observably running in this conversation (its token rendered here), so the
     # switch below can't race the turn's binding -- it is already bound to this conversation.
     expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
 
-    page.click("#new-conv")  # switch away while the turn's `done` is still pending -> it finishes muted
+    page.click("#new-conv")  # switch away mid-reply -> the rest of the turn finishes muted
     expect(page.locator("#conv-list li")).to_have_count(2)
     expect(page.locator(".bubble.assistant")).to_have_count(0)  # the fresh conversation shows no reply
 
     banner = page.locator("#notifications .notification-banner")
     expect(banner).to_be_visible(timeout=15_000)  # the background turn's completion surfaces here instead
-    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_have_count(0)  # reply never leaked into view
+    expect(page.locator(".bubble.assistant")).to_have_count(0)  # nothing of the turn leaked into view
+    assert TAIL not in page.locator("#log").inner_text()
 
     banner.locator("button").click()  # dismiss
     expect(page.locator("#notifications .notification-banner")).to_have_count(0)
+
+
+def test_switching_back_mid_turn_shows_the_turn_so_far_and_keeps_streaming(page, live_server):
+    """Switching back into a conversation whose turn is still running: the `history` frame it gets can
+    only carry the store, which has none of this turn yet, so the turn's own output rides along as
+    catch-up items -- the user bubble and the answer streamed so far -- and the rest streams into that
+    same bubble."""
+    url = live_server(delay=2.0, tail=TAIL)
+    _open(page, url)
+    page.fill("#msg", "ping")
+    page.click("#send")
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
+
+    page.click("#new-conv")  # away, mid-reply; sidebar becomes [new, original]
+    expect(page.locator(".bubble.assistant")).to_have_count(0)
+    page.locator("#conv-list li").nth(1).click()  # ...and back, while the turn is still in flight
+
+    # Replayed from the catch-up record, not from the store: neither is persisted yet.
+    expect(page.locator(".bubble.user", has_text="ping")).to_be_visible()
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible()
+    expect(page.locator("#working-indicator")).not_to_have_class(_HIDDEN)  # still marked as running
+
+    # The tail then streams into the bubble the replay left open: one bubble holding the whole reply.
+    expect(page.locator(".bubble.assistant", has_text=TAIL)).to_be_visible(timeout=15_000)
+    expect(page.locator(".bubble.assistant")).to_have_count(1)
+    assert page.locator("#notifications .notification-banner").count() == 0  # never backgrounded at the end
 
 
 def test_sidebar_collapse_resize_persist(page, live_server):
