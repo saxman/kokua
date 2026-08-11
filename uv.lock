@@ -18,7 +18,7 @@ resolution-markers = [
 
 [[package]]
 name = "aimu"
-version = "0.12.0"
+version = "0.13.0"
 source = { editable = "../aimu" }
 dependencies = [
     { name = "chromadb" },
@@ -73,7 +73,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'" },
     { name = "python-dotenv" },
     { name = "requests" },
-    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15,<0.16" },
     { name = "safetensors", marker = "extra == 'hf'" },
     { name = "sentence-transformers", marker = "extra == 'hf'", specifier = ">=3" },
     { name = "sentencepiece", marker = "extra == 'hf'" },

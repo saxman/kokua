@@ -34,6 +34,7 @@ from kokua.core.build import (
     build_memory,
     build_model_client,
     make_agent_builder,
+    unreferenced_mcp_servers,
 )
 from kokua.config import AssistantConfig
 from kokua.core.conversations import ConversationBook
@@ -212,6 +213,12 @@ class Assistant:
         )
         if config.lean_supervisor and not config.subagents:
             logger.warning("lean_supervisor is set but subagents is off; using the flat toolset instead.")
+        for name in unreferenced_mcp_servers(config):
+            logger.warning(
+                "MCP server %r is configured but no [subagents.roles.*] names it in `mcp_servers`; "
+                "a lean supervisor mounts no MCP tools itself, so this server reaches no agent.",
+                name,
+            )
         if config.subagents and not config.subagent_roles:
             logger.info(
                 "no [subagents.roles.*] configured; spawn_subagent will use a single generic worker. "

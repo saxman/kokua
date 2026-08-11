@@ -83,6 +83,20 @@ def _resolve_builtin_tools(names: list[str]) -> list:
     return resolved
 
 
+def unreferenced_mcp_servers(config: AssistantConfig) -> list[str]:
+    """Configured MCP servers that no sub-agent role names, and so reach no agent at all.
+
+    A lean supervisor mounts no MCP callables (see ``build_agent``), so a server's tools travel only to
+    the workers whose roles list it in ``mcp_servers``, by name or by raw URL. A server nobody names
+    still connects and still spends its token on the handshake; it is simply unreachable, and nothing
+    said so. Returns each one's name (or URL, when unnamed) for the startup warning.
+    """
+    if not (config.lean_supervisor and config.subagents and config.subagent_roles):
+        return []  # a flat agent mounts every connected server itself, so none can be stranded
+    referenced = {ref for role in config.subagent_roles.values() for ref in role.get("mcp_servers", [])}
+    return [s.name or s.url for s in config.mcp_servers if not ({s.url, s.name} & referenced)]
+
+
 def _generic_worker_tools(
     config: AssistantConfig,
     connections: Optional[list] = None,

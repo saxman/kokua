@@ -369,3 +369,67 @@ async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeyp
     new_agent = assistant._registry.get(new_id)
     names = [fn.__name__ for fn in new_agent.tools]
     assert names.count("remote_ping") == 1
+
+
+async def test_mcp_server_no_role_names_is_warned_about(tmp_path, monkeypatch, caplog):
+    """A lean supervisor mounts no MCP callables, so a server only reaches the workers whose roles name
+    it. An unreferenced server therefore connects, holds a token, and is reachable by nobody -- silently,
+    until now."""
+    import logging
+
+    from aimu import aio
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("remote_search")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    config = _config(
+        tmp_path,
+        lean_supervisor=True,
+        mcp_servers=[MCPServerConfig(url="https://orphan/mcp", name="orphan")],
+        subagent_roles={"coder": {"description": "Codes.", "groups": ["fs"]}},
+    )
+    with caplog.at_level(logging.WARNING, logger="kokua.core.assistant"):
+        await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    assert any("orphan" in record.getMessage() for record in caplog.records)
+
+
+async def test_mcp_server_a_role_names_is_not_warned_about(tmp_path, monkeypatch, caplog):
+    import logging
+
+    from aimu import aio
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("remote_search")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    config = _config(
+        tmp_path,
+        lean_supervisor=True,
+        mcp_servers=[MCPServerConfig(url="https://named/mcp", name="named")],
+        subagent_roles={"r": {"description": "Uses it.", "mcp_servers": ["named"]}},
+    )
+    with caplog.at_level(logging.WARNING, logger="kokua.core.assistant"):
+        await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    assert not any("named" in record.getMessage() for record in caplog.records)
+
+
+async def test_a_role_may_name_an_mcp_server_by_raw_url(tmp_path, monkeypatch, caplog):
+    """`name` is optional, so the warning has to accept a raw-URL reference as a match too."""
+    import logging
+
+    from aimu import aio
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("remote_search")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    config = _config(
+        tmp_path,
+        lean_supervisor=True,
+        mcp_servers=[MCPServerConfig(url="https://byurl/mcp")],
+        subagent_roles={"r": {"description": "Uses it.", "mcp_servers": ["https://byurl/mcp"]}},
+    )
+    with caplog.at_level(logging.WARNING, logger="kokua.core.assistant"):
+        await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    assert not any("byurl" in record.getMessage() for record in caplog.records)
