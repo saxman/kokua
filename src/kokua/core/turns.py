@@ -39,8 +39,12 @@ Every rule here was learned from a bug. Read them before changing anything in th
    call; a second cancellation delivered during that send raises ``CancelledError`` again, which
    propagates past a record call placed after the send and drops the turn's events. Every branch --
    cancelled, connection error, generic error, success -- records as its first action, not as a step
-   shared only by the paths that return normally.
-   (Regression: ``test_a_second_cancellation_during_the_stopped_send_still_records``.)
+   shared only by the paths that return normally. Recording under the right index is half of this: a
+   planned turn's index cannot come from the ``PlanResult``, since a cancelled or failed run raises
+   instead of returning one, so ``PlanRunner`` publishes the index as it commits and the plan branch
+   reads it back in a ``finally``.
+   (Regressions: ``test_a_second_cancellation_during_the_stopped_send_still_records``,
+   ``test_a_stopped_planned_turn_records_the_events_it_produced``.)
 
 6. **An unattended turn never lets an exception escape.** A scheduled firing has no user awaiting it
    and runs inside a scheduler job with no handler of its own, so a propagating error would take the
@@ -106,16 +110,24 @@ class TurnRunner:
         collector_token = subagent_events.set([])
         succeeded = False
         failure_reason = ""  # set on error, so a backgrounded turn's notification can carry the reason
-        user_index = -1  # recorded unconditionally below, including on the cancellation and error paths
+        # Where this turn's sub-agent cards anchor. Both branches settle it before they can raise, so
+        # the cancellation and error paths below record under the index a completed turn would use;
+        # -1 means the turn committed no user message, and recording no-ops.
+        user_index = -1
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
                 try:
                     if plan:
                         runner = PlanRunner(agent, self._ui, self._config, self._review_plan)
-                        result = await runner.run(msg)
+                        try:
+                            result = await runner.run(msg)
+                        finally:
+                            # A cancelled or failed planned turn raises instead of returning a
+                            # PlanResult, and the runner publishes the index as it commits, so read it
+                            # from the runner rather than from a result that may never arrive.
+                            user_index = runner.user_index
                         self._book.record_plan_metadata(result, conversation_id)
-                        user_index = result.user_index if result.committed else -1
                     else:
                         user_index = len(agent.model_client.messages)
                         stream = await agent.run(msg.text, stream=True, images=msg.images)

@@ -237,16 +237,17 @@ async def test_background_turn_error_notifies_with_reason(tmp_path):
 
 
 class _StopChannel(Channel):
-    """Yields a normal message, waits until the turn is running, then yields '/stop'."""
+    """Yields ``text``, waits until the turn is running, then yields '/stop'."""
 
     name = "fake"
 
-    def __init__(self, started):
+    def __init__(self, started, text: str = "long task"):
         self._started = started
+        self._text = text
         self.sent: list[str] = []
 
     async def receive(self):
-        yield ChannelMessage(text="long task", channel="fake")
+        yield ChannelMessage(text=self._text, channel="fake")
         await self._started.wait()
         yield ChannelMessage(text="/stop", channel="fake")
 
@@ -607,6 +608,134 @@ async def test_a_stopped_turn_records_the_events_it_produced(tmp_path):
 
     metadata = assistant._store.get(assistant._active_id).metadata
     assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1"]
+
+
+class _PlansThenSpawnsAndHangsClient(MockAsyncModelClient):
+    """Drafts a plan, then reports a spawn from the executor and hangs until the turn is cancelled.
+
+    The planner call goes through the base mock (a planned turn's first run is non-streaming on a
+    channel without live activity), so only the executor stands in for a delegation.
+    """
+
+    def __init__(self):
+        super().__init__(["THE PLAN"])
+        self.started = asyncio.Event()
+        self.reporter = None
+
+    async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
+        if self._call_count == 0:
+            return await super()._chat(user_message, generate_kwargs, use_tools, stream, images, audio)
+        self.messages.append({"role": "user", "content": user_message})
+        if self.reporter is not None:
+            await self.reporter.spawned("r-1", "researcher", "find X")
+        self.started.set()
+        await asyncio.Event().wait()  # hang until cancelled
+
+
+async def test_a_stopped_planned_turn_records_the_events_it_produced(tmp_path):
+    """`/stop` mid-spawn on a `/plan` turn: the card is anchored where a completed planned turn's
+    would be. The plan branch used to take its index from the returned PlanResult, which a cancelled
+    run never produces, so the index stayed -1 and the recording silently no-opped."""
+    client = _PlansThenSpawnsAndHangsClient()
+    channel = _StopChannel(client.started, text="/plan long task")
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._serve_channel()  # reads "/plan long task", then "/stop" (cancels the turn)
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:  # let the cancelled turn finish its (stopped) + persist
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1"]
+    messages = assistant._agent.model_client.messages
+    assert messages[0]["content"] == "long task"  # the card's anchor is the user's own words
+
+
+class _SpawnsWhilePlanningThenHangsClient(MockAsyncModelClient):
+    """Reports a spawn from the planner, then hangs in the executor before it appends anything.
+
+    The planner's messages are rolled back (planning is scratch work), so at cancellation there is no
+    user message anywhere: the events are real but have nothing to anchor to.
+    """
+
+    def __init__(self):
+        super().__init__(["THE PLAN"])
+        self.started = asyncio.Event()
+        self.reporter = None
+
+    async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
+        if self._call_count == 0:
+            if self.reporter is not None:
+                await self.reporter.spawned("r-1", "researcher", "find X")
+            return await super()._chat(user_message, generate_kwargs, use_tools, stream, images, audio)
+        self.started.set()
+        await asyncio.Event().wait()  # hang until cancelled
+
+
+async def test_a_planned_turn_cancelled_before_the_executor_commits_records_nothing(tmp_path):
+    """The streaming path publishes its index only once the executor's user message is really there.
+    Publishing it up front would file these events at an index the next turn's user message takes."""
+    client = _SpawnsWhilePlanningThenHangsClient()
+    channel = _StopChannel(client.started, text="/plan long task")
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._serve_channel()
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    assert assistant._agent.model_client.messages == []
+    assert "subagent" not in assistant._store.get(assistant._active_id).metadata
+
+
+class _PhaseStopChannel(_StopChannel):
+    """A phase-capable ``_StopChannel``, so a planned turn takes the reviewed (trace) path."""
+
+    async def send_phase(self, label, detail="") -> None:
+        pass
+
+
+async def test_a_stopped_reviewed_planned_turn_with_no_answer_records_nothing(tmp_path):
+    """The reviewed path rolls back to the pre-execution messages when it has no answer to commit, so
+    a run cancelled that early has no anchor: the index it would publish is the one the *next* turn's
+    user message will occupy, which would show this turn's cards on that one."""
+    client = _PlansThenSpawnsAndHangsClient()
+    channel = _PhaseStopChannel(client.started, text="/plan long task")
+    assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._serve_channel()
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    assert assistant._agent.model_client.messages == []  # nothing committed...
+    assert "subagent" not in assistant._store.get(assistant._active_id).metadata  # ...so nothing filed
+
+
+async def test_a_rejected_plan_records_nothing(tmp_path):
+    """A rejected plan commits no user message, so a spawn the planner made has nothing to anchor to.
+    Recording it at the pre-execution length would file it under whatever the next turn commits there."""
+    client = _SpawningClient("THE PLAN")
+    assistant = await Assistant.create(_config(tmp_path, plan_review=True), FakeChannel(), client=client)
+    client.reporter = assistant._subagent_reporter
+    active_id = assistant._active_id
+
+    turn = asyncio.create_task(
+        assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=active_id, plan=True)
+    )
+    for _ in range(1000):
+        if assistant._human.plan.pending:
+            assistant._human.plan.resolve(None)  # reject
+            break
+        await asyncio.sleep(0)
+    else:
+        raise AssertionError("plan review never became pending")
+    await turn
+
+    assert "subagent" not in assistant._store.get(active_id).metadata
 
 
 class _CancelsOnStoppedSendChannel(Channel):

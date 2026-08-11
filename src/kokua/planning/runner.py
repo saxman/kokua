@@ -124,7 +124,11 @@ VERBOSE = Presentation(stream_intermediate=True, announce_phases=True, show_plan
 class PlanResult:
     """Outcome of a planned turn, for the caller to persist. ``committed`` is False on plan-rejection
     (no committed turn to anchor replay cards to); otherwise ``user_index`` is the index of the committed
-    user message and ``subagent_events`` / ``trace`` are the reload-replay metadata for that turn."""
+    user message and ``subagent_events`` / ``trace`` are the reload-replay metadata for that turn.
+
+    Only a run that returned normally produces one of these. A cancelled or failed run raises instead,
+    so its index is read from :attr:`PlanRunner.user_index`, which this field mirrors.
+    """
 
     committed: bool
     user_index: int = -1
@@ -149,6 +153,12 @@ class PlanRunner:
         # The raw trace of the in-flight verbose turn: a list of {label, detail, text} phase segments,
         # accumulated by _send_phase / _run_and_capture / _stream_review. None outside a verbose turn.
         self._trace: Optional[list[dict]] = None
+        # Index of this turn's committed user message, published by whichever execution path commits
+        # it and -1 until then. A cancelled or failed run raises instead of returning a PlanResult, so
+        # this is how the caller still anchors that turn's recorded sub-agent cards. It stays -1 when
+        # nothing was committed (a rejected plan, or a run cancelled before it had an answer to show),
+        # because cards filed at an index no message occupies would attach to the next turn's message.
+        self.user_index = -1
 
     async def run(self, msg: ChannelMessage) -> PlanResult:
         """Deep planning: plan, optionally adversarially review + human review, then execute (optionally
@@ -189,14 +199,29 @@ class PlanRunner:
         the text back to record in the trace, and it must not emit a terminating frame mid-turn.
         """
         base_len = len(self._agent.model_client.messages)
-        stream = await self._agent.run(
-            EXECUTE_PROMPT.format(request=msg.text, plan=plan), stream=True, images=msg.images
-        )
-        await self._ui.send(stream, reply_to=msg)
+        try:
+            stream = await self._agent.run(
+                EXECUTE_PROMPT.format(request=msg.text, plan=plan), stream=True, images=msg.images
+            )
+            await self._ui.send(stream, reply_to=msg)
+        finally:
+            # Also on the cancelled and failed paths: the executor appends its user message before it
+            # can call any tool, so a turn that reported a spawn has one here to anchor the spawn's
+            # cards to, and it needs the same rewrite a completed turn gets. Synchronous, so a second
+            # cancellation cannot cut it short.
+            self._commit_user_message(base_len, msg.text)
+        return PlanResult(committed=True, user_index=self.user_index, subagent_events=events)
+
+    def _commit_user_message(self, base_len: int, request: str) -> None:
+        """Restore the user's own words over the executor's scaffolding prompt and publish the index.
+
+        Guarded rather than assumed, so ``user_index`` is published only when a user message really
+        sits at ``base_len``: a run cancelled before the executor appended anything must leave it -1.
+        """
         messages = self._agent.model_client.messages
         if len(messages) > base_len and messages[base_len].get("role") == "user":
-            messages[base_len]["content"] = msg.text
-        return PlanResult(committed=True, user_index=base_len, subagent_events=events)
+            messages[base_len]["content"] = request
+            self.user_index = base_len
 
     async def _execute_with_review(
         self, msg: ChannelMessage, plan: str, mode: "Presentation", events: list[dict]
@@ -249,15 +274,22 @@ class PlanRunner:
                         show_answer=mode.stream_intermediate,
                     )
         finally:
+            # Runs on the cancelled and failed paths too, which is where the published index earns its
+            # keep: an answer from an earlier round still commits, and its spawn cards need anchoring.
+            # The pair replaces everything the executor and its revisions appended, so the user message
+            # lands back at the pre-execution length however many rounds ran. Nothing to show means
+            # nothing committed, and then no index either: len(base) is where the *next* turn will
+            # commit, so publishing it would file this turn's cards under that one.
             pair = [{"role": "user", "content": msg.text}, {"role": "assistant", "content": answer}]
             self._agent.model_client.messages = base + (pair if answer else [])
+            if answer:
+                self.user_index = len(base)
 
-        user_index = len(self._agent.model_client.messages) - 2  # [..., user, assistant]
         if mode.stream_intermediate:
             await self._ui.finish_stream()  # already shown live; just terminate the streamed bubble
         else:
             await self._ui.send(answer, reply_to=msg)  # withheld until vetted; show it now
-        return PlanResult(committed=True, user_index=user_index, subagent_events=events, trace=self._trace or [])
+        return PlanResult(committed=True, user_index=self.user_index, subagent_events=events, trace=self._trace or [])
 
     async def _plan_review_rounds(
         self, msg: ChannelMessage, plan: str, mode: "Presentation", events: list[dict]
