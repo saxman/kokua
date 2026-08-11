@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 
-from kokua.config import AssistantConfig, MCPServerConfig
+from kokua.config import MCPServerConfig
 from kokua.core.assistant import Assistant
 from tests.channels import FakeChannel, _config, example_subagent_roles
 from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool
@@ -24,37 +24,36 @@ _MEMORY_TOOL_NAMES = {
 }
 
 
-async def test_assistant_wires_builtin_tools_by_default(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
-    names = {fn.__name__ for fn in assistant._agent.tools}
+def test_builtin_groups_reach_the_workers(tmp_path):
+    """[tools].groups is the workers' ceiling, not the supervisor's toolset, so the default groups have
+    to be verified where they actually land."""
+    from kokua.core.build import _build_subagent_agent_types
+
+    worker_tools = {
+        fn.__name__ for spec in _build_subagent_agent_types(_config(tmp_path)).values() for fn in spec["tools"]
+    }
     # Default groups are present...
-    assert {"get_weather", "read_file", "calculate", "get_current_date_and_time", "convert_time"} <= names
+    assert {"get_weather", "read_file", "calculate", "get_current_date_and_time", "convert_time"} <= worker_tools
     # ...and the generative groups (opt-in, need AIMU_*_MODEL) are not.
-    assert "generate_image" not in names
+    assert "generate_image" not in worker_tools
 
 
-async def test_assistant_tools_none_omits_builtins(tmp_path):
-    assistant = await Assistant.create(
-        _config(tmp_path, tools=["none"]), FakeChannel(), client=MockAsyncModelClient([])
-    )
+async def test_tools_none_leaves_workers_with_nothing_and_the_supervisor_intact(tmp_path):
+    from kokua.core.build import _build_subagent_agent_types
+
+    config = _config(tmp_path, tools=["none"])
+    worker_tools = {fn.__name__ for spec in _build_subagent_agent_types(config).values() for fn in spec["tools"]}
+    assert worker_tools == set()  # not even the ambient clock, which is gated on the global set
+
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
-    assert "get_weather" not in names and "calculate" not in names
-    # The assistant's own tools remain.
-    assert {"author_skill", "add_skill_script", "add_mcp_server"} <= names
+    assert {"author_skill", "add_skill_script", "add_mcp_server"} <= names  # cross-cutting tools remain
 
 
-async def test_assistant_wires_subagent_tool_by_default(tmp_path):
+async def test_assistant_wires_subagent_tool(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
     assert "spawn_subagent" in names
-
-
-async def test_assistant_subagents_flag_omits_tool(tmp_path):
-    assistant = await Assistant.create(
-        _config(tmp_path, subagents=False), FakeChannel(), client=MockAsyncModelClient([])
-    )
-    names = {fn.__name__ for fn in assistant._agent.tools}
-    assert "spawn_subagent" not in names
 
 
 async def test_subagent_tool_is_typed_when_roles_are_configured(tmp_path):
@@ -192,71 +191,21 @@ def test_worker_role_unknown_sources_drop_silently(tmp_path):
     assert "web_search" in names  # web group survived; unknown mcp/pack refs dropped without error
 
 
-async def test_no_configured_roles_falls_back_to_an_untyped_delegate(tmp_path):
-    """Roles live only in config.toml now, so "no roles" is reachable (a fresh install with no config
-    file). AIMU rejects an empty agent_types dict, so that case builds the untyped spawn_subagent(task)
-    rather than crashing the assistant at startup."""
-    import inspect
+async def test_no_configured_roles_refuses_to_start(tmp_path):
+    """Roles are the assistant's only route to a domain tool, so a config with none would start
+    something that looks running and cannot browse, read a file, or compute. Refuse instead, and name
+    the command that fixes it."""
+    from kokua.config import ConfigError
 
-    assistant = await Assistant.create(
-        _config(tmp_path, subagent_roles={}), FakeChannel(), client=MockAsyncModelClient([])
-    )
-    spawn = next(t for t in assistant._agent.tools if t.__name__ == "spawn_subagent")
-    assert list(inspect.signature(spawn).parameters) == ["task"]
-
-
-async def test_unconfigured_roles_are_announced_at_startup(tmp_path, caplog):
-    """Dropping from three specialists to one generic worker is exactly the upgrade surprise a user
-    should be able to find in the log, rather than infer from the assistant getting worse."""
-    import logging
-
-    with caplog.at_level(logging.INFO, logger="kokua.core.assistant"):
+    with pytest.raises(ConfigError, match="subagents.roles"):
         await Assistant.create(_config(tmp_path, subagent_roles={}), FakeChannel(), client=MockAsyncModelClient([]))
-    assert any("subagents.roles" in record.getMessage() for record in caplog.records)
 
 
-async def test_configured_roles_are_not_announced(tmp_path, caplog):
-    import logging
-
-    with caplog.at_level(logging.INFO, logger="kokua.core.assistant"):
-        await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
-    assert not any("subagents.roles" in record.getMessage() for record in caplog.records)
-
-
-def test_generic_worker_draws_on_every_enabled_tool_source(tmp_path):
-    """With no roles to scope it, the one worker gets what a flat agent would: enabled built-in groups,
-    tool-packs, and connected MCP servers. A lean supervisor with a tool-less worker could do nothing."""
-    from types import SimpleNamespace
-
-    from kokua.core.build import _generic_worker_tools
-
-    def remote_tool():
-        pass
-
-    def make_pdf():
-        pass
-
-    cfg = _config(tmp_path, tools=["web", "compute", "time"])
-    connections = [SimpleNamespace(url="https://broker/mcp", callables=[remote_tool])]
-    names = {fn.__name__ for fn in _generic_worker_tools(cfg, connections, {"pdf": [make_pdf]})}
-    assert {"web_search", "calculate", "get_current_date_and_time"} <= names
-    assert {"remote_tool", "make_pdf"} <= names
-    assert "read_file" not in names  # fs was not enabled, so the worker does not exceed the global set
-
-
-def test_supervisor_prompt_matches_the_delegate_signature(tmp_path):
-    """The lean prompt names the call it wants the model to make, so it has to track whether the
-    delegate is the typed spawn_subagent(agent_type, task) or the untyped spawn_subagent(task)."""
+def test_supervisor_prompt_names_the_typed_delegate(tmp_path):
+    """The prompt names the call it wants the model to make, and there is only one delegate shape."""
     from kokua.core.build import resolve_system_message
 
-    typed = resolve_system_message(
-        _config(tmp_path, lean_supervisor=True, subagent_roles={"r": {"description": "Does things."}})
-    )
-    assert "spawn_subagent(agent_type, task)" in typed
-
-    generic = resolve_system_message(_config(tmp_path, lean_supervisor=True, subagent_roles={}))
-    assert "spawn_subagent(task)" in generic
-    assert "agent_type" not in generic
+    assert "spawn_subagent(agent_type, task)" in resolve_system_message(_config(tmp_path))
 
 
 def test_load_plugin_tools_by_pack_groups_by_name(tmp_path):
@@ -268,23 +217,20 @@ def test_load_plugin_tools_by_pack_groups_by_name(tmp_path):
     assert _load_plugin_tools_by_pack(_config(tmp_path, load_plugins=False)) == {}
 
 
-async def test_lean_supervisor_drops_worker_tools(tmp_path):
-    # memory=True so the memory tools are present and we can confirm they STAY on the lean supervisor.
-    flat = await Assistant.create(_config(tmp_path, memory=True), FakeChannel(), client=MockAsyncModelClient([]))
-    lean = await Assistant.create(
-        _config(tmp_path, memory=True, lean_supervisor=True), FakeChannel(), client=MockAsyncModelClient([])
-    )
-    flat_names = {fn.__name__ for fn in flat._agent.tools}
-    lean_names = {fn.__name__ for fn in lean._agent.tools}
-    assert lean_names < flat_names  # strictly smaller
-    # The delegate + the whole time group + cross-cutting tools stay; worker/built-in/plugin tools are
-    # gone. The supervisor answers "when" questions itself, so delegating a clock read would cost a spawn.
-    assert {"spawn_subagent", "get_current_date_and_time", "convert_time"} <= lean_names
-    for kept in ("author_skill", "add_mcp_server", "store_memory", "update_config"):
-        assert kept in lean_names
-    for gone in ("web_search", "read_file", "calculate", "echo", "roll_dice"):
-        assert gone not in lean_names, gone
-        assert gone in flat_names, gone
+async def test_supervisor_carries_only_cross_cutting_tools(tmp_path):
+    """The supervisor's tool context is the point of the design: it holds what mutates shared state
+    (skills, MCP, memory, config), the clock, and the delegate. Built-in groups and tool-packs live on
+    the workers, so a tool leaking onto the supervisor is a regression."""
+    # memory=True so the memory tools are present and we can confirm they STAY on the supervisor.
+    assistant = await Assistant.create(_config(tmp_path, memory=True), FakeChannel(), client=MockAsyncModelClient([]))
+    names = {fn.__name__ for fn in assistant._agent.tools}
+    # The delegate + the whole time group: the supervisor answers "when" questions itself, so
+    # delegating a clock read would cost a whole spawn.
+    assert {"spawn_subagent", "get_current_date_and_time", "convert_time"} <= names
+    for kept in ("author_skill", "add_skill_script", "add_mcp_server", "store_memory", "update_config"):
+        assert kept in names, kept
+    for gone in ("web_search", "read_file", "calculate", "echo", "roll_dice", "markdown_to_pdf"):
+        assert gone not in names, gone
 
 
 async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
@@ -317,7 +263,6 @@ async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypa
 
     cfg = _config(
         tmp_path,
-        lean_supervisor=True,
         mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
         subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["stocks"]}},
     )
@@ -360,7 +305,6 @@ async def test_runtime_added_mcp_server_reaches_lean_worker(tmp_path, monkeypatc
 
     cfg = _config(
         tmp_path,
-        lean_supervisor=True,
         subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
     )
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
@@ -388,7 +332,6 @@ async def test_runtime_added_mcp_server_reaches_all_lean_conversations(tmp_path,
 
     cfg = _config(
         tmp_path,
-        lean_supervisor=True,
         subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
     )
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
@@ -416,7 +359,6 @@ async def test_runtime_removed_mcp_server_drops_from_lean_worker(tmp_path, monke
 
     cfg = _config(
         tmp_path,
-        lean_supervisor=True,
         subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
     )
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
@@ -429,43 +371,13 @@ async def test_runtime_removed_mcp_server_drops_from_lean_worker(tmp_path, monke
     assert "get_quote" not in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}  # worker dropped it
 
 
-def test_lean_supervisor_on_by_default():
-
-    assert AssistantConfig().lean_supervisor is True  # production default
-
-
-def test_resolve_system_message_selects_supervisor_guidance(tmp_path):
+def test_resolve_system_message_always_carries_supervisor_guidance(tmp_path):
+    """Delegation is the only route to a domain tool, so there is no configuration under which the
+    model should be told anything else."""
     from kokua.core.build import resolve_system_message
-    from kokua.config.schema import SUBAGENT_GUIDANCE, SUPERVISOR_GUIDANCE
+    from kokua.config.schema import SUPERVISOR_GUIDANCE
 
-    lean = resolve_system_message(_config(tmp_path, lean_supervisor=True))
-    assert SUPERVISOR_GUIDANCE.strip() in lean
-    assert SUBAGENT_GUIDANCE.strip() not in lean
-    flat = resolve_system_message(_config(tmp_path))
-    assert SUBAGENT_GUIDANCE.strip() in flat
-    assert SUPERVISOR_GUIDANCE.strip() not in flat
-
-
-async def test_lean_supervisor_requires_subagents_falls_back_to_flat(tmp_path):
-    # lean_supervisor without subagents is meaningless (no delegate), so wiring falls back to flat:
-    # the supervisor keeps the built-in worker tools it would otherwise delegate.
-    a = await Assistant.create(
-        _config(tmp_path, lean_supervisor=True, subagents=False), FakeChannel(), client=MockAsyncModelClient([])
-    )
-    names = {fn.__name__ for fn in a._agent.tools}
-    assert "web_search" in names  # flat groups present
-    assert "spawn_subagent" not in names  # subagents off, so no delegate
-
-
-def test_flattened_by_pack_matches_flat_plugin_tools(tmp_path):
-    # The flat supervisor mounts _dedup_by_name(by_pack.values()); it must equal the original flat
-    # plugin-tool set so flat-mode wiring is unchanged (packs are now built once, shared).
-    from kokua.core.build import _dedup_by_name, _load_plugin_tools, _load_plugin_tools_by_pack
-
-    cfg = _config(tmp_path)
-    flat = {fn.__name__ for fn in _load_plugin_tools(cfg)}
-    flattened = {fn.__name__ for fn in _dedup_by_name(_load_plugin_tools_by_pack(cfg).values())}
-    assert flattened == flat
+    assert SUPERVISOR_GUIDANCE.strip() in resolve_system_message(_config(tmp_path))
 
 
 async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):

@@ -20,6 +20,7 @@ from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType
 from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
+from tests.channels import example_subagent_roles
 from kokua.planning.reviewers import Verdict
 
 
@@ -75,7 +76,7 @@ class RecordingChannel(Channel):
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "review_rounds": 1}
+    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles(), "review_rounds": 1}
     base.update(overrides)
     return AssistantConfig(**base)
 

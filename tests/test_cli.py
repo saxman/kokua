@@ -120,8 +120,44 @@ def test_main_listing_does_not_build_an_assistant(monkeypatch, capsys):
 def test_main_reports_an_unknown_frontend_with_the_available_ones(monkeypatch, tmp_path):
     import pytest
 
+    from kokua.config import file as settings
+
     monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(settings.example_text(), encoding="utf-8")  # config is required
     with pytest.raises(KeyError) as caught:
         _run_main(monkeypatch, ["--frontend", "nope"])
     message = str(caught.value)
     assert "nope" in message and "cli" in message  # names the miss and lists the choices
+
+
+def test_main_reports_a_missing_config_without_a_traceback(monkeypatch, capsys, tmp_path):
+    """Starting with no config.toml is now the ordinary first-run mistake, so it has to read as an
+    instruction rather than as a crash."""
+    import pytest
+
+    from kokua.config import paths
+
+    paths.config_path().unlink()
+    with pytest.raises(SystemExit) as caught:
+        _run_main(monkeypatch, [])
+    assert caught.value.code != 0
+    err = capsys.readouterr().err
+    assert "config file not found" in err
+    assert "kokua config init" in err
+    assert "Traceback" not in err
+
+
+def test_main_reports_a_config_with_no_roles_without_a_traceback(monkeypatch, capsys):
+    import pytest
+
+    from kokua.config import paths
+
+    # configure_logging runs before the front end and calls faulthandler.enable(), which needs a real
+    # stderr file descriptor that pytest's capture does not provide. Logging is not what is under test.
+    monkeypatch.setattr("kokua.cli.configure_logging", lambda config: None)
+    paths.config_path().write_text("[assistant]\nmemory = false\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as caught:
+        _run_main(monkeypatch, ["--frontend", "cli"])
+    assert caught.value.code != 0
+    err = capsys.readouterr().err
+    assert "subagents.roles" in err and "Traceback" not in err

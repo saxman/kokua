@@ -123,41 +123,16 @@ async def connect_mcp(
             raise
 
 
-async def attach_server(
-    for_each_agent: ForEachAgent,
-    connections: list,
-    url: str,
-    client: Any,
-    auth_mode: str,
-    *,
-    mount_on_agents: bool = True,
-) -> list[str]:
-    """Record a connected server and (unless ``mount_on_agents`` is False) add its tools to every live agent.
+async def attach_server(connections: list, url: str, client: Any, auth_mode: str) -> list[str]:
+    """Record a connected server and return the names of the tools it makes usable.
 
-    Returns the names of the server's tools that became usable. Tools land on each ``agent.tools``; the
-    tool-loop engine re-reads the agent's effective tools each round, so a server added mid-turn is
-    dispatchable in the same turn without touching the model client. The connection always stores the
-    tool callables so a lazily-built agent can reattach them at build time without re-fetching. In lean
-    supervisor mode the server's raw tools are NOT mounted on the supervisor (``mount_on_agents``
-    False) -- they reach workers via the rebuilt ``spawn_subagent`` instead -- so the full tool-name
-    list is returned for the caller's message.
+    The server's tools are NOT mounted on any agent: the supervisor carries no MCP callables, and a
+    server reaches a worker only through a role that names it, via the rebuilt ``spawn_subagent``. The
+    connection stores the tool callables so a lazily-built agent can resolve its roles against them
+    without re-fetching. The full tool-name list is returned for the caller's message.
     """
     new_tools = await client.as_tools()
-    added_names: list[str] = []
-
-    if mount_on_agents:
-
-        def extend(agent):
-            existing = {getattr(fn, "__name__", None) for fn in agent.tools}
-            to_add = [fn for fn in new_tools if fn.__name__ not in existing]
-            agent.tools.extend(to_add)
-            for fn in to_add:
-                if fn.__name__ not in added_names:
-                    added_names.append(fn.__name__)
-
-        for_each_agent(extend)
-    else:
-        added_names = [fn.__name__ for fn in new_tools]
+    added_names = [fn.__name__ for fn in new_tools]
     connections.append(
         ServerConnection(
             url=url,
@@ -214,7 +189,7 @@ async def reconnect_mcp_servers(
                 notify=notify,
                 oauth_storage_dir=oauth_storage_dir,
             )
-            await attach_server(for_each_agent, connections, server.url, client, mode)
+            await attach_server(connections, server.url, client, mode)
         except Exception:
             logger.warning("Could not connect MCP server %s; continuing without it.", server.url, exc_info=True)
 
@@ -227,7 +202,6 @@ def make_mcp_tools(
     oauth_storage_dir: Path,
     config_path: Path,
     refresh_workers: Optional[Callable] = None,
-    lean: bool = False,
 ) -> list[Callable]:
     """Build the ``add_mcp_server`` / ``remove_mcp_server`` tools bound to the config file.
 
@@ -237,10 +211,9 @@ def make_mcp_tools(
     on the next restart; bearer-token servers are session-only (their secret is not written to disk).
     ``connections`` is the live list shared with the boot path and teardown.
 
-    In lean supervisor mode (``lean``), a server's raw tools are not mounted on the supervisor; instead
-    ``refresh_workers`` (applied to every live agent) rebuilds each agent's ``spawn_subagent`` so worker
-    roles that name the server pick up (or, on removal, drop) its tools. When given, ``refresh_workers``
-    also runs in flat mode so flat-mode roles that name a server stay current.
+    A server's raw tools are never mounted on an agent. ``refresh_workers``, applied to every live
+    agent, rebuilds each one's ``spawn_subagent`` so the worker roles that name the server pick up (or,
+    on removal, drop) its tools.
     """
 
     @tool
@@ -269,7 +242,7 @@ def make_mcp_tools(
                 url, bearer_token=bearer_token, notify=notify, oauth_storage_dir=oauth_storage_dir
             )
             # Lean mode: don't mount the raw tools on the supervisor; they reach workers via refresh below.
-            added = await attach_server(for_each_agent, connections, url, client, auth_mode, mount_on_agents=not lean)
+            added = await attach_server(connections, url, client, auth_mode)
         except BearerTokenRequired as exc:
             return str(exc)
         except Exception as exc:
@@ -283,7 +256,7 @@ def make_mcp_tools(
         else:
             note = " (session only; add it to config.toml [mcp] to keep a bearer-token server across restarts)"
         names = ", ".join(added) if added else "(no new tools)"
-        where = "available to the worker agents whose roles use them" if lean else "now available"
+        where = "available to the worker agents whose roles use them"
         return f"Connected to {url}. Tools {where}: {names}.{note}"
 
     @tool
@@ -297,22 +270,12 @@ def make_mcp_tools(
         if entry is None:
             return f"No MCP server is connected at {url!r}."
 
-        # `entry.tools` lists every tool name this server exposes, but a same-named tool from
-        # another still-connected server (or a built-in) was deduped at attach time and never
-        # re-added; only strip names this removal actually frees up.
+        # `entry.tools` lists every tool name this server exposes, but a same-named tool from another
+        # still-connected server was never separately recorded; only report names this removal actually
+        # frees up. Nothing has to be stripped from an agent: the raw tools were never mounted on one.
+        # The worker refresh below is what drops them, from the roles that named this server.
         still_owned = {name for conn in connections if conn is not entry for name in conn.tools}
         removed = set(entry.tools) - still_owned
-
-        # Drop from every agent's tools; the engine re-reads the effective tools each round, so the
-        # tools stop being advertised and dispatchable from the next round on (this turn included). In
-        # lean mode the raw tools were never mounted on the supervisor, so there is nothing to strip
-        # there -- the worker refresh below drops them from the roles that named the server.
-        if not lean:
-
-            def strip(agent):
-                agent.tools[:] = [fn for fn in agent.tools if getattr(fn, "__name__", None) not in removed]
-
-            for_each_agent(strip)
         connections.remove(entry)
         if refresh_workers is not None:
             for_each_agent(refresh_workers)  # rebuild spawn_subagent so worker roles drop this server

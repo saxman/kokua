@@ -24,8 +24,10 @@ async def test_boot_applies_config_generation_and_flags(tmp_path):
 
 async def test_boot_does_not_write_config(tmp_path):
     cfg = _config(tmp_path)
+    before = cfg.config_path.read_text(encoding="utf-8")
     await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
-    assert not cfg.config_path.exists()  # boot reads config.toml, never writes it
+    # config.toml is required, so it always exists; "not written" means byte-identical after boot.
+    assert cfg.config_path.read_text(encoding="utf-8") == before
 
 
 async def test_apply_settings_updates_and_persists_to_config(tmp_path):
@@ -100,8 +102,9 @@ async def test_update_config_tool_refuses_blocklisted_key(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
     update = next(t for t in assistant._agent.tools if t.__name__ == "update_config")
+    before = cfg.config_path.read_text(encoding="utf-8")
     result = await update(section="security", key="confirm_tools", value="[]")
-    assert not cfg.config_path.exists()  # nothing written
+    assert cfg.config_path.read_text(encoding="utf-8") == before  # nothing written
     assert "hand-edit" in result.lower()
 
 

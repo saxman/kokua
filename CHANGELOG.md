@@ -2,26 +2,42 @@
 
 ## 0.1.0 (unreleased)
 
-- **Breaking: sub-agent roles come from `config.toml` only.** `researcher`, `coder`, and `generalist`
-  were hardcoded in `config/schema.py` and merged under whatever `[subagents.roles.*]` defined, so the
-  roles you actually ran with were invisible in the file that is supposed to be the single source of
-  settings. That constant is gone; the three roles now ship as live tables in `config.example.toml`,
-  which is what `kokua config init` writes, and you edit, delete, or add to them like any other
-  setting. **On upgrade, an existing `config.toml` with no `[subagents.roles.*]` section loses the
-  three specialists** -- copy them from the updated `config.example.toml` to keep them. Rather than
-  fail (AIMU rejects an empty `agent_types` dict, and a lean supervisor whose workers have no tools
-  cannot do specialized work at all), a config with no roles falls back to AIMU's untyped
-  `spawn_subagent(task)` over one worker carrying every enabled built-in group, tool-pack, and
-  connected MCP server. The lean supervisor prompt follows that split so it names the signature that
-  exists, and startup logs one INFO line saying the fallback is in effect.
+- **Breaking: one agent shape, and roles are the only switch.** The `subagents` and `lean_supervisor`
+  flags are gone, along with the `--subagents` / `--no-subagents` CLI flags and flat mode entirely.
+  Every agent is now a lean supervisor: it mounts the cross-cutting tools (skills, MCP management,
+  memory, config, scheduling), the `time` group, and `spawn_subagent`, and nothing else. Two flags that
+  could contradict each other and each other's roles are replaced by one fact -- whether
+  `[subagents.roles.*]` defines anything.
+
+  Two consequences to know about. **`[tools].groups` is a ceiling on what workers may draw from, not
+  the assistant's own toolset**, and **an installed tool-pack or a configured MCP server reaches
+  nothing until some role names it** (`tool_packs = [...]` / `mcp_servers = [...]`). If you ran with
+  `lean_supervisor = false`, add roles covering the tools you relied on.
+
+- **Breaking: sub-agent roles come from `config.toml` only, and `config.toml` is now required.**
+  `researcher`, `coder`, and `generalist` were hardcoded in `config/schema.py` and merged under
+  whatever `[subagents.roles.*]` defined, so the roles you actually ran with were invisible in the file
+  that is supposed to be the single source of settings. That constant is gone; the three roles ship as
+  live tables in `config.example.toml`, which is what `kokua config init` writes, and you edit, delete,
+  or add to them like any other setting.
+
+  Because roles exist nowhere else and a supervisor with no workers cannot browse, read a file, or
+  compute, **Kokua now refuses to start without a config file, or with one that defines no roles**,
+  naming `kokua config init` in the error rather than running something that looks alive and cannot
+  work. **On upgrade, an existing `config.toml` with no `[subagents.roles.*]` section will fail to
+  start** -- copy the roles from the updated `config.example.toml`.
+
+- **Startup warns about an MCP server no role names.** Since the supervisor mounts no MCP callables, a
+  server that no `[subagents.roles.*]` lists in `mcp_servers` connects, spends its token on the
+  handshake, and is then reachable by nobody. That was silent; it is now a warning naming the server.
 
 - **AIMU's prebuilt agents, wired in as a tool-pack.** The new built-in `aimu_agents` pack mounts
   `CodeReviewAgent`, `ResearchReportAgent`, and `ContentCreationAgent` as the tools `code_review`,
   `research_report`, and `create_content`. It exists mainly as the worked example of wiring an agent
   built with AIMU into Kokua: every `Runner` exposes `.run(task) -> str`, so a tool-pack is the entire
   bridge and the core gains no new surface -- no `[[agents]]` table, no import-by-config. Nothing is
-  mounted until a role asks for it with `tool_packs = ["aimu_agents"]` (the default lean supervisor
-  mounts no pack tools), and `config.example.toml` ships that role commented out. `research_report`'s
+  mounted until a role asks for it with `tool_packs = ["aimu_agents"]` (the supervisor mounts no pack
+  tools), and `config.example.toml` ships that role commented out. `research_report`'s
   workers get `builtin.web` only when the `web` group is enabled, so a pack-mounted agent respects
   `[tools].groups` exactly as a role does. Each call builds a fresh agent, reading `config.model` at
   call time so a runtime model switch reaches it. The caveats are real and documented in the module:

@@ -36,7 +36,7 @@ from kokua.core.build import (
     make_agent_builder,
     unreferenced_mcp_servers,
 )
-from kokua.config import AssistantConfig
+from kokua.config import AssistantConfig, ConfigError
 from kokua.core.conversations import ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
@@ -135,6 +135,15 @@ class Assistant:
     async def create(
         cls, config: AssistantConfig, channel: Channel, *, client=None, client_factory=None
     ) -> "Assistant":
+        # The assistant is always a lean supervisor, so its only route to a domain tool is a worker.
+        # With no roles it could not browse, read a file, or compute; refuse rather than start something
+        # that looks running and cannot work.
+        if not config.subagent_roles:
+            raise ConfigError(
+                "no sub-agent roles configured: the assistant delegates all specialized work, so it "
+                "needs at least one [subagents.roles.*] in config.toml. Run `kokua config init` to "
+                "write a config with the default roles."
+            )
         memory_store, document_store, memory_tools = build_memory(config)
 
         connections: list[ServerConnection] = []
@@ -204,25 +213,18 @@ class Assistant:
         )
         assistant._book.bind_registry(assistant._registry)
 
-        # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when
-        # that agent is built: a flat agent attaches the servers' tools directly, and a lean
-        # supervisor's spawn_subagent snapshots `connections` at build time to give MCP-backed workers
-        # their tools. The fan-out is a no-op here (no agents are live yet); it just fills `connections`.
+        # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when that
+        # agent is built: the supervisor's spawn_subagent snapshots `connections` at build time to give
+        # MCP-backed workers their tools. The fan-out is a no-op here (no agents are live yet); it just
+        # fills `connections`.
         await reconnect_mcp_servers(
             for_each_agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
         )
-        if config.lean_supervisor and not config.subagents:
-            logger.warning("lean_supervisor is set but subagents is off; using the flat toolset instead.")
         for name in unreferenced_mcp_servers(config):
             logger.warning(
                 "MCP server %r is configured but no [subagents.roles.*] names it in `mcp_servers`; "
-                "a lean supervisor mounts no MCP tools itself, so this server reaches no agent.",
+                "the supervisor mounts no MCP tools itself, so this server reaches no agent.",
                 name,
-            )
-        if config.subagents and not config.subagent_roles:
-            logger.info(
-                "no [subagents.roles.*] configured; spawn_subagent will use a single generic worker. "
-                "Run `kokua config init` or copy the roles from config.example.toml to get specialists."
             )
 
         # Build the active conversation's agent (its client is layered by the factory, which also

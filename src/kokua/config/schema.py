@@ -25,22 +25,11 @@ DEFAULT_SYSTEM_MESSAGE = (
     "machine, so only automate what the user asked for."
 )
 
-# Appended to the system message when sub-agents are enabled, so the model actually delegates (without
-# explicit direction the tool sits unused). Each spawn is a fresh, context-free agent, so the guidance
-# stresses giving it a complete, self-contained task.
-SUBAGENT_GUIDANCE = (
-    " For a request that splits into independent subtasks, call `spawn_subagent` to delegate each to a "
-    "fresh sub-agent with its own isolated context, then synthesize their answers. A sub-agent shares no "
-    "history with you, so give it a complete, self-contained task. Emit several `spawn_subagent` calls "
-    "when subtasks are independent. Do the work yourself when it is small or must build on the "
-    "conversation so far."
-)
-
-# Replaces SUBAGENT_GUIDANCE in lean_supervisor mode. There the assistant mounts almost no direct
-# tools, so the "you have almost no direct tools" line is load-bearing: without it the model tries to
-# answer web/file/code questions from memory instead of delegating to a worker that actually has the
-# tools. It still answers trivial/conversational requests itself (it keeps memory, skills, config,
-# scheduling, and MCP-management tools).
+# Always appended to the system message: the assistant is a supervisor, and delegation is the only way
+# it reaches a domain tool. The "you have almost no direct tools" line is load-bearing -- without it the
+# model tries to answer web/file/code questions from memory instead of spawning a worker that actually
+# has the tools. It still answers trivial and conversational requests itself, keeping memory, skills,
+# config, scheduling, MCP-management, and the clock.
 SUPERVISOR_GUIDANCE = (
     " You are a lean supervisor. Answer trivial or conversational requests directly using your own "
     "tools (date/time, memory, skills, config, scheduling, MCP management). For any specialized work "
@@ -49,18 +38,6 @@ SUPERVISOR_GUIDANCE = (
     "pick the worker whose role fits, give it a complete, self-contained task (it shares no history "
     "with you), then relay or synthesize its answer for the user. Emit several `spawn_subagent` calls "
     "when subtasks are independent."
-)
-
-# Replaces SUPERVISOR_GUIDANCE when no [subagents.roles.*] are configured. With no roles the delegate
-# is AIMU's untyped `spawn_subagent(task)`, so the role-picking wording above would name a parameter
-# that does not exist and describe a worker menu that is not there.
-SUPERVISOR_GUIDANCE_GENERIC = (
-    " You are a lean supervisor. Answer trivial or conversational requests directly using your own "
-    "tools (date/time, memory, skills, config, scheduling, MCP management). For any specialized work "
-    "-- web research, reading or writing files, running code, or anything needing a domain tool -- you "
-    "have almost no direct tools, so you MUST delegate by calling `spawn_subagent(task)`: give it a "
-    "complete, self-contained task (it shares no history with you), then relay or synthesize its answer "
-    "for the user. Emit several `spawn_subagent` calls when subtasks are independent."
 )
 
 # Appended to the system message when memory is enabled, so the model actually uses the two stores
@@ -139,24 +116,14 @@ class AssistantConfig:
     memory: bool = True
     # Load tool-pack plugins discovered via the "kokua.tools" entry-point group.
     load_plugins: bool = True
-    # Sub-agents: give the assistant a spawn_subagent tool so it can delegate an independent subtask to
-    # a fresh, isolated agent (its own context/history) and get back a single answer. On by default.
-    subagents: bool = True
-    # Sub-agent roles (AIMU agent_types), read whole from [subagents.roles.*]; nothing is defaulted in
-    # code, so this is the entire menu spawn_subagent offers. The roles a normal install runs with are
-    # the ones config.example.toml ships. Empty means no menu at all: build.add_subagent_tool falls back
-    # to AIMU's untyped spawn_subagent(task) over every enabled tool, since an empty agent_types dict is
-    # an error there and a lean supervisor with no workers has no way to do specialized work.
+    # Sub-agent roles (AIMU agent_types), read whole from [subagents.roles.*]. This is the entire menu
+    # spawn_subagent offers AND the switch that turns delegation on: nothing is defaulted in code, and
+    # there is no separate on/off flag to contradict it. At least one role is required, because the
+    # assistant is always a lean supervisor and a supervisor with no workers cannot do specialized work
+    # at all; Assistant.create rejects an empty set rather than starting something useless.
     subagent_roles: dict[str, dict] = field(default_factory=dict)
     # Run independent tool calls in one turn concurrently (so several spawn_subagent calls overlap).
     subagents_concurrent: bool = True
-    # Lean supervisor mode (requires subagents). When on, the per-conversation agent mounts only its
-    # cross-cutting tools (memory, skills, MCP management, config, scheduling, date/time) plus the
-    # single `spawn_subagent` delegate, and delegates all specialized work to workers whose roles carry
-    # the scoped toolsets. Off keeps the flat agent that carries every tool itself. In lean mode
-    # `tools` (below) becomes the universe of built-in groups workers may draw from, not the
-    # supervisor's own tools. On by default so the always-on agent's tool context stays small.
-    lean_supervisor: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
     confirm_tools: list[str] = field(

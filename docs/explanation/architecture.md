@@ -106,6 +106,31 @@ the exact point mid-turn where they appeared live. Separately, a gated tool
 call inside a sub-agent (e.g. `execute_python`) still prompts at the top level, not inside its card: the
 approval gate is forwarded to the parent's existing prompt, not rendered into the spawn's own card.
 
+## Supervisor and workers
+
+There is one agent shape, not two. Every per-conversation agent is a **lean supervisor**: it mounts
+only the tools that mutate shared, per-conversation state (skills, MCP connections, memory, config,
+scheduling), the `time` group, and the `spawn_subagent` delegate. It carries no built-in tool group, no
+tool-pack tool, and no MCP callable. Those live on the **workers**, scoped by the roles in
+`[subagents.roles.*]`, and `build.build_agent` is a straight line with no mode to branch on.
+
+Three consequences follow, and they are the things that surprise people:
+
+- **A role is the only way capability is granted.** A built-in group, an installed tool-pack, and a
+  connected MCP server all reach nothing until some role names them. Startup warns about an MCP server
+  no role references (`build.unreferenced_mcp_servers`), since that one is invisible otherwise and
+  costs a live connection.
+- **`[tools].groups` is a ceiling, not a toolset.** It bounds what a role may draw on; a role's own
+  `groups` are intersected with it. Since nothing else expands that list any more,
+  `build.enabled_tool_groups` is also the only place a typo in it is caught.
+- **A runtime MCP change is applied by rebuilding the delegate.** Roles snapshot their toolsets when
+  `spawn_subagent` is built, so `add_mcp_server` fans `rebuild_subagent_tool` across every live agent
+  rather than appending to any `agent.tools`.
+
+At least one role is therefore required, and `Assistant.create` refuses a config with none: a
+supervisor with no workers cannot browse, read a file, or compute, so starting one produces something
+that looks alive and cannot work.
+
 ## Plugins
 
 Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`) and `kokua.tools` (a
@@ -128,6 +153,12 @@ Precedence is **CLI flag > TOML config file > built-in default**. `config/schema
 `AssistantConfig` (a plain dataclass, with leaf paths derived from `data_dir`); `config/file.py` finds
 and parses the TOML into validated overrides; `cli.resolve_config` merges the file under the CLI
 flags. Flag defaults are the `None` sentinel, so an unspecified flag defers to the file.
+
+The file itself is **required**: `config/file.py::load` raises rather than returning no overrides when
+it is missing. Sub-agent roles live only in `[subagents.roles.*]` and the assistant cannot function
+without at least one (it delegates all specialized work), so there is no useful unconfigured state to
+degrade to. `Assistant.create` enforces the companion rule and refuses a config that defines zero
+roles. Individual keys keep their built-in defaults.
 
 `config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
 comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Three writers: the web

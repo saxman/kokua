@@ -13,11 +13,9 @@ from pathlib import Path
 import aimu
 import pytest
 
-from tests.helpers import MockAsyncModelClient
-from tests.channels import FakeChannel, _config as _assistant_config
+from tests.channels import _config as _assistant_config
 from kokua import plugins
 from kokua.config import AssistantConfig
-from kokua.core.assistant import Assistant
 from kokua.plugins import ToolPack
 from kokua.toolpacks import aimu_agents
 
@@ -68,9 +66,15 @@ def test_pack_is_discovered_and_contributes_three_tools():
     assert {"code_review", "research_report", "create_content"} <= names
 
 
-async def test_pack_tools_land_on_a_flat_agent(tmp_path):
-    assistant = await Assistant.create(_assistant_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
-    names = {fn.__name__ for fn in assistant._agent.tools}
+def test_pack_tools_reach_a_role_that_names_the_pack(tmp_path):
+    """The documented wiring: a role with tool_packs = ["aimu_agents"] gets the three agents as tools."""
+    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+
+    cfg = _assistant_config(
+        tmp_path, subagent_roles={"reviewer": {"description": "Reviews.", "tool_packs": ["aimu_agents"]}}
+    )
+    types = _build_subagent_agent_types(cfg, [], _load_plugin_tools_by_pack(cfg))
+    names = {fn.__name__ for fn in types["reviewer"]["tools"]}
     assert {"code_review", "research_report", "create_content"} <= names
 
 

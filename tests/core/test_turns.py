@@ -52,8 +52,8 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
     """A target="active" proactive run auto-denies a gated tool even when it fires on the CURRENTLY
     VIEWED conversation (where streaming_conversation == _active_id would otherwise look foreground and
     wrongly prompt). Unattended turns must never prompt."""
-    cfg = _config(tmp_path, confirm_tools=["execute_python"])
-    client = _RequestsToolOnce("execute_python", {"code": "print(1)"})
+    cfg = _config(tmp_path, confirm_tools=["update_config"])
+    client = _RequestsToolOnce("update_config", {"section": "display", "key": "show_tools", "value": "false"})
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
 
     # No streaming_conversation is set by the test; _proactive sets it to _active_id (the viewed
@@ -61,20 +61,20 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
     await asyncio.wait_for(assistant._proactive("do it"), timeout=2.0)
 
     denied = [m for m in client.messages if m.get("role") == "tool"]
-    assert denied and denied[-1]["content"] == "Tool 'execute_python' was not approved."
+    assert denied and denied[-1]["content"] == "Tool 'update_config' was not approved."
 
 
 async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
     """The target="new" path (fresh conversation, never the viewed one) also auto-denies."""
-    cfg = _config(tmp_path, confirm_tools=["execute_python"])
-    client = _RequestsToolOnce("execute_python", {"code": "print(1)"})
+    cfg = _config(tmp_path, confirm_tools=["update_config"])
+    client = _RequestsToolOnce("update_config", {"section": "display", "key": "show_tools", "value": "false"})
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: client)
 
     await asyncio.wait_for(assistant._proactive("do it", target="new", task_name="t"), timeout=2.0)
 
     denied = [m for m in client.messages if m.get("role") == "tool"]
-    assert denied and denied[-1]["content"] == "Tool 'execute_python' was not approved."
+    assert denied and denied[-1]["content"] == "Tool 'update_config' was not approved."
 
 
 async def test_proactive_pins_agent_for_the_run(tmp_path):
@@ -425,9 +425,13 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
             return await super()._chat(*args, **kwargs)
 
     channel = _ConvCapturingChannel()
-    cfg = _config(tmp_path, confirm_tools=["execute_python"])
+    cfg = _config(tmp_path, confirm_tools=["update_config"])
     assistant = await Assistant.create(
-        cfg, channel, client_factory=lambda cid: _RecordingRequestsToolOnce("execute_python", {"code": "1+1"})
+        cfg,
+        channel,
+        client_factory=lambda cid: _RecordingRequestsToolOnce(
+            "update_config", {"section": "display", "key": "show_tools", "value": "false"}
+        ),
     )
     viewed = assistant._active_id
 
@@ -442,7 +446,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
     new_id = next(k for k in assistant._store.list_keys() if k != viewed)
     new_session = assistant._store.get(new_id)
     denied = [m for m in new_session.messages if m.get("role") == "tool"]
-    assert denied and denied[-1]["content"] == "Tool 'execute_python' was not approved."
+    assert denied and denied[-1]["content"] == "Tool 'update_config' was not approved."
 
     # And self._active_id is still the viewed conversation after the run completes.
     assert assistant._active_id == viewed

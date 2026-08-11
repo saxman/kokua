@@ -85,12 +85,9 @@ def _config(tmp_path: Path, **overrides) -> AssistantConfig:
         # Memory is on by default in real runs, but off here so the bulk of the tests stay fast and
         # hermetic (no ChromaDB init / state writes). The memory tests opt in with memory=True.
         "memory": False,
-        # lean_supervisor defaults on in production, but most tests here assert the flat toolset (all
-        # tools on the one agent), so pin flat; the lean-mode tests opt in with lean_supervisor=True.
-        "lean_supervisor": False,
-        # AssistantConfig defaults to no roles, which is the *unconfigured* install (spawn_subagent
-        # falls back to one untyped worker). A normal install has the roles config.example.toml ships,
-        # so mirror that here; the fallback tests opt out with subagent_roles={}.
+        # At least one role is required (Assistant.create refuses an empty set), and roles are also the
+        # only route to a built-in group, tool-pack, or MCP server. Mirror what a real install runs by
+        # using the roles config.example.toml ships, rather than a Python copy that could drift.
         "subagent_roles": example_subagent_roles(),
     }
     base.update(overrides)

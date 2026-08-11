@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 
 from . import plugins
 from kokua.config import file as settings
-from kokua.config import AssistantConfig, MCPServerConfig
+from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
 from .logging_setup import configure_logging
 
 
@@ -92,13 +93,6 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         "user-provided documents. Default: on (use --no-memory to disable).",
     )
     parser.add_argument(
-        "--subagents",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Let the assistant delegate independent subtasks to fresh, isolated sub-agents via a "
-        "spawn_subagent tool. Default: on (use --no-subagents to disable for this run).",
-    )
-    parser.add_argument(
         "--confirm-tools",
         default=None,
         metavar="NAMES",
@@ -143,7 +137,6 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
     take("mcp_servers", args.mcp, lambda urls: [MCPServerConfig(url=url) for url in urls])
     take("memory", args.memory)
     take("load_plugins", args.plugins)
-    take("subagents", args.subagents)
     take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
     take("frontend", args.frontend)
     take("host", args.host)
@@ -192,13 +185,23 @@ def main() -> None:
             print(f"{name}: {pack.description}")
         return
 
-    config = resolve_config(args)
+    # A ConfigError is a user mistake with a known fix (a missing config.toml, no sub-agent roles, a
+    # bad key), so it prints as an instruction. A traceback here would bury the one line that matters.
+    try:
+        config = resolve_config(args)
+    except ConfigError as e:
+        print(e, file=sys.stderr)
+        raise SystemExit(2) from None
+
     configure_logging(config)  # rotating file log + faulthandler, before the assistant starts
     frontend = plugins.get_frontend(config.frontend)
     try:
         asyncio.run(frontend.run(config, args))
     except KeyboardInterrupt:
         pass
+    except ConfigError as e:  # raised at boot, e.g. a config that defines no sub-agent roles
+        print(e, file=sys.stderr)
+        raise SystemExit(2) from None
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from kokua.core.messages import compact_message_images, expand_message_images
 from kokua.channels.cli import CLIChannel
 from kokua.channels.web import WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
+from tests.channels import example_subagent_roles
 from kokua.frontends.web import build_app
 
 # A 1x1 PNG, the smallest valid image; used to exercise the real encode/decode paths.
@@ -22,7 +23,7 @@ _PNG_DATA_URL = (
 
 
 def _config(tmp_path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False}
+    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles()}
     base.update(overrides)
     return AssistantConfig(**base)
 

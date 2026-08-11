@@ -108,8 +108,6 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("assistant", "memory"): ("memory", (bool,), "a boolean", None),
     ("assistant", "load_plugins"): ("load_plugins", (bool,), "a boolean", None),
     ("assistant", "agent_cache_cap"): ("agent_cache_cap", (int,), "an integer", None),
-    ("assistant", "subagents"): ("subagents", (bool,), "a boolean", None),
-    ("assistant", "lean_supervisor"): ("lean_supervisor", (bool,), "a boolean", None),
     ("tools", "groups"): ("tools", (list,), "a list of strings", _str_list),
     # [email]: SMTP send settings. No `password` key on purpose -- the password comes from the
     # KOKUA_EMAIL_PASSWORD env var, so putting it here is a hard "unknown config key" error.
@@ -204,12 +202,15 @@ def resolve_path(explicit: Optional[str]) -> tuple[Path, bool]:
 
 
 def load(explicit: Optional[str] = None) -> dict[str, Any]:
-    """Parse the config file (if any) into a dict of ``AssistantConfig`` field overrides."""
-    path, requested = resolve_path(explicit)
+    """Parse the config file into a dict of ``AssistantConfig`` field overrides.
+
+    The file is required, not optional. Sub-agent roles live only in it and the assistant cannot run
+    without at least one, so "no config" is not a state Kokua can start in; failing here with the
+    command that fixes it beats starting something that cannot work.
+    """
+    path, _ = resolve_path(explicit)
     if not path.exists():
-        if requested:
-            raise ConfigError(f"config file not found: {path}")
-        return {}
+        raise ConfigError(f"config file not found: {path}\nRun `kokua config init` to write one.")
 
     with path.open("rb") as file:
         data = tomllib.load(file)

@@ -9,11 +9,12 @@ import pytest
 from kokua.config import AssistantConfig
 from kokua.frontends import cli as cli_frontend
 from kokua.frontends.cli import FRONTEND
+from tests.channels import example_subagent_roles
 from tests.helpers import MockAsyncModelClient
 
 
 def _config(tmp_path: Path) -> AssistantConfig:
-    return AssistantConfig(data_dir=tmp_path, memory=False, lean_supervisor=False)
+    return AssistantConfig(data_dir=tmp_path, memory=False, subagent_roles=example_subagent_roles())
 
 
 def test_frontend_is_registered_with_a_name_and_description():
@@ -80,7 +81,13 @@ async def test_run_passes_the_display_flags_to_the_channel(tmp_path, monkeypatch
         lambda config, channel, **kw: real_create(config, channel, client=MockAsyncModelClient([])),
     )
 
-    config = AssistantConfig(data_dir=tmp_path, memory=False, show_thinking=False, show_tools=True)
+    config = AssistantConfig(
+        data_dir=tmp_path,
+        memory=False,
+        show_thinking=False,
+        show_tools=True,
+        subagent_roles=example_subagent_roles(),
+    )
     await cli_frontend.run(config, args=None)
 
     assert captured == {"show_thinking": False, "show_tools": True}

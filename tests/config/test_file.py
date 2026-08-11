@@ -23,8 +23,12 @@ def _resolve(*argv):
     return resolve_config(build_arg_parser().parse_args(list(argv)))
 
 
-def test_missing_default_file_is_no_op():
-    assert settings.load() == {}
+def test_missing_default_file_is_an_error_naming_the_fix():
+    """config.toml is required: sub-agent roles live only there and the assistant needs at least one,
+    so starting without a file is not a state Kokua can be in."""
+    paths.config_path().unlink()
+    with pytest.raises(settings.ConfigError, match="kokua config init"):
+        settings.load()
 
 
 def test_file_overrides_built_in_defaults():
@@ -143,7 +147,7 @@ def _init(*argv):
 
 
 def test_config_init_writes_to_default_location():
-    assert not paths.config_path().exists()
+    paths.config_path().unlink()
     assert _init() == 0
     assert paths.config_path().read_text(encoding="utf-8") == settings.example_text()
 
@@ -185,12 +189,6 @@ def test_subagents_section_parses_concurrent_and_roles(tmp_path):
     roles = overrides["subagent_roles"]
     assert roles["researcher"] == {"groups": ["web"], "description": "Custom researcher."}
     assert roles["dba"]["system_message"] == "You manage databases."
-
-
-def test_lean_supervisor_flag_parses(tmp_path):
-    path = tmp_path / "config.toml"
-    path.write_text("[assistant]\nlean_supervisor = true\n", encoding="utf-8")
-    assert settings.load(str(path))["lean_supervisor"] is True
 
 
 def test_subagent_role_mcp_servers_and_tool_packs_parse(tmp_path):
@@ -331,3 +329,18 @@ def test_shipped_example_loads_cleanly(caplog):
     assert overrides  # the example leaves several keys active at their default
     cfg = _resolve()
     assert cfg.show_thinking is True
+
+
+def test_explicit_missing_file_is_also_an_error(tmp_path):
+    """--config PATH pointing at nothing was already an error; the default location now behaves the
+    same way, so the two paths do not disagree about whether a config is optional."""
+    with pytest.raises(settings.ConfigError, match="config file not found"):
+        settings.load(str(tmp_path / "nope.toml"))
+
+
+def test_a_config_defining_no_roles_still_parses(tmp_path):
+    """The file layer stays dumb about it: zero roles is a valid TOML config, and refusing to run on
+    one is Assistant.create's call (see tests/core/test_build.py)."""
+    path = tmp_path / "config.toml"
+    path.write_text("[subagents]\nconcurrent = true\n", encoding="utf-8")
+    assert settings.load(str(path)).get("subagent_roles") is None

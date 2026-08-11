@@ -10,6 +10,7 @@ from kokua.config import table as runtime_settings
 from kokua.core.assistant import Assistant
 from kokua.planning.runner import _tool_evidence
 from kokua.config import AssistantConfig
+from tests.channels import example_subagent_roles
 from kokua.planning.reviewers import Verdict
 
 from aimu import aio
@@ -51,7 +52,7 @@ class FakeChannel(Channel):
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False}
+    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles()}
     base.update(overrides)
     return AssistantConfig(**base)
 

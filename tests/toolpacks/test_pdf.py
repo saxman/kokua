@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.helpers import MockAsyncModelClient
 from kokua import plugins
-from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
+from tests.channels import example_subagent_roles
 from kokua.plugins import ToolPack
 from kokua.toolpacks.pdf import _safe_pdf_name, build
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "lean_supervisor": False}
+    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles()}
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -39,10 +38,13 @@ def test_pdf_tool_pack_discovered():
     assert any(getattr(fn, "__name__", None) == "markdown_to_pdf" for fn in built)
 
 
-async def test_markdown_to_pdf_lands_on_agent(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannelStub(), client=MockAsyncModelClient([]))
-    names = {fn.__name__ for fn in assistant._agent.tools}
-    assert "markdown_to_pdf" in names
+def test_markdown_to_pdf_reaches_a_role_that_names_the_pack(tmp_path):
+    """The supervisor mounts no pack tools, so a role has to name `pdf` for the tool to reach a worker."""
+    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+
+    cfg = _config(tmp_path, subagent_roles={"writer": {"description": "Writes.", "tool_packs": ["pdf"]}})
+    types = _build_subagent_agent_types(cfg, [], _load_plugin_tools_by_pack(cfg))
+    assert "markdown_to_pdf" in {fn.__name__ for fn in types["writer"]["tools"]}
 
 
 def test_markdown_to_pdf_writes_valid_pdf(tmp_path):

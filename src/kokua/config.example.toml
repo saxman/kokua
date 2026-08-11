@@ -1,7 +1,9 @@
 # Kokua configuration. Run `kokua config init` to write this to $KOKUA_HOME/config.toml (default
 # ~/.kokua/config.toml), copy it there yourself, or point at it with --config PATH or $KOKUA_CONFIG.
-# Every key is optional; the value shown is the built-in default. Command-line flags override anything
-# set here. An unknown key or wrong-typed value is a hard error (startup fails and names the key).
+# The file itself is REQUIRED and Kokua will not start without it, because the sub-agent roles below
+# exist nowhere else and the assistant cannot work without at least one. Every individual key is
+# optional and the value shown is the built-in default. Command-line flags override anything set here.
+# An unknown key or wrong-typed value is a hard error (startup fails and names the key).
 #
 # This file is the single source of settings: besides hand-editing, the web settings panel, the
 # add_mcp_server tool, and the assistant's own update_config tool write to it too (comments are
@@ -28,19 +30,12 @@ memory = true
 # Discover tool-pack plugins via the "kokua.tools" entry-point group.
 load_plugins = true
 
-# Let the assistant delegate independent subtasks to fresh, isolated sub-agents (spawn_subagent tool).
-# A sub-agent's gated-tool calls (the confirm_tools, e.g. execute_python) are routed to the parent
-# for approval and are not run unattended.
-subagents = true
-
-# Lean supervisor mode (requires subagents). When true, the assistant keeps only its cross-cutting
-# tools (memory, skills, MCP management, config, scheduling, date/time) plus the single spawn_subagent
-# delegate, and hands ALL specialized work (web, files, code, domain/MCP tools) to workers whose roles
-# carry the scoped toolsets (see [subagents.roles.*] below). This shrinks the per-request tool context.
-# Important: in this mode [tools].groups below defines the universe of built-in groups WORKERS may use
-# (not the assistant's own tools), so don't set it to ["none"] or your workers have nothing to draw on.
-# On by default; set to false for the flat agent that carries every tool itself.
-# lean_supervisor = true
+# The assistant is a lean supervisor: it keeps only its cross-cutting tools (memory, skills, MCP
+# management, config, scheduling, date/time) and hands ALL specialized work (web, files, code, and
+# every domain/MCP tool) to sub-agent workers via spawn_subagent. That is not configurable, so the
+# [subagents.roles.*] tables further down are what give the assistant its actual capability, and at
+# least one is required. A sub-agent's gated-tool calls (the confirm_tools, e.g. execute_python) are
+# routed to the parent for approval and are not run unattended.
 
 # Max per-conversation agents kept live in memory (AgentRegistry LRU cap). Evicted agents rebuild
 # from persisted state on next access, so the cap bounds memory, not correctness.
@@ -53,13 +48,15 @@ show_thinking = true
 show_tools = true
 
 [tools]
-# AIMU built-in tool groups to expose. Also accepts ["all"] or ["none"]. The generative groups
-# (image, audio, speech, transcription) each require their AIMU_*_MODEL env var: there is no default,
-# so the tool raises if it is unset rather than downloading weights you did not ask for. Values and
-# accepted formats: https://saxman.info/aimu/reference/env-vars/
-# "time" (the clock + timezone conversion) is also added to every sub-agent role, whatever that role's
-# own `groups` say, since a worker that cannot tell the time is broken regardless of its domain. Drop
-# "time" here and no agent gets it, including the workers.
+# AIMU built-in tool groups the WORKERS may draw from. Also accepts ["all"] or ["none"]. This is a
+# ceiling, not a toolset: the assistant mounts none of these itself, and a role gets its own `groups`
+# intersected with this list. Setting it to ["none"] leaves your workers with nothing to draw on.
+# The generative groups (image, audio, speech, transcription) each require their AIMU_*_MODEL env var:
+# there is no default, so the tool raises if it is unset rather than downloading weights you did not
+# ask for. Values and accepted formats: https://saxman.info/aimu/reference/env-vars/
+# "time" (the clock + timezone conversion) is the one exception to "workers only": the assistant keeps
+# it, and it is added to every sub-agent role whatever that role's own `groups` say, since a worker that
+# cannot tell the time is broken regardless of its domain. Drop "time" here and no agent gets it.
 groups = ["web", "fs", "compute", "time", "misc"]
 
 # Images: the assistant reads images you attach (web upload / paste, or the CLI `/attach <path>`
@@ -72,16 +69,21 @@ groups = ["web", "fs", "compute", "time", "misc"]
 # Run independent tool calls in one turn concurrently, so several spawn_subagent calls overlap.
 concurrent = true
 
-# Sub-agent roles the model can pick via spawn_subagent(agent_type, task). These are the whole set:
-# nothing is defaulted in code, so edit, delete, or add to the three below and that is what you get.
-# Delete them all and spawn_subagent falls back to a single untyped worker carrying every enabled tool.
+# Sub-agent roles the model can pick via spawn_subagent(agent_type, task). These ARE the assistant's
+# capability: it delegates all specialized work, so a role is the only way a built-in group, a
+# tool-pack, or an MCP server reaches any agent. Nothing is defaulted in code, so edit, delete, or add
+# to the three below and that is exactly what you get. At least one role is required; delete them all
+# and Kokua refuses to start rather than run an assistant that cannot do anything.
 #
 # A role's worker toolset is the union of: its `groups` (intersected with [tools] groups above, so a
 # role narrows within the enabled tools but never exceeds them); the tools of any MCP servers it lists
 # in `mcp_servers` (by the server's `name` below, or its raw URL); and the tools of any tool-packs it
 # lists in `tool_packs` (installed kokua.tools plugins, e.g. "pdf", "email"). `system_message` is
-# optional. Roles matter most with lean_supervisor = true, where the assistant only delegates and the
-# workers carry the tools. No role needs to list "time": it is added to every role from [tools].groups.
+# optional. No role needs to list "time": it is added to every role from [tools].groups.
+#
+# Note that an installed tool-pack and a configured MCP server both do NOTHING until some role names
+# them. Startup warns about an MCP server no role references; run `kokua --list-tool-packs` to see
+# which packs are installed and available to name here.
 
 [subagents.roles.researcher]
 description = "Research specialist: gather and verify information from the web."

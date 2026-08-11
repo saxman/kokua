@@ -10,11 +10,12 @@ from tests.helpers import MockAsyncModelClient
 from kokua import plugins
 from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
+from tests.channels import example_subagent_roles
 from kokua.plugins import FrontEnd, ToolPack
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "lean_supervisor": False}
+    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles()}
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -54,13 +55,27 @@ def test_example_tool_pack_discovered():
     assert any(getattr(fn, "__name__", None) == "roll_dice" for fn in built)
 
 
-async def test_tool_pack_tools_land_on_agent(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannelStub(), client=MockAsyncModelClient([]))
-    names = {fn.__name__ for fn in assistant._agent.tools}
-    assert "roll_dice" in names  # contributed by the example tool-pack plugin
+def test_tool_pack_tools_reach_a_role_that_names_the_pack(tmp_path):
+    """A pack's tools only ever reach the workers whose roles name it; the supervisor mounts none."""
+    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+
+    cfg = _config(tmp_path, subagent_roles={"roller": {"description": "Rolls.", "tool_packs": ["example"]}})
+    types = _build_subagent_agent_types(cfg, [], _load_plugin_tools_by_pack(cfg))
+    assert "roll_dice" in {fn.__name__ for fn in types["roller"]["tools"]}
+
+
+def test_a_role_that_names_no_pack_gets_no_pack_tools(tmp_path):
+    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+
+    cfg = _config(tmp_path, subagent_roles={"plain": {"description": "Plain.", "groups": ["compute"]}})
+    types = _build_subagent_agent_types(cfg, [], _load_plugin_tools_by_pack(cfg))
+    assert "roll_dice" not in {fn.__name__ for fn in types["plain"]["tools"]}
 
 
 async def test_no_plugins_flag_omits_tool_pack_tools(tmp_path):
+    from kokua.core.build import _load_plugin_tools_by_pack
+
+    assert _load_plugin_tools_by_pack(_config(tmp_path, load_plugins=False)) == {}
     assistant = await Assistant.create(
         _config(tmp_path, load_plugins=False), FakeChannelStub(), client=MockAsyncModelClient([])
     )

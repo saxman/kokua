@@ -19,13 +19,7 @@ from aimu.skills import SkillManager, make_skill_authoring_tool, make_skill_scri
 from aimu.tools import builtin
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
-from kokua.config.schema import (
-    MEMORY_GUIDANCE,
-    SUBAGENT_GUIDANCE,
-    SUPERVISOR_GUIDANCE,
-    SUPERVISOR_GUIDANCE_GENERIC,
-    AssistantConfig,
-)
+from kokua.config.schema import MEMORY_GUIDANCE, SUPERVISOR_GUIDANCE, AssistantConfig
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.config.tools import make_config_tools
 from kokua.mcp.servers import make_mcp_tools
@@ -58,6 +52,28 @@ _TOOL_GROUPS = {
 }
 
 
+def _check_group_name(name: str) -> None:
+    """Raise ``ValueError`` naming the valid groups if ``name`` is not one of them."""
+    if name not in _TOOL_GROUPS and name not in ("all", "none"):
+        valid = ", ".join(sorted(_TOOL_GROUPS)) + ", all, none"
+        raise ValueError(f"unknown tool group {name!r}; choose from: {valid}")
+
+
+def enabled_tool_groups(config: AssistantConfig) -> set[str]:
+    """The built-in groups workers may draw from, validated.
+
+    Also the one place ``[tools].groups`` is checked. Nothing else expands that list any more (the
+    supervisor mounts no built-in groups, and a role's own ``groups`` are intersected with this set and
+    otherwise ignored), so without an explicit check a typo like ``groups = ["complete"]`` would
+    silently produce tool-less workers instead of failing at startup.
+    """
+    for name in config.tools:
+        _check_group_name(name)
+    if "all" in config.tools:
+        return set(_TOOL_GROUPS)
+    return {g for g in config.tools if g != "none"}
+
+
 def _resolve_builtin_tools(names: list[str]) -> list:
     """Map tool-group names to built-in tool callables (deduped by name).
 
@@ -69,13 +85,8 @@ def _resolve_builtin_tools(names: list[str]) -> list:
     for name in names:
         if name == "none":
             continue
-        if name == "all":
-            group = builtin.ALL_TOOLS
-        elif name in _TOOL_GROUPS:
-            group = _TOOL_GROUPS[name]
-        else:
-            valid = ", ".join(sorted(_TOOL_GROUPS)) + ", all, none"
-            raise ValueError(f"unknown tool group {name!r}; choose from: {valid}")
+        _check_group_name(name)
+        group = builtin.ALL_TOOLS if name == "all" else _TOOL_GROUPS[name]
         for fn in group:
             if fn.__name__ not in seen:
                 seen.add(fn.__name__)
@@ -86,35 +97,13 @@ def _resolve_builtin_tools(names: list[str]) -> list:
 def unreferenced_mcp_servers(config: AssistantConfig) -> list[str]:
     """Configured MCP servers that no sub-agent role names, and so reach no agent at all.
 
-    A lean supervisor mounts no MCP callables (see ``build_agent``), so a server's tools travel only to
-    the workers whose roles list it in ``mcp_servers``, by name or by raw URL. A server nobody names
-    still connects and still spends its token on the handshake; it is simply unreachable, and nothing
-    said so. Returns each one's name (or URL, when unnamed) for the startup warning.
+    The supervisor mounts no MCP callables (see ``build_agent``), so a server's tools travel only to the
+    workers whose roles list it in ``mcp_servers``, by name or by raw URL. A server nobody names still
+    connects and still spends its token on the handshake; it is simply unreachable, and nothing said so.
+    Returns each one's name (or URL, when unnamed) for the startup warning.
     """
-    if not (config.lean_supervisor and config.subagents and config.subagent_roles):
-        return []  # a flat agent mounts every connected server itself, so none can be stranded
     referenced = {ref for role in config.subagent_roles.values() for ref in role.get("mcp_servers", [])}
     return [s.name or s.url for s in config.mcp_servers if not ({s.url, s.name} & referenced)]
-
-
-def _generic_worker_tools(
-    config: AssistantConfig,
-    connections: Optional[list] = None,
-    plugin_tools_by_pack: Optional[dict[str, list]] = None,
-) -> list:
-    """The toolset for the single untyped worker used when no roles are configured.
-
-    With no role to scope it, the worker gets what a flat agent would: every enabled built-in group,
-    every tool-pack tool, and every connected MCP server's callables. Parent-only stateful tools
-    (memory, skills, MCP management, config, scheduling) stay off, exactly as they do for a role.
-    """
-    return _dedup_by_name(
-        [
-            _resolve_builtin_tools(config.tools),
-            *(plugin_tools_by_pack or {}).values(),
-            *(getattr(conn, "callables", []) for conn in connections or []),
-        ]
-    )
 
 
 def _build_subagent_agent_types(
@@ -143,11 +132,9 @@ def _build_subagent_agent_types(
     """
     connections = connections or []
     plugin_tools_by_pack = plugin_tools_by_pack or {}
-    # "all" expands to every group; "none" and unknown/disabled groups are dropped silently.
-    if "all" in config.tools:
-        enabled = set(_TOOL_GROUPS)
-    else:
-        enabled = {g for g in config.tools if g != "none"}
+    # A role's own group names are matched against this set; unknown ones drop silently, while an
+    # unknown name in [tools].groups itself raises here.
+    enabled = enabled_tool_groups(config)
     url_by_name = {s.name: s.url for s in config.mcp_servers if getattr(s, "name", None)}
     callables_by_url = {getattr(c, "url", None): getattr(c, "callables", []) for c in connections}
     # Every role also gets the time group, on top of whatever its own `groups` name. A worker scoped to
@@ -178,42 +165,13 @@ def _build_subagent_agent_types(
     return agent_types
 
 
-def _load_plugin_tools(config: AssistantConfig) -> list:
-    """Build the tools contributed by installed tool-pack plugins (deduped by name)."""
-    tools: list = []
-    seen: set[str] = set()
-    for name, pack in discover_tool_packs().items():
-        try:
-            pack_tools = pack.build(config)
-        except Exception:
-            logger.warning("Tool-pack %r failed to build; skipping.", name, exc_info=True)
-            continue
-        for fn in pack_tools:
-            fname = getattr(fn, "__name__", None)
-            if fname and fname not in seen:
-                seen.add(fname)
-                tools.append(fn)
-        logger.info("Loaded tool-pack %r (%d tools).", name, len(pack_tools))
-    return tools
-
-
-def _dedup_by_name(tool_lists) -> list:
-    """Flatten lists of tool callables into one list, keeping the first of each ``__name__``."""
-    out: list = []
-    seen: set[str] = set()
-    for fns in tool_lists:
-        for fn in fns:
-            name = getattr(fn, "__name__", None)
-            if name and name not in seen:
-                seen.add(name)
-                out.append(fn)
-    return out
-
-
 def _load_plugin_tools_by_pack(config: AssistantConfig) -> dict[str, list]:
     """Tool-pack tools grouped by pack name (each pack built once), so a sub-agent role can request a
-    specific pack's tools by name. Empty when plugins are disabled. A pack that fails to build is
-    skipped (same forgiving contract as ``_load_plugin_tools``)."""
+    specific pack's tools by name. Empty when plugins are disabled.
+
+    Grouped rather than flattened because a pack's tools only ever reach a worker through the role that
+    names it: the supervisor mounts none of them. A pack that fails to build is skipped rather than
+    taking the assistant down with it."""
     if not config.load_plugins:
         return {}
     by_pack: dict[str, list] = {}
@@ -226,17 +184,13 @@ def _load_plugin_tools_by_pack(config: AssistantConfig) -> dict[str, list]:
 
 
 def resolve_system_message(config: AssistantConfig) -> str:
-    """The system prompt for the model client: base message plus the memory/subagent guidance the
-    enabled features need. Shared by the initial build and a runtime model switch.
+    """The system prompt for the model client: base message plus the memory guidance, when memory is on.
 
-    The lean variant names the delegate's exact call, so it has to follow the same role/no-role split
-    ``add_subagent_tool`` makes: with no configured roles the delegate is ``spawn_subagent(task)``, and
-    the role-picking wording would name a parameter that is not there.
+    Shared by the initial build and a runtime model switch. The supervisor guidance is unconditional:
+    delegation is the only route to a domain tool, so there is no configuration under which the model
+    should be told anything else.
     """
-    system = config.system_message + (MEMORY_GUIDANCE if config.memory else "")
-    if config.subagents and config.lean_supervisor:
-        return system + (SUPERVISOR_GUIDANCE if config.subagent_roles else SUPERVISOR_GUIDANCE_GENERIC)
-    return system + (SUBAGENT_GUIDANCE if config.subagents else "")
+    return config.system_message + (MEMORY_GUIDANCE if config.memory else "") + SUPERVISOR_GUIDANCE
 
 
 def build_model_client(config: AssistantConfig):
@@ -283,20 +237,17 @@ def build_agent(
     memory_tools: list,
     for_each_agent: Callable,
     reapply_config: Callable,
-    plugin_tools: Optional[list] = None,
     tool_approval: Optional[Callable] = None,
     plugin_tools_by_pack: Optional[dict[str, list]] = None,
     subagent_observer: Optional[SubagentObserver] = None,
 ) -> aio.SkillAgent:
-    """Build the SkillAgent and its full tool set (skills, MCP management, memory, plugins, built-ins).
+    """Build the supervisor SkillAgent and its tool set (skills, MCP management, memory, config, time).
 
     ``add_skill_script`` and the MCP tools need the agent (to surface new tools this turn), so they are
-    built after it; the SkillAgent re-appends its skills-server tools each run. ``plugin_tools`` is the
-    already-built, deduped tool-pack list (the caller builds packs once and shares it); when ``None``
-    the packs are built here (deduped by name) if enabled. ``connections`` is the live list the MCP
-    tools append to and the boot reconnect / teardown share. ``for_each_agent`` fans a runtime
-    add/remove out across every live agent; already-connected servers in ``connections`` are attached
-    to this fresh agent directly.
+    built after it; the SkillAgent re-appends its skills-server tools each run. ``connections`` is the
+    live list the MCP tools append to and the boot reconnect / teardown share. ``for_each_agent`` fans a
+    runtime add/remove out across every live agent. ``plugin_tools_by_pack`` is not mounted here -- it is
+    passed through so ``refresh_workers`` can rebuild the delegate's role toolsets after such a change.
     """
     manager = SkillManager(skill_dirs=[str(config.skills_dir)])
     author_skill = make_skill_authoring_tool(manager, config.skills_dir)
@@ -307,7 +258,6 @@ def build_agent(
         name="assistant",
         concurrent_tool_calls=config.subagents_concurrent,
     )
-    lean = config.lean_supervisor and config.subagents
     by_pack = plugin_tools_by_pack or {}
 
     # When an MCP server is added/removed at runtime, rebuild each live agent's spawn_subagent so its
@@ -319,9 +269,13 @@ def build_agent(
     def refresh_workers(a: aio.SkillAgent) -> None:
         rebuild_subagent_tool(a, config, tool_approval, connections, by_pack, subagent_observer)
 
-    # Cross-cutting / parent-only tools the supervisor keeps in both modes (they mutate shared,
-    # per-conversation state that workers must not touch: skills, MCP connections, memory, config).
-    base_parent_tools = [
+    # The supervisor's whole toolset: cross-cutting tools that mutate shared, per-conversation state
+    # workers must not touch (skills, MCP connections, memory, config), plus the time group, plus (added
+    # by wire_agent) the spawn_subagent delegate and the scheduler tools. Built-in groups, tool-packs,
+    # and connected-MCP callables are deliberately absent: they live on the workers, scoped per role.
+    # The time tools are the exception because the supervisor answers scheduling and "when" questions
+    # itself, and delegating a clock read would cost a whole spawn.
+    agent.tools = [
         author_skill,
         make_skill_script_tool(agent, manager, config.skills_dir),
         *make_mcp_tools(
@@ -330,30 +284,12 @@ def build_agent(
             notify=notify,
             oauth_storage_dir=oauth_storage_dir,
             config_path=config.config_path,
-            refresh_workers=refresh_workers if config.subagents else None,
-            lean=lean,
+            refresh_workers=refresh_workers,
         ),
         *memory_tools,
         *make_config_tools(config.config_path, reapply_config),
+        *builtin.time,
     ]
-    if lean:
-        # Lean supervisor: keep only the cross-cutting tools + the time group (and, added by wire_agent,
-        # the single spawn_subagent delegate + scheduler tools). The built-in groups, tool-packs, and
-        # connected-MCP callables are NOT mounted here -- they live on the workers, scoped per role.
-        # The time tools are the exception because the supervisor answers scheduling and "when" questions
-        # itself; delegating a clock read would cost a whole spawn.
-        agent.tools = [*base_parent_tools, *builtin.time]
-        return agent
-    if plugin_tools is None:
-        plugin_tools = _load_plugin_tools(config) if config.load_plugins else []
-    agent.tools = [*base_parent_tools, *plugin_tools, *_resolve_builtin_tools(config.tools)]
-    # Attach already-connected MCP servers to this fresh agent (runtime-added servers fan out separately).
-    existing = {getattr(fn, "__name__", None) for fn in agent.tools}
-    for conn in connections:
-        for fn in conn.callables:
-            if fn.__name__ not in existing:
-                agent.tools.append(fn)
-                existing.add(fn.__name__)
     return agent
 
 
@@ -376,8 +312,8 @@ def wire_agent(
     This is everything the assistant needs on every per-conversation agent, in one place so each
     conversation's agent is wired identically.
     """
-    # Build tool-packs once here and share: the flat supervisor mounts the flattened set, while each
-    # worker role draws only the packs it names (add_subagent_tool). Empty when plugins are disabled.
+    # Build tool-packs once here and share: each worker role draws only the packs it names
+    # (add_subagent_tool). The supervisor mounts none of them. Empty when plugins are disabled.
     plugin_tools_by_pack = _load_plugin_tools_by_pack(config)
     agent = build_agent(
         config,
@@ -388,7 +324,6 @@ def wire_agent(
         memory_tools=memory_tools,
         for_each_agent=for_each_agent,
         reapply_config=reapply_config,
-        plugin_tools=_dedup_by_name(plugin_tools_by_pack.values()),
         tool_approval=tool_approval,
         plugin_tools_by_pack=plugin_tools_by_pack,
         subagent_observer=subagent_observer,
@@ -461,35 +396,24 @@ def add_subagent_tool(
     plugin_tools_by_pack: Optional[dict[str, list]] = None,
     observer: Optional[SubagentObserver] = None,
 ) -> None:
-    """Append the ``spawn_subagent`` tool when sub-agents are enabled (no-op otherwise).
+    """Append the typed ``spawn_subagent(agent_type, task)`` delegate, the supervisor's only route to a
+    domain tool.
 
-    With roles configured this is the typed ``spawn_subagent(agent_type, task)``: each spawn clones the
-    active model and gets its role's scoped tool subset -- built-in groups (intersected with
-    ``config.tools``) plus any MCP servers / tool-packs the role names, resolved against ``connections``
-    and ``plugin_tools_by_pack``.
+    Each spawn clones the active model and gets its role's scoped tool subset: built-in groups
+    (intersected with ``config.tools``) plus any MCP servers and tool-packs the role names, resolved
+    against ``connections`` and ``plugin_tools_by_pack``. The parent-only stateful tools (memory,
+    skills, MCP management, config, scheduling) are deliberately withheld. Concurrent spawns overlap
+    under the parent's ``concurrent_tool_calls``; the approval gate is forwarded so a sub-agent's
+    gated-tool calls (e.g. execute_python) prompt via the parent rather than running unattended.
+    ``observer`` is how a front end shows the spawn's work while it runs.
 
-    With no roles configured it is AIMU's untyped ``spawn_subagent(task)`` over one worker holding every
-    enabled tool. Roles come only from ``[subagents.roles.*]``, so that case is reachable (a fresh
-    install with no config file), and it cannot be left to fall through: AIMU rejects an empty
-    ``agent_types`` dict outright, and a lean supervisor whose workers have no tools cannot do
-    specialized work at all. ``resolve_system_message`` follows the same split, so the prompt names the
-    signature that actually exists.
-
-    Either way the parent-only stateful tools (memory, skills, MCP management, config, scheduling) are
-    deliberately withheld. Concurrent spawns overlap under the parent's ``concurrent_tool_calls``; the
-    approval gate is forwarded so a sub-agent's gated-tool calls (e.g. execute_python) prompt via the
-    parent rather than running unattended. ``observer`` is how a front end shows the spawn's work while
-    it runs.
+    ``config.subagent_roles`` is non-empty by the time this runs (``Assistant.create`` rejects an empty
+    set), which also satisfies AIMU's rule that ``agent_types`` must not be an empty dict.
     """
-    if not config.subagents:
-        return
-    agent_types = _build_subagent_agent_types(config, connections, plugin_tools_by_pack)
-    generic = not agent_types
     agent.tools.append(
         make_async_subagent_tool(
             agent.model_client.model,
-            agent_types=None if generic else agent_types,
-            tools=_generic_worker_tools(config, connections, plugin_tools_by_pack) if generic else None,
+            agent_types=_build_subagent_agent_types(config, connections, plugin_tools_by_pack),
             tool_approval=tool_approval,
             observer=observer,
         )
@@ -507,8 +431,7 @@ def rebuild_subagent_tool(
     """Replace an agent's ``spawn_subagent`` tool with a fresh one built from the CURRENT connections.
 
     Worker roles snapshot their toolset when ``spawn_subagent`` is built, so after a runtime MCP
-    add/remove this re-resolves each role (picking up or dropping the changed server's tools). No-op
-    when sub-agents are disabled (there is no delegate to rebuild)."""
+    add/remove this re-resolves each role (picking up or dropping the changed server's tools)."""
     agent.tools[:] = [t for t in agent.tools if getattr(t, "__name__", None) != SPAWN_SUBAGENT_TOOL_NAME]
     add_subagent_tool(
         agent,
