@@ -2,6 +2,15 @@
 
 ## 0.1.0 (unreleased)
 
+- **A sub-agent card looks like the tool call it replaces.** The web channel already suppresses the
+  parent's `spawn_subagent` tool block because the card stands in for it, but the card looked like
+  nothing else on the page. A spawn now renders as `🔧 spawn_subagent(<role>) — <status>` in the same
+  monospace a tool block's header uses, over an argument line (`agent_type="…", task="…"`) built by
+  the same helper that fills a tool block's body, and then the nested thinking / tool / answer blocks
+  it already showed. The task moved off the header, where it was truncated to 60 characters, onto
+  that argument line, where it is shown whole. Planning reviewer verdicts share the card frame but
+  are backed by no tool call, so they keep their plain `🔎 <role> — <status>` header.
+
 - **Every agent can tell the time.** AIMU's clock and timezone converter moved out of `builtin.misc`
   into their own `builtin.time` group, which Kokua now exposes as the `time` tool group and adds to the
   default set (`web,fs,compute,time,misc`). Two agents previously could not reach these tools at all,

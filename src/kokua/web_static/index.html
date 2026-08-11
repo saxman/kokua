@@ -133,6 +133,12 @@
     .plan { align-self: flex-start; max-width: 85%; background: var(--approval-bg); border: 1px solid var(--approval-border); border-radius: 12px; padding: 8px 14px; }
     .subagent { align-self: flex-start; max-width: 85%; font-size: 0.9em; color: var(--tool-fg); background: var(--tool-bg); border: 1px solid var(--tool-border); border-radius: 10px; padding: 6px 12px; }
     .subagent[data-status="running"] { opacity: 0.75; font-style: italic; }
+    /* A spawn card stands in for the `spawn_subagent` tool block the server suppresses (see
+       WebChannel.send_frame), so its header line and argument line carry the tool block's monospace
+       type. Only those two: the body below keeps the card's roomier layout, which its nested blocks
+       need to stay readable. A planning reviewer's card, which no tool call backs, gets neither. */
+    .subagent.spawn > .fold-header, .subagent .sa-args { font-family: ui-monospace, monospace; font-size: 0.9em; }
+    .subagent .sa-args { word-break: break-word; opacity: 0.85; margin: 2px 0 4px; }
     /* A card's nested blocks ARE the top-level thinking/tool/answer components (see .thinking, .tool
        and .assistant above), so they need no styling of their own -- only placement inside the card's
        body: indented under it, and released from the transcript's width cap, which the card itself
@@ -540,26 +546,28 @@
     function renderSubagent(frame, ts) {
       let card = frame.id ? subagentCards[frame.id] : null;
       if (!card) {
-        card = addFoldable("subagent", "", { md: true }, ts);  // stamp once, when first created
+        const spawn = !!frame.task;
+        card = addFoldable("subagent" + (spawn ? " spawn" : ""), "", { md: true }, ts);  // stamp once, when first created
         if (frame.id) subagentCards[frame.id] = card;
-        card.spawn = !!frame.task;
+        card.spawn = spawn;
         card.answers = [];  // every generated-text block, re-rendered as markdown when the spawn ends
-        // The task is shown truncated on the header below (visible even collapsed, which is all a
-        // reader sees by default) and deliberately not repeated here -- a second, untruncated copy in
-        // the body would read as the card's first line of content rather than as its own label.
+        if (spawn) card.body.appendChild(spawnArgsLine(frame));
       }
       if (frame.append) appendSubagentEntry(card, frame.append);
       // A spawn's finish frame carries both `status` and `append` together, and no `role` of its own
-      // (see the frame shapes above) -- remember role/task on the card so a status-only update still
+      // (see the frame shapes above) -- remember the role on the card so a status-only update still
       // has the identity to re-render, rather than either skipping the label update (frame.append is
       // truthy) or falling back to "Sub-agent" (frame.role is absent).
       if (frame.role || frame.status) {
         if (frame.role) card.role = frame.role;
-        if (frame.task) card.task = frame.task;
         const role = card.role || "Sub-agent";
         const status = subagentStatusLabel(frame.status, card.spawn);
-        card.label.textContent = (card.spawn ? "🤖 " : "🔎 ") + role + " — " + status;
-        if (card.task) card.label.textContent += " · " + truncate(card.task, 60);
+        // A spawn reads as the call it replaces; the role sits in the header because it is what
+        // tells several concurrent spawns apart while they are all collapsed. Its full arguments,
+        // task included, are on the card's own argument line.
+        card.label.textContent = card.spawn
+          ? "🔧 " + SPAWN_TOOL_NAME + "(" + role + ") — " + status
+          : "🔎 " + role + " — " + status;
         if (frame.issues && frame.issues.length && frame.status !== "running") {
           const issuesMd = frame.issues.map((i) => "- " + i).join("\n");
           const html = renderMarkdown(issuesMd);
@@ -580,8 +588,19 @@
       return status || "done";
     }
 
-    function truncate(text, limit) {
-      return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
+    // The tool whose block the server suppresses in favour of the card (see SPAWN_SUBAGENT_TOOL_NAME
+    // in channels/web.py); the card names it so the transcript still says which call was made.
+    const SPAWN_TOOL_NAME = "spawn_subagent";
+
+    // A spawn card's first body line: the call's arguments, rendered exactly as a tool block's body
+    // is. `agent_type` is reconstructed from the frame's role because kokua always builds AIMU's
+    // typed spawn tool, whose parameters are agent_type and task (see _build_subagent_agent_types);
+    // AIMU's untyped mode, which kokua never builds, would take task alone.
+    function spawnArgsLine(frame) {
+      const el = document.createElement("div");
+      el.className = "sa-args";
+      el.textContent = toolArgs({ agent_type: frame.role || "subagent", task: frame.task });
+      return el;
     }
 
     // One entry inside a card's body, built from the very same components the top level uses for the
