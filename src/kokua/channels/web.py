@@ -212,9 +212,12 @@ def conversation_to_frames(
                     if segment.get("text"):
                         add({"type": "reasoning", "text": segment["text"]}, ts)
                 # A reviewer's verdict is already in the trace, but a sub-agent the turn spawned is
-                # not; those cards carry `task` (create event) or `append` (later events) and are
-                # replayed on their own. Filtering on `task` alone would drop a spawn's later frames.
-                events = [event for event in events if "task" in event or "append" in event]
+                # not, so those cards are replayed on their own. A spawn is identified by the `task` on
+                # its create event and the rest of its lineage by that event's id: shape alone is not
+                # enough, since a spawn whose text streamed closes with a status-only event that looks
+                # exactly like a reviewer's, and dropping it strands the card at "working...".
+                spawned = {event["id"] for event in events if "task" in event and "id" in event}
+                events = [event for event in events if event.get("id") in spawned]
             for event in events:
                 add({"type": "subagent", **event}, ts)
         elif role == "assistant":

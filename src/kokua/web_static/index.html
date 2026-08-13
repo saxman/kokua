@@ -560,6 +560,10 @@
         card.spawn = spawn;
         card.answers = [];  // every generated-text block, re-rendered as markdown when the spawn ends
         if (spawn) card.body.appendChild(spawnArgsLine(frame));
+        // An `append` frame carries no role or status, so a card first created by one has no identity to
+        // put on its header. Label it anyway: an empty header reads as a broken block rather than as the
+        // sub-agent output it holds. Overwritten below by the first frame that does carry identity.
+        card.label.textContent = "🔎 Sub-agent — working…";
       }
       if (frame.append) appendSubagentEntry(card, frame.append);
       // A spawn's finish frame carries both `status` and `append` together, and no `role` of its own

@@ -2,6 +2,24 @@
 
 ## 0.1.0 (unreleased)
 
+- **Switching into a running scheduled task shows its sub-agent work, header and all.** A task running
+  in its own conversation opened no catch-up record: only `TurnRunner.reactive` did. A background turn's
+  frames are muted, so everything that task's spawns reported was dropped on the floor, and since an
+  unattended turn's cards are the only display frames it produces, switching in mid-task showed an empty
+  transcript. Worse, the switch made that conversation foreground, so the spawn's *later* `append`
+  frames arrived at a page whose card references the `history` frame had just cleared: the page built a
+  fresh card from an `append`, which carries neither role nor status, and rendered it with an empty
+  header. `_run_unattended` now records like every other turn (invariant 3), opening the record inside
+  its gate hold so a firing queued behind another turn on the same conversation cannot replace a record
+  still in use.
+
+  Two hardening fixes ride along. `renderSubagent` labels a card it builds from an `append` alone, so a
+  lost create event reads as a sub-agent whose identity is unknown rather than as a broken block. And a
+  verbose planned turn's replay now keeps a spawn's whole lineage by the create event's id: a spawn whose
+  text streamed closes with a status-only event, which the previous shape-based filter mistook for a
+  reviewer verdict and dropped, stranding the replayed card at "working..." with its answer never
+  rendered as markdown.
+
 - **A tool card shows what the call returned, not just what it was asked to do.** The result was
   reaching the channel all along -- AIMU yields `TOOL_CALLING` only once a call has been dispatched, so
   the chunk carries the result -- and was being dropped. Worse, it wasn't even reconstructible on

@@ -1010,3 +1010,22 @@ async def test_a_turn_that_fails_before_persisting_still_ends_its_catch_up_recor
         await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=active_id)
 
     assert ("end", active_id) in channel.calls
+
+
+async def test_an_unattended_turn_opens_a_catch_up_record_for_the_conversation_it_runs_in(tmp_path):
+    """A scheduled task running in its own conversation is by definition not the conversation being
+    viewed, so every frame it produces is muted -- and a sub-agent card is the only frame such a turn
+    produces at all. Without a record, switching in mid-task shows none of the work, and the spawn's
+    later `append` frames then reach a page holding no card to update."""
+    channel = _CatchUpChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["task output"])
+    )
+    active_id = assistant._active_id
+
+    await assistant._proactive("run the report", target="new", task_name="report")
+
+    task_id = next(key for key in assistant._store.list_keys() if key != active_id)
+    assert ("begin", task_id, "run the report") in channel.calls
+    # Ended at the persist, so a switch-in landing after it replays the store alone, not both.
+    assert channel.calls.index(("end", task_id)) > channel.calls.index(("begin", task_id, "run the report"))

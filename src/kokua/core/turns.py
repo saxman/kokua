@@ -26,7 +26,12 @@ Every rule here was learned from a bug. Read them before changing anything in th
    (or into no list at all) instead of the turn that owns it. The channel's catch-up record is opened
    in the same place and for the same reason, but it is *ended by ``_persist``* rather than by the
    ``finally``: the store and the record stand for the same output, so ending it next to the write that
-   supersedes it is what keeps a switch-in from replaying both.
+   supersedes it is what keeps a switch-in from replaying both. Every turn opens one, unattended runs
+   included -- a scheduled task's spawn cards are muted like any other background turn's frames, and
+   they are the only display frames such a turn produces. An unattended run opens its record *inside*
+   the gate, because a firing can queue behind a turn already running on the same conversation and
+   would otherwise replace that turn's record while it is still standing in for live output.
+   (Regression: ``test_an_unattended_turn_opens_a_catch_up_record_for_the_conversation_it_runs_in``.)
 
 4. **A proactive run never touches the active pointer.** It is not "switching" to a conversation,
    just running a turn on one -- the registry looks up any conversation's agent by id. Leaving the
@@ -287,6 +292,14 @@ class TurnRunner:
         self._book.pin(conversation_id)  # invariant 2
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
+                # Record the turn for a user who switches into its conversation before it finishes. An
+                # unattended turn's only display frames are its spawns' cards, so without this a task
+                # delegating in a conversation nobody is watching shows nothing of that work on the
+                # switch-in, and the spawn's later `append` frames arrive with no card to update.
+                # Opened inside the gate rather than beside the contextvars above (as the reactive path
+                # does; see invariant 3): a firing that has to queue behind a turn already running on
+                # this conversation would otherwise replace that turn's record while it is still needed.
+                self._ui.begin_catch_up(conversation_id, prompt)
                 agent = self._book.agent_for(conversation_id)
                 # Tag every message this unprompted run appends, so replayed history can distinguish
                 # it from a user-driven turn. The agent doesn't reset on run (the system prompt lives
@@ -301,6 +314,8 @@ class TurnRunner:
                 await self._persist(conversation_id)
         finally:
             self._book.unpin(conversation_id)
+            # Normally already done by `_persist`; this covers a run that raised before reaching it.
+            self._ui.end_catch_up(conversation_id)
             proactive_turn.reset(proactive_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)

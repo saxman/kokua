@@ -334,6 +334,28 @@ def test_a_traced_turn_replays_spawn_cards_but_not_reviewer_cards():
     assert [item["id"] for item in replayed] == ["r-1", "r-1"]
 
 
+def test_a_traced_turns_spawn_card_keeps_its_closing_status():
+    """A spawn whose text streamed closes with a status-only event, carrying neither `task` nor
+    `append`. Dropping it leaves the replayed card stuck at "working..." with its answer never
+    rendered as markdown, so a lineage's events are kept by id rather than by shape."""
+    items = conversation_to_frames(
+        [{"role": "user", "content": "plan something"}],
+        show_thinking=False,
+        show_tools=False,
+        subagent={
+            "0": [
+                {"id": "plan-review-0", "role": "reviewer", "status": "done", "issues": ["too vague"]},
+                {"id": "r-1", "role": "researcher", "task": "find X", "status": "running"},
+                {"id": "r-1", "append": {"kind": "answer", "text": "the answer"}},
+                {"id": "r-1", "status": "done"},
+            ]
+        },
+        trace={"0": [{"label": "Planner", "detail": "drafting", "text": "a plan"}]},
+    )
+    replayed = [item for item in items if item["type"] == "subagent"]
+    assert [item.get("status") for item in replayed] == ["running", None, "done"]
+
+
 async def test_web_channel_background_turn_frames_are_muted():
     from kokua.channels.web import streaming_conversation
 

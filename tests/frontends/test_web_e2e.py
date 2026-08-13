@@ -466,3 +466,31 @@ def test_reviewer_card_still_renders_with_its_own_icon(page, live_server):
     expect(card.locator(".sa-args")).to_have_count(0)
     card.locator(".fold-header").click()
     expect(card.locator("li", has_text="too vague")).to_have_count(1)
+
+
+def test_a_card_built_from_an_append_alone_still_names_itself(page, live_server):
+    """An `append` frame carries neither role nor status, so a card first created by one has no identity
+    to put on its header. It must still label itself: a headerless card is an invisible failure, which is
+    how the lost create event behind it (a switch-in mid-task, before `_run_unattended` recorded its
+    turn) showed up in the first place -- as a block of sub-agent output with nothing above it."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    def seed(config):
+        TinyDBSessionStore(str(config.sessions_path)).save(
+            Session(
+                key="seeded",
+                messages=[{"role": "user", "content": "research the vendors"}],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                    "subagent": {"0": [{"id": "r-1", "append": {"kind": "answer", "text": "Vendor A is cheaper."}}]},
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    card = page.locator(".bubble.subagent")
+    expect(card).to_have_count(1)
+    expect(card.locator("> .fold-header > .fold-label")).to_contain_text("Sub-agent")
+    expect(card.locator("> .fold-body")).to_contain_text("Vendor A is cheaper.")
