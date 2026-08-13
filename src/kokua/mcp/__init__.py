@@ -6,9 +6,9 @@ from .servers import (
     ServerConnection,
     attach_server,
     connect_mcp,
-    make_mcp_tools,
     reconnect_mcp_servers,
 )
+from .tools import make_mcp_tools
 
 __all__ = [
     "ServerConnection",

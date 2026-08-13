@@ -309,3 +309,18 @@ async def test_record_subagent_events_ignores_an_empty_list(tmp_path):
     assistant._book.record_subagent_events([], 0, assistant._active_id)
 
     assert "subagent" not in assistant._store.get(assistant._active_id).metadata
+
+
+async def test_sessions_backs_list_and_shares_its_ordering(tmp_path):
+    """``sessions()`` is the single store-walk-and-order seam; ``list()`` is a projection of it, so the
+    two can never disagree about recency."""
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["a"])
+    )
+    await assistant._handle(ChannelMessage(text="first chat", channel="fake"), conversation_id=assistant._active_id)
+    await assistant.new_conversation()
+    await assistant._handle(ChannelMessage(text="second chat", channel="fake"), conversation_id=assistant._active_id)
+
+    book = assistant._book
+    assert [session.key for session in book.sessions()] == [item["id"] for item in book.list()]
+    assert len(book.sessions()) == 2

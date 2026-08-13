@@ -90,12 +90,8 @@ class ConversationBook:
 
     def most_recent_or_new(self) -> Session:
         """The most-recently-updated session, creating a fresh empty one if the store is empty."""
-        keys = self._store.list_keys()
-        if keys:
-            sessions = [self._store.get(key) for key in keys]
-            sessions.sort(key=lambda session: session.metadata.get("updated_at", ""), reverse=True)
-            return sessions[0]
-        return self.new_session()
+        sessions = self.sessions()
+        return sessions[0] if sessions else self.new_session()
 
     def new_session(self, title: Optional[str] = None) -> Session:
         """Mint and persist an empty session, optionally pre-titled."""
@@ -145,19 +141,33 @@ class ConversationBook:
 
     # --- CRUD ---------------------------------------------------------------------------------
 
+    def sessions(self) -> list[Session]:
+        """Every stored conversation, most-recently-updated first.
+
+        The one place the store's key-then-get walk and the ``updated_at`` ordering live: ``list()``
+        projects it for the sidebar, ``most_recent_or_new`` takes its head, and the agent's read-only
+        conversation tools scan it. Re-read on every call, which is the point -- a conversation a
+        background turn just persisted has to show up.
+
+        Costs one store read per conversation (TinyDB re-parses the file each time), which is already
+        what a sidebar push costs. If that ever matters, a bulk read belongs in AIMU's store, and this is
+        the single seam it would land behind.
+        """
+        sessions = [self._store.get(key) for key in self._store.list_keys()]
+        sessions.sort(key=lambda session: session.metadata.get("updated_at", ""), reverse=True)
+        return sessions
+
     def list(self) -> list[dict]:
         """All conversations as {id, title, updated_at, active}, most-recently-updated first."""
-        items = [
+        return [
             {
-                "id": key,
+                "id": session.key,
                 "title": session.metadata.get("title") or "New conversation",
                 "updated_at": session.metadata.get("updated_at", ""),
-                "active": key == self._active_id,
+                "active": session.key == self._active_id,
             }
-            for key, session in ((key, self._store.get(key)) for key in self._store.list_keys())
+            for session in self.sessions()
         ]
-        items.sort(key=lambda item: item["updated_at"], reverse=True)
-        return items
 
     def create(self) -> str:
         """Start and switch to a new, empty conversation; returns its id.

@@ -22,7 +22,7 @@ from aimu.tools.builtin import make_document_tools, make_memory_tools
 from kokua.config.schema import MEMORY_GUIDANCE, SUPERVISOR_GUIDANCE, AssistantConfig
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.config.tools import make_config_tools
-from kokua.mcp.servers import make_mcp_tools
+from kokua.mcp.tools import make_mcp_tools
 from kokua.mcp.auth import Notify
 from kokua.plugins import discover_tool_packs
 
@@ -271,10 +271,13 @@ def build_agent(
 
     # The supervisor's whole toolset: cross-cutting tools that mutate shared, per-conversation state
     # workers must not touch (skills, MCP connections, memory, config), plus the time group, plus (added
-    # by wire_agent) the spawn_subagent delegate and the scheduler tools. Built-in groups, tool-packs,
-    # and connected-MCP callables are deliberately absent: they live on the workers, scoped per role.
-    # The time tools are the exception because the supervisor answers scheduling and "when" questions
-    # itself, and delegating a clock read would cost a whole spawn.
+    # by wire_agent) the spawn_subagent delegate, the scheduler tools, and the read-only conversation
+    # tools. Built-in groups, tool-packs, and connected-MCP callables are deliberately absent: they live
+    # on the workers, scoped per role. The time tools are the exception because the supervisor answers
+    # scheduling and "when" questions itself, and delegating a clock read would cost a whole spawn. The
+    # conversation tools are supervisor-only for a different reason: a worker shares no history and has
+    # no conversation identity, so "the user's other conversations" only means something here.
+    # docs/explanation/architecture.md carries the full inventory, pinned by a test in test_build.py.
     agent.tools = [
         author_skill,
         make_skill_script_tool(agent, manager, config.skills_dir),
@@ -303,14 +306,16 @@ def wire_agent(
     memory_tools: list,
     tool_approval: Callable,
     scheduler_tools: list,
+    conversation_tools: list,
     for_each_agent: Callable,
     reapply_config: Callable,
     subagent_observer: Optional[SubagentObserver] = None,
 ) -> aio.SkillAgent:
-    """Build a fully-wired SkillAgent: base tools + approval gate + subagent tool + scheduler tools.
+    """Build a fully-wired SkillAgent: base tools + approval gate + subagent tool + live-state tools.
 
     This is everything the assistant needs on every per-conversation agent, in one place so each
-    conversation's agent is wired identically.
+    conversation's agent is wired identically. The live-state tools (scheduler, conversations) are built
+    once by the caller and shared, since they close over app state rather than over this agent.
     """
     # Build tool-packs once here and share: each worker role draws only the packs it names
     # (add_subagent_tool). The supervisor mounts none of them. Empty when plugins are disabled.
@@ -338,6 +343,7 @@ def wire_agent(
         observer=subagent_observer,
     )
     agent.tools.extend(scheduler_tools)
+    agent.tools.extend(conversation_tools)
     return agent
 
 
@@ -351,6 +357,7 @@ def make_agent_builder(
     memory_tools: list,
     tool_approval: Callable,
     scheduler_tools: list,
+    conversation_tools: list,
     store,
     images_path: Path,
     for_each_agent: Callable,
@@ -375,6 +382,7 @@ def make_agent_builder(
             memory_tools=memory_tools,
             tool_approval=tool_approval,
             scheduler_tools=scheduler_tools,
+            conversation_tools=conversation_tools,
             for_each_agent=for_each_agent,
             reapply_config=reapply_config,
             subagent_observer=subagent_observer,

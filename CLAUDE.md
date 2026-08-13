@@ -65,10 +65,10 @@ src/kokua/
   cli.py  plugins.py  images.py  logging_setup.py  config.example.toml  web_static/
   core/         assistant (composition root + serve loop), conversations, turns, interaction,
                 settings_runtime, diagnostics, build, agent_registry, turn_gate, turn_registry,
-                messages, errors
+                messages, errors, tools
   config/       schema, paths, file, store, table, tools
   planning/     runner (the /plan pipeline), reviewers
-  mcp/          servers, auth
+  mcp/          servers, auth, tools
   scheduling/   recurrence (pure math), registry (the JSON file), tools
   channels/     ui (ChannelUI), protocol (RichChannel), cli, web
   frontends/    cli, web           -- registered as plugins, exactly like a third party's
@@ -111,6 +111,16 @@ manual browser check.
 
 Use English punctuation (no em dashes) and inclusive terminology (allowlist/blocklist, primary/replica,
 main branch). Keep the core small; prefer a plugin over a core change.
+
+**Agent tools live in `<subsystem>/tools.py`.** A module that defines an `@aimu.tool` is either a
+subsystem's `tools.py` (`core/`, `config/`, `mcp/`, `scheduling/`) or a tool-pack under `toolpacks/`;
+nothing else contains one. A tool group belongs to the subsystem whose live state it needs, and the
+factory takes that state as arguments (`make_scheduler_tools`, `make_conversation_tools`), so `grep -rl
+'@tool' src/kokua/` should only ever find those files. Note the convention is only half the answer:
+about half the supervisor's tools come from AIMU and are not in this repo at all, which is why
+[docs/explanation/architecture.md](docs/explanation/architecture.md#the-supervisors-tools) carries the
+full inventory and `tests/core/test_build.py` pins it as an exact set. Add a supervisor tool and that
+test fails until the table is updated in the same commit.
 
 Docstrings explain *why*, and must stand on their own: no bare task or phase numbers ("Task 6",
 "Phase B"), which reference a design history that isn't in the repository. Name the behavior or link

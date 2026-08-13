@@ -2,6 +2,50 @@
 
 ## 0.1.0 (unreleased)
 
+- **The assistant can look across your other conversations.** Three read-only tools on the supervisor:
+  `list_conversations` (ids, last-active times, message counts, titles), `read_conversation` (one
+  transcript as plain text), and `search_conversations` (case-insensitive text across every saved
+  conversation, with snippets). So "what did we decide about the deployment last week?" is answerable,
+  and context from a past thread can be carried into a `spawn_subagent` task. They are supervisor-only,
+  like memory and skills: a worker shares no history and has no conversation identity.
+
+  Reads come from the last persisted snapshot, never from a rebuilt agent. Building one to read it would
+  allocate a model client, re-expand every stored image, evict live agents from the LRU cache, and can
+  fail for reasons unrelated to reading -- and it would be *less* correct, since a running turn appends
+  to its message list in place, so a reader in another task can catch a half-written turn. Two markers
+  keep the snapshot honest instead: a conversation with an in-flight turn is flagged as having unsaved
+  messages, and the conversation you are in says so, since its current turn is not persisted yet and the
+  model already has it in context.
+
+  A transcript holds only what was said -- user and assistant messages with role and time, reasoning and
+  tool calls left out, each image as `[image]` -- with one long message cut on its own so a pasted
+  document cannot swallow a read, and the whole thing bounded by a `max_chars` the model can raise. When
+  it does not fit, the *oldest* messages are dropped behind a count, so a read always ends with the most
+  recent message. Search matches the phrase first and falls back to all-of-these-words within one
+  message, saying which it used, because a model tends to pass a natural phrase no message contains
+  verbatim and "nothing matches" would be misleading.
+
+  These are not approval-gated: they only read, and gating them would make a scheduled digest that reads
+  history fail silently (unattended turns auto-deny gated tools). Add any of the three names to
+  `[security] confirm_tools` to change that. Worth knowing: text in one conversation can now influence
+  another, so a prompt injection's blast radius is wider than the conversation it landed in.
+
+- **Agent tools are now findable: `<subsystem>/tools.py`, plus a documented inventory.** The supervisor
+  carries 27 tools from eight sources, and finding them meant reading `build_agent` and knowing which
+  half comes from AIMU. Two of the four Kokua-side groups were already in a `tools.py`; the other two
+  were not, so `make_mcp_tools` moved out of `mcp/servers.py` into a new `mcp/tools.py` (connection
+  machinery stays in `servers.py`), and the new conversation tools landed in `core/tools.py`. Now
+  `grep -rl '@tool' src/kokua/` finds exactly those four files plus `toolpacks/`. `kokua.mcp` still
+  re-exports `make_mcp_tools`, so the package's import surface is unchanged.
+
+  A naming convention only covers half the problem, since twelve of the tools come from AIMU and cannot
+  be grepped here at all, so `docs/explanation/architecture.md` gained a table of all 27 with the factory
+  that builds each and the state it needs. Documentation like that rots, so
+  `test_supervisor_toolset_is_exactly_the_documented_inventory` replaces the old six-name sampling check
+  with an **exact-set** assertion mirroring the table: adding a supervisor tool fails the suite until the
+  table is updated in the same commit, and a tool-pack or built-in group leaking onto the supervisor
+  fails it too, naming the offender.
+
 - **Switching into a running scheduled task shows its sub-agent work, header and all.** A task running
   in its own conversation opened no catch-up record: only `TurnRunner.reactive` did. A background turn's
   frames are muted, so everything that task's spawns reported was dropped on the floor, and since an

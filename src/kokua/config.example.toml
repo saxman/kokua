@@ -31,11 +31,11 @@ memory = true
 load_plugins = true
 
 # The assistant is a lean supervisor: it keeps only its cross-cutting tools (memory, skills, MCP
-# management, config, scheduling, date/time) and hands ALL specialized work (web, files, code, and
-# every domain/MCP tool) to sub-agent workers via spawn_subagent. That is not configurable, so the
-# [subagents.roles.*] tables further down are what give the assistant its actual capability, and at
-# least one is required. A sub-agent's gated-tool calls (the confirm_tools, e.g. execute_python) are
-# routed to the parent for approval and are not run unattended.
+# management, config, scheduling, reading its other conversations, date/time) and hands ALL specialized
+# work (web, files, code, and every domain/MCP tool) to sub-agent workers via spawn_subagent. That is
+# not configurable, so the [subagents.roles.*] tables further down are what give the assistant its
+# actual capability, and at least one is required. A sub-agent's gated-tool calls (the confirm_tools,
+# e.g. execute_python) are routed to the parent for approval and are not run unattended.
 
 # Max per-conversation agents kept live in memory (AgentRegistry LRU cap). Evicted agents rebuild
 # from persisted state on next access, so the cap bounds memory, not correctness.

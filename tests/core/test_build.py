@@ -217,20 +217,95 @@ def test_load_plugin_tools_by_pack_groups_by_name(tmp_path):
     assert _load_plugin_tools_by_pack(_config(tmp_path, load_plugins=False)) == {}
 
 
-async def test_supervisor_carries_only_cross_cutting_tools(tmp_path):
+# The supervisor's COMPLETE toolset, grouped by where each group is built. Half of it comes from AIMU,
+# which is why no naming convention in this repo can answer "where are all the tools?" on its own. This
+# is the executable half of the inventory table in docs/explanation/architecture.md: adding or removing a
+# supervisor tool fails the test below, and the table needs the same edit in that commit.
+SUPERVISOR_TOOLS = {
+    "kokua core/tools.py": {"list_conversations", "read_conversation", "search_conversations"},
+    "kokua config/tools.py": {"read_config", "update_config"},
+    "kokua mcp/tools.py": {"add_mcp_server", "remove_mcp_server"},
+    "kokua scheduling/tools.py": {
+        "schedule_task",
+        "list_scheduled_tasks",
+        "get_scheduled_task",
+        "update_scheduled_task",
+        "cancel_scheduled_task",
+        "enable_scheduled_task",
+        "disable_scheduled_task",
+        "run_scheduled_task",
+    },
+    "aimu make_skill_authoring_tool / make_skill_script_tool": {"author_skill", "add_skill_script"},
+    "aimu builtin.time": {"get_current_date_and_time", "convert_time"},
+    "aimu make_async_subagent_tool": {"spawn_subagent"},
+}
+# Only present with memory enabled, so they are asserted separately below.
+MEMORY_TOOLS = {
+    "aimu make_memory_tools + make_document_tools": {
+        "store_memory",
+        "search_memories",
+        "list_memories",
+        "save_document",
+        "read_document",
+        "list_documents",
+        "search_documents",
+    },
+}
+
+
+def _expected(*groups: dict) -> set[str]:
+    return {name for group in groups for names in group.values() for name in names}
+
+
+def _source_of(name: str) -> str:
+    for source, names in {**SUPERVISOR_TOOLS, **MEMORY_TOOLS}.items():
+        if name in names:
+            return source
+    return "unknown source"
+
+
+async def test_supervisor_toolset_is_exactly_the_documented_inventory(tmp_path):
     """The supervisor's tool context is the point of the design: it holds what mutates shared state
-    (skills, MCP, memory, config), the clock, and the delegate. Built-in groups and tool-packs live on
-    the workers, so a tool leaking onto the supervisor is a regression."""
+    (skills, MCP, memory, config, scheduling), reading its other conversations, the clock, and the
+    delegate. Built-in groups and tool-packs live on the workers.
+
+    Asserted as an exact set rather than a sample, so a tool-pack leaking onto the supervisor fails here,
+    and so does adding a supervisor tool without updating the inventory table this list mirrors."""
     # memory=True so the memory tools are present and we can confirm they STAY on the supervisor.
     assistant = await Assistant.create(_config(tmp_path, memory=True), FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
-    # The delegate + the whole time group: the supervisor answers "when" questions itself, so
-    # delegating a clock read would cost a whole spawn.
-    assert {"spawn_subagent", "get_current_date_and_time", "convert_time"} <= names
-    for kept in ("author_skill", "add_skill_script", "add_mcp_server", "store_memory", "update_config"):
-        assert kept in names, kept
-    for gone in ("web_search", "read_file", "calculate", "echo", "roll_dice", "markdown_to_pdf"):
-        assert gone not in names, gone
+    expected = _expected(SUPERVISOR_TOOLS, MEMORY_TOOLS)
+
+    leaked = sorted(names - expected)
+    missing = sorted(expected - names)
+    assert not leaked, f"undocumented tools on the supervisor: {leaked} (a worker tool leaking here?)"
+    assert not missing, f"documented tools absent: {[(n, _source_of(n)) for n in missing]}"
+
+
+async def test_disabling_memory_drops_exactly_the_memory_tools(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path, memory=False), FakeChannel(), client=MockAsyncModelClient([]))
+    names = {fn.__name__ for fn in assistant._agent.tools}
+    assert names == _expected(SUPERVISOR_TOOLS)
+
+
+CONVERSATION_TOOL_NAMES = SUPERVISOR_TOOLS["kokua core/tools.py"]
+
+
+async def test_create_registers_the_conversation_tools(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    assert CONVERSATION_TOOL_NAMES <= {getattr(fn, "__name__", None) for fn in assistant._agent.tools}
+
+
+def test_conversation_tools_do_not_reach_the_workers(tmp_path):
+    """Reading other conversations is supervisor-only: a worker shares no history and has no conversation
+    identity, so the capability is meaningless to it (and would widen a spawn's blast radius)."""
+    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+
+    config = _config(tmp_path)
+    agent_types = _build_subagent_agent_types(config, [], _load_plugin_tools_by_pack(config))
+    assert agent_types  # roles are configured, so this is not vacuous
+    for role, spec in agent_types.items():
+        assert CONVERSATION_TOOL_NAMES.isdisjoint({fn.__name__ for fn in spec["tools"]}), role
 
 
 async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
@@ -380,6 +455,15 @@ def test_resolve_system_message_always_carries_supervisor_guidance(tmp_path):
     assert SUPERVISOR_GUIDANCE.strip() in resolve_system_message(_config(tmp_path))
 
 
+def test_supervisor_guidance_names_the_conversation_tools():
+    """No worker has these tools, so if the guidance stops naming them the capability is orphaned: the
+    model delegates "what did we decide last week?" to a worker that cannot answer."""
+    from kokua.config.schema import SUPERVISOR_GUIDANCE
+
+    for name in CONVERSATION_TOOL_NAMES:
+        assert name in SUPERVISOR_GUIDANCE, name
+
+
 async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
     import kokua.core.build as build_mod
 
@@ -513,6 +597,7 @@ def test_make_agent_builder_wires_and_restores(tmp_path):
         memory_tools=memory_tools,
         tool_approval=lambda name, args: True,
         scheduler_tools=[],
+        conversation_tools=[],
         store=store,
         images_path=config.images_path,
         for_each_agent=lambda apply: None,

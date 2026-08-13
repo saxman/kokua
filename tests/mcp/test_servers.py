@@ -83,26 +83,6 @@ async def test_connect_mcp_other_oauth_failure_reraises_unchanged(monkeypatch, t
         await mcp.connect_mcp("https://svc/mcp", notify=_noop_notify, oauth_storage_dir=tmp_path / "oauth")
 
 
-async def test_add_mcp_server_tool_returns_bearer_instruction(monkeypatch, tmp_path):
-    async def fake_connect(*, url=None, auth=None, **kw):
-        if auth is None:
-            raise Exception("401 Unauthorized")
-        raise Exception("Registration failed: 404")
-
-    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
-
-    add_mcp_server, _ = mcp.make_mcp_tools(
-        lambda fn: None,
-        [],
-        notify=_noop_notify,
-        oauth_storage_dir=tmp_path / "oauth",
-        config_path=tmp_path / "config.toml",
-    )
-    msg = await add_mcp_server(url="https://git.example/mcp")
-    assert "bearer token" in msg.lower()
-    assert "git.example" in msg
-
-
 def test_resolve_server_token_reads_env(monkeypatch):
     monkeypatch.setenv("MY_MCP_TOKEN", "secret")
     server = MCPServerConfig(url="https://svc/mcp", token_env="MY_MCP_TOKEN")

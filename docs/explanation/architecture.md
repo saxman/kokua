@@ -26,6 +26,7 @@ src/kokua/
   core/          the transport-agnostic runtime
     assistant.py         composition root + serve loop; delegates everything below
     conversations.py     ConversationBook: store + agent cache + active pointer
+    tools.py             agent tools over core state (currently: reading other conversations)
     turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
     interaction.py       HumanGate: tool approval and plan review as lock-guarded single slots
     settings_runtime.py  SettingsApplier: read, apply live, persist, switch model
@@ -48,7 +49,7 @@ src/kokua/
     tools.py       the assistant's own read_config / update_config
 
   planning/      runner.py (the /plan pipeline), reviewers.py (context-free reviewer agents)
-  mcp/           servers.py (connect, attach, reconnect, runtime add/remove), auth.py (ChatOAuth)
+  mcp/           servers.py (connect, attach, reconnect), tools.py (runtime add/remove), auth.py (ChatOAuth)
   scheduling/    recurrence.py (pure schedule math), registry.py (the JSON file), tools.py (agent tools)
   channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
   frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
@@ -110,9 +111,10 @@ approval gate is forwarded to the parent's existing prompt, not rendered into th
 
 There is one agent shape, not two. Every per-conversation agent is a **lean supervisor**: it mounts
 only the tools that mutate shared, per-conversation state (skills, MCP connections, memory, config,
-scheduling), the `time` group, and the `spawn_subagent` delegate. It carries no built-in tool group, no
-tool-pack tool, and no MCP callable. Those live on the **workers**, scoped by the roles in
-`[subagents.roles.*]`, and `build.build_agent` is a straight line with no mode to branch on.
+scheduling), the read-only cross-conversation tools, the `time` group, and the `spawn_subagent`
+delegate. It carries no built-in tool group, no tool-pack tool, and no MCP callable. Those live on the
+**workers**, scoped by the roles in `[subagents.roles.*]`, and `build.build_agent` is a straight line
+with no mode to branch on.
 
 Three consequences follow, and they are the things that surprise people:
 
@@ -130,6 +132,61 @@ Three consequences follow, and they are the things that surprise people:
 At least one role is therefore required, and `Assistant.create` refuses a config with none: a
 supervisor with no workers cannot browse, read a file, or compute, so starting one produces something
 that looks alive and cannot work.
+
+### The supervisor's tools
+
+All 27 of them, and where each group is built. `build.build_agent` sets the first six groups; `wire_agent`
+appends the last three. Roughly half come from AIMU and so are not greppable in this repository, which is
+why this table exists rather than a naming convention alone:
+
+| Tools | Built by | Needs |
+|---|---|---|
+| `author_skill`, `add_skill_script` | AIMU `make_skill_authoring_tool` / `make_skill_script_tool` | the `SkillManager` and the agent |
+| `store_memory`, `search_memories`, `list_memories`, `save_document`, `read_document`, `list_documents`, `search_documents` | AIMU `make_memory_tools` + `make_document_tools` | the two stores; absent when `memory = false` |
+| `get_current_date_and_time`, `convert_time` | AIMU `builtin.time` | nothing |
+| `add_mcp_server`, `remove_mcp_server` | `mcp/tools.py` | the live connection list, the config path |
+| `read_config`, `update_config` | `config/tools.py` | the config path, the hot-apply callback |
+| `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task` | `scheduling/tools.py` | the `Scheduler`, the task registry, the proactive-turn method |
+| `list_conversations`, `read_conversation`, `search_conversations` | `core/tools.py` | the `ConversationBook`, `Assistant.turn_running` |
+| `spawn_subagent` | AIMU `make_async_subagent_tool` | the role menu built from `[subagents.roles.*]` |
+
+Two conventions keep this honest. Kokua-side agent tools live in a subsystem's `tools.py` and nowhere
+else, so `grep -rl '@tool' src/kokua/` finds exactly those four files plus `toolpacks/`. And
+`test_supervisor_toolset_is_exactly_the_documented_inventory` in `tests/core/test_build.py` asserts the
+agent's tool names as an **exact set** mirroring this table, so adding a supervisor tool fails the suite
+until the table is updated, and a worker tool leaking onto the supervisor fails it too. Documentation
+alone would have rotted; the test is what makes the table trustworthy.
+
+The pattern for a new group: a `make_*_tools(...)` factory closing over the live state it needs, called
+in `Assistant.create` (where that state exists) and threaded through `make_agent_builder` into
+`wire_agent`. That is also what makes a group supervisor-only for free, since a worker's toolset is
+composed independently by `_build_subagent_agent_types` from groups, MCP servers, and tool-packs. A tool
+that needs nothing but `AssistantConfig` should be a tool-pack instead, and then a role has to name it.
+
+### Reading across conversations
+
+`core/tools.py` gives the supervisor `list_conversations`, `read_conversation`, and
+`search_conversations`. Two decisions in it are worth knowing before changing them.
+
+Supervisor-only is deliberate, not incidental: a worker shares no history and has no conversation
+identity, so "the user's other conversations" means nothing to it, and granting the capability would
+widen a spawn's blast radius for no gain. When a worker needs history, the supervisor reads first and
+puts the text into the spawn's task.
+
+Every read goes through the store, never `ConversationBook.agent_for`. Building an agent to read it
+would allocate a model client, re-expand every stored image, mutate the LRU registry (so reading twenty
+conversations would evict the live agent of one with a running turn), and can raise `ModelClientError`
+for reasons unrelated to reading. It is also *less* correct: a running turn appends to
+`agent.model_client.messages` in place, so a reader in another task can observe a half-written turn,
+while the store holds a snapshot written once at the end of a turn. The two markers close the gap the
+snapshot opens -- `turn_running` flags unsaved messages, and the active conversation is flagged as the
+one whose current turn the model should read out of its own context. A test constructs a book with no
+registry bound, so any accidental `agent_for` path fails rather than passing quietly.
+
+`ConversationBook.sessions()` is the single place the store's key-then-get walk and the `updated_at`
+ordering live; `list()` projects it and `most_recent_or_new` takes its head. It costs one store read per
+conversation, which is already what a sidebar push costs. A bulk read belongs in AIMU's store, and this
+is the seam it would land behind.
 
 ## Plugins
 
@@ -253,11 +310,20 @@ owns the record's lifetime (`ChannelUI.begin_catch_up` / `end_catch_up`), since 
 starts; it ends the record inside `_persist`, next to the write that supersedes it, so no switch-in can
 land in a window where both the store and the record would render the same turn.
 
+An unattended turn records the same way, and needs it most: a scheduled task running in its own
+conversation is never the conversation being viewed, and its spawns' cards are the only display frames it
+produces at all, so without a record switching into a running task showed an empty transcript and the
+spawn's later `append` frames then arrived with no card to update. It opens the record *inside* its gate
+hold rather than beside the turn contextvars, because a firing can queue behind a turn already running on
+that conversation and would otherwise replace a record still standing in for live output.
+
 Planning's reviewer verdicts and a turn's spawned sub-agents share one `subagent` frame type and one
 persisted map (`metadata["subagent"]`); `task` on the create event is what tells the two apart.
 `conversation_to_frames` replays that map on reload, interleaved right after its user bubble; a
 verbose-traced turn suppresses the reviewer verdict cards (their content is already in the raw trace)
-but still replays its own spawn cards, since a sub-agent it spawned is not part of that trace. The
+but still replays its own spawn cards, since a sub-agent it spawned is not part of that trace -- kept by
+the create event's id, not by event shape, since a spawn whose text streamed closes with a status-only
+event indistinguishable from a reviewer's verdict. The
 page's `renderSubagent` builds or updates one foldable card per id, filling its body as `append` frames
 arrive; nested reasoning honors `show_thinking` and nested tool calls honor `show_tools`, the same flags
 the top-level turn uses, while the card itself and its generated text always show.

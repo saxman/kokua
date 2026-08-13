@@ -41,6 +41,7 @@ from kokua.core.conversations import ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
 from kokua.core.subagents import SubagentReporter
+from kokua.core.tools import make_conversation_tools
 from kokua.mcp.servers import ServerConnection, reconnect_mcp_servers
 from kokua.scheduling import make_scheduler_tools
 from kokua.core.settings_runtime import SettingsApplier
@@ -186,6 +187,12 @@ class Assistant:
         assistant._settings.layered_factory(raw_factory)
         scheduler_tools, arm_tasks = make_scheduler_tools(scheduler, config.scheduled_tasks_path, assistant._proactive)
 
+        # Read-only visibility across conversations, bound to the live book. Built here rather than in
+        # build.py because the book is app state, not a config value, so no tool-pack could reach it.
+        # Safe this early: these tools read the store through the book and never touch the agent
+        # registry, which is bound below.
+        conversation_tools = make_conversation_tools(assistant._book, assistant.turn_running)
+
         # Fan a global tool mutation (MCP add/remove) out across every live conversation's agent. Reads
         # the registry lazily: it is set just below and only ever called at runtime (add/remove) or by the
         # boot reconnect, by which point the registry exists and is populated.
@@ -203,6 +210,7 @@ class Assistant:
                 memory_tools=memory_tools,
                 tool_approval=assistant._approve,
                 scheduler_tools=scheduler_tools,
+                conversation_tools=conversation_tools,
                 store=store,
                 images_path=config.images_path,
                 for_each_agent=for_each_agent,
