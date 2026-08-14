@@ -83,13 +83,22 @@ def test_verdict_defaults():
 
 
 def test_reviewer_toolset_boundary():
-    """The reviewer gets verification tools (date, web, compute) but no access to user state."""
+    """The reviewer gets verification tools (date, web, arithmetic) but no access to user state."""
     names = {t.__name__ for t in review.REVIEWER_TOOLS}
-    # Present: the motivating date tool, web lookup, and computation (incl. execute_python for math).
-    assert {"get_current_date_and_time", "web_search", "get_webpage", "calculate", "execute_python"} <= names
+    # Present: the motivating date tool, web lookup, and arithmetic.
+    assert {"get_current_date_and_time", "web_search", "get_webpage", "calculate"} <= names
     # Absent: the user's memory/documents, skill authoring, and MCP mutation.
     assert not (names & {"store_memory", "search_memories", "save_document", "search_documents"})
     assert not any(n in names for n in ("author_skill", "add_skill_script", "add_mcp_server", "remove_mcp_server"))
+
+
+def test_reviewer_toolset_holds_nothing_the_approval_gate_would_have_to_cover():
+    """A reviewer cannot be approval-gated (nobody to ask mid-review), so its toolset must contain no
+    tool that needs a gate. Pinned against the shipped `confirm_tools` default rather than a literal
+    list, so adding a name there fails here until the reviewer's toolset is re-checked."""
+    names = {t.__name__ for t in review.REVIEWER_TOOLS}
+    assert not (names & set(AssistantConfig().confirm_tools))
+    assert "execute_python" not in names  # the specific escape this guards: arbitrary code, unsandboxed
 
 
 def test_reviewer_prompts_warn_about_stale_knowledge():

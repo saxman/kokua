@@ -3,7 +3,7 @@
 Each reviewer runs as a *fresh* agent with only a reviewer system prompt, so it sees none of the main
 agent's conversation -- an independent critic, not the author defending its own work. It is a *tool-using*
 critic: it runs a bounded tool-calling loop over a curated verification toolset (`REVIEWER_TOOLS`: web
-lookup, computation, and the current date/time) so it can check recency and factual/numeric claims
+lookup, arithmetic, and the current date/time) so it can check recency and factual/numeric claims
 instead of rejecting anything it cannot verify from the request alone. Its prompts warn that its own
 knowledge may be stale, and the result reviewer is additionally shown the agent's evidence (the tool
 results it used) so it judges against what the agent actually retrieved. The typed verdict is then
@@ -22,16 +22,19 @@ from typing import Callable, Optional
 from aimu import aio
 from aimu.tools import builtin
 
-# The reviewer's verification toolset: an independent critic that can look things up and compute, but has
-# no access to user state. web = get_weather/get_webpage/web_search/wikipedia; compute = calculate/
-# execute_python (so the reviewer can run calculations to check numeric claims); plus the current date/
-# time (the original motivation: reviewers were rejecting correct recency claims for date-unawareness).
-# Deliberately EXCLUDES memory/document stores, skill authoring, and MCP add/remove.
+# The reviewer's verification toolset: an independent critic that can look things up and check
+# arithmetic, but has no access to user state. web = get_weather/get_webpage/web_search/wikipedia;
+# `calculate` for numeric claims; plus the current date/time (the original motivation: reviewers were
+# rejecting correct recency claims for date-unawareness). Deliberately EXCLUDES the memory/document
+# stores, skill authoring, and MCP add/remove.
 #
-# NOTE (known limitation, tracked in README): execute_python runs arbitrary code with full machine
-# access and, unlike the main agent, the reviewer has no approval gate -- an autonomous critic must not
-# block on the user mid-review. This is an intentional short-term tradeoff for calculation support.
-REVIEWER_TOOLS: list[Callable] = [*builtin.web, *builtin.compute, builtin.get_current_date_and_time]
+# `calculate` rather than the whole `builtin.compute` group, because that group's other member is
+# `execute_python`, which runs arbitrary code with the user's privileges and no sandbox. A reviewer
+# cannot be approval-gated -- an autonomous critic has nobody to ask mid-review, and a gate it could
+# not satisfy would just deadlock it -- so mounting `execute_python` here would hand it the one
+# capability `[security] confirm_tools` exists to hold back, with the gate structurally unable to
+# apply. Arithmetic is the only thing a verdict actually needs computed, and `calculate` covers it.
+REVIEWER_TOOLS: list[Callable] = [*builtin.web, builtin.calculate, builtin.get_current_date_and_time]
 
 # Appended to both reviewer prompts. Reviewers were rejecting correct answers as "hallucinated" because
 # they trusted their own (stale) training knowledge over the agent's fresher, tool-retrieved data. Tell
@@ -91,7 +94,8 @@ class Verdict:
 def _reviewer_agent(model: Optional[str], system: str, tools: Optional[list[Callable]] = None) -> aio.Agent:
     """A fresh, context-free reviewer agent with the verification toolset (an independent, tool-using
     critic). ``tools`` overrides ``REVIEWER_TOOLS`` (tests pass their own). No ``tool_approval`` gate:
-    the toolset is curated and the reviewer must run unattended. Factored out so tests can monkeypatch it."""
+    the reviewer runs unattended, so the toolset is curated to hold nothing that would need one -- see
+    ``REVIEWER_TOOLS``. Factored out so tests can monkeypatch it."""
     return aio.Agent(
         aio.client(model, system=system),
         tools=REVIEWER_TOOLS if tools is None else tools,
