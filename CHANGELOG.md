@@ -2,537 +2,378 @@
 
 ## 0.1.0 (unreleased)
 
-- **The assistant can look across your other conversations.** Three read-only tools on the supervisor:
+First release. Kokua starts from AIMU's `examples/personal-assistant/` and restructures it into an
+installable, modular application: a small transport-agnostic core with capability pushed into plugins.
+Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
+The pre-release development history is in the git log.
+
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer. Apache-2.0.
+
+### Package and entry points
+
+- `src`-layout `kokua` package with two console scripts: `kokua` runs the selected front end (default
+  `cli`), `kokua-web` is a convenience for `kokua --frontend web`. Both route through `kokua.cli`, so
+  both run the AIMU preflight described under [Diagnostics](#diagnostics-and-error-reporting).
+- **Plugin system** (`kokua.plugins`). Front ends and tool-packs are discovered through the
+  `kokua.frontends` and `kokua.tools` entry-point groups. The built-in `cli` / `web` front ends and the
+  five built-in tool-packs register exactly as a third party's package would, so if the built-in path
+  and the plugin path ever diverge, the plugin path is the broken one. Inspect with `--list-frontends`
+  and `--list-tool-packs`; disable discovery with `--no-plugins`.
+- The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
+  `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
+
+### Conversations and turns
+
+- **Per-conversation agents.** Each conversation owns its AIMU `SkillAgent` and model client, built
+  lazily and held in a bounded LRU registry (`agent_cache_cap`, default 8). Memory and documents stay
+  shared across conversations.
+- **Concurrent conversations.** A turn keeps running when you switch away: it streams only into the
+  conversation you are viewing, persists to its own conversation, and posts a completion notification
+  instead of streaming. Switching does not cancel it; only deleting a conversation does, and only its
+  own turn. The invariants that make this safe are documented at the top of `core/turns.py`.
+- **Switching into a running turn shows the turn.** A turn's messages are not in the store until it
+  ends, so its output is recorded as it is produced -- the user bubble, reasoning, tool calls with their
+  results, sub-agent cards, images, and the answer so far -- and replayed on switch-in, after which the
+  rest streams into the bubble replay left open. The record is dropped once the turn reaches the store,
+  so nothing is shown twice. Unattended scheduled turns record the same way, so switching into a running
+  task shows the sub-agent work it has done.
+- **`/stop`** cancels an in-flight reply and keeps the partial turn so the conversation continues (the
+  web UI has a Stop button for the same). Built on AIMU's `aio.RunHandle`; reactive turns run as
+  background tasks, so the channel keeps reading mid-turn -- which is also what lets a web approval
+  reply reach the waiting tool call.
+
+### Front ends
+
+- **`cli`**: the terminal, via AIMU's `CLIChannel`. `/attach <path>` stages a local image onto the next
+  message.
+- **`web`** (behind the `web` extra): a Starlette + uvicorn WebSocket server with a streaming browser
+  UI, bound to `127.0.0.1:8000` by default.
+  - **Conversations** are listed in a sidebar, auto-titled from the first message, with new / select /
+    delete (deleting the active one switches to the most recently updated remaining conversation). The
+    sidebar collapses to an icon rail and drag-resizes between 180 and 480px; the divider is
+    keyboard-operable. Width, collapsed state, and theme are per-browser preferences applied before
+    first paint, so there is no flash on load.
+  - **Replies render as GitHub-flavored markdown** on turn completion, via vendored `marked` +
+    `DOMPurify` (bundled, served locally, no CDN). The rendered HTML is sanitized, so model and tool
+    output cannot inject scripts or markup, and links open with `rel="noopener"`. LaTeX math is typeset
+    with vendored KaTeX after sanitization, with `trust:false` and a `maxExpand` cap; a malformed
+    expression is left as source text rather than breaking the bubble.
+  - **Auxiliary blocks fold.** Thinking, tool calls, verbose-trace phases, sub-agent cards, drafted
+    plans, and agent-loop `↻ continuation` markers render collapsed behind a header that keeps the
+    identifying label, so the transcript stays scannable. Direct messages and the interactive approval
+    and plan-review prompts are unaffected.
+  - **A tool card shows what the call returned**, not just what it was asked to do. The result renders
+    in a nested foldable labeled with its size (`↳ output (2,148 chars)`), filled on first open and
+    clamped at 4000 characters with a `show all` control. Always plain text, never markdown, because a
+    tool result is untrusted input. An error, an argument-binding failure, and a denied approval are
+    results too and arrive the same way, so there is no separate failure rendering. All four surfaces
+    that render a tool call carry it -- a live card, a background turn's catch-up replay, a sub-agent
+    card's nested calls, and a reloaded transcript -- and replay rejoins a stored call to its result by
+    `tool_call_id`, since concurrent dispatch appends results in completion order.
+  - **Sub-agent work is visible.** A `spawn_subagent` call renders as
+    `🔧 spawn_subagent(<role>) — <status>` over an argument line, then the nested thinking, tool calls,
+    and answer the child produced, each individually foldable and built by the same builders and CSS as
+    their top-level counterparts. The child's text streams in live and re-renders as markdown when the
+    spawn ends. The parent's own duplicate `spawn_subagent` tool block is suppressed. Recording and
+    display are independent, so a background turn's spawns are recorded even though its frames are
+    muted, and switching in later shows the work.
+  - **Bubbles carry a localized datetime caption** (full precision on hover), sitting on the
+    always-visible header line of a foldable so it shows collapsed or expanded. Ephemeral chrome
+    (notices, approval prompts, banners) is not stamped. Messages persisted before timestamps existed
+    render without a caption.
+  - **Agent-loop continuations are distinguished from user input.** The loop injects its own turns as
+    `user`-role messages; these render as a muted `↻ continuation` marker showing the injected prompt
+    rather than as user bubbles. Proactive turns keep their amber styling.
+  - **A settings panel** (gear button) changes the model, the generation kwargs (`temperature`,
+    `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), the display preferences,
+    the planning toggles, and the theme at runtime. Server-backed changes take effect on the next turn
+    and persist to `config.toml`; switching the model rebuilds the client and carries the conversation
+    over. Provider support varies: thinking models ignore `top_p` / `top_k` and force `temperature`, and
+    Anthropic does not support the penalty parameters.
+  - Reloading the page replays the prior conversation, including reasoning and tool calls when
+    `show_thinking` / `show_tools` are on.
+
+### Agents and tools
+
+- **One agent shape.** Every agent is a lean supervisor: it mounts the cross-cutting tools (skills, MCP
+  management, memory, config, scheduling, conversation reads), the `time` group, and `spawn_subagent`,
+  and nothing else. Specialized work is delegated to workers whose roles carry the scoped toolsets,
+  which keeps the advertised per-request tool set small. Two consequences worth knowing:
+  `[tools].groups` is a **ceiling on what workers may draw from**, not the assistant's own toolset, and
+  an installed tool-pack or configured MCP server **reaches nothing until some role names it**.
+- **Sub-agent roles come from `config.toml` only.** `researcher`, `coder`, and `generalist` ship as
+  live tables in `config.example.toml` -- which is what `kokua config init` writes -- and are edited,
+  deleted, or added to like any other setting. Because roles exist nowhere else and a supervisor with
+  no workers cannot browse, read a file, or compute, **Kokua refuses to start without a config file, or
+  with one that defines no roles**, naming `kokua config init` in the error rather than running
+  something that looks alive and cannot work.
+- **`spawn_subagent(agent_type, task)`** is typed. Each role clones the active model with its own tool
+  subset: built-in `groups` intersected with the enabled `[tools].groups`, plus `tool_packs` and
+  `mcp_servers` (by a server's optional `name` or its URL), with the parent-only memory / skills / MCP
+  management withheld. Independent spawns in one turn run concurrently (`[subagents] concurrent`,
+  default on). A worker's gated-tool call is routed to the parent for approval and is never run
+  unattended.
+- **Every agent can tell the time.** AIMU's clock and timezone converter form a `time` group, in the
+  default set (`web,fs,compute,time,misc`). It is mounted on the supervisor whole and added to *every*
+  sub-agent role on top of that role's own `groups`, since a worker that cannot resolve "by tomorrow
+  morning" is broken whatever its domain. That addition is gated on `time` being in `[tools].groups`,
+  so dropping it there still removes it everywhere. Note that a model with a calculator is not the same
+  as one that uses it: the supervisor deliberately has no `calculate` / `execute_python` of its own and
+  must delegate arithmetic to a worker.
+- **The assistant can look across your other conversations.** Three read-only supervisor tools:
   `list_conversations` (ids, last-active times, message counts, titles), `read_conversation` (one
   transcript as plain text), and `search_conversations` (case-insensitive text across every saved
   conversation, with snippets). So "what did we decide about the deployment last week?" is answerable,
   and context from a past thread can be carried into a `spawn_subagent` task. They are supervisor-only,
   like memory and skills: a worker shares no history and has no conversation identity.
 
-  Reads come from the last persisted snapshot, never from a rebuilt agent. Building one to read it would
-  allocate a model client, re-expand every stored image, evict live agents from the LRU cache, and can
-  fail for reasons unrelated to reading -- and it would be *less* correct, since a running turn appends
-  to its message list in place, so a reader in another task can catch a half-written turn. Two markers
+  Reads come from the last persisted snapshot, never a rebuilt agent -- building one to read it would
+  allocate a model client, re-expand every stored image, and evict live agents from the LRU cache, and
+  it would be *less* correct, since a running turn appends to its message list in place. Two markers
   keep the snapshot honest instead: a conversation with an in-flight turn is flagged as having unsaved
-  messages, and the conversation you are in says so, since its current turn is not persisted yet and the
-  model already has it in context.
+  messages, and the conversation you are in says so, since its current turn is not persisted yet and
+  the model already has it in context. A transcript holds only what was said, with reasoning and tool
+  calls left out and each image as `[image]`, one long message cut on its own so a pasted document
+  cannot swallow a read, and the whole bounded by a `max_chars` the model can raise; when it does not
+  fit, the *oldest* messages are dropped behind a count, so a read always ends with the most recent
+  message. Search matches the phrase first and falls back to all-of-these-words within one message,
+  saying which it used.
+- **Agent tools are findable.** A module defining an `@aimu.tool` is either a subsystem's `tools.py`
+  (`core/`, `config/`, `mcp/`, `scheduling/`) or a tool-pack under `toolpacks/`, so
+  `grep -rl '@tool' src/kokua/` finds exactly those. Because about half the supervisor's 27 tools come
+  from AIMU and cannot be grepped here at all,
+  [docs/explanation/architecture.md](docs/explanation/architecture.md#the-supervisors-tools) carries the
+  full inventory with the factory that builds each, and `tests/core/test_build.py` pins it as an
+  **exact set**: adding a supervisor tool fails the suite until the table is updated in the same commit,
+  and a tool-pack leaking onto the supervisor fails it too, naming the offender.
+- **Skills**: AIMU's skill authoring plus runnable skill scripts.
+- **Memory**, on by default: a `SemanticMemoryStore` for facts and a `DocumentStore` for documents,
+  shared across conversations. Concurrent-turn safety lives inside AIMU's stores (a re-entrant per-store
+  lock) rather than a Kokua-side wrapper.
 
-  A transcript holds only what was said -- user and assistant messages with role and time, reasoning and
-  tool calls left out, each image as `[image]` -- with one long message cut on its own so a pasted
-  document cannot swallow a read, and the whole thing bounded by a `max_chars` the model can raise. When
-  it does not fit, the *oldest* messages are dropped behind a count, so a read always ends with the most
-  recent message. Search matches the phrase first and falls back to all-of-these-words within one
-  message, saying which it used, because a model tends to pass a natural phrase no message contains
-  verbatim and "nothing matches" would be misleading.
+### Built-in tool-packs
 
-  These are not approval-gated: they only read, and gating them would make a scheduled digest that reads
-  history fail silently (unattended turns auto-deny gated tools). Add any of the three names to
-  `[security] confirm_tools` to change that. Worth knowing: text in one conversation can now influence
-  another, so a prompt injection's blast radius is wider than the conversation it landed in.
+- **`pdf`**: `markdown_to_pdf` renders Markdown to a PDF (`fpdf2` + `markdown`, both pure-Python, no
+  system libraries) in `data/downloads/`. The web front end serves that folder at
+  `GET /download/<name>`, so the assistant can hand back a link; the tool also returns the absolute
+  path for the CLI.
+- **`image`**: `generate_image`, offered only when `AIMU_IMAGE_MODEL` is set (e.g. `gemini:nano-banana`
+  or an `hf:<repo>` diffusers model).
+- **`email`**: `send_email` over SMTP (stdlib `smtplib`). The recipient is locked to the configured
+  `[email] to` address, so the tool takes no recipient and can only ever email you. The body is written
+  in Markdown and delivered as HTML with a plain-text fallback; attachments are limited to files already
+  in `data/downloads/` or `data/images/` (traversal-safe). Offered only when `[email] host` and `to` are
+  set and `KOKUA_EMAIL_PASSWORD` is present -- the password is never read from the config file. Sending
+  is ungated, so a scheduled digest can send.
+- **`aimu_agents`**: mounts AIMU's prebuilt `CodeReviewAgent`, `ResearchReportAgent`, and
+  `ContentCreationAgent` as the tools `code_review`, `research_report`, and `create_content`. It exists
+  mainly as the worked example of wiring an AIMU-built agent into Kokua: every `Runner` exposes
+  `.run(task) -> str`, so a tool-pack is the entire bridge and the core gains no new surface. Each call
+  builds a fresh agent, reading `config.model` at call time so a runtime model switch reaches it. The
+  caveats are documented in the module: the prebuilts are synchronous, so a nested run gets no sub-agent
+  card, no `/stop`, and no approval gate on its workers.
+- **`example`**: the template for writing your own.
 
-- **Agent tools are now findable: `<subsystem>/tools.py`, plus a documented inventory.** The supervisor
-  carries 27 tools from eight sources, and finding them meant reading `build_agent` and knowing which
-  half comes from AIMU. Two of the four Kokua-side groups were already in a `tools.py`; the other two
-  were not, so `make_mcp_tools` moved out of `mcp/servers.py` into a new `mcp/tools.py` (connection
-  machinery stays in `servers.py`), and the new conversation tools landed in `core/tools.py`. Now
-  `grep -rl '@tool' src/kokua/` finds exactly those four files plus `toolpacks/`. `kokua.mcp` still
-  re-exports `make_mcp_tools`, so the package's import surface is unchanged.
+Nothing a pack contributes is mounted until a role asks for it with `tool_packs = [...]`.
 
-  A naming convention only covers half the problem, since twelve of the tools come from AIMU and cannot
-  be grepped here at all, so `docs/explanation/architecture.md` gained a table of all 27 with the factory
-  that builds each and the state it needs. Documentation like that rots, so
-  `test_supervisor_toolset_is_exactly_the_documented_inventory` replaces the old six-name sampling check
-  with an **exact-set** assertion mirroring the table: adding a supervisor tool fails the suite until the
-  table is updated in the same commit, and a tool-pack or built-in group leaking onto the supervisor
-  fails it too, naming the offender.
+### Proactive work: scheduled tasks
 
-- **Switching into a running scheduled task shows its sub-agent work, header and all.** A task running
-  in its own conversation opened no catch-up record: only `TurnRunner.reactive` did. A background turn's
-  frames are muted, so everything that task's spawns reported was dropped on the floor, and since an
-  unattended turn's cards are the only display frames it produces, switching in mid-task showed an empty
-  transcript. Worse, the switch made that conversation foreground, so the spawn's *later* `append`
-  frames arrived at a page whose card references the `history` frame had just cleared: the page built a
-  fresh card from an `append`, which carries neither role nor status, and rendered it with an empty
-  header. `_run_unattended` now records like every other turn (invariant 3), opening the record inside
-  its gate hold so a firing queued behind another turn on the same conversation cannot replace a record
-  still in use.
-
-  Two hardening fixes ride along. `renderSubagent` labels a card it builds from an `append` alone, so a
-  lost create event reads as a sub-agent whose identity is unknown rather than as a broken block. And a
-  verbose planned turn's replay now keeps a spawn's whole lineage by the create event's id: a spawn whose
-  text streamed closes with a status-only event, which the previous shape-based filter mistook for a
-  reviewer verdict and dropped, stranding the replayed card at "working..." with its answer never
-  rendered as markdown.
-
-- **A tool card shows what the call returned, not just what it was asked to do.** The result was
-  reaching the channel all along -- AIMU yields `TOOL_CALLING` only once a call has been dispatched, so
-  the chunk carries the result -- and was being dropped. Worse, it wasn't even reconstructible on
-  reload: a stored `role: "tool"` message was skipped entirely by replay, except for the `/images/`
-  reference a generated image carries.
-
-  The result now rides the `tool` frame as `response` and renders in a nested foldable below the
-  arguments, labeled with its size (`↳ output (2,148 chars)`) so a reader knows what opening it costs.
-  The body fills on first open and clamps at 4000 characters with a `show all` button for the rest, as
-  plain text and never markdown, since a tool result is untrusted input. An error, an argument-binding
-  failure, and a denied approval are results too and arrive on the same key, so there is no separate
-  failure rendering to learn.
-
-  All four surfaces that render a tool call carry it: a live card, a background turn's catch-up replay,
-  a sub-agent card's nested calls, and a reloaded transcript. Replay rejoins a stored call to its result
-  by `tool_call_id` rather than by position, since concurrent dispatch appends results in completion
-  order. A call with no matching result -- a conversation stored before this shipped, a turn cut short
-  mid-dispatch -- renders the card exactly as it always did. `show_tools` still gates the whole card,
-  output included, and the tool-approval prompt is unchanged: it fires before dispatch, so there is no
-  result yet.
-
-  One cost worth knowing: output travels whole and only the DOM clamps, so a `history` frame grows by
-  every tool result in the conversation and is re-sent on every conversation *switch*, not only on
-  reload. A conversation with dozens of large results (PDF extractions, email fetches, big MCP
-  responses) makes that frame correspondingly large.
-
-  Requires the matching AIMU change (`response` on its base web `tool` frame), which is on AIMU's
-  `main`.
-
-- **Breaking: one agent shape, and roles are the only switch.** The `subagents` and `lean_supervisor`
-  flags are gone, along with the `--subagents` / `--no-subagents` CLI flags and flat mode entirely.
-  Every agent is now a lean supervisor: it mounts the cross-cutting tools (skills, MCP management,
-  memory, config, scheduling), the `time` group, and `spawn_subagent`, and nothing else. Two flags that
-  could contradict each other and each other's roles are replaced by one fact -- whether
-  `[subagents.roles.*]` defines anything.
-
-  Two consequences to know about. **`[tools].groups` is a ceiling on what workers may draw from, not
-  the assistant's own toolset**, and **an installed tool-pack or a configured MCP server reaches
-  nothing until some role names it** (`tool_packs = [...]` / `mcp_servers = [...]`). If you ran with
-  `lean_supervisor = false`, add roles covering the tools you relied on.
-
-- **Breaking: sub-agent roles come from `config.toml` only, and `config.toml` is now required.**
-  `researcher`, `coder`, and `generalist` were hardcoded in `config/schema.py` and merged under
-  whatever `[subagents.roles.*]` defined, so the roles you actually ran with were invisible in the file
-  that is supposed to be the single source of settings. That constant is gone; the three roles ship as
-  live tables in `config.example.toml`, which is what `kokua config init` writes, and you edit, delete,
-  or add to them like any other setting.
-
-  Because roles exist nowhere else and a supervisor with no workers cannot browse, read a file, or
-  compute, **Kokua now refuses to start without a config file, or with one that defines no roles**,
-  naming `kokua config init` in the error rather than running something that looks alive and cannot
-  work. **On upgrade, an existing `config.toml` with no `[subagents.roles.*]` section will fail to
-  start** -- copy the roles from the updated `config.example.toml`.
-
-- **A scheduled task can be read in full and edited in place.** Asking to change a task's wording
-  produced a rewritten-from-scratch prompt, because nothing could show the model the original: the only
-  view was `list_scheduled_tasks`, which cut every prompt to 60 characters with no mark to say it had
-  cut anything, and the only way to "edit" was `cancel_scheduled_task` plus a fresh `schedule_task`.
-  Two new tools close that. **`get_scheduled_task`** shows one task whole -- complete prompt, schedule,
-  target, next fire, dedicated conversation. **`update_scheduled_task`** edits any subset of a task's
-  fields in place, keeping its id, `created_at`, and dedicated conversation, and re-deriving the
-  schedule fields you omit from the record, so changing a weekly task's time keeps its day. It re-arms
-  only when the schedule actually changes, so editing a prompt never restarts an interval countdown, and
-  it rejects an invalid schedule, a past one-shot, or a name another task holds without writing anything.
-  The listing now marks a truncated prompt with `...` and points at `get_scheduled_task`.
-
-- **Fixed: switching conversations mid-reply streamed the rest of that reply into the conversation you
-  switched to.** Backgrounding a turn is supposed to mute it, but the mute decision was taken once, when
-  the reply's send began, and the streaming loop then ran to completion under that stale answer. Switching
-  away mid-reply replaced the page with the new conversation's history and every later token, thinking
-  block, tool call, plan bubble, and sub-agent card of the old turn was appended there. The decision is
-  now made per frame, as each is sent, so a switch takes effect on the next token: the abandoned turn
-  finishes silently and announces itself with the usual "Reply ready in ..." notification. The page had a
-  matching bug of its own -- replaying a conversation removed the streaming bubble from the transcript but
-  kept writing into it, so the *next* turn in any conversation resurrected the abandoned reply's text
-  above its own.
-
-- **Switching into a conversation mid-turn now shows the turn.** Its messages aren't in the store until
-  the turn ends, so a switch-in used to replay the conversation as though the turn had never started: no
-  user bubble, and (before the fix above) the answer resuming mid-sentence with its beginning missing,
-  staying truncated until the next reload. The turn's output is now recorded as it is produced -- the user
-  bubble, reasoning, tool calls, sub-agent cards, uploaded and generated images, and the answer so far --
-  and rides along on the same frame the switch-in replays, after which the rest of the reply streams into
-  the bubble that replay left open. The record is dropped the moment the turn reaches the store, so
-  nothing is ever shown twice.
-
-- **Startup warns about an MCP server no role names.** Since the supervisor mounts no MCP callables, a
-  server that no `[subagents.roles.*]` lists in `mcp_servers` connects, spends its token on the
-  handshake, and is then reachable by nobody. That was silent; it is now a warning naming the server.
-
-- **AIMU's prebuilt agents, wired in as a tool-pack.** The new built-in `aimu_agents` pack mounts
-  `CodeReviewAgent`, `ResearchReportAgent`, and `ContentCreationAgent` as the tools `code_review`,
-  `research_report`, and `create_content`. It exists mainly as the worked example of wiring an agent
-  built with AIMU into Kokua: every `Runner` exposes `.run(task) -> str`, so a tool-pack is the entire
-  bridge and the core gains no new surface -- no `[[agents]]` table, no import-by-config. Nothing is
-  mounted until a role asks for it with `tool_packs = ["aimu_agents"]` (the supervisor mounts no pack
-  tools), and `config.example.toml` ships that role commented out. `research_report`'s
-  workers get `builtin.web` only when the `web` group is enabled, so a pack-mounted agent respects
-  `[tools].groups` exactly as a role does. Each call builds a fresh agent, reading `config.model` at
-  call time so a runtime model switch reaches it. The caveats are real and documented in the module:
-  the prebuilts are synchronous, so a nested run gets no sub-agent card, no `/stop`, and no approval
-  gate on its workers -- and a `coder` role with `fs` + `compute` is a stronger reviewer than the
-  tool-less `CodeReviewAgent`.
-
-- **A sub-agent card looks like the tool call it replaces.** The web channel already suppresses the
-  parent's `spawn_subagent` tool block because the card stands in for it, but the card looked like
-  nothing else on the page. A spawn now renders as `🔧 spawn_subagent(<role>) — <status>` in the same
-  monospace a tool block's header uses, over an argument line (`agent_type="…", task="…"`) built by
-  the same helper that fills a tool block's body, and then the nested thinking / tool / answer blocks
-  it already showed. The task moved off the header, where it was truncated to 60 characters, onto
-  that argument line, where it is shown whole. Planning reviewer verdicts share the card frame but
-  are backed by no tool call, so they keep their plain `🔎 <role> — <status>` header.
-
-- **Every agent can tell the time.** AIMU's clock and timezone converter moved out of `builtin.misc`
-  into their own `builtin.time` group, which Kokua now exposes as the `time` tool group and adds to the
-  default set (`web,fs,compute,time,misc`). Two agents previously could not reach these tools at all,
-  which is what prompted the change: the **lean supervisor** mounts no built-in groups, and force-added
-  only `get_current_date_and_time`, so `convert_time` never reached the assistant no matter what
-  `[tools].groups` said; and any **sub-agent role** whose `groups` omitted `misc` (the built-in `coder`,
-  which is `fs`+`compute`, and every role defined purely by a tool-pack or MCP server) got a worker with
-  no clock. The lean supervisor now mounts the whole `time` group, and the group is added to *every*
-  sub-agent role on top of its own `groups`, since a worker that cannot resolve "by tomorrow morning" is
-  broken whatever its domain and a role should not have to remember to ask. That addition is gated on
-  `time` being in `[tools].groups`, so it still never grants a tool the user disabled globally; drop
-  `time` there and no agent gets it, workers included. Roles need not list `time` themselves. Note that
-  a model with a calculator is not the same as one that uses it: the lean supervisor still has no
-  `calculate`/`execute_python` of its own by design, and must delegate arithmetic to a worker.
-
-- **Design principles written down**: [docs/explanation/design-principles.md](docs/explanation/design-principles.md)
-  states the six principles that decide what belongs in Kokua's core, each with the code that backs
-  it, what it excludes, and what it means for a contributor.
-  [docs/explanation/architecture.md](docs/explanation/architecture.md) now holds the architecture
-  narrative that used to live only in `CLAUDE.md`, so there is one place to keep current.
-
-- **Modularization**: `src/kokua` is grouped by subsystem instead of 23 flat modules -- `core/`,
-  `config/`, `planning/`, `mcp/`, `scheduling/`, beside the existing `channels/`, `frontends/`,
-  `toolpacks/`. No entry-point paths changed, so plugin registration and the console scripts are
-  untouched. `kokua.assistant` remains for one release as a `DeprecationWarning` shim re-exporting
-  `Assistant` from `kokua.core`. Retires TODO #6. The stable public import surface is now declared:
-  `kokua.plugins`, `kokua.config`, `kokua.core`, `kokua.channels.web`, `kokua.images`.
-
-- **`Assistant` decomposed** from an 872-line class mixing nine concerns into a composition root plus
-  `ConversationBook` (store + agent cache + active pointer), `TurnRunner` (reactive and proactive
-  turns), `HumanGate` (approval and plan review), `SettingsApplier`, and `ChannelUI`. Its public
-  surface is unchanged: front ends call the same twelve members.
-
-- **Bug fix -- concurrent plan reviews clobbered each other.** Tool approval was guarded by a lock so
-  concurrent gated calls could not overwrite the pending slot; plan review never was, so two
-  concurrent planned turns would lose one of the two prompts (the first waiter hung, and the answer
-  landed on the wrong request). Both now share one lock-guarded `PendingRequest`.
-
-- **Bug fix -- a failing scheduled task could take down the scheduler.** Only `target="active"`
-  firings had error handling; the `"new"`/`"task"` path returned before reaching it, so a model error
-  propagated into the scheduler job, which has no handler. A `target="task"` firing that failed also
-  forgot the conversation it had just created and minted a new one on every later firing. Both fixed
-  by unifying the proactive paths; the key is now returned even on failure.
-
-- **One runtime-settings table.** The set of settings changeable without a restart was spelled out in
-  nine places. `config/table.py`'s `RUNTIME_SETTINGS` is now the single declaration, driving the TOML
-  schema, the panel sanitizer, the hot-apply set, the live-apply loop, the channel mirroring, and the
-  persist path. Adding a setting is one entry, enforced by tests.
-
-- **One planned-turn pipeline.** The verbose and summary `/plan` flows were mirrored implementations
-  (~150 duplicated lines). They are now one pipeline plus a `Presentation` record with two instances.
-  Behavior is unchanged, pinned by frame-sequence characterization tests written before the change.
-
-- **`ChannelUI`** replaces 17 scattered `getattr(channel, "send_x", None)` / `hasattr` sites with one
-  adapter that probes each capability once and gives every optional frame a documented fallback.
-  `channels/protocol.py` declares the rich surface for documentation and typing.
-
-- **Dead code removed**: six unused functions in `paths.py` (every leaf path is a derived
-  `AssistantConfig` property), `images.save_file`, `TurnInfo.background`, two `TurnTracker` methods,
-  and the legacy `new_session` fallback in the scheduled-task registry.
-
-- **Tests** mirror the source layout; the 2346-line `test_assistant.py` is split along the same seams.
-
-- **Memory store thread-safety moved upstream**: concurrent-turn safety for the shared memory and
-  document stores now lives inside AIMU's `SemanticMemoryStore`/`DocumentStore` (a re-entrant per-store
-  lock) rather than a Kokua-side wrapper. `build_memory` returns the stores' tools directly again.
-
-Initial release. Kokua starts from AIMU's `examples/personal-assistant/` and restructures it into an
-installable, modular application.
-
-- **Package**: `src`-layout `kokua` package with console scripts `kokua` (runs the selected front end) and
-  `kokua-web`. Apache-2.0, Python 3.11+.
-- **Assistant core** (`kokua.assistant`): the transport-agnostic `Assistant` wiring an AIMU `SkillAgent`
-  with skill authoring + runnable skill scripts, persistent conversation history,
-  remote MCP servers (startup `--mcp` + runtime `add_mcp_server`), and persistent memory (a
-  `SemanticMemoryStore` for facts + a `DocumentStore` for documents, on by default).
-- **Model-failure surfacing**: a failed model request now reports its actual cause instead of a fixed
-  "Sorry, something went wrong handling that." A new `kokua.errors.describe_error` walks the exception's
-  `__cause__` chain to the root and the turn handler sends it (e.g. "The request couldn't reach the model
-  server: ModelConnectionError: Connection error. (caused by ... Connection refused)"), so an unreachable
-  local model server is diagnosable from the chat itself. Reactive and proactive (scheduled) turns both
-  surface the detail; a proactive failure is reported and swallowed so it can't crash the scheduler.
-  Relies on AIMU's new `ModelConnectionError` (re-exported as `kokua.assistant.ModelConnectionError`).
-- **Hang observability**: a `/diag` chat command reports the in-flight turn, elapsed time, whether the
-  turn lock is held, and dumps a wedged turn's async stack — handled in the serve loop without the lock,
-  so it answers even when a hung turn holds it (`Assistant._diag_report`). Diagnostic logs now go to a
-  rotating `data/logs/kokua.log` (5 × 2 MB) with turn-lifecycle lines (submitted / lock acquired /
-  done / error), configured via `configure_logging` (`kokua.logging_setup`) at startup and the
-  `[logging] level` config key. `faulthandler` is enabled so `kill -USR1 <pid>` dumps all thread stacks.
-- **Typed, concurrent sub-agents**: `spawn_subagent` is now typed — `spawn_subagent(agent_type, task)`
-  with built-in `researcher` / `coder` / `generalist` roles, each cloning the active model with its own
-  tool subset (role groups intersected with the enabled `[tools]` groups; parent-only memory/skills/MCP
-  withheld). Override or add roles under `[subagents.roles.*]`. Independent spawns in one turn run
-  concurrently (`[subagents] concurrent`, default on); the tool-approval gate serializes only the gated
-  `confirm_tools`, so gated calls still prompt one at a time. A sub-agent's gated-tool calls (the
-  `confirm_tools`, e.g. `execute_python`) are routed to the parent for approval and are not run
-  unattended. Fixed: `[tools] groups = ["all"]` now correctly enables all tool groups for sub-agent
-  roles (previously the clamping logic treated `"all"` as a literal group name, leaving roles with no
-  tools).
-- **Lean supervisor mode** (`[assistant] lean_supervisor`, **on by default**; set false for the flat
-  agent): a supervisor/worker architecture that shrinks the per-request tool context. When on, the per-conversation agent keeps
-  only its cross-cutting tools (memory, skills, MCP management, config, scheduling, date/time) plus the
-  single `spawn_subagent` delegate, and delegates all specialized work to workers whose roles carry the
-  scoped toolsets — dropping the advertised tool set from ~30+ to ~10-12. Sub-agent roles can now be
-  assigned specific MCP servers (`mcp_servers`, by a server's new optional `[[mcp.server]].name` or its
-  URL) and tool-packs (`tool_packs`) in addition to built-in `groups`, so a role can own e.g. a trading
-  MCP server or the `pdf`/`email` packs. In lean mode `[tools] groups` defines the universe of built-in
-  groups workers may draw from. Default (flat) wiring is unchanged. MCP servers now connect before the
-  first agent is built so config-declared servers reach workers; adding or removing a server at runtime
-  (`add_mcp_server`/`remove_mcp_server`) rebuilds each live agent's `spawn_subagent` so worker roles
-  pick up or drop it immediately (and in lean mode the server's raw tools are not mounted on the
-  supervisor).
-- **Scheduled tasks**: the assistant can schedule durable, agent-managed tasks (`schedule_task` /
-  `list_scheduled_tasks` / `cancel_scheduled_task`) that fire an unprompted turn when due, persisted to
+- Durable, agent-managed tasks that fire an unprompted turn when due, persisted to
   `data/scheduled_tasks.json` and re-armed at startup. Schedules are one-shot, interval, daily, or
-  weekly (no cron dependency). A per-task `target` selects where each firing runs: `active` (default,
-  the currently-viewed conversation), `new` (a fresh conversation per firing), or `task` (one dedicated
-  conversation, created on the first firing and reused on every later firing so the task builds on its
-  own history; a deleted conversation is recreated on the next firing). `disable_scheduled_task` /
-  `enable_scheduled_task` pause a task (it stops firing but stays in the registry) and resume it later,
-  without losing the task; disabled tasks are skipped at startup and show as `disabled` in the listing.
-  `run_scheduled_task` runs an existing task now, on demand, without changing its schedule: it reproduces
-  the real firing (honoring `target`, auto-denying gated tools), so a task can be dry-run before it is
-  due; disabled tasks can be run too.
-- **Plugin system** (`kokua.plugins`): front ends and tool-packs discovered via the `kokua.frontends` and
-  `kokua.tools` entry-point groups. Built-in `cli` and `web` front ends and an `example` tool-pack are
-  registered as plugins; third parties add their own by publishing a package. `--list-frontends`,
-  `--list-tool-packs`, `--no-plugins`.
-- **Front ends**: `cli` (terminal via AIMU's `CLIChannel`) and `web` (Starlette + uvicorn WebSocket server
-  with a streaming browser UI, behind the `web` extra). Reloading the web page replays the prior
-  conversation (user messages, answers, and reasoning/tool calls when `show_thinking` / `show_tools` are
-  on); the assistant already restored its context across reconnects, this makes it visible. Assistant
-  replies render as GitHub-flavored markdown when a turn completes (tables, nested lists, code, task
-  lists, strikethrough, links), via vendored `marked` + `DOMPurify` (bundled in `web_static/`, served
-  locally, no CDN); the rendered HTML is sanitized so model/tool output cannot inject scripts or markup,
-  and links open with `rel="noopener"`. LaTeX math (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`, common in
-  Gemini output) is typeset with vendored KaTeX (JS + CSS + woff2 fonts bundled in `web_static/`, served
-  locally); it runs after DOMPurify with `trust:false` + a `maxExpand` cap, so untrusted output stays
-  safe, and `throwOnError:false` leaves a malformed expression as source text instead of breaking the
-  bubble. Light and dark themes: a theme selector in the settings panel
-  (auto / light / dark; auto follows the OS preference) sets a per-browser choice remembered locally and
-  applied before first paint (no flash on load, no new dependencies). Each conversation bubble shows a
-  datetime caption ("Jul 23, 3:45 PM", localized via `toLocaleString`, full precision on hover); it sits
-  below a regular bubble and on the always-visible header line of a foldable (thinking/tool/phase/
-  sub-agent) so it shows whether the block is collapsed or expanded. The time is the message's
-  append-time `timestamp` (AIMU's inert message key, now populated on the async path), threaded into the
-  `history` frame per item by `conversation_to_frames` and rendered on both live and replayed bubbles;
-  live bubbles with no server time yet are stamped client-side. Messages persisted before this change
-  carry no timestamp and render without a caption. Ephemeral chrome (system notices, approval prompts,
-  banners) is not stamped.
-- **Multiple web conversations**: the web UI lists conversations in a sidebar (auto-titled from the
-  first message) and lets you start a new one or select an existing one to continue, backed by AIMU's
-  `sessions` store. Memory stays shared across conversations. CLI multi-conversation is a later change.
-  Each conversation row has a delete (`×`) control (with a confirmation prompt); deleting the active
-  conversation switches to the most-recently-updated remaining one, or a fresh empty one if none remain.
-  Backed by a new `delete(key)` on AIMU's `SessionStore`.
-- **Collapsible, resizable sidebar (web)**: the left panel can be collapsed to a narrow icon rail (a
-  `«`/`»` toggle) and drag-resized via the divider between it and the chat (clamped to 180-480px;
-  dragging below the threshold snaps to the rail, dragging back out re-expands). The divider is also
-  keyboard-operable (arrows resize, Enter toggles). Width and collapsed state are a per-browser
-  preference (localStorage), applied before first paint like the theme so there is no flash on load.
-- **Distinguish agent-loop turns from user input (web)**: the agent loop injects its own continuation
-  turns as `user`-role messages; using AIMU's inert `provenance` message key, the web UI now renders these
-  as a muted `↻ continuation` marker at each loop-iteration boundary instead of as user bubbles, both live
-  (keyed off `StreamChunk.iteration`) and on history replay. The marker shows the injected prompt text for
-  inspection. Proactive turns are tagged and replay with their existing amber styling. Real user turns are
-  unaffected.
-- **Foldable auxiliary blocks (web)**: the non-direct blocks in the chat transcript (thinking, tool
-  calls, `↻ continuation` markers, verbose-trace phases, sub-agent cards, and drafted plans) now render
-  collapsed, each with a click-to-expand header. The header keeps the identifying label (tool name,
-  phase name) so the transcript stays scannable; expanding reveals the verbose detail. Direct user and
-  assistant messages and the interactive approval / plan-review prompts are unaffected. Fold state is
-  per-block and not persisted across reloads. Client-side only; no protocol change.
-- **Stop an in-flight reply**: send `/stop` (the web UI also has a Stop button, enabled only while a reply
-  is being processed) to cancel the current turn;
-  the partial turn is kept so the conversation can continue. Built on AIMU's `aio.RunHandle`; reactive
-  turns run as background tasks so the channel keeps reading mid-turn.
-- **Tool approval**: configured "risky" tools require confirmation before each call (terminal `y/N` or
-  web Allow/Deny), built on AIMU's `ToolApproval` gate. Default set `add_skill_script`, `add_mcp_server`,
-  `execute_python`; configurable via `[security] confirm_tools` / `--confirm-tools` (empty disables).
-  Proactive turns auto-deny gated tools. The reply is routed through the single channel reader, so it is
-  safe alongside `/stop`.
-- **Web settings panel**: a gear button in the web header opens a panel to change, at runtime, the model
-  generation kwargs (`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`,
-  `repetition_penalty`), display prefs (`show_thinking` / `show_tools` plus the auto/light/dark theme),
-  and the active model. Server-backed changes take effect on the next turn (switching the model rebuilds
-  the client and carries the conversation over) and persist across restarts by writing back into
-  `config.toml` (see the config-consolidation entry below). The theme is a per-browser choice (stored
-  locally, not server-side). Provider support varies: thinking models ignore `top_p`/`top_k` and force
-  `temperature`, and Anthropic does not support the penalty parameters.
-- **Config consolidation (single source of settings)**: `config.toml` now holds all settings and is
-  written by the app as well as hand-edited, replacing the separate `data/runtime-settings.json` and
-  `data/mcp-servers.json` state files (both removed, along with `mcp_registry.py`). `config_store.py`
-  does comment-preserving writes via `tomlkit` (new dependency; stdlib `tomllib` cannot write TOML), so
-  hand-written comments and layout survive app writes; a fresh file is seeded from the shipped example on
-  first write. The web settings panel and the `add_mcp_server`/`remove_mcp_server` tools now persist here
-  (runtime-added MCP servers land in `[[mcp.server]]`, URL only). `data/` holds only content now.
-- **Assistant config tools**: `read_config` / `update_config` (`kokua.config_tools`) let the assistant
-  inspect and repair its own configuration in-conversation. `update_config` validates and coerces the
-  value, applies hot-appliable keys (model, `[generation]`, display and planning flags) to the running
-  session immediately (persisting only after a successful apply, so a bad model isn't saved) and reports
-  "restart required" for everything else. A security blocklist (`[security].confirm_tools`, `[email].to`,
-  `[paths].data_dir`) can never be changed by the tool, only by hand-edit; `update_config` is in the
-  default `confirm_tools` list, so each write goes through the approval prompt.
-- **Remote/custom model endpoints**: `[assistant].model` accepts AIMU's extended
-  `provider:model_id[@base_url][;flags]` form, so Kokua can target a remote OpenAI-compatible server
-  (e.g. a llama.cpp `llama-server` on another host) or a model id not in AIMU's catalog. Example:
-  `model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"`. Documented in `config.example.toml`.
-- **Markdown-to-PDF tool**: a built-in `pdf` tool-pack contributes `markdown_to_pdf`, which renders
-  Markdown to a PDF (via `fpdf2` + `markdown`, both pure-Python, no system libraries) saved in
-  `data/downloads/`. Enabled by default like any tool-pack. The web front end serves that folder at
-  `GET /download/<name>`, so the assistant can hand back a download link; the tool also returns the
-  absolute path for the CLI. (Downloads live in their own folder, not `data/documents/`, so the binary
-  PDFs never disturb the DocumentStore, which scans the documents folder as text.)
-- **Email tool**: a built-in `email` tool-pack contributes `send_email`, letting the assistant email
-  information to you (digests, summaries, reports) over SMTP (stdlib `smtplib`, no extra dependency). The
-  recipient is locked to your configured `[email] to` address, so the tool takes no recipient and can only
-  ever email you. The body is written in Markdown and delivered as HTML with a plain-text fallback;
-  attachments are limited to files already in `data/downloads/` or `data/images/` (traversal-safe). The
-  tool is offered only when `[email] host` and `to` are set and the `KOKUA_EMAIL_PASSWORD` env var is
-  present (the password is never read from the config file). Sending is ungated, so scheduled/proactive
-  turns can send (e.g. a daily digest).
-- **Image input and output**: attach images and the assistant reads them (vision), and it can generate
-  images. In the web UI, attach via the composer's paperclip or by pasting; thumbnails preview before
-  send and images render inline in the chat (live and on reload). In the CLI, `/attach <path>` stages a
-  local image onto the next message. Vision needs a vision-capable model (Claude models qualify);
-  generation needs the `AIMU_IMAGE_MODEL` env var (e.g. `gemini:nano-banana` or a HuggingFace diffusers
-  `hf:<repo>`), and the built-in `image` tool-pack contributes `generate_image` only when it is set.
-  Uploaded and generated images are stored under `data/images/` (content-addressed) and served at
-  `GET /images/<name>`; a conversation keeps only a short `/images/<name>` reference, so `sessions.json`
-  stays small (the bytes are re-inlined as base64 only when a turn is sent to the model, since a
-  localhost URL is not fetchable by the provider). Like downloads, images live in their own folder so the
-  binary files never disturb the DocumentStore.
-- **Deep planning (per request)**: a planned turn first drafts an explicit plan (which tools/skills/MCP
-  services to use, what to web-search for, and where to build a skill via `author_skill` or connect a
-  server via `add_mcp_server`) and then executes it. Planning is invoked per request, not as a global
-  mode: use the web UI's **Plan** toggle next to the message box (a sticky per-request switch), or send
-  `/plan <task>` in either front end. `plan_review` pauses a planned turn for Approve / Edit / Reject; off
-  runs the plan autonomously. Built on Kokua's existing turn loop and tool-approval round-trip (AIMU
-  already makes the agent plan-capable); planning is scratch work kept out of the saved conversation,
-  which stores your actual request and the answer. `web-search`-for-MCP relies on the default `web` tools.
-- **MCP OAuth fallback fix**: `add_mcp_server` now starts the OAuth flow for a server that signals its
-  auth requirement with a 400 + "missing Authorization header" (rather than a standard 401). The
-  auth-challenge heuristic previously matched only `unauthor`/401/403, so such a server surfaced the raw
-  "bad request: missing required Authorization header" error instead of posting an authorization link; it
-  now also matches `authoriz`/`authentic`.
-- **Bearer-token guidance for OAuth-incapable servers**: when a server requires authentication but its
-  OAuth flow can't complete because it lacks dynamic client registration (the `/register` endpoint 404s),
-  `add_mcp_server` now returns an actionable "provide a bearer token and add the server again" message
-  instead of a raw `OAuthRegistrationError`. Its docstring tells the assistant to relay the message, ask
-  the user for a token, and retry with `bearer_token`.
-- **Per-service MCP bearer tokens via env vars**: the `[mcp]` config is now an array of `[[mcp.server]]`
-  tables, each with a required `url` and an optional `token_env` naming an environment variable that holds
-  that server's bearer token (read at startup, so the secret stays out of `config.toml`). This replaces
-  the single `[mcp] servers`/`bearer` keys, which applied one token to every server. `--mcp <url>` still
-  adds token-less servers from the CLI; the `--mcp-bearer` flag is removed (put authenticated servers in
-  `config.toml`). A configured `token_env` whose variable is unset logs a warning and connects tokenless
-  rather than aborting startup.
-- **Adversarial plan + result review** (deep planning, both off by default): an independent, context-free
-  reviewer agent (fresh client, sees only the request + plan/answer) critiques the plan and/or the final
-  result. `plan_review_agent` re-plans on rejection up to `review_rounds`, surfacing leftover concerns (to
-  the human gate when it's on, else noted with the plan). `result_review` checks the answer before it's
-  shown and revises on rejection; because a result can't be vetted and streamed at once, it runs the
-  executor with the agentic loop (thinking/tool calls) still streaming live but the final answer withheld
-  until it passes review, and commits a clean transcript. Reuses AIMU's structured output
-  (`client.chat(schema=Verdict, use_tools=False)`) with no AIMU change; toggles in the settings panel and
-  the `[planning]` config section.
-- **Verbose trace ("Show all reasoning")**: an opt-in planning toggle (default off) that turns a planned
-  turn into a labeled, streamed trace -- planner, each plan reviewer, executor, each result reviewer, and
-  every revision stream their thinking + output live under phase headers, and every intermediate plan and
-  result version is shown. Reviewers stream a free-text prose assessment (readable, and their thinking when
-  the model emits it). It overrides result review's "hide until vetted" gate (you see every version); only
-  the final approved answer is committed to the transcript. Thinking is model-dependent (adaptive models
-  may skip it on easy prompts). The whole raw trace (each phase's label + streamed text) is now recorded
-  per turn in `session.metadata["trace"]` and replayed on reload, so a reloaded verbose turn shows the
-  same raw output it did live -- not a summary. Verbose turns show only this raw trace; they do not emit
-  the summary reviewer cards below.
-- **Sub-agent activity in the web UI** (non-verbose turns): the adversarial reviewers show up in the chat
-  stream as their own cards -- "Plan reviewer / Result reviewer -- reviewing..." that update in place to
-  approved / rejected (with the issues) -- so the otherwise-silent reviewer pauses are visible. Added
-  via a generic `subagent` WebSocket frame (no change to the model conversation schema); reviewer
-  verdicts are recorded per turn in `session.metadata` and replayed in order on reload. (With the verbose
-  trace on, the raw streamed reasoning replaces these cards.)
-- **Spawned sub-agent activity, shown live and on reload**: a `spawn_subagent` call now gets its own
-  foldable card in the conversation that spawned it, updated in place as the child agent runs -- nested
-  reasoning (gated by `show_thinking`) and nested tool calls (gated by `show_tools`), with the card and
-  its final answer always shown regardless of those flags. No new setting. `core/subagents.py`'s
-  `SubagentReporter` implements AIMU's `SubagentObserver` and is the one instance every per-conversation
-  agent's `spawn_subagent` reports through, including after a runtime MCP add/remove rebuilds it.
-  Recording (`ConversationBook.record_subagent_events`, a new method sharing the same
-  `metadata["subagent"]` map the reviewer cards above write into) and display are independent: a
-  background turn's cards are muted like everything else it streams, but its spawns are still recorded,
-  so switching into that conversation later shows the work. This depends on AIMU's unreleased `main`
-  (the `SubagentObserver` protocol and the `observer=` parameter on `make_async_subagent_tool`, see
-  AIMU's own changelog); `build.py` imports `SubagentObserver` unconditionally, so an AIMU install that
-  predates this seam fails at Kokua startup with an `ImportError`, not a silent no-cards fallback --
-  another symptom of the stale-same-version-string trap `CLAUDE.md`'s AIMU-dependency section already
-  warns about. Known limitation: a gated tool call inside a sub-agent (e.g. `execute_python`) still
-  prompts at the top level, not inside its card. The parent's own `🔧 spawn_subagent(...)` tool card is
-  suppressed (its role/task/result are pure duplication of the `🤖` card): `WebChannel.send_frame`
-  drops the `tool` frame for `spawn_subagent` specifically (covering both live paths, since the base
-  `send()` and Kokua's `stream_activity()` both route through it), and `conversation_to_frames` drops
-  the matching replay item. Inside a card, the nested reasoning, tool calls, and generated text are the
-  page's own top-level blocks reused: `addFoldable` and `renderTool` take a parent element, so a nested
-  `💭 thinking` or `🔧 <name>` block is the same builder and the same CSS as its top-level counterpart
-  rather than a card-specific style, and the generated text is its own assistant-styled markdown block.
-  Each nests as an individually foldable block: thinking and tool calls start collapsed as at the top
-  level, the answer starts expanded (it is what the reader opened the card for), and the card itself
-  still starts collapsed showing only role, status, and the truncated task. The sub-agent's text now
-  streams in live token by token and is re-rendered as markdown when the spawn ends, exactly as the
-  assistant's own reply is; recorded events coalesce consecutive chunks into one entry per block, so a
-  reloaded card looks the same while the stored JSON stays proportional to text length. The task is no
-  longer duplicated between the (still-visible-when-collapsed) header and the body.
-- **Tool-using reviewers**: the adversarial reviewers are now tool-enabled agents rather than a single
-  tool-less call. Each runs a bounded tool-calling assessment over a curated verification toolset
-  (`review.REVIEWER_TOOLS`: current date/time, web lookup, and computation) and then extracts the typed
-  verdict in a follow-up structured call. This fixes reviewers rejecting correct answers they couldn't
-  verify -- most visibly recency claims, since a context-free reviewer had no way to know today's date
-  (Kokua injects the date into no prompt; it must be fetched via `get_current_date_and_time`, exactly as
-  the main agent does). The toolset deliberately excludes the user's memory/documents, skills, and MCP
-  mutation, so the reviewer stays an independent critic with no access to user state. Known limitation
-  (see README): the toolset includes `execute_python` for calculations, and unlike the main agent the
-  reviewer has no approval gate, so it can run code unattended during a review -- an intentional
-  short-term tradeoff to revisit (sandbox the reviewer, or drop to `calculate`-only).
-- **Reviewers grounded in fresh information**: two changes so reviewers stop rejecting correct answers as
-  "hallucinated" by trusting their own stale training knowledge. (1) Both reviewer prompts now warn that
-  the reviewer's built-in knowledge may be outdated, that disagreement with memory is not evidence of
-  fabrication, and that it must verify a suspected inaccuracy with its tools before flagging (and note
-  unverifiable claims as such rather than rejecting on suspicion). (2) The result reviewer is now shown an
-  Evidence section -- the tool results the agent actually retrieved to produce its answer (extracted by
-  `assistant._tool_evidence` from the executor transcript, each result truncated) -- so it judges against
-  real sources, while still spot-checking with its own tools.
-- **App-owned state**: all state under `~/.kokua` (override `KOKUA_HOME`), replacing the example's reliance
-  on `aimu.paths.output`.
-- **Strict config parsing**: an unknown key or non-table section in `config.toml` now fails fast with a
-  `ConfigError` instead of being warned-about and ignored, so typos and removed keys surface immediately.
-- **Model resolution failures surface cleanly**: with no `model` set, AIMU resolves `AIMU_LANGUAGE_MODEL`,
-  else the first already-running local model (Ollama, then a local OpenAI-compatible server), and never a
-  cloud model. When nothing resolves (or the model string is invalid), `Assistant.create` now raises a
-  `ModelClientError` carrying AIMU's actionable message; the CLI prints it and exits non-zero and the web
-  UI shows it in the chat, instead of a traceback. The web build failure also releases the single-connection
-  guard, so a later connection is not wrongly refused as "busy in another tab".
-- **Tests**: mock-only suite (assistant wiring, CLI parsing, MCP, memory, web channel + server round-trip,
-  plugin discovery), with a vendored async mock model client (no reach into the AIMU repo).
-- **Per-conversation agents**: each conversation now has its own AIMU `SkillAgent`, built lazily and kept
-  in a bounded LRU `AgentRegistry` (new `agent_cache_cap` config, default 8), instead of a single shared
-  agent that was swapped and `restore()`d between conversations on switch. Lays the groundwork for
-  concurrent per-conversation turns in a follow-up. Because building an agent is now lazy, the web UI's
-  new/select/delete-conversation controls can also hit a `ModelClientError` (e.g. a since-broken model
-  string); these are now caught and reported in the chat, like the existing settings-panel handling,
-  instead of tearing down the websocket connection.
+  weekly (no cron dependency).
+- Managed by the assistant through `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`,
+  `update_scheduled_task`, `cancel_scheduled_task`, `disable_scheduled_task` / `enable_scheduled_task`
+  (pause without losing the task), and `run_scheduled_task` (run one now, reproducing a real firing, so
+  a task can be dry-run before it is due).
+- `update_scheduled_task` edits any subset of a task's fields in place, keeping its id, `created_at`,
+  and dedicated conversation, and re-deriving the schedule fields you omit, so changing a weekly task's
+  time keeps its day. It re-arms only when the schedule actually changes, so editing a prompt never
+  restarts an interval countdown, and it rejects an invalid schedule, a past one-shot, or a name another
+  task holds without writing anything.
+- A per-task `target` selects where each firing runs: `active` (the currently-viewed conversation),
+  `new` (a fresh conversation per firing), or `task` (one dedicated conversation, created on the first
+  firing and reused after, so the task builds on its own history; a deleted one is recreated).
+- A failing firing is reported and swallowed rather than propagating into the scheduler, which has no
+  handler of its own.
 
-- **Concurrent conversations**: a turn keeps running when you switch away, streaming only into the
-  conversation you are viewing. Background turns post a completion notification instead of streaming.
-  Switching conversations no longer cancels the in-flight turn. Tool approval prompts only for the
-  conversation you are viewing; background and scheduled/proactive turns always auto-deny gated tools.
-  Switching into (or connecting into) a conversation with a turn already running in the background shows
-  a "working" indicator until that turn's next frame arrives. Shared memory and document tools are
-  serialized with one lock so concurrent turns can't race on the stores.
+### Deep planning and adversarial review
+
+- **Planning is per request, not a global mode**: the web UI's Plan toggle beside the message box (a
+  sticky per-request switch), or `/plan <task>` in either front end. A planned turn first drafts an
+  explicit plan -- which tools, skills, and MCP services to use, what to search for, where to author a
+  skill or connect a server -- and then executes it. Planning is scratch work kept out of the saved
+  conversation, which stores your actual request and the answer.
+- **`plan_review`** pauses a planned turn for Approve / Edit / Reject; off runs the plan autonomously.
+- **Adversarial plan and result review** (both off by default): an independent, context-free reviewer
+  agent -- a fresh client seeing only the request plus the plan or answer -- critiques the plan and/or
+  the final result. `plan_review_agent` re-plans on rejection up to `review_rounds`, surfacing leftover
+  concerns. `result_review` checks the answer before it is shown and revises on rejection; because a
+  result cannot be vetted and streamed at once, the executor's thinking and tool calls stream live while
+  the final answer is withheld until it passes, then a clean transcript is committed.
+- **Reviewers are tool-using and grounded.** Each runs a bounded tool-calling assessment over a curated
+  verification toolset and then extracts its typed verdict in a follow-up structured call. The toolset
+  is web lookup, `calculate`, and the current date and time; it deliberately excludes the user's memory
+  and documents, skill authoring, MCP mutation, and `execute_python` -- a reviewer cannot be
+  approval-gated, since an autonomous critic has nobody to ask mid-review, so it is given nothing that
+  would need a gate. Both prompts warn that the reviewer's own knowledge may be stale, that disagreement
+  with memory is not evidence of fabrication, and that a suspected inaccuracy must be verified with
+  tools before flagging. The result reviewer is additionally shown an Evidence section -- the tool
+  results the agent actually retrieved -- so it judges against real sources.
+- **Verbose trace ("Show all reasoning")**, off by default: turns a planned turn into a labeled, live
+  trace -- planner, each plan reviewer, executor, each result reviewer, and every revision -- showing
+  every intermediate plan and result version. It overrides result review's hide-until-vetted gate; only
+  the final approved answer is committed. The whole raw trace is recorded per turn and replayed on
+  reload, so a reloaded verbose turn shows the same output it did live rather than a summary.
+- In non-verbose turns the reviewers appear as their own cards that update in place from
+  "reviewing..." to approved or rejected with the issues, so the otherwise-silent reviewer pauses are
+  visible. Verdicts are recorded per turn and replayed in order on reload.
+
+### Configuration
+
+- **`config.toml` is the single source of settings, and the app writes it** -- there is no parallel
+  store. Layering is built-in defaults < the TOML file < command-line flags. Writes are
+  comment-preserving (via `tomlkit`, since stdlib `tomllib` cannot write TOML), so hand-written comments
+  and layout survive an app write; a fresh file is seeded from the shipped example.
+  `kokua config init` scaffolds `$KOKUA_HOME/config.toml` from `config.example.toml`, where every key
+  sits at its built-in default, documented.
+- **Strict parsing**: an unknown key or non-table section fails fast with a `ConfigError` naming the
+  key, so typos and removed keys surface immediately instead of being silently ignored.
+- **One runtime-settings table.** `config/table.py`'s `RUNTIME_SETTINGS` is the single declaration of
+  what can change without a restart, driving the TOML schema, the panel sanitizer, the hot-apply set,
+  the live-apply loop, the channel mirroring, and the persist path at once. Adding a setting is one
+  entry, enforced by tests.
+- **The assistant can inspect and repair its own configuration**: `read_config` / `update_config`.
+  `update_config` validates and coerces the value, applies hot-appliable keys immediately and persists
+  only after a successful apply (so a bad model is not saved), and reports "restart required" for
+  everything else. A blocklist -- `[security] confirm_tools`, `[email] to`, `[paths] data_dir` -- can
+  never be changed by the tool, only by hand. `update_config` is in the default `confirm_tools` list, so
+  each write goes through the approval prompt.
+- **Remote and custom model endpoints.** `[assistant] model` accepts AIMU's extended
+  `provider:model_id[@base_url][;flags]` form, so Kokua can target a remote OpenAI-compatible server or
+  a model id not in AIMU's catalog, e.g.
+  `model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"`.
+- **All state under one directory you own**: `$KOKUA_HOME`, default `~/.kokua`, replacing the example's
+  reliance on `aimu.paths.output`. `data/` holds content only -- conversations, memory, documents,
+  `images/`, `downloads/`, `logs/`, `scheduled_tasks.json`. Images and downloads live in their own
+  folders so the binary files never disturb the `DocumentStore`, which scans the documents folder as
+  text.
+
+### MCP
+
+- Remote MCP servers from a startup `--mcp <url>` (repeatable) or `[[mcp.server]]` tables in
+  `config.toml`, plus `add_mcp_server` / `remove_mcp_server` at runtime. Servers connect before the
+  first agent is built so config-declared servers reach workers, and a runtime add or remove rebuilds
+  each live agent's `spawn_subagent` so roles pick the server up or drop it immediately.
+- **Per-server bearer tokens via environment variables.** Each `[[mcp.server]]` takes a required `url`,
+  an optional `name`, and an optional `token_env` naming the variable holding that server's token, read
+  at startup so the secret stays out of `config.toml`. A `token_env` whose variable is unset logs a
+  warning and connects tokenless rather than aborting startup.
+- **OAuth**: `add_mcp_server` starts the OAuth flow for a server that signals its auth requirement with
+  a non-standard response (a 400 plus "missing Authorization header", not only a 401/403). When the flow
+  cannot complete because the server lacks dynamic client registration, it returns an actionable "provide
+  a bearer token and add the server again" message instead of a raw `OAuthRegistrationError`, and its
+  docstring tells the assistant to relay that, ask for a token, and retry with `bearer_token`.
+- **Startup warns about a server no role names.** Since the supervisor mounts no MCP callables, such a
+  server connects, spends its token on the handshake, and is then reachable by nobody. That is now a
+  warning naming the server.
+
+### Images
+
+- Attach images and the assistant reads them (needs a vision-capable model); it can generate them when
+  `AIMU_IMAGE_MODEL` is set. In the web UI, attach via the composer's paperclip or by pasting, with
+  thumbnails previewed before send and images rendered inline live and on reload; in the CLI, `/attach`.
+- Uploaded and generated images are stored content-addressed under `data/images/` and served at
+  `GET /images/<name>`. A conversation keeps only a short `/images/<name>` reference, so the session
+  store stays small; the bytes are re-inlined as base64 only when a turn is sent to the model, since a
+  localhost URL is not fetchable by the provider.
+
+### Security
+
+Kokua can author and run Python and shell scripts as **real subprocesses with your user privileges and
+no sandbox**, and can connect to remote MCP servers and run whatever tools they expose. Real capability
+is the point of a personal assistant, but it means a prompt-injected or mistaken model can run arbitrary
+code on your machine. Run it only with a model, inputs, and MCP servers you trust. The CLI prints a
+notice on startup.
+
+- **Tool approval.** Configured risky tools require confirmation before each call -- terminal `y/N`, web
+  Allow/Deny -- built on AIMU's `ToolApproval` gate. The default set is `add_skill_script`,
+  `add_mcp_server`, `execute_python`, and `update_config`; adjust with `[security] confirm_tools` or
+  `--confirm-tools` (empty disables). Proactive and backgrounded turns auto-deny gated tools regardless,
+  so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
+  are currently viewing. The reply is routed through the single channel reader, so it is safe alongside
+  `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
+  cannot overwrite each other.
+- **The reviewer toolset needs no gate.** An autonomous critic cannot pause to ask you mid-review, so
+  rather than exempting it from the gate the reviewer is given nothing the gate exists to cover: web
+  lookup, `calculate`, and the clock. A test pins this against the shipped `confirm_tools` default, so
+  adding a name there fails the suite until the reviewer's toolset is re-checked.
+- **Injection crosses conversations.** The assistant can read every saved conversation, and a transcript
+  is untrusted text, so an injection that lands in one conversation can influence what the assistant
+  does in another. The three read tools are ungated by default, since they only read and gating them
+  would make an unattended scheduled run that reads history fail silently; add `read_conversation` and
+  `search_conversations` to `[security] confirm_tools` to change that.
+
+### Diagnostics and error reporting
+
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.13.1`
+  requirement covers a normal install, but a development checkout installs the sibling `../aimu`
+  editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
+  floor and one capability probe -- the version string of an editable install says what its branch
+  claims, not what its code contains -- and names both fixes: update the sibling, or
+  `uv sync --no-sources` to take AIMU from PyPI instead.
+- **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
+  exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
+  the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.
+  (caused by ... Connection refused)"). Reactive and proactive turns both surface the detail.
+- **Model resolution failures surface cleanly.** With no `model` set, AIMU resolves
+  `AIMU_LANGUAGE_MODEL`, else the first already-running local model (Ollama, then a local
+  OpenAI-compatible server), and never a cloud model. When nothing resolves, or the model string is
+  invalid, `Assistant.create` raises a `ModelClientError` carrying AIMU's actionable message: the CLI
+  prints it and exits non-zero, the web UI shows it in the chat. Because agents are built lazily, the
+  web UI's new / select / delete controls can hit the same error, and report it in the chat rather than
+  tearing down the WebSocket. A web build failure also releases the single-connection guard, so a later
+  connection is not wrongly refused as "busy in another tab".
+- **Hang observability.** `/diag` reports the in-flight turn, elapsed time, whether the turn gate is
+  held, and dumps a wedged turn's async stack. It is handled in the serve loop without taking the gate,
+  so it answers even when a hung turn holds it. Diagnostic logs go to a rotating
+  `data/logs/kokua.log` (5 × 2 MB) with turn-lifecycle lines, level set by `[logging] level`.
+  `faulthandler` is enabled, so `kill -USR1 <pid>` dumps all thread stacks.
+
+### Known limitations
+
+- **A `target="task"` scheduled conversation grows without bound.** Reusing one conversation across
+  every firing is the intended continuity tradeoff, but each firing replays the full, growing transcript
+  to the model, so a high-frequency or long-lived task means steadily rising token cost and eventually
+  the context window. There is no cap yet.
+- **A gated tool call inside a sub-agent prompts at the top level**, not inside its card.
+- **A tool result travels whole and only the DOM clamps it**, so the web `history` frame grows by every
+  tool result in the conversation and is re-sent on every conversation switch, not only on reload. A
+  conversation with dozens of large results (PDF extractions, email fetches, big MCP responses) makes
+  that frame correspondingly large.
+- **A message can bind to the wrong conversation if you switch immediately after sending.** A reactive
+  turn binds to a conversation when the serve loop dequeues its message, while the web front end handles
+  new / select / delete inline, so a control processed in that sub-millisecond window sends the reply to
+  the conversation switched *to*. Not reachable by hand; surfaced deterministically by the Playwright
+  suite, which waits for the turn to be observably running before switching.
+
+### Internals and development
+
+- `src/kokua/` is grouped by subsystem -- `core/`, `config/`, `planning/`, `mcp/`, `scheduling/`,
+  `channels/`, `frontends/`, `toolpacks/` -- and `tests/` mirrors it exactly.
+- `Assistant` is a composition root and the serve loop; it delegates to `ConversationBook` (store +
+  agent cache + active pointer), `TurnRunner`, `HumanGate`, `SettingsApplier`, and `ChannelUI`.
+  `ChannelUI` is the one adapter that probes each optional channel capability once and gives every rich
+  frame a documented fallback, so there is no `isinstance(channel, WebChannel)` in `core/` or
+  `planning/`. `channels/protocol.py` declares the rich surface for documentation and typing.
+- The six principles that decide what belongs in the core, each with the code that backs it, are in
+  [docs/explanation/design-principles.md](docs/explanation/design-principles.md); the architecture
+  narrative is in [docs/explanation/architecture.md](docs/explanation/architecture.md).
+- **Verifiable without a model.** The default test suite is mock-only: no model, no network, no keys.
+  This is why the model client is injectable and the builders are free functions. Client-side page JS is
+  covered by an opt-in Playwright suite (`pytest -m e2e`) driving the real `index.html` in headless
+  Chromium; it skips rather than errors when the browser or the `web` extra is absent, and it does not
+  gate the default suite.
+- CI lints, runs the suite on Python 3.11-3.13, and separately builds the sdist and wheel, checks their
+  metadata, and installs the wheel into a clean environment to run both console scripts -- an editable
+  install imports straight from `src/`, so it cannot catch a missing package-data entry or a console
+  script pointing at a moved function.

@@ -35,24 +35,22 @@ The practical consequence: the assistant core is a few hundred lines that knows 
 
 ## Install
 
-Kokua depends on AIMU, and currently uses AIMU features that are on AIMU's `main` branch but not yet in a published release. It therefore installs AIMU **from source as an editable dependency**. Clone AIMU as a sibling of this repo, then sync:
+Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer.
 
 ```bash
-git clone https://github.com/saxman/aimu        # sibling of kokua/, if you don't have it
-uv sync --all-extras                            # installs the local editable ../aimu automatically
+uv sync --all-extras --no-sources        # AIMU from PyPI; what you want to just run Kokua
 ```
 
-`[tool.uv.sources]` pins `aimu = { path = "../aimu", editable = true }`, so `uv sync` always installs your local checkout (and picks up your edits live) rather than the PyPI build, which carries the same version string but lacks the features Kokua needs.
+The `web` extra (included in `--all-extras`, or `pip install '.[web]'`) adds the browser front end; without it the CLI works alone.
 
-> **No sibling checkout?** For CI or a clone without `../aimu`, swap that source for the git one (see the comment in `pyproject.toml`):
+> **Why `--no-sources`?** Kokua and AIMU are developed together, so `[tool.uv.sources]` points AIMU at a sibling `../aimu` checkout, installed editable, which lets architectural changes move across the boundary without a release round-trip. `--no-sources` ignores that table and resolves AIMU from PyPI instead. If you *are* developing both, clone AIMU as a sibling of this repo and drop the flag:
 >
-> ```toml
-> aimu = { git = "https://github.com/saxman/aimu", branch = "main" }
+> ```bash
+> git clone https://github.com/saxman/aimu    # sibling of kokua/
+> uv sync --all-extras                        # installs ../aimu editable; picks up your edits live
 > ```
 >
-> Once AIMU publishes a release with the needed features, the override goes away and this becomes a normal `uv add kokua` / `pip install kokua`.
-
-The `web` extra (`uv sync --all-extras`, or `pip install '.[web]'`) adds the browser front end; without it the CLI works alone.
+> The `aimu>=0.13.1` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
 
 ## Quick start
 
@@ -98,7 +96,7 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 - **[Plan before doing](src/kokua/planning/).** When you ask for it, the assistant drafts an explicit plan first -- which tools, skills, and MCP services it will use, what it will search for, where it needs to build a skill or connect a server -- then carries it out. Planning is per request, not a global mode: use the **Plan** toggle beside the message box, or send `/plan <task>` (which also works in the CLI).
 - **Human review.** Enable *Review the plan before executing* to pause a planned turn for your Approve / Edit / Reject; otherwise the plan runs automatically.
 - **Adversarial review.** An independent reviewer agent with no conversation context can critique the plan (Kokua re-plans on rejection) and/or the final answer before you see it (Kokua revises, up to `review_rounds`). Both are off by default and combine with human review, whose prompt shows you the critique. Reviewing the result means the answer cannot stream live: the agentic loop still streams, but the answer appears only once it passes.
-- **Reviewers check their claims.** Each reviewer is a tool-using agent that runs a bounded assessment over a curated verification toolset (current date/time, web lookup, computation) before returning a verdict, so it can confirm recency and numeric claims instead of rejecting what it cannot verify from the request alone. The toolset excludes your memory, documents, skills, and MCP servers, keeping the reviewer an independent critic with no access to your state. See [Security](#security) for a known limitation.
+- **Reviewers check their claims.** Each reviewer is a tool-using agent that runs a bounded assessment over a curated verification toolset (current date/time, web lookup, arithmetic) before returning a verdict, so it can confirm recency and numeric claims instead of rejecting what it cannot verify from the request alone. The toolset excludes your memory, documents, skills, and MCP servers, keeping the reviewer an independent critic with no access to your state, and excludes `execute_python` because a reviewer cannot be approval-gated (see [Security](#security)).
 - **Show all reasoning.** Turn it on for the full trace: every LLM call in a planned turn (planner, each reviewer, executor, each revision) streams live under a labeled phase header, and every intermediate version is shown. This overrides result review's hide-until-vetted gate; only the final answer is saved. The raw trace is recorded per turn, so reloading replays exactly what you saw rather than a summary.
 
 ### Files and media
@@ -166,7 +164,7 @@ Kokua can author and run Python/shell scripts as **real subprocesses with your u
 
 **Injection crosses conversations.** The assistant can read every saved conversation, and a transcript is untrusted text (a worker may have pasted web content into it), so an injection that lands in one conversation can influence what the assistant does in another. The three read tools are ungated by default, since they only read and gating them would make an unattended scheduled run that reads history fail silently; add `read_conversation` and `search_conversations` to `[security] confirm_tools` if you would rather approve each one.
 
-**Known limitation -- reviewer tools bypass the approval gate.** With adversarial review on, the reviewer is a tool-using agent whose verification toolset includes `execute_python` (so it can check numeric claims). Unlike the main agent it has **no** approval gate -- an autonomous critic cannot pause to ask you mid-review -- so it can run arbitrary Python unattended while reviewing. This is an intentional short-term tradeoff we intend to revisit (sandboxing the reviewer, or restricting it to `calculate`-only arithmetic). Until then, treat "review on" as granting the reviewer the same code-execution reach the main agent has.
+**The reviewer needs no gate.** With adversarial review on, the reviewer is a tool-using agent, and an autonomous critic cannot pause to ask you mid-review. Rather than exempt it from the approval gate, its verification toolset holds nothing the gate exists to cover: web lookup, `calculate`, and the clock, with no `execute_python`, no memory or document access, and no MCP mutation. A test pins this against the shipped `confirm_tools` default, so adding a name there fails the suite until the reviewer's toolset is re-checked.
 
 ## Development
 
@@ -175,7 +173,10 @@ uv sync --all-extras                                  # installs the editable ..
 uv run ruff check . && uv run ruff format --check .
 uv run pytest -q                                      # mock-only: no model, network, or keys
 uv run pytest -m e2e                                  # opt-in browser tests (playwright install chromium)
+uv run --with build --with twine python -m build && uv run --with twine twine check --strict dist/*
 ```
+
+That last line is what CI's `package` job runs before installing the wheel into a clean environment. An editable install imports straight from `src/`, so it cannot catch a resource missing from `[tool.setuptools.package-data]` or a console script pointing at a moved function; only a built wheel can.
 
 `src/kokua/` is grouped by subsystem, and `tests/` mirrors it exactly:
 
