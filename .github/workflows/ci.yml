@@ -12,15 +12,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      # Kokua needs AIMU features not yet on PyPI, so install AIMU from main first.
-      # The bare `aimu` dependency in pyproject is then already satisfied.
+      # AIMU comes from its main branch rather than PyPI on purpose: Kokua and AIMU are developed
+      # together, so this job is the early warning that an AIMU change broke Kokua. The `package`
+      # job below covers the other side, installing against the released `aimu>=0.13.1`.
       - name: Install AIMU from main
         run: pip install "aimu @ git+https://github.com/saxman/aimu@main"
       - name: Install Kokua (dev + web)
@@ -31,3 +32,51 @@ jobs:
           ruff format --check .
       - name: Test
         run: pytest -q
+
+  # An editable install cannot catch a packaging mistake: it imports straight from `src/`, so a
+  # `web_static` asset missing from `[tool.setuptools.package-data]` or a console script pointing at
+  # a moved function both pass the test job and fail for the first person to `pip install kokua`.
+  # This job builds the real artifacts and runs them from a wheel in a clean environment.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Build sdist + wheel
+        run: |
+          pip install build twine
+          python -m build
+      - name: Check distribution metadata
+        run: twine check --strict dist/*
+      # Deliberately no git install of AIMU here, unlike the test job: letting pip resolve
+      # `aimu>=0.13.1` from PyPI is what makes this job also a check that the pin is satisfiable,
+      # which is the half of a release the test job cannot see.
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install "$(ls dist/*.whl)[web]"
+      # Exercises the packaged artifact rather than the checkout: both console scripts resolve, the
+      # entry-point plugins are discoverable, and the vendored browser assets shipped in the wheel.
+      - name: Smoke-test the installed package
+        run: |
+          cd /tmp
+          /tmp/smoke/bin/kokua --list-frontends
+          /tmp/smoke/bin/kokua --list-tool-packs
+          /tmp/smoke/bin/kokua-web --help > /dev/null
+          /tmp/smoke/bin/python - <<'PY'
+          from importlib.resources import files
+
+          import kokua
+          from kokua.config.file import example_text
+
+          print("kokua", kokua.__version__)
+          # Read the resources through the same calls the app uses, so an anchor pointing at the wrong
+          # package fails here exactly as it would at runtime (see tests/test_package_data.py).
+          assert "[assistant]" in example_text(), "config.example.toml did not resolve from the wheel"
+          static = files("kokua") / "web_static"
+          assert (static / "index.html").is_file(), "web_static/index.html missing from the wheel"
+          assert any((static / "fonts").iterdir()), "vendored KaTeX fonts missing from the wheel"
+          PY
