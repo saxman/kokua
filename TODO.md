@@ -1,7 +1,7 @@
 # TODO / Backlog
 
-Captured 2026-07-14; pruned and renumbered 2026-08-13 (three resolved items removed, two release-hygiene
-items added). Backlog only, not yet scheduled. File references point at current code.
+Captured 2026-07-14; pruned and renumbered 2026-08-13 (three resolved items removed, three
+release-hygiene items added). Backlog only, not yet scheduled. File references point at current code.
 
 ## 1. Make session-level config overrides visible
 When the web settings panel (`config/table.py`'s `RUNTIME_SETTINGS`) or a mid-session `/model` switch
@@ -105,7 +105,23 @@ for an ordinary `pip install kokua`. Decide whether 0.1.0 goes to PyPI, and if s
 workflow using trusted publishing rather than a stored token. If Kokua stays source-installed for now,
 say so in the README and leave the name unclaimed deliberately rather than by omission.
 
-## 11. Add a SECURITY.md
+## 11. Decide whether to adopt ruff 0.16's default rule set
+`[project.optional-dependencies] dev` pins `ruff>=0.15,<0.16` so CI's lint verdict matches the local
+one. 0.16 widened the defaults considerably and reports 312 findings on a tree that lints clean under
+0.15, of which 234 are auto-fixable. The bulk is mechanical (`UP045` non-pep604-annotation-optional at
+130, `I001` unsorted-imports at 51, `UP035` deprecated-import at 25), but the remainder is worth reading
+rather than fixing blind: 13 naive-datetime findings between `DTZ001` and `DTZ005`, six of them in
+`scheduling/tools.py`, where local-time arithmetic is the intended semantics (a daily task fires at
+09:00 where the user is); `B023` function-uses-loop-variable (7); `RUF059` unused-unpacked-variable
+(35); and `BLE001` blind-except (7), spread across `core/turns.py`, `core/assistant.py`,
+`core/diagnostics.py`, and `channels/web.py` -- the deliberate catch-and-report paths that exist so a
+failure reaches the channel instead of killing a turn.
+
+Decide as one change: adopt with an explicit `[tool.ruff.lint] select`, apply the auto-fixes in a
+commit that does nothing else, and either fix or `noqa`-with-a-reason the judgment calls. Raising the
+pin without that is how a linter upgrade turns into an unreviewed diff across the tree.
+
+## 12. Add a SECURITY.md
 The README's Security section is thorough about the threat model -- unsandboxed subprocesses with the
 user's privileges, prompt injection crossing conversations -- but there is no `SECURITY.md`, so a
 reporter has no stated channel or expectation. Add one covering how to report, what is in scope (the

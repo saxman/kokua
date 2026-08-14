@@ -39,7 +39,12 @@ web = [
     "uvicorn>=0.30",
 ]
 dev = [
-    "ruff",
+    # Pinned to a minor range, because an unpinned linter makes CI's verdict drift from the one you
+    # get locally: `uv run` resolves ruff through uv.lock, while CI installs with pip and no lock, so
+    # it picked up 0.16, whose default rule set is far wider (UP, I, RUF, DTZ, B, TRY...) and which
+    # reported 312 findings on a tree that lints clean here. Adopting that set is a deliberate change,
+    # not something a fresh CI run should decide (see TODO.md). Matches AIMU's own pin.
+    "ruff>=0.15,<0.16",
     "pytest",
     "pytest-asyncio",
     # Browser-driven end-to-end tests of the web UI's client JS (opt-in: `pytest -m e2e`).
