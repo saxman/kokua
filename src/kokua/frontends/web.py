@@ -285,7 +285,9 @@ def serve(config: AssistantConfig, **uvicorn_kwargs) -> None:
 
 
 def main() -> None:
-    # The `kokua-web` convenience script: resolve config (defaults < file < flags), then serve.
+    # Resolve config (defaults < file < flags), then serve. The `kokua-web` console script reaches
+    # this through `cli.main_web`, which runs the AIMU preflight first: importing *this* module
+    # already pulls in the AIMU surface that preflight exists to check, so the check cannot live here.
     from ..cli import build_arg_parser, resolve_config
 
     args = build_arg_parser("kokua-web").parse_args()

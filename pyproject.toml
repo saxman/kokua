@@ -14,16 +14,16 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# Kokua uses AIMU features that are on `main` but not yet in a published release
-# (aio.channels/Scheduler, make_document_tools, MCPClient url=). The PyPI build of AIMU
-# carries the same version string but lacks these, so the dependency is sourced from the
-# local checkout via [tool.uv.sources] below (editable). `uv sync` installs that, not PyPI.
-# TODO: pin `aimu>=<next-release>` and drop the source override once those features ship.
+# 0.13.1 is the first AIMU release carrying everything Kokua needs (aio.channels/Scheduler,
+# SubagentObserver, make_document_tools, MCPClient url=, `response` on the web tool frame). This
+# floor is what ships in the wheel and what a PyPI install resolves; [tool.uv.sources] below
+# separately redirects development installs to the sibling checkout.
 dependencies = [
-    "aimu[ollama,openai_compat]",
+    "aimu[ollama,openai_compat]>=0.13.1",
     # Markdown -> PDF for the built-in `pdf` tool-pack (both pure-Python, no system libraries).
     "fpdf2>=2.7",
     "markdown>=3.5",
@@ -52,11 +52,12 @@ Homepage = "https://github.com/saxman/kokua"
 Repository = "https://github.com/saxman/kokua"
 Changelog = "https://github.com/saxman/kokua/blob/main/CHANGELOG.md"
 
-# `kokua` runs the selected front end (default: cli). `kokua-web` is a convenience
-# for `kokua --frontend web`.
+# `kokua` runs the selected front end (default: cli). `kokua-web` is a convenience for
+# `kokua --frontend web`; both go through `cli` so they share the AIMU preflight (see
+# `aimu_compat`), which has to run before anything imports the web front end.
 [project.scripts]
 kokua = "kokua.cli:main"
-kokua-web = "kokua.frontends.web:main"
+kokua-web = "kokua.cli:main_web"
 
 # Built-in plugins, registered like any third-party module would be. Install a package
 # that adds an entry point under these groups and Kokua discovers it at runtime.
@@ -71,10 +72,18 @@ pdf = "kokua.toolpacks.pdf:TOOL_PACK"
 image = "kokua.toolpacks.image:TOOL_PACK"
 email = "kokua.toolpacks.email:TOOL_PACK"
 
-# Source AIMU from the sibling checkout so `uv sync` installs the local editable copy
-# instead of the (stale, same-versioned) PyPI build. Path is relative to this file, so it
-# requires `../aimu` to exist. For CI or a fresh clone without it, swap to a git source:
-#   aimu = { git = "https://github.com/saxman/aimu", branch = "main" }
+# Kokua and AIMU are developed together, so a `uv sync` here installs the sibling checkout
+# editable: architectural changes can move code across the boundary and be exercised
+# immediately, without a release round-trip.
+#
+# Note what this does NOT do: uv installs a path source without checking it against the
+# version specifier above (verified -- a declared `aimu>=0.99.0` installs a 0.13.1 sibling and
+# locks it without complaint). So the floor governs a `pip install kokua` and nothing else, and
+# an out-of-date sibling is caught at startup by `kokua.aimu_compat` instead.
+#
+# The path is relative to this file, so `../aimu` must exist. Without it (CI, a fresh clone,
+# or anyone who just wants to run Kokua), ignore this table: `uv sync --no-sources` resolves
+# AIMU from PyPI instead. Nothing here needs editing.
 [tool.uv.sources]
 aimu = { path = "../aimu", editable = true }
 

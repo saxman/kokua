@@ -12,6 +12,7 @@ uv run pytest -m e2e                      # opt-in browser UI tests (needs `play
 uv run ruff check . && uv run ruff format --check .      # lint (format with `ruff format .`)
 uv run kokua --frontend web              # run the web UI (or `kokua-web`); `kokua` alone is the CLI
 uv run kokua config init                 # scaffold $KOKUA_HOME/config.toml from the documented example
+uv run --with build python -m build      # build sdist + wheel (what CI's `package` job verifies)
 ```
 
 Line length is 120 (configured in `pyproject.toml`). Run lint + tests before committing; update
@@ -19,12 +20,31 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and uses features on AIMU's `main`
-that are not yet in a published release. `[tool.uv.sources]` in `pyproject.toml` pins
-`aimu = { path = "../aimu", editable = true }`, so a sibling `../aimu` checkout must exist and `uv sync`
-installs it live. The trap: the PyPI build of AIMU carries the same version string but lacks these
-features, so a plain install silently gives you the wrong AIMU. For CI or a clone without `../aimu`, swap
-that source for the git one noted in `pyproject.toml`.
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.13.1`. That
+floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
+`{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
+projects are developed together and architectural changes move code across the boundary.
+
+Consequences for working in this repo:
+
+- **The version floor does not constrain your sibling checkout.** uv installs a path source without
+  checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
+  without complaint), so `>=0.13.1` governs an installed Kokua and nothing about your working copy.
+  Do not read the pin as a guarantee about the AIMU you are running.
+- **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
+  catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
+  fix. Both halves earn their place: the probe catches a checkout whose declared version already reads
+  new enough while the code behind it does not (an editable install's version says what its branch
+  claims), and the floor catches the capabilities that are not importable symbols -- AIMU 0.13.1 added
+  the tool result to its web `tool` frame, which no `getattr` can detect and which would otherwise
+  degrade silently to tool cards with no output. If you add a Kokua feature needing a newer AIMU, raise
+  `MINIMUM_AIMU` and the `pyproject.toml` floor in the same commit, and update `_PROBE_SYMBOL` when the
+  new surface is an importable name.
+- **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
+  from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
+- **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is
+  `cli:main_web`, not `frontends.web:main`, because importing the web front end pulls in the AIMU surface
+  the preflight checks.
 
 ## Design principles
 

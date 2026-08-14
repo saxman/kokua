@@ -16,6 +16,7 @@ import asyncio
 import sys
 
 from . import plugins
+from .aimu_compat import AimuVersionError, require_aimu
 from kokua.config import file as settings
 from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
 from .logging_setup import configure_logging
@@ -163,6 +164,19 @@ def _init_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def preflight() -> None:
+    """Fail with an instruction, not a traceback, when the installed AIMU is too old.
+
+    Shared by both console scripts. Runs before anything imports a front end, since that is what pulls
+    in the AIMU surface whose absence would otherwise surface as a bare ``ImportError``.
+    """
+    try:
+        require_aimu()
+    except AimuVersionError as e:
+        print(e, file=sys.stderr)
+        raise SystemExit(2) from None
+
+
 def main() -> None:
     parser = build_arg_parser()
     args = parser.parse_args()
@@ -172,6 +186,8 @@ def main() -> None:
             raise SystemExit(_init_config(args))
         parser.parse_args(["config", "--help"])  # no/unknown subcommand: show config usage and exit.
         return
+
+    preflight()
 
     if args.list_frontends:
         for name, frontend in sorted(plugins.discover_frontends().items()):
@@ -202,6 +218,19 @@ def main() -> None:
     except ConfigError as e:  # raised at boot, e.g. a config that defines no sub-agent roles
         print(e, file=sys.stderr)
         raise SystemExit(2) from None
+
+
+def main_web() -> None:
+    """The `kokua-web` console script: preflight, then hand off to the web front end's own `main`.
+
+    A thin wrapper rather than pointing the script straight at `kokua.frontends.web:main`, because
+    importing that module pulls in the AIMU surface `preflight` checks, so the check has to happen
+    before the import rather than inside it.
+    """
+    preflight()
+    from .frontends.web import main as web_main
+
+    web_main()
 
 
 if __name__ == "__main__":
