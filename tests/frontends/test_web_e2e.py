@@ -433,11 +433,30 @@ def test_a_call_with_no_recorded_result_renders_no_output_section(page, live_ser
     expect(tool.locator(".bubble.tool-output")).to_have_count(0)
 
 
-def test_reviewer_card_still_renders_with_its_own_icon(page, live_server):
+def test_a_collapsed_tool_line_names_the_call_and_its_result_size(page, live_server):
+    """Everything in the transcript stays folded, so the one always-visible line has to carry the
+    call. The arguments ride the header (ellipsized, never wrapped) and the result size sits at the
+    right, so a reader learns what was called and what it cost without opening anything."""
+    _open(page, live_server(delay=0.0, seed=_seed_tool_call("the page body")))
+    tool = page.locator(".bubble.tool")
+    expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
+
+    label = tool.locator("> .fold-header > .fold-label")
+    expect(label.locator(".fold-kind")).to_have_text("tool")
+    expect(label.locator(".fold-payload")).to_have_text('get_webpage(url="u")')
+    expect(label.locator(".fold-metric")).to_have_text("13 chars")
+
+    # One line tall regardless of argument length: the payload ellipsizes, the row never wraps.
+    header = tool.locator("> .fold-header")
+    line_height = header.evaluate("el => parseFloat(getComputedStyle(el).lineHeight)")
+    assert header.bounding_box()["height"] < line_height * 1.8
+
+
+def test_reviewer_card_is_distinguishable_from_a_spawn(page, live_server):
     """A planning reviewer's verdict shares the same card frame and persisted map as a spawn's card
-    (see `renderSubagent`), which is exactly the regression risk finding C caught: the icon is the
-    only at-a-glance way to tell the two apart, and it must stay 🔎 for a reviewer rather than take
-    the tool-call look a spawn gets: no tool call backs a reviewer's verdict."""
+    (see `renderSubagent`), and the kind word is the only at-a-glance way to tell the two apart: a
+    reviewer reads "review" and must not take the tool-call look a spawn gets, since no tool call
+    backs a reviewer's verdict."""
     from aimu.sessions import Session, TinyDBSessionStore
 
     def seed(config):
@@ -461,7 +480,7 @@ def test_reviewer_card_still_renders_with_its_own_icon(page, live_server):
     card = page.locator(".bubble.subagent")
     expect(card).to_have_count(1)
     expect(card).not_to_have_class(re.compile(r"\bspawn\b"))
-    expect(card.locator(".fold-label")).to_contain_text("🔎")
+    expect(card.locator(".fold-kind")).to_have_text("review")
     expect(card.locator(".fold-label")).to_contain_text("Plan reviewer")
     expect(card.locator(".sa-args")).to_have_count(0)
     card.locator(".fold-header").click()

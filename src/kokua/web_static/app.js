@@ -221,7 +221,7 @@ function renderSubagent(frame, ts) {
   let card = frame.id ? subagentCards[frame.id] : null;
   if (!card) {
     const spawn = !!frame.task;
-    card = addFoldable("subagent" + (spawn ? " spawn" : ""), "", { md: true }, ts);  // stamp once, when first created
+    card = addFoldable("subagent" + (spawn ? " spawn" : ""), {}, { md: true }, ts);  // stamp once, when first created
     if (frame.id) subagentCards[frame.id] = card;
     card.spawn = spawn;
     card.answers = [];  // every generated-text block, re-rendered as markdown when the spawn ends
@@ -229,7 +229,7 @@ function renderSubagent(frame, ts) {
     // An `append` frame carries no role or status, so a card first created by one has no identity to
     // put on its header. Label it anyway: an empty header reads as a broken block rather than as the
     // sub-agent output it holds. Overwritten below by the first frame that does carry identity.
-    card.label.textContent = "🔎 Sub-agent — working…";
+    setFoldLabel(card.label, "subagent", "Sub-agent", "working…");
   }
   if (frame.append) appendSubagentEntry(card, frame.append);
   // A spawn's finish frame carries both `status` and `append` together, and no `role` of its own
@@ -242,10 +242,10 @@ function renderSubagent(frame, ts) {
     const status = subagentStatusLabel(frame.status, card.spawn);
     // A spawn reads as the call it replaces; the role sits in the header because it is what
     // tells several concurrent spawns apart while they are all collapsed. Its full arguments,
-    // task included, are on the card's own argument line.
-    card.label.textContent = card.spawn
-      ? "🔧 " + SPAWN_TOOL_NAME + "(" + role + ") — " + status
-      : "🔎 " + role + " — " + status;
+    // task included, are on the card's own argument line. The kind word is what tells a reviewer's
+    // card from a spawn's at a glance, which is the job the 🔎/🔧 icons used to do.
+    if (card.spawn) setFoldLabel(card.label, "subagent", SPAWN_TOOL_NAME + "(" + role + ")", status);
+    else setFoldLabel(card.label, "review", role, status);
     if (frame.issues && frame.issues.length && frame.status !== "running") {
       const issuesMd = frame.issues.map((i) => "- " + i).join("\n");
       const html = renderMarkdown(issuesMd);
@@ -290,8 +290,9 @@ function spawnArgsLine(frame) {
 function appendSubagentEntry(card, entry) {
   if (entry.kind === "reasoning") {
     card.answer = null;
-    if (!card.reasoning) card.reasoning = addFoldable("thinking", "💭 thinking", { parent: card.body }).body;
-    card.reasoning.appendChild(document.createTextNode(entry.text || ""));
+    if (!card.reasoning) card.reasoning = addFoldable("thinking", { kind: "thinking" }, { parent: card.body });
+    card.reasoning.body.appendChild(document.createTextNode(entry.text || ""));
+    setFoldLabel(card.reasoning.label, "thinking", "", lineMetric(card.reasoning.body.textContent));
     return;
   }
   card.reasoning = null;
@@ -304,7 +305,13 @@ function appendSubagentEntry(card, entry) {
     card.answer = null;
     const el = document.createElement("div");
     el.className = "sa-error";
-    el.textContent = "⚠️ " + (entry.text || "");
+    // Carries the same kind word every other block does, so the transcript reads one way throughout.
+    // Not a foldable: a failure is one short line and the reason the reader is looking.
+    const kind = document.createElement("span");
+    kind.className = "fold-kind";
+    kind.textContent = "error";
+    el.appendChild(kind);
+    el.appendChild(document.createTextNode(entry.text || ""));
     card.body.appendChild(el);
     return;
   }
@@ -312,7 +319,7 @@ function appendSubagentEntry(card, entry) {
   // terminal status, the same two steps the assistant's own reply takes (see finalizeStreaming).
   // Expanded from the start, since it is the result a reader opens the card for.
   if (!card.answer) {
-    const block = addFoldable("assistant", "💬 answer", { parent: card.body, expanded: true });
+    const block = addFoldable("assistant", { kind: "answer" }, { parent: card.body, expanded: true });
     card.answer = { body: block.body, text: "" };
     card.answers.push(card.answer);
   }
@@ -396,14 +403,37 @@ function addBubble(cls, text, ts) {
 
 function notice(text) { addBubble("notice", text); }
 
+// A collapsed row's label, in three parts: the kind word, the payload (the call with its condensed
+// arguments), and an optional metric. They are separate spans so the payload is the only part that
+// ellipsizes, which is what keeps a row exactly one line tall however long the arguments are. All
+// three live inside .fold-label, so the label's text is still the whole line.
+function setFoldLabel(label, kind, payload, metric) {
+  label.replaceChildren();
+  for (const [cls, text] of [["fold-kind", kind], ["fold-payload", payload], ["fold-metric", metric]]) {
+    if (!text) continue;
+    const span = document.createElement("span");
+    span.className = cls;
+    span.textContent = text;
+    label.appendChild(span);
+  }
+}
+
+// "N lines" for a folded text block. With the body hidden by default this count is the only signal
+// that reasoning happened at all, and roughly how much of it there was.
+function lineMetric(text) {
+  const lines = (text || "").split("\n").length;
+  return lines + (lines === 1 ? " line" : " lines");
+}
+
 // A foldable auxiliary block: a header (identifying label, always visible) over a body (verbose
 // detail, hidden until expanded). Starts collapsed. Returns handles so callers can populate/stream
-// into `body` and update `label` (e.g. a sub-agent card whose status changes). `opts.md` marks the
-// body as markdown-rendered content (drops plain-text pre-wrap; see the .md rules).
-// `opts.parent` places the block inside another element instead of the transcript, which is how a
-// sub-agent card's nested blocks are the very same components as their top-level counterparts;
+// into `body` and update `label` (e.g. a sub-agent card whose status changes). `labelParts` is
+// `{kind, payload, metric}`; only the payload ellipsizes, so the arguments belong there.
+// `opts.md` marks the body as markdown-rendered content (drops plain-text pre-wrap; see the .md
+// rules). `opts.parent` places the block inside another element instead of the transcript, which is
+// how a sub-agent card's nested blocks are the very same components as their top-level counterparts;
 // `opts.expanded` starts it open, for a block whose content is the point rather than the detail.
-function addFoldable(cls, headerText, opts, ts) {
+function addFoldable(cls, labelParts, opts, ts) {
   const expanded = !!(opts && opts.expanded);
   const outer = document.createElement("div");
   outer.className = "bubble foldable " + (expanded ? "" : "collapsed ") + cls;
@@ -416,9 +446,9 @@ function addFoldable(cls, headerText, opts, ts) {
   tri.textContent = expanded ? "▾" : "▸";
   const label = document.createElement("span");
   label.className = "fold-label";
-  label.textContent = headerText || "";
+  const parts = labelParts || {};
+  setFoldLabel(label, parts.kind, parts.payload, parts.metric);
   header.appendChild(tri);
-  header.appendChild(document.createTextNode(" "));
   header.appendChild(label);
   stampHeader(header, ts);  // rides the header so it stays visible while collapsed
   const body = document.createElement("div");
@@ -568,7 +598,7 @@ function renderToolOutput(parent, response) {
   const size = response.length.toLocaleString();
   // Not also `.tool`: that would make `.bubble.tool` match a card and its own output. The monospace
   // type and colour are inherited properties, so they arrive from the enclosing card regardless.
-  addFoldable("tool-output", `↳ output (${size} chars)`, {
+  addFoldable("tool-output", { kind: "output", metric: `${size} chars` }, {
     parent,
     onFirstExpand: (body) => {
       const text = document.createElement("span");
@@ -589,21 +619,25 @@ function renderToolOutput(parent, response) {
   });
 }
 
-// Foldable tool / continuation blocks. Header carries the identifying name; body holds the verbose
-// detail (arguments, injected prompt) and, for a tool call, the result it returned. Shared by live
-// frames, history replay, and (via `opts.parent`) a sub-agent card's nested tool calls.
+// Foldable tool / continuation blocks. The header carries the call and its condensed arguments, so a
+// folded row says what was called without being opened; the body holds the full untruncated arguments
+// and, for a tool call, the result it returned. Shared by live frames, history replay, and (via
+// `opts.parent`) a sub-agent card's nested tool calls.
 function renderTool(name, args, ts, opts) {
-  const f = addFoldable("tool", "🔧 " + (name || "tool"), { parent: opts && opts.parent }, ts);
-  f.body.appendChild(document.createTextNode(toolArgs(args)));
   // An absent response means no result was recorded (a transcript stored before results were
   // replayed, a turn cut short mid-dispatch); an empty one means the tool returned nothing. Neither
   // has anything to show, and an "output (0 chars)" row on every such card would be noise.
   const response = opts && opts.response;
-  if (typeof response === "string" && response) renderToolOutput(f.body, response);
+  const returned = typeof response === "string" && response;
+  const metric = returned ? `${response.length.toLocaleString()} chars` : "";
+  const parts = { kind: "tool", payload: toolLine(name, args), metric };
+  const f = addFoldable("tool", parts, { parent: opts && opts.parent }, ts);
+  f.body.appendChild(document.createTextNode(toolArgs(args)));
+  if (returned) renderToolOutput(f.body, response);
   return f;
 }
 function renderLoop(text, ts) {
-  const f = addFoldable("loop", "↻ continuation", undefined, ts);
+  const f = addFoldable("loop", { kind: "continuation" }, undefined, ts);
   f.body.textContent = text || "";
   return f;
 }
@@ -611,7 +645,7 @@ function renderLoop(text, ts) {
 // A deep-planning plan as its own foldable, markdown-rendered. Shared by the live `plan` frame and
 // the catch-up replay of a planned turn still in flight.
 function renderPlan(text) {
-  const f = addFoldable("plan", "📋 plan", { md: true });
+  const f = addFoldable("plan", { kind: "plan" }, { md: true });
   const html = renderMarkdown(text);
   if (html === null) f.body.textContent = text || "";
   else {
@@ -624,7 +658,8 @@ function renderPlan(text) {
 // Verbose-trace phase header: a labeled divider (e.g. "Planner · drafting a plan"). Shared by the
 // live `phase` frame and history replay so both render the raw trace identically.
 function renderPhase(label, detail, ts) {
-  const f = addFoldable("phase", label || "", undefined, ts);
+  // A phase is a labelled divider rather than an event row, so its label is the payload alone.
+  const f = addFoldable("phase", { payload: label || "" }, undefined, ts);
   if (detail) f.body.textContent = "· " + detail;
   return f.outer;
 }
@@ -634,10 +669,12 @@ ws.onmessage = (event) => {
   // Blocks are appended in arrival order (thinking -> tool -> answer, possibly several
   // rounds per turn). A tool call or answer token closes any open thinking block.
   if (frame.type === "thinking") {
-    // thinkingBlock points at the foldable body so streamed tokens accumulate inside it (collapsed
-    // by default; the user expands to watch it).
-    if (!thinkingBlock) thinkingBlock = addFoldable("thinking", "💭 thinking", undefined, new Date()).body;
-    thinkingBlock.appendChild(document.createTextNode(frame.text));
+    // thinkingBlock holds the whole foldable, not just its body: tokens accumulate in the body
+    // (collapsed by default; the user expands to watch it), and with the body hidden the line count
+    // on the header is the only thing that shows reasoning happened, so it grows as tokens land.
+    if (!thinkingBlock) thinkingBlock = addFoldable("thinking", { kind: "thinking" }, undefined, new Date());
+    thinkingBlock.body.appendChild(document.createTextNode(frame.text));
+    setFoldLabel(thinkingBlock.label, "thinking", "", lineMetric(thinkingBlock.body.textContent));
     autoscroll();
   } else if (frame.type === "tool") {
     thinkingBlock = null;
@@ -716,7 +753,11 @@ ws.onmessage = (event) => {
       else if (item.type === "partial") { streamingText = item.text || ""; streamingBubble = addBubble("assistant", streamingText); }
       else if (item.type === "plan") renderPlan(item.text);
       else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user", item.ts);
-      else if (item.type === "thinking") addFoldable("thinking", "💭 thinking", undefined, item.ts).body.textContent = item.text || "";
+      else if (item.type === "thinking") {
+        const f = addFoldable("thinking", { kind: "thinking" }, undefined, item.ts);
+        f.body.textContent = item.text || "";
+        setFoldLabel(f.label, "thinking", "", lineMetric(item.text));
+      }
       else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response });
       else if (item.type === "loop") renderLoop(item.text, item.ts);
       else if (item.type === "subagent") renderSubagent(item, item.ts);
