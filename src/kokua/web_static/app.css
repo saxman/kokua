@@ -96,7 +96,7 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .notification-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px;
   background: var(--attention); border: 1px solid var(--attention-border); border-radius: 10px;
   padding: 8px 14px; font-size: 0.9em; }
-.notification-banner button { padding: 2px 10px; font-size: 0.85em; background: var(--fg-dim); }
+.notification-banner button { padding: 2px 10px; font-size: 0.85em; }
 /* A flat transcript: one left-aligned column, no fills, no alignment flip. The rhythm comes from
    per-row margins rather than a flex gap, so the space between two turns can be wider than the space
    between one turn's own blocks. */
@@ -214,15 +214,32 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .approval code { font-family: ui-monospace, monospace; font-size: 0.85em; }
 .approval .actions { display: flex; gap: 8px; }
 .approval button { padding: 6px 14px; font-size: 0.85em; }
-.approval button.deny { background: var(--fg-dim); }
-form { display: flex; gap: 8px; padding: 12px 16px; background: var(--surface); border-top: 1px solid var(--border); }
-#msg { flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 1em; background: var(--surface); color: var(--fg); }
-button { padding: 10px 18px; border: none; border-radius: 10px; background: var(--accent); color: var(--accent-fg); font-size: 1em; cursor: pointer; }
+/* Deny is the safe answer, so it is the quiet one: allowing a gated call is the deliberate act. */
+.approval button.deny { background: none; border-color: var(--attention-border); color: var(--fg-dim); }
+.approval button.deny:hover { color: var(--fg); }
+/* One bordered box holding the text area and its controls, so the composer reads as a single field
+   rather than a row of five peers. */
+form { display: flex; flex-direction: column; gap: 8px; margin: 8px 16px 16px; padding: 10px 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+form:focus-within { border-color: var(--accent); }
+#msg { width: 100%; border: none; background: none; color: var(--fg); font: inherit; font-size: 0.98em;
+  line-height: 1.5; resize: none; overflow-y: hidden; padding: 0; }
+#msg:focus { outline: none; }
+#msg:disabled { color: var(--fg-faint); }
+#composer-actions { display: flex; align-items: center; gap: 8px; }
+#composer-actions .spacer { flex: 1; }
+
+button { padding: 6px 14px; border: 1px solid transparent; border-radius: 8px; background: var(--accent);
+  color: var(--accent-fg); font-size: 0.88em; cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: default; }
 /* Per-request planning toggle in the composer: off looks like a plain outlined button; on is filled. */
-#plan-toggle { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
+#attach-btn, #plan-toggle { background: none; border-color: var(--border); color: var(--fg-dim); }
+#attach-btn:hover, #plan-toggle:hover { color: var(--fg); }
 #plan-toggle.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
-#attach-btn { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
+#stop { background: none; border-color: var(--border); color: var(--fg-dim); }
+#stop:hover { color: var(--fg); border-color: var(--fg-dim); }
+button.secondary, .notification-banner button { background: none; border-color: var(--border);
+  color: var(--fg-dim); }
 /* An inline image, in the composer preview row or a chat bubble. */
 .bubble.image { padding: 0; background: transparent; border: none; overflow: hidden; }
 .bubble.image img { max-width: 100%; border-radius: 12px; display: block; }
@@ -239,7 +256,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .bubble-ts { display: block; margin-top: 2px; }
 .fold-ts { flex: none; margin-left: 8px; }
 .bubble:hover > .bubble-ts, .fold-header:hover > .fold-ts { opacity: 1; }
-.attach-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px 0; }
+.attach-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 8px; }
 .attach-previews .chip { position: relative; }
 .attach-previews img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }
 .attach-previews .remove { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0;
@@ -250,16 +267,16 @@ button:disabled { opacity: 0.5; cursor: default; }
 #settings-btn:hover { color: var(--fg); background: var(--surface); }
 /* Settings modal */
 .hidden { display: none !important; }
-.modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-card { background: var(--surface); color: var(--fg); border: 1px solid var(--border); border-radius: 12px;
-  padding: 20px 22px; width: 420px; max-width: 92vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); }
-.modal-card h2 { margin: 0 0 12px; font-size: 1.2em; }
+  padding: 20px 22px; width: 440px; max-width: 92vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18); }
+.modal-card h2 { margin: 0 0 14px; font-size: 1.05em; }
 #settings-form { display: flex; flex-direction: column; gap: 10px; }
 #settings-form fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
-#settings-form legend { padding: 0 6px; font-weight: 600; }
+#settings-form legend { padding: 0 6px; font-size: 0.82em; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--fg-faint); }
 .field { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.9em; }
 .field input, .field select { width: 55%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--fg); font-size: 0.95em; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 0.9em; }
 .hint { font-size: 0.78em; color: var(--fg-dim); margin: 2px 0 0; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
-button.secondary { background: var(--fg-dim); }

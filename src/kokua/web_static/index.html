@@ -61,13 +61,22 @@
       <div id="notifications"></div>
       <div id="log"></div>
       <div id="attach-previews" class="attach-previews hidden"></div>
+      <!-- #send and #stop keep separate ids and separate handlers, with only one in the DOM at a time
+           (setProcessing toggles .hidden). `disabled` stays the connection state that ws.onopen and
+           ws.onclose manage; `.hidden` is the turn state. Two concerns, two attributes, so neither
+           button has to work out which thing it currently is. -->
       <form id="form">
         <input id="image-input" type="file" accept="image/*" multiple hidden />
-        <button id="attach-btn" type="button" title="Attach image">📎</button>
-        <input id="msg" autocomplete="off" placeholder="Message your assistant..." autofocus />
-        <button id="plan-toggle" type="button" title="Plan this request before acting" aria-pressed="false">Plan</button>
-        <button id="send" type="submit">Send</button>
-        <button id="stop" type="button" disabled>Stop</button>
+        <textarea id="msg" rows="1" autocomplete="off"
+                  placeholder="Message your assistant..." autofocus></textarea>
+        <div id="composer-actions">
+          <button id="attach-btn" type="button" title="Attach image">📎</button>
+          <button id="plan-toggle" type="button" title="Plan this request before acting"
+                  aria-pressed="false">Plan</button>
+          <span class="spacer"></span>
+          <button id="send" type="submit">Send</button>
+          <button id="stop" type="button" class="hidden">Stop</button>
+        </div>
       </form>
     </main>
   </div>

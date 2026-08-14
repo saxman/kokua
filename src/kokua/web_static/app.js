@@ -371,10 +371,15 @@ function finalizeSubagentCard(card) {
   }
 }
 
-// Stop is only meaningful while a reactive turn is being processed: enabled when the user sends,
-// disabled when the turn ends (a `done` frame, or a non-proactive `message` for "(stopped)"/errors).
+// A turn is being processed: Stop takes the primary slot for its duration (a `done` frame, or a
+// non-proactive `message` for "(stopped)"/errors, hands it back). Also called with false on a
+// `history` frame (a view change) and with the `working` frame's state, so the composer always
+// describes the conversation being viewed rather than the last one to start a turn. Without that
+// reset, switching away from a running turn would leave the new conversation showing Stop and no way
+// to send at all.
 function setProcessing(active) {
-  stopBtn.disabled = !active;
+  sendBtn.classList.toggle("hidden", active);
+  stopBtn.classList.toggle("hidden", !active);
 }
 
 // Follow streamed output only while the user is already at the bottom. Once they scroll up we
@@ -760,6 +765,7 @@ ws.onmessage = (event) => {
     showNotification(frame.text);
   } else if (frame.type === "working") {
     setWorking(!!frame.active);
+    setProcessing(!!frame.active);
   } else if (frame.type === "approval") {
     renderApproval(frame.name, frame.arguments);
   } else if (frame.type === "plan") {
@@ -785,6 +791,7 @@ ws.onmessage = (event) => {
     thinkingBlock = null;
     stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
     setWorking(false);  // reset; a "working" frame right behind this one re-shows it if still running
+    setProcessing(false);  // same for the composer: idle unless that "working" frame says otherwise
     for (const item of frame.items) {
       if (item.type === "user") addBubble("user", item.text, item.ts);
       // An in-flight turn's answer so far: left open (and unstamped), so the rest streams into it.
@@ -901,6 +908,26 @@ ws.onclose = () => {
   setWorking(false);
 };
 
+// Grow the box with its content up to a cap, then scroll. A one-line <input> made a multi-line
+// message impossible to type at all.
+const MSG_MAX_ROWS = 8;
+function autoGrowInput() {
+  input.style.height = "auto";
+  const lineHeight = parseFloat(getComputedStyle(input).lineHeight) || 20;
+  const max = lineHeight * MSG_MAX_ROWS;
+  input.style.height = Math.min(input.scrollHeight, max) + "px";
+  input.style.overflowY = input.scrollHeight > max ? "auto" : "hidden";
+}
+input.addEventListener("input", autoGrowInput);
+
+// A textarea does not submit its form on Enter, so this is what sends. `isComposing` is the guard that
+// keeps an IME's Enter (accepting a candidate) from sending a half-typed message.
+input.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  form.requestSubmit();
+});
+
 // Plan toggle: a sticky per-request switch. While on, each sent message is planned (drafted, then
 // executed) by wrapping it as "/plan <text>" -- the same command the server already handles -- while
 // the chat still shows the user's own words. Stays on across turns until clicked off.
@@ -972,6 +999,7 @@ form.addEventListener("submit", (e) => {
     ws.send(outgoing);
   }
   input.value = "";
+  autoGrowInput();  // collapse the box back to one row
   setProcessing(true);  // a turn is now being processed; allow stopping it
 });
 

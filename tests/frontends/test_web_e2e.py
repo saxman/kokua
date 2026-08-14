@@ -149,6 +149,48 @@ def test_send_message_renders_reply(page, live_server):
     expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
 
 
+def test_send_and_stop_swap_places(page, live_server):
+    """One primary action, never a disabled button: Send is replaced by Stop for the duration of a
+    turn. Switching conversations mid-turn must hand Send back, or the composer of the conversation you
+    switched into would be unusable."""
+    _open(page, live_server(delay=3.0))
+    send, stop = page.locator("#send"), page.locator("#stop")
+    expect(send).to_be_visible()
+    expect(stop).to_be_hidden()
+
+    page.fill("#msg", "ping")
+    send.click()
+    expect(stop).to_be_visible()
+    expect(send).to_be_hidden()
+
+    page.click("#new-conv")  # switching away leaves that turn running in the background
+    expect(send).to_be_visible()  # ...and this conversation is idle, so it can be typed into
+    expect(stop).to_be_hidden()
+
+    page.locator("#conv-list li").nth(1).click()  # back into the still-running conversation
+    expect(stop).to_be_visible()  # the composer follows the conversation you are viewing
+    expect(stop).to_be_hidden(timeout=10_000)  # ...and hands Send back when that turn ends
+
+
+def test_enter_sends_and_shift_enter_makes_a_newline(page, live_server):
+    """A textarea, not an input: a message can contain a newline. Enter still sends, because a chat
+    composer that needs a button click for every message is worse than the multi-line it enables."""
+    _open(page, live_server(delay=0.0))
+    box = page.locator("#msg")
+    box.click()
+    box.type("first")
+    page.keyboard.press("Shift+Enter")
+    box.type("second")
+    assert box.input_value() == "first\nsecond"
+
+    page.keyboard.press("Enter")
+    expect(page.locator(".bubble.user", has_text="first")).to_be_visible()
+    assert box.input_value() == ""
+    # Exactly one: the keydown handler calls requestSubmit(), and a second listener or a surviving
+    # native submit would echo the message twice.
+    expect(page.locator(".bubble.user")).to_have_count(1)
+
+
 def test_bubbles_show_timestamp_caption(page, live_server):
     """The user bubble and the streamed reply each carry a datetime caption (`.bubble-ts`)."""
     _open(page, live_server(delay=0.0))

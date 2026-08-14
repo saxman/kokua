@@ -329,17 +329,19 @@ arrive; nested reasoning honors `show_thinking` and nested tool calls honor `sho
 the top-level turn uses, while the card itself and its generated text always show.
 
 A card's body is built from the page's own top-level components, not from card-specific markup:
-`addFoldable` and `renderTool` take an optional parent element (`opts.parent`), so a nested `💭 thinking`
-or `🔧 <name>` block is literally the same builder (and the same CSS) as its top-level counterpart --
+`addFoldable` and `renderTool` take an optional parent element (`opts.parent`), so a nested `thinking`
+or `tool <name>` row is literally the same builder (and the same CSS) as its top-level counterpart --
 including the nested output foldable, so a spawn's own tool calls show their results too. The
 generated text is an assistant-styled markdown block. Each nests as its own foldable: thinking and tool
 calls start collapsed, as they do at the top level, and the answer starts expanded, since it is what a
 reader opens the card for. The card itself starts collapsed, and a spawn card takes the shape of the
-`spawn_subagent` tool block the channel suppressed for it: a monospace `🔧 spawn_subagent(<role>) —
-<status>` header over an argument line built by the same `toolArgs` helper a tool block's body uses.
-The arguments are reconstructed on the page from the frame's `role` and `task`, which is faithful
-because Kokua only ever builds AIMU's typed spawn tool. A reviewer card, which no tool call backs,
-keeps its plain `🔎 <role> — <status>` header. Generated text streams in chunk by chunk as plain text
+`spawn_subagent` tool block the channel suppressed for it: a monospace
+`subagent  spawn_subagent(<role>)  <status>` header over an argument line built by the same `toolArgs`
+helper a tool block's body uses. The arguments are reconstructed on the page from the frame's `role`
+and `task`, which is faithful because Kokua only ever builds AIMU's typed spawn tool. A reviewer card,
+which no tool call backs, reads `review  <role>  <status>` instead, and that kind word is the only
+at-a-glance difference between the two, which is why an e2e test pins it. Generated text streams in
+chunk by chunk as plain text
 and is re-rendered as markdown
 when the spawn hits its terminal status, the same two steps the assistant's own reply takes, so a
 replayed card (which also ends with a terminal status) lands on the same DOM.

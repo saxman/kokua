@@ -47,23 +47,40 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
 - **`cli`**: the terminal, via AIMU's `CLIChannel`. `/attach <path>` stages a local image onto the next
   message.
 - **`web`** (behind the `web` extra): a Starlette + uvicorn WebSocket server with a streaming browser
-  UI, bound to `127.0.0.1:8000` by default.
-  - **Conversations** are listed in a sidebar, auto-titled from the first message, with new / select /
-    delete (deleting the active one switches to the most recently updated remaining conversation). The
-    sidebar collapses to an icon rail and drag-resizes between 180 and 480px; the divider is
-    keyboard-operable. Width, collapsed state, and theme are per-browser preferences applied before
-    first paint, so there is no flash on load.
+  UI, bound to `127.0.0.1:8000` by default. The page is three files: `index.html` for the markup,
+  `app.css`, and `app.js`, served from the same static-asset allowlist as the vendored libraries.
+  - **A flat transcript, not a chat.** One left-aligned column: the user's turn is marked with a `>`
+    rather than filled, prose takes a 76ch measure, and machine events are dim monochrome one-line rows
+    set apart by a kind word and an indent. Tables and code blocks run wider than the prose measure,
+    since they are scanned rather than read.
+  - **Colour means one thing.** Twelve semantic tokens, of which the warm pair marks only a decision
+    waiting on you: a tool approval or a plan review. Tool calls, sub-agent cards, and proactive
+    messages are not warm. The disclosure triangle is the only glyph on the page; every block names its
+    kind in words.
+  - **Conversations** are listed in a sidebar, auto-titled from the first message, each row showing its
+    relative age, with new / select / delete (deleting the active one switches to the most recently
+    updated remaining conversation). The header strip names the conversation being viewed. The sidebar
+    collapses to an icon rail and drag-resizes between 180 and 480px; the divider is keyboard-operable.
+    Width, collapsed state, and theme are per-browser preferences applied before first paint, so there
+    is no flash on load.
+  - **The composer is one bordered box** with a text area that grows to eight rows: Enter sends,
+    Shift+Enter inserts a newline (an IME's Enter does neither). Send is replaced by Stop for the
+    duration of a turn rather than sitting beside a permanently disabled button, and switching
+    conversations mid-turn updates it to match the conversation being viewed.
   - **Replies render as GitHub-flavored markdown** on turn completion, via vendored `marked` +
     `DOMPurify` (bundled, served locally, no CDN). The rendered HTML is sanitized, so model and tool
     output cannot inject scripts or markup, and links open with `rel="noopener"`. LaTeX math is typeset
     with vendored KaTeX after sanitization, with `trust:false` and a `maxExpand` cap; a malformed
-    expression is left as source text rather than breaking the bubble.
-  - **Auxiliary blocks fold.** Thinking, tool calls, verbose-trace phases, sub-agent cards, drafted
-    plans, and agent-loop `↻ continuation` markers render collapsed behind a header that keeps the
-    identifying label, so the transcript stays scannable. Direct messages and the interactive approval
-    and plan-review prompts are unaffected.
+    expression is left as source text rather than breaking the row.
+  - **Auxiliary blocks fold, and the folded line carries the call.** Thinking, tool calls,
+    verbose-trace phases, sub-agent cards, drafted plans, and agent-loop continuation markers render
+    collapsed behind a one-line header: the kind word, then the call with its condensed arguments, then
+    a metric (a result size, a line count, a status). Only the arguments ellipsize, so a row is never
+    taller than one line however long they are, and a turn can be read without opening anything. The
+    full untruncated arguments are inside the fold. Direct messages and the interactive approval and
+    plan-review prompts are unaffected.
   - **A tool card shows what the call returned**, not just what it was asked to do. The result renders
-    in a nested foldable labeled with its size (`↳ output (2,148 chars)`), filled on first open and
+    in a nested foldable labeled with its size (`output  2,148 chars`), filled on first open and
     clamped at 4000 characters with a `show all` control. Always plain text, never markdown, because a
     tool result is untrusted input. An error, an argument-binding failure, and a denied approval are
     results too and arrive the same way, so there is no separate failure rendering. All four surfaces
@@ -71,19 +88,19 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
     card's nested calls, and a reloaded transcript -- and replay rejoins a stored call to its result by
     `tool_call_id`, since concurrent dispatch appends results in completion order.
   - **Sub-agent work is visible.** A `spawn_subagent` call renders as
-    `🔧 spawn_subagent(<role>) — <status>` over an argument line, then the nested thinking, tool calls,
+    `subagent  spawn_subagent(<role>)  <status>` over an argument line, then the nested thinking, tool calls,
     and answer the child produced, each individually foldable and built by the same builders and CSS as
     their top-level counterparts. The child's text streams in live and re-renders as markdown when the
     spawn ends. The parent's own duplicate `spawn_subagent` tool block is suppressed. Recording and
     display are independent, so a background turn's spawns are recorded even though its frames are
     muted, and switching in later shows the work.
-  - **Bubbles carry a localized datetime caption** (full precision on hover), sitting on the
-    always-visible header line of a foldable so it shows collapsed or expanded. Ephemeral chrome
-    (notices, approval prompts, banners) is not stamped. Messages persisted before timestamps existed
-    render without a caption.
+  - **Rows carry a localized datetime caption**, revealed on hover (full precision in its tooltip) so
+    the transcript is not dated line by line. On a foldable it rides the always-visible header, so it
+    shows collapsed or expanded. Ephemeral chrome (notices, approval prompts, banners) is not stamped.
+    Messages persisted before timestamps existed render without a caption.
   - **Agent-loop continuations are distinguished from user input.** The loop injects its own turns as
-    `user`-role messages; these render as a muted `↻ continuation` marker showing the injected prompt
-    rather than as user bubbles. Proactive turns keep their amber styling.
+    `user`-role messages; these render as a dim `continuation` row showing the injected prompt rather
+    than as the user's own turn. A proactive message keeps its uppercase label.
   - **A settings panel** (gear button) changes the model, the generation kwargs (`temperature`,
     `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), the display preferences,
     the planning toggles, and the theme at runtime. Server-backed changes take effect on the next turn
