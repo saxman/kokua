@@ -35,9 +35,13 @@ def _index_html() -> str:
     return files("kokua").joinpath("web_static/index.html").read_text(encoding="utf-8")
 
 
-# Vendored browser libraries served at the page's root (the page loads them by relative URL). Text
-# assets map filename -> media type; the KaTeX fonts (binary woff2) are served from the /fonts/ subpath.
+# Browser assets served at the page's root (the page loads them by relative URL). Text assets map
+# filename -> media type; the KaTeX fonts (binary woff2) are served from the /fonts/ subpath.
+# app.css/app.js are the page's own stylesheet and script, split out of index.html so each file holds
+# one language; the rest are vendored libraries.
 _STATIC_ASSETS = {
+    "app.css": "text/css",
+    "app.js": "text/javascript",
     "marked.min.js": "text/javascript",
     "purify.min.js": "text/javascript",
     "katex.min.js": "text/javascript",

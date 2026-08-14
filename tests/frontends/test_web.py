@@ -1306,6 +1306,28 @@ def test_vendored_katex_js_css_and_fonts_served(tmp_path):
     assert client.get("/fonts/KaTeX_Main-Regular.ttf").status_code == 404
 
 
+def test_page_css_and_js_served(tmp_path):
+    """The page's own stylesheet and script are separate files, so they must serve like the vendored
+    ones do. The index references them by relative URL; a 404 here is a page with no styling."""
+    from starlette.testclient import TestClient
+
+    client = TestClient(build_app(_config(tmp_path), client=MockAsyncModelClient([])))
+
+    css = client.get("/app.css")
+    assert css.status_code == 200
+    assert css.headers["content-type"].startswith("text/css")
+    assert "--fg" in css.text  # the token layer the whole sheet is built on
+
+    js = client.get("/app.js")
+    assert js.status_code == 200
+    assert "javascript" in js.headers["content-type"]
+    assert "WebSocket" in js.text
+
+    index = client.get("/").text
+    assert 'href="app.css"' in index
+    assert 'src="app.js"' in index
+
+
 async def test_a_second_answer_after_a_phase_replays_as_its_own_bubble():
     """A verbose planned turn closes the answer at each phase, so a second one is a second bubble --
     including when both hold the same text, where floating the open one by equality would move the
