@@ -159,6 +159,29 @@ def test_bubbles_show_timestamp_caption(page, live_server):
     expect(page.locator(".bubble.assistant .bubble-ts")).to_be_visible(timeout=10_000)
 
 
+def test_transcript_is_one_flat_column_with_hover_timestamps(page, live_server):
+    """The flat transcript: user and assistant rows share a left edge instead of alternating sides,
+    and the datetime caption is revealed on hover rather than printed under every block. The caption
+    stays in the DOM at zero opacity, which is why the older visibility assertions still hold."""
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "ping")
+    page.click("#send")
+    user = page.locator(".bubble.user")
+    assistant = page.locator(".bubble.assistant")
+    expect(assistant).to_be_visible(timeout=10_000)
+
+    # Same left edge: the bubble metaphor put these on opposite sides of the pane.
+    assert abs(user.bounding_box()["x"] - assistant.bounding_box()["x"]) < 2
+
+    # The user's turn is marked by a glyph, not by a fill.
+    expect(user.locator(".row-marker")).to_have_text(">")
+
+    caption = user.locator(".bubble-ts")
+    assert caption.evaluate("el => getComputedStyle(el).opacity") == "0"
+    user.hover()
+    expect(caption).not_to_have_css("opacity", "0")
+
+
 TAIL = "And here is the rest of it."
 
 

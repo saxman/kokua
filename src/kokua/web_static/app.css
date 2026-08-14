@@ -41,7 +41,8 @@ body {
   background: var(--bg); color: var(--fg);
 }
 #app { display: flex; flex: 1; min-height: 0; }
-:root { --sidebar-width: 240px; --sidebar-rail: 48px; }
+/* --row-measure caps a machine-event row; prose takes the narrower 76ch measure (see .assistant). */
+:root { --sidebar-width: 240px; --sidebar-rail: 48px; --row-measure: 58rem; }
 #sidebar { width: var(--sidebar-width); flex: none; background: var(--bg); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; padding: 10px; gap: 8px; overflow-y: auto; }
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -86,48 +87,57 @@ header small { font-weight: 400; color: var(--fg-faint); margin-left: 8px; }
   background: var(--attention); border: 1px solid var(--attention-border); border-radius: 10px;
   padding: 8px 14px; font-size: 0.9em; }
 .notification-banner button { padding: 2px 10px; font-size: 0.85em; background: var(--fg-dim); }
-#log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-.bubble { max-width: 70%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; line-height: 1.4; }
-.user { align-self: flex-end; background: var(--accent); color: var(--accent-fg); border-bottom-right-radius: 4px; }
-/* Full-strength text is stated, not inherited, so the block reads the same nested inside a
-   sub-agent card (whose own text is tinted) as it does at the top level. */
-.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; color: var(--fg); }
-.proactive { align-self: flex-start; }
-.proactive::before { content: "proactive "; font-size: 0.7em; text-transform: uppercase; opacity: 0.6; letter-spacing: 0.05em; }
-.notice { align-self: center; font-size: 0.85em; opacity: 0.6; }
-/* Marks an agent-loop continuation boundary (a framework-injected turn), not user input.
-   Shows the injected prompt text for inspection; styled like the thinking block. */
-.loop {
-  align-self: flex-start; max-width: 70%; font-size: 0.8em; color: var(--fg-dim);
-  background: transparent; border-left: 2px solid var(--border); padding: 2px 10px; white-space: pre-wrap;
-}
-.thinking {
-  align-self: flex-start; max-width: 70%; font-size: 0.85em; font-style: italic;
-  color: var(--fg-dim); background: transparent; border-left: 2px solid var(--border); padding: 2px 10px; white-space: pre-wrap;
-}
-.tool { align-self: flex-start; max-width: 70%; font-family: ui-monospace, monospace; font-size: 0.8em; color: var(--fg-dim); border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; word-break: break-word; }
-/* A tool call's result, nested inside its own card: released from the transcript's width cap (the
-   card already applies it) and stripped of the second border and background it would otherwise
-   draw inside the first. `.bubble` supplies the pre-wrap that keeps the result's own line breaks. */
-.tool > .fold-body > .tool-output { max-width: none; margin: 4px 0 0; padding: 0; background: transparent; border: none; }
-.tool-output .output-text { display: block; max-height: 24em; overflow: auto; opacity: 0.85; }
-.tool-output .output-more { display: block; margin-top: 4px; padding: 1px 6px; font: inherit; color: inherit;
-  background: transparent; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+/* A flat transcript: one left-aligned column, no fills, no alignment flip. The rhythm comes from
+   per-row margins rather than a flex gap, so the space between two turns can be wider than the space
+   between one turn's own blocks. */
+#log { flex: 1; overflow-y: auto; padding: 20px 16px 8px; display: flex; flex-direction: column; }
+.bubble { max-width: none; padding: 0; border: none; border-radius: 0; background: none;
+  white-space: pre-wrap; line-height: 1.55; margin: 2px 0; }
+
+/* A prose measure, left-aligned. Full-bleed text on a wide monitor is unreadable; machine-event rows,
+   tables, and code blocks escape the cap because they are scanned rather than read.
+   Full-strength text is stated, not inherited, so a block reads the same nested inside a sub-agent
+   card (whose own text is dimmed) as it does at the top level. */
+.user, .assistant, .proactive { max-width: 76ch; color: var(--fg); }
+.user { margin-top: 22px; display: flex; gap: 8px; }
+.row-marker { flex: none; color: var(--fg-faint); user-select: none; }
+.assistant { margin-top: 10px; }
+.proactive::before { content: "proactive"; display: block; font-size: 0.72em; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--fg-faint); margin-bottom: 2px; }
+.notice { align-self: center; font-size: 0.85em; color: var(--fg-dim); margin: 12px 0; }
+
+/* Machine events: dim monochrome rows told apart by their kind word and their indent, not by a fill
+   or a border. This is where the amber went.
+
+   Wider than the prose measure, since a call with its arguments needs the room, but still capped: the
+   metric is right-aligned within the row, and on a full-width row it would sit a thousand pixels from
+   the call it describes. The cap is in rem, not ch, so the monospace tool row and the sans-serif
+   sub-agent row land at the same width and their metrics form one column rather than a ragged edge. */
+.loop, .thinking, .tool, .subagent, .plan { color: var(--fg-dim); margin: 1px 0 1px 14px;
+  max-width: var(--row-measure); }
+.thinking, .loop { font-size: 0.85em; }
+.tool { font-family: ui-monospace, monospace; font-size: 0.82em; }
+.subagent, .plan { font-size: 0.9em; }
+/* A card's body is set off by a rule rather than a box, so nesting reads as depth without drawing a
+   second border inside the first. */
+.subagent > .fold-body, .plan > .fold-body { border-left: 1px solid var(--border); padding-left: 12px; }
+.tool > .fold-body > .tool-output { max-width: none; margin: 4px 0 0; padding: 0; }
+.tool-output .output-text { display: block; max-height: 24em; overflow: auto; }
+.tool-output .output-more { display: block; margin-top: 4px; padding: 1px 6px; font: inherit;
+  color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 4px;
+  cursor: pointer; }
 .tool-output .output-more:hover { text-decoration: underline; }
-.plan { align-self: flex-start; max-width: 85%; background: var(--attention); border: 1px solid var(--attention-border); border-radius: 12px; padding: 8px 14px; }
-.subagent { align-self: flex-start; max-width: 85%; font-size: 0.9em; color: var(--fg-dim); border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px; }
-.subagent[data-status="running"] { opacity: 0.75; font-style: italic; }
+.subagent[data-status="running"] .fold-metric { font-style: italic; }
 /* A spawn card stands in for the `spawn_subagent` tool block the server suppresses (see
    WebChannel.send_frame), so its header line and argument line carry the tool block's monospace
    type. Only those two: the body below keeps the card's roomier layout, which its nested blocks
    need to stay readable. A planning reviewer's card, which no tool call backs, gets neither. */
 .subagent.spawn > .fold-header, .subagent .sa-args { font-family: ui-monospace, monospace; font-size: 0.9em; }
-.subagent .sa-args { word-break: break-word; opacity: 0.85; margin: 2px 0 4px; }
+.subagent .sa-args { word-break: break-word; color: var(--fg-dim); margin: 2px 0 4px; }
 /* A card's nested blocks ARE the top-level thinking/tool/answer components (see .thinking, .tool
    and .assistant above), so they need no styling of their own -- only placement inside the card's
-   body: indented under it, and released from the transcript's width cap, which the card itself
-   already applies. */
-.subagent .fold-body > .bubble { max-width: none; margin: 8px 0 8px 12px; }
+   body: released from the transcript's prose measure, which would apply twice over. */
+.subagent .fold-body > .bubble { max-width: none; margin: 6px 0 6px 2px; }
 /* Not a foldable: a failure is one short line and the reason the reader is looking, so it stays
    visible rather than hiding behind a disclosure triangle. */
 .subagent .sa-error {
@@ -183,8 +193,14 @@ header small { font-weight: 400; color: var(--fg-faint); margin-left: 8px; }
 .md input[type="checkbox"] { margin-right: 0.4em; }
 .md li { list-style-position: outside; }
 .md li.task-list-item { list-style: none; margin-left: -1.1em; }
-.approval { align-self: flex-start; max-width: 70%; background: var(--attention); border: 1px solid var(--attention-border); border-radius: 12px; padding: 10px 14px; }
-.approval .prompt { font-size: 0.9em; margin-bottom: 8px; }
+/* Tables and code are scanned, not read, so they escape the prose measure rather than scrolling
+   sideways inside a needlessly narrow column. */
+.md pre, .md table { max-width: none; }
+
+/* The only warm block left, and now the only warm thing on the page. */
+.approval { max-width: 76ch; background: var(--attention); border: 1px solid var(--attention-border);
+  border-radius: 10px; padding: 12px 14px; margin: 16px 0; }
+.approval .prompt { font-size: 0.9em; margin-bottom: 10px; }
 .approval code { font-family: ui-monospace, monospace; font-size: 0.85em; }
 .approval .actions { display: flex; gap: 8px; }
 .approval button { padding: 6px 14px; font-size: 0.85em; }
@@ -200,12 +216,19 @@ button:disabled { opacity: 0.5; cursor: default; }
 /* An inline image, in the composer preview row or a chat bubble. */
 .bubble.image { padding: 0; background: transparent; border: none; overflow: hidden; }
 .bubble.image img { max-width: 100%; border-radius: 12px; display: block; }
-/* Append-time datetime caption. On a regular bubble it sits below the content; on a foldable it
-   rides the always-visible header line (so it shows whether the block is collapsed or expanded). */
-.bubble-ts { display: block; margin-top: 4px; font-size: 0.7em; opacity: 0.5; text-align: right; }
-.bubble.image .bubble-ts { text-align: left; margin-top: 2px; }
-.fold-ts { float: right; margin-left: 8px; font-size: 0.72em; font-weight: 400; font-style: normal;
-  font-family: system-ui, sans-serif; text-transform: none; letter-spacing: 0; opacity: 0.5; }
+/* Append-time datetime caption, revealed on hover rather than printed under every block. On a regular
+   bubble it sits below the content; on a foldable it rides the always-visible header line (so it shows
+   whether the block is collapsed or expanded).
+
+   This must stay `opacity`, never `display: none` or `visibility: hidden`: the e2e suite asserts the
+   caption is visible, and Playwright's visibility check ignores opacity but not those two. Tidying
+   this into display:none turns two passing tests red. */
+.bubble-ts, .fold-ts { color: var(--fg-faint); font-size: 0.7em; font-weight: 400; font-style: normal;
+  font-family: -apple-system, system-ui, sans-serif; text-transform: none; letter-spacing: 0;
+  opacity: 0; transition: opacity 120ms ease; }
+.bubble-ts { display: block; margin-top: 2px; }
+.fold-ts { flex: none; margin-left: 8px; }
+.bubble:hover > .bubble-ts, .fold-header:hover > .fold-ts { opacity: 1; }
 .attach-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px 0; }
 .attach-previews .chip { position: relative; }
 .attach-previews img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }

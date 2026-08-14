@@ -394,7 +394,16 @@ function stampHeader(header, value) {
 function addBubble(cls, text, ts) {
   const el = document.createElement("div");
   el.className = "bubble " + cls;
-  el.textContent = text || "";
+  // The user's turn is marked, not filled: a flat transcript has no sides to alternate between, so
+  // the glyph is what says who is speaking. Appended as a text node rather than assigned to
+  // textContent, which would wipe the marker.
+  if (cls === "user") {
+    const marker = document.createElement("span");
+    marker.className = "row-marker";
+    marker.textContent = ">";
+    el.appendChild(marker);
+  }
+  el.appendChild(document.createTextNode(text || ""));
   stampBubble(el, ts);
   log.appendChild(el);
   autoscroll();
