@@ -450,8 +450,13 @@ function notice(text) { addBubble("notice", text); }
 // arguments), and an optional metric. They are separate spans so the payload is the only part that
 // ellipsizes, which is what keeps a row exactly one line tall however long the arguments are. All
 // three live inside .fold-label, so the label's text is still the whole line.
+//
+// A row with no payload (thinking, continuation, plan) is labelled `no-payload`, because there the
+// kind word is the entire visible line and has to be the row's primary content. Wearing the dimmer
+// secondary styling it takes beside a tool call's arguments, such a row reads as blank space.
 function setFoldLabel(label, kind, payload, metric) {
   label.replaceChildren();
+  label.classList.toggle("no-payload", !payload);
   for (const [cls, text] of [["fold-kind", kind], ["fold-payload", payload], ["fold-metric", metric]]) {
     if (!text) continue;
     const span = document.createElement("span");

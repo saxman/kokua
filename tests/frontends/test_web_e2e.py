@@ -508,6 +508,58 @@ def test_a_call_with_no_recorded_result_renders_no_output_section(page, live_ser
     expect(tool.locator(".bubble.tool-output")).to_have_count(0)
 
 
+def _seed_thinking_and_continuation(config):
+    """Plant a conversation holding a reasoning block and a framework-injected continuation turn, the
+    two rows whose whole visible line is their kind word. Turns `show_thinking` on, since replay gates
+    reasoning on the same flag the live stream does."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    config.show_thinking = True
+    config.show_tools = True
+    TinyDBSessionStore(str(config.sessions_path)).save(
+        Session(
+            key="seeded",
+            messages=[
+                {"role": "user", "content": "find the pricing page"},
+                {
+                    "role": "assistant",
+                    "content": "Looking.",
+                    "thinking": "Search first.\nThen read it.",
+                    "tool_calls": [
+                        {"type": "function", "function": {"name": "get_webpage", "arguments": {"url": "u"}}, "id": "1"}
+                    ],
+                },
+                {"role": "tool", "name": "get_webpage", "content": "body", "tool_call_id": "1"},
+                {"role": "user", "content": "Continue working on the task.", "provenance": "continuation"},
+                {"role": "assistant", "content": "Done."},
+            ],
+            metadata={"title": "seeded", "created_at": "2026-08-10T00:00:00", "updated_at": "2026-08-10T00:00:00"},
+        )
+    )
+
+
+def test_a_row_whose_kind_word_is_its_only_content_stays_legible(page, live_server):
+    """A thinking or continuation row carries no call, so its kind word is the entire visible line and
+    has to be the row's primary content. Styled as the dimmer secondary label it wears beside a tool
+    call's arguments, such a row reads as blank space and the reasoning looks like it never happened."""
+    _open(page, live_server(delay=0.0, seed=_seed_thinking_and_continuation))
+    thinking = page.locator(".bubble.thinking")
+    loop = page.locator(".bubble.loop")
+    expect(thinking).to_have_count(1)
+    expect(loop).to_have_count(1)
+
+    # The colour a machine row's primary content uses, taken from the one row that has a payload.
+    primary = page.locator(".bubble.tool > .fold-header .fold-payload").evaluate("el => getComputedStyle(el).color")
+    for row in (thinking, loop):
+        kind = row.locator(".fold-kind")
+        assert kind.evaluate("el => getComputedStyle(el).color") == primary
+        # Not shrunk relative to its own row either: 0.82em of an already-small row is a whisper.
+        ratio = kind.evaluate(
+            "el => parseFloat(getComputedStyle(el).fontSize) / parseFloat(getComputedStyle(el.closest('.fold-header')).fontSize)"
+        )
+        assert ratio == 1, f"kind word is {ratio:.2f}x its row's font size"
+
+
 def test_a_collapsed_tool_line_names_the_call_and_its_result_size(page, live_server):
     """Everything in the transcript stays folded, so the one always-visible line has to carry the
     call. The arguments ride the header (ellipsized, never wrapped) and the result size sits at the

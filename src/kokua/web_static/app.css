@@ -178,6 +178,10 @@ header { display: flex; align-items: center; justify-content: space-between; gap
   font-family: -apple-system, system-ui, sans-serif; text-transform: none; }
 .fold-kind { font-size: 0.82em; }
 .fold-metric { font-size: 0.78em; }
+/* No payload (thinking, continuation, plan): the kind word IS the line, so it takes the row's primary
+   content colour and its full size. As the secondary label it wears next to a call, it reads as an
+   empty row and the reasoning looks like it never happened. */
+.fold-label.no-payload .fold-kind { color: var(--fg-dim); font-size: 1em; }
 .sa-error .fold-kind { color: inherit; margin-right: 8px; }
 .foldable .fold-body { margin-top: 4px; }
 .foldable.collapsed .fold-body { display: none; }
