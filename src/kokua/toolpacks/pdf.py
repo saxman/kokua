@@ -91,6 +91,6 @@ def build(config: AssistantConfig) -> list:
 
 TOOL_PACK = ToolPack(
     name="pdf",
-    description="Render Markdown to a downloadable PDF saved in the documents folder (fpdf2 + markdown).",
+    description="Render Markdown to a downloadable PDF saved in the downloads folder (fpdf2 + markdown).",
     build=build,
 )
