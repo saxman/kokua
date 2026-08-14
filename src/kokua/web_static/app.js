@@ -11,6 +11,7 @@ const convList = document.getElementById("conv-list");
 const newConvBtn = document.getElementById("new-conv");
 const notifications = document.getElementById("notifications");
 const workingIndicator = document.getElementById("working-indicator");
+const convHeading = document.getElementById("conv-heading");
 
 // A background turn finished while the user was viewing a different conversation ("notification"
 // frame): show a dismissible banner rather than stealing the current view.
@@ -35,14 +36,38 @@ function setWorking(active) {
   workingIndicator.classList.toggle("hidden", !active);
 }
 
+// A conversation's age for the sidebar. Coarse on purpose: the sidebar answers "which of these did I
+// touch recently", not "when exactly", which the row's own transcript already says. A future
+// updated_at (clock skew) yields a negative age and reads as "just now", which is the right answer
+// for a row that was only just touched.
+function relativeTime(iso) {
+  if (!iso) return "";
+  const then = new Date(iso);
+  if (isNaN(then.getTime())) return "";
+  const seconds = Math.floor((Date.now() - then.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return Math.floor(seconds / 60) + "m";
+  if (seconds < 86400) return Math.floor(seconds / 3600) + "h";
+  if (seconds < 172800) return "yesterday";
+  return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function renderConversations(items) {
   convList.innerHTML = "";
   for (const item of items) {
     const li = document.createElement("li");
+    // Title over age in their own column, so the delete button stays at the row's right edge.
+    const text = document.createElement("span");
+    text.className = "conv-text";
     const title = document.createElement("span");
     title.className = "conv-title";
     title.textContent = item.title;
-    li.appendChild(title);
+    const age = document.createElement("span");
+    age.className = "conv-age";
+    age.textContent = relativeTime(item.updated_at);
+    text.appendChild(title);
+    text.appendChild(age);
+    li.appendChild(text);
     if (item.active) {
       li.classList.add("active");
     } else {
@@ -63,6 +88,10 @@ function renderConversations(items) {
     li.appendChild(del);
     convList.appendChild(li);
   }
+  // The header names what you are looking at, which is the one thing the old dark bar's
+  // "Kokua, local, single user" could not tell you.
+  const active = items.find((item) => item.active);
+  convHeading.textContent = active ? active.title : "Kokua";
 }
 
 newConvBtn.addEventListener("click", () => {

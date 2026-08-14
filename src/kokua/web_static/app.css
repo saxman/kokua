@@ -43,44 +43,54 @@ body {
 #app { display: flex; flex: 1; min-height: 0; }
 /* --row-measure caps a machine-event row; prose takes the narrower 76ch measure (see .assistant). */
 :root { --sidebar-width: 240px; --sidebar-rail: 48px; --row-measure: 58rem; }
+/* The sidebar shares the canvas background and is separated by a hairline, so it reads as part of the
+   same surface rather than as its own slab. */
 #sidebar { width: var(--sidebar-width); flex: none; background: var(--bg); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; padding: 10px; gap: 8px; overflow-y: auto; }
+  display: flex; flex-direction: column; padding: 8px; gap: 10px; overflow-y: auto; }
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 /* Draggable divider between the sidebar and main pane; also arrow-key/Enter operable (see JS). */
 #sidebar-resize { flex: none; width: 5px; cursor: col-resize; background: transparent; align-self: stretch; }
 #sidebar-resize:hover, body.resizing #sidebar-resize { background: var(--accent); }
-#sidebar-top { display: flex; }
-#sidebar-toggle { flex: none; margin-left: auto; border: none; background: none; color: inherit;
-  cursor: pointer; font-size: 1.1em; line-height: 1; padding: 2px 6px; border-radius: 6px; }
-#sidebar-toggle:hover { background: var(--surface); }
-#new-conv { background: var(--accent); color: var(--accent-fg); display: flex; align-items: center;
-  justify-content: center; gap: 6px; }
-/* Collapsed "icon rail": sidebar shrinks to a narrow strip; only the toggle and the "+" glyph show. */
-:root[data-sidebar-collapsed="true"] #sidebar { width: var(--sidebar-rail); padding: 10px 4px; overflow: hidden; }
-:root[data-sidebar-collapsed="true"] #sidebar-toggle { margin: 0 auto; }
-:root[data-sidebar-collapsed="true"] #new-conv .label,
+#sidebar-top { display: flex; align-items: center; gap: 4px; height: 24px; }
+#wordmark { flex: 1; font-size: 0.8em; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--fg-faint); }
+#new-conv, #sidebar-toggle { flex: none; background: none; border: none; color: var(--fg-dim);
+  cursor: pointer; font-size: 1.05em; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+#new-conv:hover, #sidebar-toggle:hover { background: var(--surface); color: var(--fg); }
+#new-conv .label { display: none; }  /* the + carries it; the title attribute names it */
+/* Collapsed "icon rail": sidebar shrinks to a narrow strip; only the two icon buttons show. */
+:root[data-sidebar-collapsed="true"] #sidebar { width: var(--sidebar-rail); padding: 8px 4px; overflow: hidden; }
+:root[data-sidebar-collapsed="true"] #sidebar-top { flex-direction: column; height: auto; gap: 8px; }
+:root[data-sidebar-collapsed="true"] #wordmark,
 :root[data-sidebar-collapsed="true"] #conv-list { display: none; }
 body.resizing { user-select: none; }
-#conv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-#conv-list li { padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 0.9em;
-  display: flex; align-items: center; gap: 6px; }
+#conv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+#conv-list li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px;
+  cursor: pointer; border-left: 2px solid transparent; }
 #conv-list li:hover { background: var(--surface); }
-#conv-list li.active { background: var(--surface); font-weight: 600; cursor: default; }
-#conv-list .conv-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#conv-list .conv-delete { flex: none; border: none; background: none; color: inherit; cursor: pointer;
-  font-size: 1.1em; line-height: 1; padding: 0 2px; opacity: 0; }
-#conv-list li:hover .conv-delete { opacity: 0.6; }
-#conv-list .conv-delete:hover { opacity: 1; }
-/* The header bar loses its dark fill here; the next commit rebuilds it as a strip. Keeping the old
-   translucent-white treatments against a light background would make both invisible. */
-header { padding: 12px 16px; background: transparent; color: var(--fg); font-weight: 600;
-  display: flex; align-items: center; justify-content: space-between;
+#conv-list li.active { background: var(--surface); border-left-color: var(--accent); cursor: default; }
+.conv-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#conv-list .conv-title { font-size: 0.88em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#conv-list li.active .conv-title { font-weight: 600; }
+.conv-age { font-size: 0.72em; color: var(--fg-faint); }
+#conv-list .conv-delete { flex: none; border: none; background: none; color: var(--fg-faint);
+  cursor: pointer; font-size: 1.1em; line-height: 1; padding: 0 2px; opacity: 0; }
+#conv-list li:hover .conv-delete { opacity: 1; }
+#conv-list .conv-delete:hover { color: var(--danger); }
+/* A thin strip naming the conversation being viewed, rather than a dark bar naming the application. */
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 0 16px; height: 40px; flex: none; background: transparent; color: var(--fg);
   border-bottom: 1px solid var(--border); }
-header small { font-weight: 400; color: var(--fg-faint); margin-left: 8px; }
+#conv-heading { font-size: 0.95em; font-weight: 600; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
 /* Shown in the header while the conversation being viewed has a turn running in the background
    (e.g. switched into mid-turn); cleared once that turn's next done/message/notification arrives. */
-#working-indicator { font-size: 0.85em; color: var(--fg-dim); padding: 3px 10px; border-radius: 10px;
-  background: var(--surface); border: 1px solid var(--border); }
+#working-indicator { display: flex; align-items: center; gap: 6px; font-size: 0.82em;
+  color: var(--fg-dim); background: none; border: none; padding: 0; }
+#working-indicator .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #working-indicator .dot { animation: none; opacity: 1; } }
 /* Dismissible banners for background-turn completions ("notification" frames), stacked above the log. */
 #notifications { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 0; }
 .notification-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -234,9 +244,10 @@ button:disabled { opacity: 0.5; cursor: default; }
 .attach-previews img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }
 .attach-previews .remove { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; padding: 0;
   border-radius: 50%; font-size: 0.8em; line-height: 20px; background: var(--fg-dim); color: var(--accent-fg); }
-.header-actions { display: flex; gap: 8px; }
-#settings-btn { background: transparent; border: 1px solid var(--border); color: var(--fg-dim);
-  border-radius: 8px; padding: 4px 10px; font-size: 1em; line-height: 1; cursor: pointer; }
+.header-actions { display: flex; align-items: center; gap: 10px; }
+#settings-btn { background: none; border: none; color: var(--fg-faint); font-size: 1em; line-height: 1;
+  padding: 4px; cursor: pointer; border-radius: 6px; }
+#settings-btn:hover { color: var(--fg); background: var(--surface); }
 /* Settings modal */
 .hidden { display: none !important; }
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }

@@ -37,19 +37,25 @@
   <div id="app">
     <aside id="sidebar">
       <div id="sidebar-top">
+        <span id="wordmark">Kokua</span>
+        <button id="new-conv" type="button" title="New conversation">
+          <span class="icon">+</span><span class="label">New conversation</span>
+        </button>
         <button id="sidebar-toggle" type="button" aria-expanded="true" title="Collapse sidebar">«</button>
       </div>
-      <button id="new-conv" type="button"><span class="icon">+</span><span class="label">New conversation</span></button>
       <ul id="conv-list"></ul>
     </aside>
     <div id="sidebar-resize" role="separator" aria-orientation="vertical"
          aria-label="Resize sidebar" tabindex="0"></div>
     <main id="main">
       <header>
-        <span>Kokua <small>local, single user</small></span>
+        <span id="conv-heading">Kokua</span>
         <span class="header-actions">
-          <span id="working-indicator" class="hidden" title="This conversation has a turn still running in the background">⏳ Working…</span>
-          <button id="settings-btn" type="button" title="Settings">⚙️</button>
+          <span id="working-indicator" class="hidden"
+                title="This conversation has a turn still running in the background">
+            <span class="dot" aria-hidden="true"></span>working
+          </span>
+          <button id="settings-btn" type="button" title="Settings">⚙</button>
         </span>
       </header>
       <div id="notifications"></div>

@@ -275,6 +275,16 @@ def test_sidebar_collapse_resize_persist(page, live_server):
     assert abs(sidebar.bounding_box()["width"] - resized_width) < 2
 
 
+def test_sidebar_row_shows_the_conversation_age(page, live_server):
+    """The `conversations` frame already carries `updated_at` and the page used to discard it. A second
+    dim line per row answers 'which of these did I touch recently' without opening any."""
+    _open(page, live_server(delay=0.0, seed=_seed_tool_call("the page body")))
+    row = page.locator("#conv-list li").first
+    expect(row.locator(".conv-title")).to_have_text("seeded")
+    # Seeded at a fixed 2026-08-10 date, so this is a calendar date rather than a relative age.
+    expect(row.locator(".conv-age")).to_have_text("Aug 10")
+
+
 def test_working_indicator_on_switch_into_running(page, live_server):
     """Switching back into a conversation whose turn is still running shows the 'working' indicator,
     which clears once that turn completes."""
