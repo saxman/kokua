@@ -125,25 +125,27 @@ class FakeScheduler:
         return self.jobs.pop(name, None) is not None
 
 
-async def _noop_fire(prompt, *, target="active", task_name=None, session_id=None):
+async def _noop_fire(prompt, *, target="active", task_name=None, session_id=None, task_id=None):
     _noop_fire.calls.append((prompt, target, task_name, session_id))
+    _noop_fire.task_ids.append(task_id)
     return _noop_fire.return_key
 
 
 _noop_fire.calls = []
+_noop_fire.task_ids = []
 _noop_fire.return_key = None
 
 
 def _make(tmp_path, fire=_noop_fire):
     scheduler = FakeScheduler()
     path = tmp_path / "scheduled_tasks.json"
-    tools, arm_all = scheduling.make_scheduler_tools(scheduler, path, fire)
+    tools, arm_all, controls = scheduling.make_scheduler_tools(scheduler, path, fire)
     by_name = {t.__name__: t for t in tools}
-    return scheduler, path, by_name, arm_all
+    return scheduler, path, by_name, arm_all, controls
 
 
 async def test_schedule_task_persists_and_arms(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     out = await tools["schedule_task"]("do it", "daily", time_of_day="09:00", name="brief")
     records = scheduling.load(path)
     assert len(records) == 1 and records[0]["name"] == "brief" and records[0]["target"] == "active"
@@ -153,7 +155,7 @@ async def test_schedule_task_persists_and_arms(tmp_path):
 
 
 async def test_schedule_task_target_task_persists_with_empty_session_id(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("digest", "daily", time_of_day="09:00", name="d", target="task")
     record = scheduling.load(path)[0]
     assert record["target"] == "task" and record["session_id"] == ""
@@ -161,7 +163,7 @@ async def test_schedule_task_target_task_persists_with_empty_session_id(tmp_path
 
 async def test_schedule_task_flat_daily_call(tmp_path):
     # The exact shape the model failed to produce before: a flat "daily" + time, no nested dict.
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     out = await tools["schedule_task"]("summarize the day", "daily", time_of_day="20:00")
     records = scheduling.load(path)
     assert len(records) == 1 and records[0]["schedule"] == {"type": "daily", "at": "20:00"}
@@ -169,20 +171,20 @@ async def test_schedule_task_flat_daily_call(tmp_path):
 
 
 async def test_schedule_task_weekday_is_normalized(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("x", "weekly", weekday="Monday", time_of_day="09:00", name="w")
     assert scheduling.load(path)[0]["schedule"] == {"type": "weekly", "day": "mon", "at": "09:00"}
 
 
 async def test_schedule_task_rejects_unknown_type(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     out = await tools["schedule_task"]("x", "cron", time_of_day="20:00")
     assert "Invalid schedule" in out and "once, interval, daily, weekly" in out
     assert scheduling.load(path) == []
 
 
 async def test_schedule_task_rejects_bad_schedule_and_dupe_name(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     bad = await tools["schedule_task"]("x", "daily", time_of_day="99:99")
     assert "Invalid schedule" in bad and scheduling.load(path) == []
     await tools["schedule_task"]("x", "interval", interval_seconds=60, name="dupe")
@@ -191,13 +193,13 @@ async def test_schedule_task_rejects_bad_schedule_and_dupe_name(tmp_path):
 
 
 async def test_schedule_task_rejects_past_once(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     out = await tools["schedule_task"]("x", "once", at_datetime="2000-01-01T00:00:00")
     assert "past" in out.lower() and scheduling.load(path) == []
 
 
 async def test_cancel_removes_record_and_job(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("x", "interval", interval_seconds=60, name="k")
     task_id = scheduling.load(path)[0]["id"]
     out = await tools["cancel_scheduled_task"]("k")
@@ -206,16 +208,114 @@ async def test_cancel_removes_record_and_job(tmp_path):
 
 
 async def test_list_scheduled_tasks(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     assert "No scheduled tasks" in await tools["list_scheduled_tasks"]()
     await tools["schedule_task"]("summarize inbox", "daily", time_of_day="09:00", name="brief", target="task")
     listing = await tools["list_scheduled_tasks"]()
     assert "brief" in listing and "summarize inbox" in listing and "target=task" in listing
 
 
+async def test_controls_list_returns_structured_records(tmp_path):
+    """The web sidebar needs fields, not the prose ``list_scheduled_tasks`` renders for the model."""
+    scheduler, path, tools, _, controls = _make(tmp_path)
+    await tools["schedule_task"]("summarize inbox", "daily", time_of_day="09:00", name="brief", target="task")
+
+    items = controls.list_tasks()
+
+    assert len(items) == 1
+    item = items[0]
+    assert item["name"] == "brief" and item["prompt"] == "summarize inbox"
+    assert item["schedule"] == {"type": "daily", "at": "09:00"}
+    assert item["target"] == "task" and item["enabled"] is True
+    assert item["id"] == scheduling.load(path)[0]["id"]
+    assert isinstance(item["next_fire"], str) and item["next_fire"]
+
+
+async def test_controls_list_reports_next_fire_in_seconds_for_formatting(tmp_path):
+    """The prose ``next_fire`` reads badly for a long schedule ("~86400s"), so the seconds are sent
+    too and the front end formats them. None means there is nothing to count down to."""
+    scheduler, path, tools, _, controls = _make(tmp_path)
+    await tools["schedule_task"]("x", "interval", interval_seconds=3600, name="live")
+
+    item = controls.list_tasks()[0]
+    assert 3500 < item["next_fire_seconds"] <= 3600
+
+    controls.set_enabled("live", False)
+    assert controls.list_tasks()[0]["next_fire_seconds"] is None
+
+
+async def test_controls_list_reports_a_disabled_task_as_disabled(tmp_path):
+    scheduler, path, tools, _, controls = _make(tmp_path)
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="d")
+
+    controls.set_enabled("d", False)
+
+    assert controls.list_tasks()[0]["enabled"] is False
+    assert controls.list_tasks()[0]["next_fire"] == "disabled"
+
+
+async def test_controls_set_enabled_cancels_and_rearms_the_scheduler_job(tmp_path):
+    """The panel must not just edit JSON: disabling has to drop the armed job, and enabling re-arm it,
+    or the in-memory scheduler keeps firing a task the registry calls disabled."""
+    scheduler, path, tools, _, controls = _make(tmp_path)
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="d")
+    task_id = scheduling.load(path)[0]["id"]
+
+    controls.set_enabled("d", False)
+    assert task_id not in scheduler.jobs
+    assert scheduling.load(path)[0]["enabled"] is False
+
+    controls.set_enabled("d", True)
+    assert task_id in scheduler.jobs
+    assert scheduling.load(path)[0]["enabled"] is True
+
+
+async def test_controls_cancel_removes_record_and_job(tmp_path):
+    scheduler, path, tools, _, controls = _make(tmp_path)
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="k")
+    task_id = scheduling.load(path)[0]["id"]
+
+    controls.cancel("k")
+
+    assert task_id not in scheduler.jobs and scheduling.load(path) == []
+
+
+async def test_controls_run_now_leaves_the_armed_job_alone(tmp_path):
+    """Running a task by hand must not disturb when it next fires, so the run-now job is a separate
+    scheduler entry rather than a re-arm of the record's own."""
+    scheduler, path, tools, _, controls = _make(tmp_path)
+    await tools["schedule_task"]("x", "interval", interval_seconds=60, name="r")
+    task_id = scheduling.load(path)[0]["id"]
+
+    controls.run_now("r")
+
+    assert scheduler.at_count[task_id] == 1  # untouched
+    assert f"run-now:{task_id}" in scheduler.jobs
+
+
+async def test_controls_report_an_unknown_handle(tmp_path):
+    scheduler, path, tools, _, controls = _make(tmp_path)
+
+    assert "No scheduled task" in controls.set_enabled("nope", False)
+    assert "No scheduled task" in controls.cancel("nope")
+    assert "No scheduled task" in controls.run_now("nope")
+
+
+async def test_fire_job_passes_the_task_id_so_its_conversation_can_be_grouped(tmp_path):
+    _noop_fire.calls = []
+    scheduler, path, tools, _, _controls = _make(tmp_path)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", target="new")
+    task_id = scheduling.load(path)[0]["id"]
+
+    _delay, job = scheduler.jobs[task_id]
+    await job()
+
+    assert _noop_fire.task_ids == [task_id]
+
+
 async def test_fire_job_recurring_rearms(tmp_path):
     _noop_fire.calls = []
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", target="new")
     task_id = scheduling.load(path)[0]["id"]
     _delay, job = scheduler.jobs[task_id]
@@ -229,7 +329,7 @@ async def test_fire_job_task_target_persists_returned_session_id(tmp_path):
     _noop_fire.calls = []
     _noop_fire.return_key = "sess-123"
     try:
-        scheduler, path, tools, _ = _make(tmp_path)
+        scheduler, path, tools, _, _ = _make(tmp_path)
         await tools["schedule_task"]("digest", "interval", interval_seconds=60, name="d", target="task")
         task_id = scheduling.load(path)[0]["id"]
         _delay, job = scheduler.jobs[task_id]
@@ -247,7 +347,7 @@ async def test_fire_job_new_target_does_not_persist_session_id(tmp_path):
     _noop_fire.calls = []
     _noop_fire.return_key = "ephemeral"
     try:
-        scheduler, path, tools, _ = _make(tmp_path)
+        scheduler, path, tools, _, _ = _make(tmp_path)
         await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="n", target="new")
         task_id = scheduling.load(path)[0]["id"]
         _delay, job = scheduler.jobs[task_id]
@@ -260,12 +360,12 @@ async def test_fire_job_new_target_does_not_persist_session_id(tmp_path):
 async def test_fire_job_task_target_skips_writeback_if_cancelled_during_run(tmp_path):
     _noop_fire.return_key = "sess-late"
 
-    async def cancelling_fire(prompt, *, target="active", task_name=None, session_id=None):
+    async def cancelling_fire(prompt, *, target="active", task_name=None, session_id=None, task_id=None):
         scheduling.remove(path, scheduling.load(path)[0]["id"])  # user cancelled mid-run
         return _noop_fire.return_key
 
     try:
-        scheduler, path, tools, _ = _make(tmp_path, fire=cancelling_fire)
+        scheduler, path, tools, _, _ = _make(tmp_path, fire=cancelling_fire)
         await tools["schedule_task"]("digest", "interval", interval_seconds=60, name="c", target="task")
         task_id = scheduling.load(path)[0]["id"]
         _delay, job = scheduler.jobs[task_id]
@@ -276,7 +376,7 @@ async def test_fire_job_task_target_skips_writeback_if_cancelled_during_run(tmp_
 
 
 async def test_fire_job_once_removes(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     future = "2999-01-01T00:00:00"
     await tools["schedule_task"]("later", "once", at_datetime=future, name="o")
     task_id = scheduling.load(path)[0]["id"]
@@ -286,10 +386,10 @@ async def test_fire_job_once_removes(tmp_path):
 
 
 async def test_fire_job_skips_rearm_if_cancelled_during_run(tmp_path):
-    async def cancelling_fire(prompt, *, target="active", task_name=None, session_id=None):
+    async def cancelling_fire(prompt, *, target="active", task_name=None, session_id=None, task_id=None):
         scheduling.remove(path, scheduling.load(path)[0]["id"])  # user cancelled mid-run
 
-    scheduler, path, tools, _ = _make(tmp_path, fire=cancelling_fire)
+    scheduler, path, tools, _, _ = _make(tmp_path, fire=cancelling_fire)
     await tools["schedule_task"]("x", "interval", interval_seconds=60, name="c")
     task_id = scheduling.load(path)[0]["id"]
     _delay, job = scheduler.jobs[task_id]
@@ -298,7 +398,7 @@ async def test_fire_job_skips_rearm_if_cancelled_during_run(tmp_path):
 
 
 async def test_disable_cancels_job_and_clears_flag(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("x", "interval", interval_seconds=60, name="d")
     task_id = scheduling.load(path)[0]["id"]
     out = await tools["disable_scheduled_task"]("d")
@@ -309,7 +409,7 @@ async def test_disable_cancels_job_and_clears_flag(tmp_path):
 
 
 async def test_disable_already_disabled_reports(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("x", "interval", interval_seconds=60, name="d")
     await tools["disable_scheduled_task"]("d")
     out = await tools["disable_scheduled_task"]("d")
@@ -317,7 +417,7 @@ async def test_disable_already_disabled_reports(tmp_path):
 
 
 async def test_enable_rearms_and_sets_flag(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("x", "interval", interval_seconds=60, name="e")
     task_id = scheduling.load(path)[0]["id"]
     await tools["disable_scheduled_task"]("e")
@@ -328,14 +428,14 @@ async def test_enable_rearms_and_sets_flag(tmp_path):
 
 
 async def test_enable_already_enabled_reports(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("x", "interval", interval_seconds=60, name="e")
     out = await tools["enable_scheduled_task"]("e")
     assert "already enabled" in out.lower()
 
 
 async def test_enable_past_due_once_reports_wont_fire(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     # Persist a disabled, past-due one-shot directly (schedule_task rejects past times).
     scheduling.add(
         path,
@@ -355,13 +455,13 @@ async def test_enable_past_due_once_reports_wont_fire(tmp_path):
 
 
 async def test_enable_disable_unknown_reports(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     assert "No scheduled task" in await tools["enable_scheduled_task"]("nope")
     assert "No scheduled task" in await tools["disable_scheduled_task"]("nope")
 
 
 async def test_arm_all_skips_disabled(tmp_path):
-    scheduler, path, tools, arm_all = _make(tmp_path)
+    scheduler, path, tools, arm_all, _ = _make(tmp_path)
     scheduling.add(
         path,
         {
@@ -380,12 +480,12 @@ async def test_arm_all_skips_disabled(tmp_path):
 
 
 async def test_fire_job_skips_rearm_when_disabled_during_run(tmp_path):
-    async def disabling_fire(prompt, *, target="active", task_name=None, session_id=None):
+    async def disabling_fire(prompt, *, target="active", task_name=None, session_id=None, task_id=None):
         record = scheduling.load(path)[0]
         record["enabled"] = False
         scheduling.add(path, record)  # user disabled mid-run
 
-    scheduler, path, tools, _ = _make(tmp_path, fire=disabling_fire)
+    scheduler, path, tools, _, _ = _make(tmp_path, fire=disabling_fire)
     await tools["schedule_task"]("x", "interval", interval_seconds=60, name="r")
     task_id = scheduling.load(path)[0]["id"]
     _delay, job = scheduler.jobs[task_id]
@@ -395,7 +495,7 @@ async def test_fire_job_skips_rearm_when_disabled_during_run(tmp_path):
 
 
 async def test_list_shows_disabled_state(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("summarize inbox", "daily", time_of_day="09:00", name="brief")
     await tools["disable_scheduled_task"]("brief")
     listing = await tools["list_scheduled_tasks"]()
@@ -404,7 +504,7 @@ async def test_list_shows_disabled_state(tmp_path):
 
 async def test_run_now_enqueues_job_and_fires_by_id(tmp_path):
     _noop_fire.calls = []
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", target="new")
     task_id = scheduling.load(path)[0]["id"]
     out = await tools["run_scheduled_task"](task_id)
@@ -418,7 +518,7 @@ async def test_run_now_enqueues_job_and_fires_by_id(tmp_path):
 
 async def test_run_now_by_name(tmp_path):
     _noop_fire.calls = []
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="byname")
     task_id = scheduling.load(path)[0]["id"]
     await tools["run_scheduled_task"]("byname")
@@ -429,7 +529,7 @@ async def test_run_now_by_name(tmp_path):
 
 async def test_run_now_does_not_disturb_schedule(tmp_path):
     _noop_fire.calls = []
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r")
     task_id = scheduling.load(path)[0]["id"]
     before = scheduling.load(path)
@@ -444,7 +544,7 @@ async def test_run_now_task_target_persists_and_reuses_session_id(tmp_path):
     _noop_fire.calls = []
     _noop_fire.return_key = "sess-run"
     try:
-        scheduler, path, tools, _ = _make(tmp_path)
+        scheduler, path, tools, _, _ = _make(tmp_path)
         await tools["schedule_task"]("digest", "interval", interval_seconds=60, name="d", target="task")
         task_id = scheduling.load(path)[0]["id"]
 
@@ -463,7 +563,7 @@ async def test_run_now_task_target_persists_and_reuses_session_id(tmp_path):
 
 
 async def test_run_now_keeps_one_shot(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("later", "once", at_datetime="2999-01-01T00:00:00", name="o")
     task_id = scheduling.load(path)[0]["id"]
     await tools["run_scheduled_task"](task_id)
@@ -474,7 +574,7 @@ async def test_run_now_keeps_one_shot(tmp_path):
 
 async def test_run_now_allows_disabled_and_notes_it(tmp_path):
     _noop_fire.calls = []
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="d")
     await tools["disable_scheduled_task"]("d")
     task_id = scheduling.load(path)[0]["id"]
@@ -486,7 +586,7 @@ async def test_run_now_allows_disabled_and_notes_it(tmp_path):
 
 
 async def test_run_now_unknown_reports_and_enqueues_nothing(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     out = await tools["run_scheduled_task"]("nope")
     assert "No scheduled task" in out
     assert scheduler.jobs == {}
@@ -494,7 +594,7 @@ async def test_run_now_unknown_reports_and_enqueues_nothing(tmp_path):
 
 async def test_run_now_skips_fire_if_cancelled_before_firing(tmp_path):
     _noop_fire.calls = []
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="c")
     task_id = scheduling.load(path)[0]["id"]
     await tools["run_scheduled_task"](task_id)
@@ -505,7 +605,7 @@ async def test_run_now_skips_fire_if_cancelled_before_firing(tmp_path):
 
 
 async def test_arm_all_arms_and_drops_past_once(tmp_path):
-    scheduler, path, tools, arm_all = _make(tmp_path)
+    scheduler, path, tools, arm_all, _ = _make(tmp_path)
     scheduling.add(
         path,
         {
@@ -541,7 +641,7 @@ LONG_PROMPT = "Search the web for at least five verified AI news articles, then 
 
 async def test_get_scheduled_task_returns_the_whole_prompt(tmp_path):
     # Editing a task requires reading its current prompt; the listing's preview is not enough.
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"](LONG_PROMPT, "daily", time_of_day="09:00", name="news", target="task")
     out = await tools["get_scheduled_task"]("news")
     assert LONG_PROMPT in out
@@ -549,12 +649,12 @@ async def test_get_scheduled_task_returns_the_whole_prompt(tmp_path):
 
 
 async def test_get_scheduled_task_unknown(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     assert "No scheduled task" in await tools["get_scheduled_task"]("nope")
 
 
 async def test_list_marks_a_truncated_prompt(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"](LONG_PROMPT, "daily", time_of_day="09:00", name="news")
     listing = await tools["list_scheduled_tasks"]()
     assert LONG_PROMPT not in listing  # still a preview
@@ -562,7 +662,7 @@ async def test_list_marks_a_truncated_prompt(tmp_path):
 
 
 async def test_update_prompt_keeps_identity_and_schedule(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("old", "daily", time_of_day="09:00", name="news", target="task")
     before = scheduling.load(path)[0]
     out = await tools["update_scheduled_task"]("news", prompt="new and longer")
@@ -574,7 +674,7 @@ async def test_update_prompt_keeps_identity_and_schedule(tmp_path):
 
 
 async def test_update_prompt_does_not_disturb_the_schedule(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("old", "interval", interval_seconds=60, name="r")
     task_id = scheduling.load(path)[0]["id"]
     await tools["update_scheduled_task"]("r", prompt="new")
@@ -582,7 +682,7 @@ async def test_update_prompt_does_not_disturb_the_schedule(tmp_path):
 
 
 async def test_update_partial_schedule_keeps_the_existing_type_and_fields(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("p", "weekly", weekday="mon", time_of_day="09:00", name="w")
     task_id = scheduling.load(path)[0]["id"]
     await tools["update_scheduled_task"]("w", time_of_day="10:30")
@@ -591,14 +691,14 @@ async def test_update_partial_schedule_keeps_the_existing_type_and_fields(tmp_pa
 
 
 async def test_update_can_change_the_schedule_type(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("p", "daily", time_of_day="09:00", name="d")
     await tools["update_scheduled_task"]("d", schedule_type="weekly", weekday="Friday")
     assert scheduling.load(path)[0]["schedule"] == {"type": "weekly", "day": "fri", "at": "09:00"}
 
 
 async def test_update_rejects_an_invalid_schedule_and_changes_nothing(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("p", "daily", time_of_day="09:00", name="d")
     before = scheduling.load(path)
     out = await tools["update_scheduled_task"]("d", prompt="edited", time_of_day="99:99")
@@ -607,7 +707,7 @@ async def test_update_rejects_an_invalid_schedule_and_changes_nothing(tmp_path):
 
 
 async def test_update_rejects_a_past_one_shot(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("p", "once", at_datetime="2999-01-01T00:00:00", name="o")
     before = scheduling.load(path)
     out = await tools["update_scheduled_task"]("o", at_datetime="2000-01-01T00:00:00")
@@ -615,7 +715,7 @@ async def test_update_rejects_a_past_one_shot(tmp_path):
 
 
 async def test_update_rejects_a_duplicate_name_but_allows_the_same_name(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("a", "interval", interval_seconds=60, name="one")
     await tools["schedule_task"]("b", "interval", interval_seconds=60, name="two")
     out = await tools["update_scheduled_task"]("two", name="one")
@@ -625,7 +725,7 @@ async def test_update_rejects_a_duplicate_name_but_allows_the_same_name(tmp_path
 
 
 async def test_update_a_disabled_task_does_not_arm_it(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("p", "daily", time_of_day="09:00", name="d")
     await tools["disable_scheduled_task"]("d")
     task_id = scheduling.load(path)[0]["id"]
@@ -635,7 +735,7 @@ async def test_update_a_disabled_task_does_not_arm_it(tmp_path):
 
 
 async def test_update_target_keeps_the_dedicated_conversation(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("p", "interval", interval_seconds=60, name="t", target="task")
     record = scheduling.load(path)[0]
     record["session_id"] = "sess-1"
@@ -646,7 +746,7 @@ async def test_update_target_keeps_the_dedicated_conversation(tmp_path):
 
 
 async def test_update_with_no_fields_reports_and_changes_nothing(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     await tools["schedule_task"]("p", "interval", interval_seconds=60, name="r")
     before = scheduling.load(path)
     out = await tools["update_scheduled_task"]("r")
@@ -654,5 +754,5 @@ async def test_update_with_no_fields_reports_and_changes_nothing(tmp_path):
 
 
 async def test_update_unknown_task(tmp_path):
-    scheduler, path, tools, _ = _make(tmp_path)
+    scheduler, path, tools, _, _ = _make(tmp_path)
     assert "No scheduled task" in await tools["update_scheduled_task"]("nope", prompt="x")

@@ -20,6 +20,64 @@ async def test_create_registers_scheduling_tools(tmp_path):
     } <= names
 
 
+async def test_list_tasks_reports_the_persisted_registry(tmp_path):
+    from kokua import scheduling
+
+    cfg = _config(tmp_path)
+    scheduling.add(
+        cfg.scheduled_tasks_path,
+        {
+            "id": "t1",
+            "name": "brief",
+            "prompt": "summarize inbox",
+            "schedule": {"type": "interval", "seconds": 3600},
+            "target": "task",
+            "created_at": "2026-08-01T00:00:00",
+            "enabled": True,
+        },
+    )
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    items = assistant.list_tasks()
+
+    assert len(items) == 1 and items[0]["id"] == "t1" and items[0]["name"] == "brief"
+
+
+async def test_task_action_disables_a_task_through_the_shared_controls(tmp_path):
+    """The panel's actions go through TaskControls, so the registry and the live scheduler agree."""
+    from kokua import scheduling
+
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    scheduling.add(
+        cfg.scheduled_tasks_path,
+        {
+            "id": "t1",
+            "name": "brief",
+            "prompt": "p",
+            "schedule": {"type": "interval", "seconds": 3600},
+            "created_at": "x",
+            "enabled": True,
+        },
+    )
+
+    assistant.task_action("disable", "t1")
+
+    assert scheduling.load(cfg.scheduled_tasks_path)[0]["enabled"] is False
+    assert assistant.list_tasks()[0]["next_fire"] == "disabled"
+
+
+async def test_task_action_rejects_an_unknown_action(tmp_path):
+    """The action arrives from the browser, so it is checked against an allowlist rather than
+    dispatched on whatever string was sent."""
+    import pytest
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    with pytest.raises(ValueError):
+        assistant.task_action("drop_table", "t1")
+
+
 async def test_create_arms_persisted_tasks_and_drops_past_once(tmp_path):
     from kokua import scheduling
 

@@ -359,6 +359,33 @@ async def test_proactive_new_session_runs_in_fresh_conversation(tmp_path):
     assert any("report" in s for s in channel.sent)
 
 
+async def test_proactive_stamps_minted_conversation_with_its_task_id(tmp_path):
+    """Every conversation a task mints records which task minted it, for both "new" and "task"
+    targets. A "new" task has no session_id to link by, so without this stamp its firings would be
+    indistinguishable from conversations the user started."""
+    assistant = await Assistant.create(
+        _config(tmp_path), _ConvCapturingChannel(), client_factory=lambda cid: MockAsyncModelClient(["out"])
+    )
+
+    new_key = await assistant._proactive("run it", target="new", task_name="report", task_id="task-1")
+    task_key = await assistant._proactive("run it", target="task", task_name="digest", task_id="task-2")
+
+    assert assistant._store.get(new_key).metadata["task_id"] == "task-1"
+    assert assistant._store.get(task_key).metadata["task_id"] == "task-2"
+
+
+async def test_proactive_active_target_stamps_nothing(tmp_path):
+    """A target="active" firing runs in the conversation the user is already viewing, so it must not
+    claim that conversation for the task."""
+    assistant = await Assistant.create(
+        _config(tmp_path), _ConvCapturingChannel(), client_factory=lambda cid: MockAsyncModelClient(["out"])
+    )
+
+    await assistant._proactive("run it", target="active", task_name="report", task_id="task-1")
+
+    assert "task_id" not in assistant._store.get(assistant._active_id).metadata
+
+
 async def test_proactive_new_session_degrades_on_single_conversation_channel(tmp_path):
     channel = FakeChannel()  # no send_conversations
     client = MockAsyncModelClient(["task output"])

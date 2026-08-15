@@ -9,6 +9,11 @@ const imageInput = document.getElementById("image-input");
 const attachPreviews = document.getElementById("attach-previews");
 const convList = document.getElementById("conv-list");
 const newConvBtn = document.getElementById("new-conv");
+const tasksSection = document.getElementById("tasks");
+const tasksToggle = document.getElementById("tasks-toggle");
+const tasksRefresh = document.getElementById("tasks-refresh");
+const tasksCount = document.getElementById("tasks-count");
+const taskList = document.getElementById("task-list");
 const notifications = document.getElementById("notifications");
 const workingIndicator = document.getElementById("working-indicator");
 const convHeading = document.getElementById("conv-heading");
@@ -52,9 +57,42 @@ function relativeTime(iso) {
   return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function renderConversations(items) {
+// The two sidebar frames arrive independently and each needs the other to render: a task row lists
+// its conversations, and the chat list excludes them. Both are kept here and both lists re-render
+// whenever either frame arrives.
+let lastConversations = [];
+let lastTasks = [];
+
+function selectConversation(id) {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "select", id }));
+}
+
+// A conversation belongs to a task if that task minted it (`task_id`, stamped at mint time) or if it
+// is the dedicated conversation a target="task" record remembers (`session_id`, the only link for a
+// conversation minted before task_id was recorded).
+function conversationsOfTask(task) {
+  return lastConversations.filter(
+    (conv) =>
+      (conv.task_id && conv.task_id === task.id) || (task.session_id && conv.id === task.session_id)
+  );
+}
+
+// Ids nested under a task that is *currently in the list*. Deleting a task therefore returns its
+// conversations to the chat list instead of hiding them: excluding every conversation with a task_id
+// would leave an orphan unreachable from the sidebar entirely.
+function nestedConversationIds() {
+  const ids = new Set();
+  for (const task of lastTasks) {
+    for (const conv of conversationsOfTask(task)) ids.add(conv.id);
+  }
+  return ids;
+}
+
+function renderConversations() {
+  const nested = nestedConversationIds();
   convList.innerHTML = "";
-  for (const item of items) {
+  for (const item of lastConversations) {
+    if (nested.has(item.id)) continue;  // shown under its task instead
     const li = document.createElement("li");
     // Title over age in their own column, so the delete button stays at the row's right edge.
     const text = document.createElement("span");
@@ -71,9 +109,7 @@ function renderConversations(items) {
     if (item.active) {
       li.classList.add("active");
     } else {
-      li.addEventListener("click", () => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "select", id: item.id }));
-      });
+      li.addEventListener("click", () => selectConversation(item.id));
     }
     const del = document.createElement("button");
     del.type = "button";
@@ -89,14 +125,154 @@ function renderConversations(items) {
     convList.appendChild(li);
   }
   // The header names what you are looking at, which is the one thing the old dark bar's
-  // "Kokua, local, single user" could not tell you.
-  const active = items.find((item) => item.active);
+  // "Kokua, local, single user" could not tell you. Read from every conversation, not just the
+  // unnested ones, so viewing a task's conversation still names it.
+  const active = lastConversations.find((item) => item.active);
   convHeading.textContent = active ? active.title : "Kokua";
 }
 
 newConvBtn.addEventListener("click", () => {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "new" }));
 });
+
+// --- Scheduled tasks section --------------------------------------------------------------------
+
+// Seconds until the next firing, in the sidebar's units. The server also sends prose in `next_fire`,
+// which is what a task with nothing to count down to (disabled, past-due, unparseable) shows instead.
+function countdown(seconds) {
+  if (seconds < 60) return "in " + Math.max(1, Math.round(seconds)) + "s";
+  if (seconds < 3600) return "in " + Math.round(seconds / 60) + "m";
+  if (seconds < 86400) return "in " + Math.round(seconds / 3600) + "h";
+  return "in " + Math.round(seconds / 86400) + "d";
+}
+
+function scheduleText(schedule) {
+  if (!schedule || !schedule.type) return "";
+  if (schedule.type === "daily") return "daily " + (schedule.at || "");
+  if (schedule.type === "weekly") return (schedule.day || "") + " " + (schedule.at || "");
+  if (schedule.type === "once") return "once " + (schedule.at || "");
+  if (schedule.type === "interval") {
+    const seconds = schedule.seconds || 0;
+    if (seconds % 3600 === 0) return "every " + seconds / 3600 + "h";
+    if (seconds % 60 === 0) return "every " + seconds / 60 + "m";
+    return "every " + seconds + "s";
+  }
+  return schedule.type;
+}
+
+function taskAction(action, id) {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "task", action, id }));
+}
+
+function actionButton(label, title, handler) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.title = title;
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function taskRow(task) {
+  const li = document.createElement("li");
+  li.className = "task-row" + (task.enabled ? " enabled" : "");
+  li.dataset.taskId = task.id;
+
+  const dot = document.createElement("span");
+  dot.className = "task-dot";
+  li.appendChild(dot);
+
+  const text = document.createElement("span");
+  text.className = "task-text";
+  const name = document.createElement("span");
+  name.className = "task-name";
+  name.textContent = task.name || task.prompt;
+  const when = document.createElement("span");
+  when.className = "task-when";
+  const next = task.next_fire_seconds === null || task.next_fire_seconds === undefined
+    ? task.next_fire
+    : countdown(task.next_fire_seconds);
+  when.textContent = [scheduleText(task.schedule), next].filter(Boolean).join(" · ");
+  text.appendChild(name);
+  text.appendChild(when);
+  li.appendChild(text);
+  // The full prompt is the one field too long for a row, so it is the row's tooltip.
+  li.title = task.prompt;
+
+  const actions = document.createElement("span");
+  actions.className = "task-actions";
+  actions.appendChild(
+    task.enabled
+      ? actionButton("⏸", "Disable this task", () => taskAction("disable", task.id))
+      : actionButton("▶", "Enable this task", () => taskAction("enable", task.id))
+  );
+  actions.appendChild(actionButton("⟲", "Run this task now", () => taskAction("run", task.id)));
+  const del = actionButton("×", "Delete this task", () => {
+    if (confirm(`Delete the task "${task.name || task.prompt}"?`)) taskAction("delete", task.id);
+  });
+  del.className = "task-delete";
+  actions.appendChild(del);
+  li.appendChild(actions);
+  return li;
+}
+
+function taskConversationRow(conv) {
+  const li = document.createElement("li");
+  li.className = "task-conv" + (conv.active ? " active" : "");
+  // When a task runs, every firing's conversation carries the same title (the task's name), so the
+  // row shows when it ran instead -- that is the only thing telling two firings apart. The marker
+  // keeps a bare date from reading as a stray row rather than a child of the task above.
+  const marker = document.createElement("span");
+  marker.className = "task-conv-marker";
+  marker.textContent = "↳";
+  marker.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.className = "task-conv-label";
+  label.textContent = relativeTime(conv.updated_at) || conv.title;
+  li.appendChild(marker);
+  li.appendChild(label);
+  li.title = conv.title;
+  if (!conv.active) li.addEventListener("click", () => selectConversation(conv.id));
+  return li;
+}
+
+function renderTasks() {
+  tasksSection.classList.toggle("hidden", lastTasks.length === 0);
+  tasksCount.textContent = lastTasks.length ? String(lastTasks.length) : "";
+  taskList.innerHTML = "";
+  for (const task of lastTasks) {
+    taskList.appendChild(taskRow(task));
+    for (const conv of conversationsOfTask(task)) taskList.appendChild(taskConversationRow(conv));
+  }
+}
+
+function renderSidebar() {
+  renderConversations();
+  renderTasks();
+}
+
+// Collapsed state persists like the sidebar's own, so the section stays how the user left it.
+function setTasksExpanded(expanded) {
+  tasksToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  taskList.hidden = !expanded;
+  try {
+    localStorage.setItem("tasks-collapsed", expanded ? "false" : "true");
+  } catch (e) {}
+}
+
+tasksToggle.addEventListener("click", () => {
+  setTasksExpanded(tasksToggle.getAttribute("aria-expanded") !== "true");
+});
+// A task the model schedules or cancels mid-chat does not push a new task frame, so this is how the
+// section catches up without a reload. A firing's new conversation needs no refresh: it arrives on the
+// conversations frame and nests client-side.
+tasksRefresh.addEventListener("click", () => {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "get_tasks" }));
+});
+
+try {
+  if (localStorage.getItem("tasks-collapsed") === "true") setTasksExpanded(false);
+} catch (e) {}
 
 // --- Settings panel -----------------------------------------------------------------------
 const settingsBtn = document.getElementById("settings-btn");
@@ -782,7 +958,11 @@ ws.onmessage = (event) => {
   } else if (frame.type === "settings") {
     populateSettings(frame.values);
   } else if (frame.type === "conversations") {
-    renderConversations(frame.items);
+    lastConversations = frame.items;
+    renderSidebar();
+  } else if (frame.type === "tasks") {
+    lastTasks = frame.items;
+    renderSidebar();
   } else if (frame.type === "history") {
     // Replay a conversation (on connect or after switching), reusing the live renderers.
     log.innerHTML = "";  // replace any current transcript

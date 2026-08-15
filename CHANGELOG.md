@@ -212,6 +212,20 @@ Nothing a pack contributes is mounted until a role asks for it with `tool_packs 
   firing and reused after, so the task builds on its own history; a deleted one is recreated).
 - A failing firing is reported and swallowed rather than propagating into the scheduler, which has no
   handler of its own.
+- **A tasks section in the web sidebar**, below the conversation list, showing each task's name,
+  schedule, and next firing, with disable/enable, run-now, and delete per row. It hides itself entirely
+  when there are no tasks, collapses (remembered per browser), and scrolls independently of the
+  conversation list so neither can crowd the other out. Creating and editing tasks stays in chat, where
+  the model turns a natural-language schedule into a validated one.
+- The panel's actions and the agent's tools share one implementation (`scheduling.TaskControls`), so a
+  registry write and the scheduler (un)arming that must accompany it can never come apart. The action
+  name arrives from the browser and is allowlisted rather than dispatched on.
+- **Each task's conversations are nested under it** in that section and left out of the chat list, so
+  the chat list holds only conversations you started. A conversation records the task that minted it
+  (`task_id` in its metadata), which is the durable link a task name is not. Grouping happens on the
+  page, not in the core: nothing is filtered out of `ConversationBook.list()`, so the agent's
+  conversation tools still see every conversation. A conversation whose task has been deleted falls back
+  into the chat list rather than becoming unreachable.
 
 ### Deep planning and adversarial review
 

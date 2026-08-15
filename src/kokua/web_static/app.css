@@ -45,8 +45,10 @@ body {
 :root { --sidebar-width: 240px; --sidebar-rail: 48px; --row-measure: 58rem; }
 /* The sidebar shares the canvas background and is separated by a hairline, so it reads as part of the
    same surface rather than as its own slab. */
+/* The sidebar itself does not scroll: #conv-list and #tasks each own a scroll region, so a long task
+   list cannot push the conversation list out of view (and vice versa). */
 #sidebar { width: var(--sidebar-width); flex: none; background: var(--bg); border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; padding: 8px; gap: 10px; overflow-y: auto; }
+  display: flex; flex-direction: column; padding: 8px; gap: 10px; overflow: hidden; }
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 /* Draggable divider between the sidebar and main pane; also arrow-key/Enter operable (see JS). */
 #sidebar-resize { flex: none; width: 5px; cursor: col-resize; background: transparent; align-self: stretch; }
@@ -62,9 +64,14 @@ body {
 :root[data-sidebar-collapsed="true"] #sidebar { width: var(--sidebar-rail); padding: 8px 4px; overflow: hidden; }
 :root[data-sidebar-collapsed="true"] #sidebar-top { flex-direction: column; height: auto; gap: 8px; }
 :root[data-sidebar-collapsed="true"] #wordmark,
+:root[data-sidebar-collapsed="true"] #tasks,
 :root[data-sidebar-collapsed="true"] #conv-list { display: none; }
 body.resizing { user-select: none; }
-#conv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+/* `flex: 0 1 auto`, not `1 1 auto`: the list takes the height it needs and no more, so the tasks
+   section sits directly under it instead of being pushed to the bottom of the sidebar by the free
+   space. It still shrinks and scrolls first when the two together overflow. */
+#conv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px;
+  flex: 0 1 auto; min-height: 0; overflow-y: auto; }
 #conv-list li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px;
   cursor: pointer; border-left: 2px solid transparent; }
 #conv-list li:hover { background: var(--surface); }
@@ -77,6 +84,50 @@ body.resizing { user-select: none; }
   cursor: pointer; font-size: 1.1em; line-height: 1; padding: 0 2px; opacity: 0; }
 #conv-list li:hover .conv-delete { opacity: 1; }
 #conv-list .conv-delete:hover { color: var(--danger); }
+
+/* --- Scheduled tasks section ---------------------------------------------------------------- */
+/* Capped at 45% of the sidebar and scrolling internally: the conversation list keeps the rest. */
+#tasks { flex: none; max-height: 45%; display: flex; flex-direction: column; min-height: 0;
+  border-top: 1px solid var(--border); padding-top: 8px; }
+#tasks.hidden { display: none; }
+#tasks-head { display: flex; align-items: center; gap: 4px; flex: none; }
+#tasks-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: none;
+  border: none; cursor: pointer; padding: 2px 4px; border-radius: 6px; color: var(--fg-faint);
+  font-size: 0.8em; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+#tasks-toggle:hover, #tasks-refresh:hover { background: var(--surface); color: var(--fg); }
+#tasks-toggle .caret { font-size: 0.9em; transition: transform 0.12s ease; }
+#tasks-toggle[aria-expanded="false"] .caret { transform: rotate(-90deg); }
+#tasks-count { color: var(--fg-faint); font-weight: 400; }
+#tasks-refresh { flex: none; background: none; border: none; color: var(--fg-faint); cursor: pointer;
+  font-size: 0.95em; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+#task-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column;
+  gap: 2px; overflow-y: auto; min-height: 0; }
+#task-list[hidden] { display: none; }
+.task-row { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 6px;
+  border-left: 2px solid transparent; }
+.task-row:hover { background: var(--surface); }
+/* A filled dot is an armed task, a hollow one is disabled: the state reads at a glance without
+   spending a row's width on the word. */
+.task-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--accent); }
+.task-row.enabled .task-dot { background: var(--accent); }
+.task-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.task-name { font-size: 0.88em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-when { font-size: 0.72em; color: var(--fg-faint); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.task-actions { flex: none; display: flex; gap: 0; opacity: 0; }
+.task-row:hover .task-actions, .task-actions:focus-within { opacity: 1; }
+.task-actions button { border: none; background: none; color: var(--fg-faint); cursor: pointer;
+  font-size: 0.95em; line-height: 1; padding: 0 3px; border-radius: 4px; }
+.task-actions button:hover { color: var(--fg); background: var(--bg); }
+.task-actions .task-delete:hover { color: var(--danger); }
+/* A task's own conversations, indented under it. Same click-to-switch behavior as a chat row. */
+.task-conv { display: flex; align-items: center; gap: 5px; padding: 3px 8px 3px 18px; border-radius: 6px;
+  cursor: pointer; border-left: 2px solid transparent; font-size: 0.82em; color: var(--fg-dim); }
+.task-conv-marker { flex: none; color: var(--fg-faint); }
+.task-conv-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-conv:hover { background: var(--surface); color: var(--fg); }
+.task-conv.active { background: var(--surface); border-left-color: var(--accent); color: var(--fg);
+  font-weight: 600; cursor: default; }
 /* A thin strip naming the conversation being viewed, rather than a dark bar naming the application. */
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 0 16px; height: 40px; flex: none; background: transparent; color: var(--fg);

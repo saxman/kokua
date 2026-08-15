@@ -311,6 +311,26 @@ async def test_record_subagent_events_ignores_an_empty_list(tmp_path):
     assert "subagent" not in assistant._store.get(assistant._active_id).metadata
 
 
+async def test_new_session_records_the_task_that_minted_it(tmp_path):
+    """A scheduled task's conversation carries the task id, which is what lets the sidebar nest it
+    under its task. Names are optional and editable, so the id is the only durable link."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a"]))
+
+    session = assistant._book.new_session(title="morning-brief", task_id="abc123")
+
+    assert assistant._store.get(session.key).metadata["task_id"] == "abc123"
+
+
+async def test_list_projects_task_id_and_leaves_it_none_for_a_chat(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["a"]))
+    task_session = assistant._book.new_session(title="morning-brief", task_id="abc123")
+
+    by_id = {item["id"]: item for item in assistant._book.list()}
+
+    assert by_id[task_session.key]["task_id"] == "abc123"
+    assert by_id[assistant._active_id]["task_id"] is None
+
+
 async def test_sessions_backs_list_and_shares_its_ordering(tmp_path):
     """``sessions()`` is the single store-walk-and-order seam; ``list()`` is a projection of it, so the
     two can never disagree about recency."""

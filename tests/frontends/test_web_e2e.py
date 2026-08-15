@@ -640,3 +640,130 @@ def test_a_card_built_from_an_append_alone_still_names_itself(page, live_server)
     expect(card).to_have_count(1)
     expect(card.locator("> .fold-header > .fold-label")).to_contain_text("Sub-agent")
     expect(card.locator("> .fold-body")).to_contain_text("Vendor A is cheaper.")
+
+
+# --- Scheduled tasks sidebar section -------------------------------------------------------------
+
+
+def _seed_task_and_conversations(config, *, task_id="t1", enabled=True, with_task=True):
+    """Plant one interval task plus two conversations it minted and one ordinary chat."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    from kokua import scheduling
+
+    if with_task:
+        scheduling.add(
+            config.scheduled_tasks_path,
+            {
+                "id": task_id,
+                "name": "morning-brief",
+                "prompt": "Summarize my calendar and unread mail.",
+                "schedule": {"type": "daily", "at": "07:00"},
+                "target": "new",
+                "created_at": "2026-08-01T00:00:00",
+                "enabled": enabled,
+            },
+        )
+    store = TinyDBSessionStore(str(config.sessions_path))
+    store.save(
+        Session(
+            key="chat",
+            messages=[{"role": "user", "content": "my own chat"}],
+            metadata={"title": "my own chat", "created_at": "2026-08-12T00:00:00", "updated_at": "2026-08-12T00:00:00"},
+        )
+    )
+    for index in (1, 2):
+        store.save(
+            Session(
+                key=f"firing-{index}",
+                messages=[{"role": "user", "content": "Summarize my calendar and unread mail."}],
+                metadata={
+                    "title": "morning-brief",
+                    "created_at": f"2026-08-1{index}T07:00:00",
+                    "updated_at": f"2026-08-1{index}T07:00:00",
+                    "task_id": task_id,
+                },
+            )
+        )
+
+
+def test_tasks_section_is_absent_with_no_tasks(page, live_server):
+    """The section costs nothing for a user who never schedules a task."""
+    _open(page, live_server(delay=0.0))
+    expect(page.locator("#tasks")).to_be_hidden()
+
+
+def test_tasks_section_lists_a_task_with_its_schedule_and_countdown(page, live_server):
+    _open(page, live_server(delay=0.0, seed=_seed_task_and_conversations))
+    row = page.locator(".task-row")
+    expect(row).to_have_count(1)
+    expect(row).to_contain_text("morning-brief")
+    expect(row.locator(".task-when")).to_contain_text("daily 07:00")
+    expect(row.locator(".task-when")).to_contain_text("in ")  # a countdown, not raw seconds
+    expect(page.locator("#tasks-count")).to_have_text("1")
+
+
+def test_task_conversations_nest_under_the_task_and_leave_the_chat_list(page, live_server):
+    """The whole point of the grouping: a task's firings are reachable under it, and the chat list
+    holds only conversations the user started."""
+    _open(page, live_server(delay=0.0, seed=_seed_task_and_conversations))
+    expect(page.locator("#task-list .task-conv")).to_have_count(2)
+    # The chat list keeps the user's own conversation plus the empty one the app opens at startup,
+    # and neither firing appears in it.
+    titles = page.locator("#conv-list .conv-title").all_inner_texts()
+    assert "my own chat" in titles
+    assert "morning-brief" not in titles
+
+
+def test_a_task_conversation_can_be_opened_from_its_task(page, live_server):
+    _open(page, live_server(delay=0.0, seed=_seed_task_and_conversations))
+    page.locator("#task-list .task-conv").first.click()
+    expect(page.locator("#conv-heading")).to_have_text("morning-brief")
+    expect(page.locator(".bubble.user")).to_contain_text("Summarize my calendar and unread mail.")
+
+
+def test_an_orphaned_task_conversation_falls_back_to_the_chat_list(page, live_server):
+    """A conversation whose task is gone must stay reachable. Excluding every conversation carrying a
+    task_id would hide it from the sidebar entirely."""
+    _open(page, live_server(delay=0.0, seed=lambda c: _seed_task_and_conversations(c, with_task=False)))
+    expect(page.locator("#tasks")).to_be_hidden()
+    titles = page.locator("#conv-list .conv-title").all_inner_texts()
+    assert titles.count("morning-brief") == 2
+
+
+def test_disabling_a_task_round_trips_through_the_server(page, live_server):
+    _open(page, live_server(delay=0.0, seed=_seed_task_and_conversations))
+    row = page.locator(".task-row")
+    expect(row).to_have_class(re.compile(r"(^|\s)enabled(\s|$)"))
+
+    row.hover()
+    row.locator(".task-actions button").first.click()  # the pause button
+
+    expect(page.locator(".task-row")).not_to_have_class(re.compile(r"(^|\s)enabled(\s|$)"))
+    expect(page.locator(".task-row .task-when")).to_contain_text("disabled")
+
+
+def test_enabling_a_disabled_task_round_trips_through_the_server(page, live_server):
+    _open(page, live_server(delay=0.0, seed=lambda c: _seed_task_and_conversations(c, enabled=False)))
+    row = page.locator(".task-row")
+    expect(row).not_to_have_class(re.compile(r"(^|\s)enabled(\s|$)"))
+
+    row.hover()
+    row.locator(".task-actions button").first.click()  # the play button
+
+    expect(page.locator(".task-row")).to_have_class(re.compile(r"(^|\s)enabled(\s|$)"))
+    expect(page.locator(".task-row .task-when")).to_contain_text("in ")
+
+
+def test_tasks_section_collapses_and_remembers_it(page, live_server):
+    url = live_server(delay=0.0, seed=_seed_task_and_conversations)
+    _open(page, url)
+    expect(page.locator("#task-list")).to_be_visible()
+
+    page.click("#tasks-toggle")
+    expect(page.locator("#task-list")).to_be_hidden()
+
+    page.reload()
+    page.wait_for_selector("#conv-list li")
+    expect(page.locator("#tasks")).to_be_visible()
+    expect(page.locator("#task-list")).to_be_hidden()  # the choice survived the reload

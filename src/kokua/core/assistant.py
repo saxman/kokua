@@ -185,7 +185,10 @@ class Assistant:
         # Wrap the raw factory so every conversation's client carries the effective generation kwargs
         # the active agent has, not bare provider defaults.
         assistant._settings.layered_factory(raw_factory)
-        scheduler_tools, arm_tasks = make_scheduler_tools(scheduler, config.scheduled_tasks_path, assistant._proactive)
+        scheduler_tools, arm_tasks, task_controls = make_scheduler_tools(
+            scheduler, config.scheduled_tasks_path, assistant._proactive
+        )
+        assistant._tasks = task_controls
 
         # Read-only visibility across conversations, bound to the live book. Built here rather than in
         # build.py because the book is app state, not a config value, so no tool-pack could reach it.
@@ -325,6 +328,27 @@ class Assistant:
         """Apply a settings-panel change at runtime and persist it to config.toml."""
         await self._settings.apply_and_persist(incoming)
 
+    def list_tasks(self) -> list[dict]:
+        """The scheduled tasks as fields, for a front end that renders its own task rows."""
+        return self._tasks.list_tasks()
+
+    def task_action(self, action: str, id_or_name: str) -> str:
+        """Run one task lifecycle action, returning the sentence its equivalent tool would.
+
+        The action name reaches this from a front end, so it is looked up in a table rather than
+        dispatched on the string. Raises ``ValueError`` for anything not in it.
+        """
+        actions: dict[str, Callable[[], str]] = {
+            "enable": lambda: self._tasks.set_enabled(id_or_name, True),
+            "disable": lambda: self._tasks.set_enabled(id_or_name, False),
+            "run": lambda: self._tasks.run_now(id_or_name),
+            "delete": lambda: self._tasks.cancel(id_or_name),
+        }
+        run = actions.get(action)
+        if run is None:
+            raise ValueError(f"unknown task action {action!r}")
+        return run()
+
     async def _maybe_push_conversations(self) -> None:
         """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""
         await self._ui.push_conversations(self.list_conversations())
@@ -421,5 +445,8 @@ class Assistant:
         target: str = "active",
         task_name: Optional[str] = None,
         session_id: Optional[str] = None,
+        task_id: Optional[str] = None,
     ) -> Optional[str]:
-        return await self._turns.proactive(prompt, target=target, task_name=task_name, session_id=session_id)
+        return await self._turns.proactive(
+            prompt, target=target, task_name=task_name, session_id=session_id, task_id=task_id
+        )

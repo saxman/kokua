@@ -919,6 +919,114 @@ def test_ws_get_and_apply_settings(tmp_path):
     assert echoed["values"]["show_tools"] is False
 
 
+def _seed_task(config, task_id="t1", name="brief", enabled=True):
+    from kokua import scheduling
+
+    scheduling.add(
+        config.scheduled_tasks_path,
+        {
+            "id": task_id,
+            "name": name,
+            "prompt": "summarize inbox",
+            "schedule": {"type": "interval", "seconds": 3600},
+            "target": "task",
+            "created_at": "2026-08-01T00:00:00",
+            "enabled": enabled,
+        },
+    )
+
+
+def test_ws_sends_tasks_on_connect(tmp_path):
+    """The sidebar section is populated without the page having to ask, mirroring the settings push."""
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    _seed_task(config)
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        frame = _drain_until(ws, "tasks")
+    assert [item["id"] for item in frame["items"]] == ["t1"]
+    assert frame["items"][0]["name"] == "brief" and frame["items"][0]["enabled"] is True
+
+
+def test_ws_get_tasks_returns_the_registry(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    _seed_task(config)
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "tasks")  # the connect-time push
+        ws.send_text(json.dumps({"type": "get_tasks"}))
+        frame = _drain_until(ws, "tasks")
+    assert [item["id"] for item in frame["items"]] == ["t1"]
+
+
+def test_ws_task_disable_applies_and_echoes_fresh_tasks(tmp_path):
+    import json
+
+    from kokua import scheduling
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    _seed_task(config)
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "tasks")
+        ws.send_text(json.dumps({"type": "task", "action": "disable", "id": "t1"}))
+        echoed = _drain_until(ws, "tasks")
+    assert echoed["items"][0]["enabled"] is False
+    assert scheduling.load(config.scheduled_tasks_path)[0]["enabled"] is False
+
+
+def test_ws_task_delete_removes_the_record(tmp_path):
+    import json
+
+    from kokua import scheduling
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    _seed_task(config)
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "tasks")
+        ws.send_text(json.dumps({"type": "task", "action": "delete", "id": "t1"}))
+        echoed = _drain_until(ws, "tasks")
+    assert echoed["items"] == []
+    assert scheduling.load(config.scheduled_tasks_path) == []
+
+
+def test_ws_task_rejects_unknown_action_without_touching_the_registry(tmp_path):
+    import json
+
+    from kokua import scheduling
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    _seed_task(config)
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "tasks")
+        ws.send_text(json.dumps({"type": "task", "action": "drop_table", "id": "t1"}))
+        message = _drain_until(ws, "message")
+    assert "could not" in message["text"].lower()
+    assert scheduling.load(config.scheduled_tasks_path)[0]["enabled"] is True
+
+
+def test_ws_conversations_carry_their_task_id(tmp_path):
+    """The page nests a task's conversations under it, so the sidebar payload has to say which task
+    minted each conversation."""
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        frame = _drain_until(ws, "conversations")
+    assert all("task_id" in item for item in frame["items"])
+
+
 def test_ws_reports_model_client_error_and_releases_busy(tmp_path, monkeypatch):
     import kokua.core.assistant as assistant_mod
     from starlette.testclient import TestClient

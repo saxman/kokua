@@ -54,11 +54,11 @@ def _static_text(filename: str) -> str:
     return files("kokua").joinpath(f"web_static/{filename}").read_text(encoding="utf-8")
 
 
-_CONTROL_TYPES = ("new", "select", "delete", "settings", "get_settings")
+_CONTROL_TYPES = ("new", "select", "delete", "settings", "get_settings", "get_tasks", "task")
 
 
 def _parse_control(raw: str) -> Optional[dict]:
-    """Return a control object ({"type": "new"/"select"/"delete"/"settings"/"get_settings", ...}), else None.
+    """Return a control object ({"type": "new"/"select"/"delete"/"settings"/"task"/..., ...}), else None.
 
     Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
     approval "y"/"n") and is fed to the channel unchanged.
@@ -183,10 +183,11 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             await websocket.close()
             busy["active"] = False
             return
-        # Show the conversation list, the active conversation's history, and the current settings on
-        # (re)connect, so the sidebar, chat, and settings panel are all populated.
+        # Show the conversation list, the active conversation's history, the current settings, and the
+        # scheduled tasks on (re)connect, so the sidebar, chat, and settings panel are all populated.
         await _sync_view(channel, assistant)
         await channel.send_settings(assistant.current_settings())
+        await channel.send_tasks(assistant.list_tasks())
 
         async def pump() -> None:
             # Conversation controls (new/select/delete) are handled here and never reach the channel; an
@@ -225,6 +226,21 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                             logger.warning("Could not apply settings", exc_info=True)
                             await channel.send("Sorry, those settings could not be applied.")
                         await channel.send_settings(assistant.current_settings())
+                        continue
+                    # Task controls touch only the scheduled-task registry, so like the settings
+                    # controls they answer with a fresh task list and skip the sidebar/history refresh.
+                    if control["type"] == "get_tasks":
+                        await channel.send_tasks(assistant.list_tasks())
+                        continue
+                    if control["type"] == "task":
+                        try:
+                            # task_action allowlists the action, so an unrecognized one raises here
+                            # rather than reaching the registry.
+                            assistant.task_action(str(control.get("action", "")), str(control.get("id", "")))
+                        except Exception:
+                            logger.warning("Could not apply task action", exc_info=True)
+                            await channel.send("Sorry, that task action could not be applied.")
+                        await channel.send_tasks(assistant.list_tasks())
                         continue
                     if control["type"] == "new":
                         try:

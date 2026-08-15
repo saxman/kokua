@@ -536,6 +536,14 @@ class WebChannel(BaseWebChannel):
         """Send the current runtime settings so the page can populate its settings panel."""
         await self.send_frame({"type": "settings", "values": values})
 
+    async def send_tasks(self, items: list[dict]) -> None:
+        """Send the scheduled tasks so the page can populate its sidebar task section.
+
+        Like ``send_settings``, this is a front-end concern rather than part of ``RichChannel``: the
+        core never sends it, so there is no capability for ``ChannelUI`` to degrade.
+        """
+        await self.send_frame({"type": "tasks", "items": items})
+
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
 

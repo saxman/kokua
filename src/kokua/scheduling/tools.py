@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable, Literal, Optional
@@ -22,6 +23,23 @@ from .recurrence import next_fire
 from .registry import _record_target, add, find, load, remove
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TaskControls:
+    """The task lifecycle operations, shared by the agent tools and by any front end showing tasks.
+
+    Every mutation here pairs a registry write with the scheduler (un)arming that must accompany it.
+    A caller that edited the JSON directly would leave the in-memory scheduler firing a task the
+    registry calls disabled, so this is the only supported way to change a task's state. The mutators
+    return the same user-facing sentence their tool does; a front end can show it or discard it and
+    re-read ``list_tasks``.
+    """
+
+    list_tasks: Callable[[], list[dict]]
+    set_enabled: Callable[[str, bool], str]
+    cancel: Callable[[str], str]
+    run_now: Callable[[str], str]
 
 
 def _build_schedule(
@@ -73,14 +91,17 @@ def make_scheduler_tools(
     scheduler,
     registry_path: Path,
     fire: Callable[..., Awaitable[None]],
-) -> tuple[list[Callable], Callable[[], None]]:
+) -> tuple[list[Callable], Callable[[], None], TaskControls]:
     """Build the schedule/list/cancel agent tools bound to a live ``Scheduler`` and a fire callback.
 
     ``fire`` is the assistant's proactive-turn entry point, called as
-    ``await fire(prompt, target=..., task_name=..., session_id=...)`` when a task is due; for a
-    ``target="task"`` firing it returns the conversation key it used, which is persisted back onto the
-    record so the next firing reuses it. Returns the tool list plus ``arm_all`` (call once at boot to
-    schedule persisted tasks).
+    ``await fire(prompt, target=..., task_name=..., session_id=..., task_id=...)`` when a task is due;
+    for a ``target="task"`` firing it returns the conversation key it used, which is persisted back
+    onto the record so the next firing reuses it. ``task_id`` is passed so a conversation the firing
+    mints records which task minted it.
+
+    Returns the tool list, ``arm_all`` (call once at boot to schedule persisted tasks), and a
+    :class:`TaskControls` handle exposing the same lifecycle operations to a front end.
     """
 
     def _lookup(id_or_name: str) -> Optional[dict]:
@@ -101,6 +122,15 @@ def make_scheduler_tools(
             return False
         scheduler.at(delay, functools.partial(_fire, record["id"], rearm=True), name=record["id"])
         return True
+
+    def _next_fire_text(record: dict, now: datetime) -> str:
+        if not record.get("enabled", True):
+            return "disabled"
+        try:
+            delay = next_fire(record["schedule"], now)
+        except ValueError:
+            return "invalid schedule"
+        return "past" if delay is None else f"~{int(delay)}s"
 
     def _remember_session(task_id: str, target: str, used_key) -> None:
         # Persist the conversation key a "task"-target firing wrote to, so the next firing reuses it.
@@ -129,6 +159,7 @@ def make_scheduler_tools(
                 target=target,
                 task_name=record.get("name"),
                 session_id=record.get("session_id") or None,
+                task_id=task_id,
             )
             _remember_session(task_id, target, used_key)
         finally:
@@ -199,15 +230,6 @@ def make_scheduler_tools(
         add(registry_path, record)
         _arm(record)
         return f"Scheduled task {_handle(record)}; first run in ~{int(delay)}s."
-
-    def _next_fire_text(record: dict, now: datetime) -> str:
-        if not record.get("enabled", True):
-            return "disabled"
-        try:
-            delay = next_fire(record["schedule"], now)
-        except ValueError:
-            return "invalid schedule"
-        return "past" if delay is None else f"~{int(delay)}s"
 
     @tool
     async def list_scheduled_tasks() -> str:
@@ -348,15 +370,18 @@ def make_scheduler_tools(
             _arm(record)
         return summary
 
-    @tool
-    async def cancel_scheduled_task(id_or_name: str) -> str:
-        """Cancel a scheduled task by its id or name."""
+    def _cancel(id_or_name: str) -> str:
         record = _lookup(id_or_name)
         if record is None:
             return f"No scheduled task matches {id_or_name!r}."
         scheduler.cancel(record["id"])
         remove(registry_path, record["id"])
         return f"Cancelled scheduled task {_handle(record)}."
+
+    @tool
+    async def cancel_scheduled_task(id_or_name: str) -> str:
+        """Cancel a scheduled task by its id or name."""
+        return _cancel(id_or_name)
 
     def _set_enabled(id_or_name: str, enabled: bool) -> str:
         """Flip a task's enabled flag and (un)arm it. Shared by the two tools below, which stay
@@ -391,16 +416,7 @@ def make_scheduler_tools(
         """Re-enable a disabled scheduled task by id or name so it resumes firing on its schedule."""
         return _set_enabled(id_or_name, True)
 
-    @tool
-    async def run_scheduled_task(id_or_name: str) -> str:
-        """Run an existing scheduled task now, without changing its schedule.
-
-        Reproduces exactly what the task's next scheduled firing would do (honoring its ``target``;
-        gated tools are auto-denied as they would be for an unattended firing), so you can verify how
-        the task behaves. A ``target="task"`` run writes into (and, on the first run, creates and
-        remembers) the task's dedicated conversation. The task's output arrives as a separate message
-        shortly after, not as this tool's return value. Works on a disabled task too.
-        """
+    def _run_now(id_or_name: str) -> str:
         record = _lookup(id_or_name)
         if record is None:
             return f"No scheduled task matches {id_or_name!r}."
@@ -413,13 +429,70 @@ def make_scheduler_tools(
         note = " (note: this task is disabled)" if not record.get("enabled", True) else ""
         return f"Running task {handle} now; its output will appear shortly{suffix}.{note}"
 
-    return [
-        schedule_task,
-        list_scheduled_tasks,
-        get_scheduled_task,
-        update_scheduled_task,
-        cancel_scheduled_task,
-        disable_scheduled_task,
-        enable_scheduled_task,
-        run_scheduled_task,
-    ], arm_all
+    @tool
+    async def run_scheduled_task(id_or_name: str) -> str:
+        """Run an existing scheduled task now, without changing its schedule.
+
+        Reproduces exactly what the task's next scheduled firing would do (honoring its ``target``;
+        gated tools are auto-denied as they would be for an unattended firing), so you can verify how
+        the task behaves. A ``target="task"`` run writes into (and, on the first run, creates and
+        remembers) the task's dedicated conversation. The task's output arrives as a separate message
+        shortly after, not as this tool's return value. Works on a disabled task too.
+        """
+        return _run_now(id_or_name)
+
+    def _next_fire_seconds(record: dict, now: datetime) -> Optional[float]:
+        """Seconds until the next firing, or None when there is nothing to count down to.
+
+        Paired with ``_next_fire_text``: a front end formats this into its own phrasing, and falls back
+        to the text for the None cases (disabled, past-due, unparseable).
+        """
+        if not record.get("enabled", True):
+            return None
+        try:
+            return next_fire(record["schedule"], now)
+        except ValueError:
+            return None
+
+    def _list_tasks() -> list[dict]:
+        """Every task as fields rather than prose, for a front end that renders its own rows.
+
+        ``session_id`` is included because it is the only link to the conversation of a
+        ``target="task"`` task created before conversations recorded their ``task_id``.
+        """
+        now = datetime.now()
+        return [
+            {
+                "id": record["id"],
+                "name": record.get("name"),
+                "prompt": record["prompt"],
+                "schedule": record["schedule"],
+                "target": _record_target(record),
+                "enabled": record.get("enabled", True),
+                "created_at": record.get("created_at", ""),
+                "session_id": record.get("session_id") or None,
+                "next_fire": _next_fire_text(record, now),
+                "next_fire_seconds": _next_fire_seconds(record, now),
+            }
+            for record in load(registry_path)
+        ]
+
+    return (
+        [
+            schedule_task,
+            list_scheduled_tasks,
+            get_scheduled_task,
+            update_scheduled_task,
+            cancel_scheduled_task,
+            disable_scheduled_task,
+            enable_scheduled_task,
+            run_scheduled_task,
+        ],
+        arm_all,
+        TaskControls(
+            list_tasks=_list_tasks,
+            set_enabled=_set_enabled,
+            cancel=_cancel,
+            run_now=_run_now,
+        ),
+    )

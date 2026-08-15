@@ -268,6 +268,35 @@ self-contained `web_static/index.html` served as package data, plus vendored `ma
 typeset after sanitization with `trust:false`. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under `/fonts/`.
 
+### The settings panel and the tasks section
+
+Two page surfaces are pure front-end concerns and deliberately absent from `RichChannel`: the settings
+panel (`settings` / `get_settings`) and the scheduled-tasks section (`tasks` / `get_tasks` / `task`).
+The core never sends either frame, so there is no capability for `ChannelUI` to probe and no fallback to
+document; `Assistant` exposes only accessors (`current_settings` / `apply_settings`,
+`list_tasks` / `task_action`) and `frontends/web.py`'s pump handles the control frames. A new transport
+that wants a task list implements its own; it is not a hole in the channel contract.
+
+`task_action` is the seam that keeps the panel honest. Every task mutation pairs a registry write with
+the scheduler (un)arming that must accompany it, and both the agent's tools and the panel go through the
+same `scheduling.TaskControls` handle that `make_scheduler_tools` returns alongside the tools, so the two
+cannot drift: a front end that edited `scheduled_tasks.json` directly would leave the in-memory scheduler
+firing a task the registry calls disabled. The action name arrives from the browser, so it is looked up
+in a table and raises for anything else rather than being dispatched on.
+
+Grouping a task's conversations under it happens **on the page**, not in the core. `new_session` stamps
+`metadata["task_id"]` on any conversation a firing mints (the task's id, not its name, since a name is
+optional and `update_scheduled_task` can change it) and `ConversationBook.list()` projects it, but nothing
+is filtered there -- the agent's read-only conversation tools walk `sessions()` and still see every
+conversation. The page nests a conversation under a task when its `task_id` matches a task *currently in
+the list*, or when it is the `session_id` a `target="task"` record remembers (the only link for a
+conversation minted before `task_id` was recorded). Requiring the task to be present is what makes
+deleting a task return its conversations to the chat list instead of hiding them: keying on `task_id`
+alone would leave an orphan unreachable from the sidebar. Because the nesting is client-side, a firing's
+new conversation appears under its task with no task re-fetch -- `TurnRunner.proactive` already pushes the
+conversation list. The reverse is not true: a task the model schedules or cancels mid-chat does not push a
+`tasks` frame, which is what the section's refresh button is for.
+
 A `tool` frame carries what the call returned as well as what it was asked to do (`response`, added to
 AIMU's base frame), because AIMU yields `TOOL_CALLING` only once the call has been dispatched. An error,
 an argument-binding failure, and a denied approval are results too and arrive on that same key, so the

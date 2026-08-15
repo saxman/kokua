@@ -93,12 +93,19 @@ class ConversationBook:
         sessions = self.sessions()
         return sessions[0] if sessions else self.new_session()
 
-    def new_session(self, title: Optional[str] = None) -> Session:
-        """Mint and persist an empty session, optionally pre-titled."""
+    def new_session(self, title: Optional[str] = None, task_id: Optional[str] = None) -> Session:
+        """Mint and persist an empty session, optionally pre-titled and attributed to a task.
+
+        ``task_id`` marks a conversation a scheduled task minted, which is how the sidebar nests it
+        under that task. It is the task's id rather than its name because a name is optional and
+        ``update_scheduled_task`` can change it, so only the id survives an edit.
+        """
         now = _now()
         metadata = {"created_at": now, "updated_at": now}
         if title:
             metadata["title"] = title
+        if task_id:
+            metadata["task_id"] = task_id
         session = Session(key=uuid.uuid4().hex, metadata=metadata)
         self._store.save(session)
         return session
@@ -158,13 +165,19 @@ class ConversationBook:
         return sessions
 
     def list(self) -> list[dict]:
-        """All conversations as {id, title, updated_at, active}, most-recently-updated first."""
+        """All conversations as {id, title, updated_at, active, task_id}, most-recently-updated first.
+
+        ``task_id`` is the scheduled task that minted the conversation, or None for one the user
+        started. Nothing is filtered out here: a front end that groups task conversations under their
+        task does that grouping itself, so the agent's conversation tools still see every conversation.
+        """
         return [
             {
                 "id": session.key,
                 "title": session.metadata.get("title") or "New conversation",
                 "updated_at": session.metadata.get("updated_at", ""),
                 "active": session.key == self._active_id,
+                "task_id": session.metadata.get("task_id"),
             }
             for session in self.sessions()
         ]

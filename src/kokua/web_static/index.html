@@ -44,6 +44,18 @@
         <button id="sidebar-toggle" type="button" aria-expanded="true" title="Collapse sidebar">«</button>
       </div>
       <ul id="conv-list"></ul>
+      <!-- Scheduled tasks, with each task's own conversations nested under it. Hidden entirely while
+           there are no tasks, so it costs nothing for a user who never schedules one. -->
+      <section id="tasks" class="hidden">
+        <div id="tasks-head">
+          <button id="tasks-toggle" type="button" aria-expanded="true" aria-controls="task-list">
+            <span class="caret" aria-hidden="true">▾</span><span class="tasks-label">Tasks</span>
+            <span id="tasks-count"></span>
+          </button>
+          <button id="tasks-refresh" type="button" title="Refresh tasks">⟳</button>
+        </div>
+        <ul id="task-list"></ul>
+      </section>
     </aside>
     <div id="sidebar-resize" role="separator" aria-orientation="vertical"
          aria-label="Resize sidebar" tabindex="0"></div>

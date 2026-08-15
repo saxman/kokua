@@ -226,6 +226,7 @@ class TurnRunner:
         target: str = "active",
         task_name: Optional[str] = None,
         session_id: Optional[str] = None,
+        task_id: Optional[str] = None,
     ) -> Optional[str]:
         """Run an unattended turn with ``prompt`` and surface the result.
 
@@ -237,12 +238,16 @@ class TurnRunner:
         - ``"task"``: the task's own conversation, reused across firings -- ``session_id`` is the key
           it created previously (``None`` on the first firing).
 
+        ``task_id`` is stamped onto any conversation this firing mints, so a front end can group a
+        task's conversations under it. A ``"active"`` firing stamps nothing: that conversation belongs
+        to the user, not the task.
+
         Returns the conversation key for ``"new"``/``"task"`` so the caller can remember it, or
         ``None`` for ``"active"``. **The key is returned even when the run fails**, so a task whose
         first firing errors still records the conversation it minted instead of minting another one
         on every subsequent firing.
         """
-        spec = self._resolve_target(target, prompt, task_name, session_id)
+        spec = self._resolve_target(target, prompt, task_name, session_id, task_id)
         try:
             await self._run_unattended(prompt, spec)
         except ModelConnectionError as exc:  # invariant 6
@@ -258,7 +263,12 @@ class TurnRunner:
         return spec.conversation_id if spec.returns_key else None
 
     def _resolve_target(
-        self, target: str, prompt: str, task_name: Optional[str], session_id: Optional[str]
+        self,
+        target: str,
+        prompt: str,
+        task_name: Optional[str],
+        session_id: Optional[str],
+        task_id: Optional[str] = None,
     ) -> ProactiveTarget:
         """Pick the conversation this firing runs in, minting or reusing one as the target requires.
 
@@ -274,7 +284,7 @@ class TurnRunner:
             self._book.touch(session)
         else:
             title = task_name or derive_title([{"role": "user", "content": prompt}]) or "Scheduled task"
-            session = self._book.new_session(title=title)
+            session = self._book.new_session(title=title, task_id=task_id)
         title = session.metadata.get("title") or "Scheduled task"
         return ProactiveTarget(
             conversation_id=session.key,
