@@ -3,8 +3,9 @@
 These wrap tools AIMU provides rather than defining any, which is why they live here instead of in a
 subsystem's ``tools.py``: that convention marks the files holding Kokua's own ``@tool`` definitions.
 
-The generative groups (image, audio, speech, transcription) each need their ``AIMU_*_MODEL`` env var
-and raise at call time otherwise, so an agent declaring one is opting into that requirement.
+The generative groups (audio, speech, transcription) each need their ``AIMU_*_MODEL`` env var and raise
+at call time otherwise, so an agent declaring one is opting into that requirement. AIMU's fourth
+generative group, ``image``, is not registered here; see the comment at its omission in ``_GROUPS``.
 
 ``cross_cutting`` is set for the capabilities an agent holds to manage itself. ``time`` is one of them
 even though it is an AIMU group like ``fs``: an agent keeps a clock for its own scheduling and "when"
@@ -25,7 +26,13 @@ _GROUPS = {
     "compute": (builtin.compute, "Run Python, shell commands, and calculations."),
     "time": (builtin.time, "The current date and time, and timezone conversion."),
     "misc": (builtin.misc, "Assorted utilities."),
-    "image": (builtin.image, "Image generation. Needs AIMU_IMAGE_MODEL."),
+    # AIMU's own "image" group is deliberately not registered here. Kokua's `image` toolset
+    # (kokua.toolsets.image, a plugin) supersedes it: both contribute a tool named `generate_image`, but
+    # AIMU's saves into a folder inside the aimu package, which the web front end cannot serve, while
+    # Kokua's saves into the servable `images_path`. Registering both would let a name collision (which
+    # this registry otherwise treats as a startup error) instead decide, via first-wins deduplication,
+    # which implementation an agent silently gets -- the exact failure a single namespace exists to rule
+    # out. See tests/toolsets/test_builtin.py for the test pinning this.
     "audio": (builtin.audio, "Audio generation. Needs AIMU_AUDIO_MODEL."),
     "speech": (builtin.speech, "Text to speech. Needs AIMU_SPEECH_MODEL."),
     "transcription": (builtin.transcription, "Speech to text. Needs AIMU_TRANSCRIPTION_MODEL."),

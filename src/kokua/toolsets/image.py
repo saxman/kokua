@@ -79,7 +79,7 @@ def build(config: AssistantConfig) -> list:
 
 
 TOOLSET = Toolset(
-    name="image-generation",
+    name="image",
     description="Generate images from a text prompt (needs the AIMU_IMAGE_MODEL environment variable set).",
     build=lambda ctx: build(ctx.config),
 )

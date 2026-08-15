@@ -17,7 +17,6 @@ from aimu.aio.tools.builtin import make_async_subagent_tool
 
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.config.schema import MEMORY_GUIDANCE, SUPERVISOR_GUIDANCE, AssistantConfig
-from kokua.toolsets.agents import agent_tools, build_registry
 from kokua.toolsets.builtin import BUILTIN_TOOLSETS
 from kokua.toolsets.context import LiveState
 
@@ -90,6 +89,11 @@ def _build_subagent_agent_types(config: AssistantConfig, state: Optional[LiveSta
     are wired. The role ``description`` becomes the first line of the built ``system_message`` (AIMU
     shows it in the tool's role menu).
     """
+    # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which pulls
+    # in kokua.core.tools -- a submodule of this package -- and importing it triggers kokua/core/__init__
+    # to run, which imports this module. A top-level import here would close that cycle.
+    from kokua.toolsets.agents import agent_tools, build_registry
+
     state = state or LiveState(config=config, registry=build_registry(config))
     enabled = _enabled_group_names(config)
     url_by_name = {s.name: s.url for s in config.mcp_servers if getattr(s, "name", None)}
@@ -168,6 +172,8 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
     ``config``; omitting it resolves the model straight from ``config``, for a caller with no client of
     its own.
     """
+    from kokua.toolsets.agents import agent_tools  # see the comment in _build_subagent_agent_types
+
     agent = aio.SkillAgent(
         client if client is not None else build_model_client(config),
         tools=[],

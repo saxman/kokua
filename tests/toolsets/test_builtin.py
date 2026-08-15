@@ -15,8 +15,24 @@ def _ctx(tmp_path, agent=None) -> ToolsetContext:
 
 
 def test_every_aimu_group_is_registered():
-    for name in ("web", "fs", "compute", "time", "misc", "image", "audio", "speech", "transcription"):
+    """AIMU's "image" group is deliberately excluded (see the omission comment in `builtin._GROUPS`)."""
+    for name in ("web", "fs", "compute", "time", "misc", "audio", "speech", "transcription"):
         assert name in BY_NAME
+
+
+def test_the_registered_image_toolset_is_not_aimus(tmp_path):
+    """Kokua's `image` toolset (a plugin, saving into the servable images_path) supersedes AIMU's own
+    "image" group (which saves where the web front end cannot serve it): both contribute a tool named
+    `generate_image`, so registering both would let a name collision silently decide which an agent
+    gets. Pinned here so a future change cannot silently re-register AIMU's group and reintroduce that.
+    """
+    assert "image" not in BY_NAME
+    aimu_image_names = {fn.__name__ for fn in aimu_builtin.image}
+    for toolset in BUILTIN_TOOLSETS:
+        if toolset.entry_point_only:
+            continue  # skills needs a real agent to build; irrelevant to the image collision anyway
+        built_names = {fn.__name__ for fn in toolset.build(_ctx(tmp_path))}
+        assert aimu_image_names.isdisjoint(built_names), toolset.name
 
 
 def test_a_group_builds_exactly_aimus_tools(tmp_path):

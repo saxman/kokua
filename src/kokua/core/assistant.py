@@ -44,7 +44,6 @@ from kokua.core.settings_runtime import SettingsApplier
 from kokua.core.turn_gate import TurnGate
 from kokua.core.turns import TurnRunner
 from kokua.core.turn_registry import TurnInfo, TurnTracker
-from kokua.toolsets.agents import build_registry
 from kokua.toolsets.context import LiveState
 
 logger = logging.getLogger(__name__)
@@ -142,6 +141,12 @@ class Assistant:
                 "needs at least one [subagents.roles.*] in config.toml. Run `kokua config init` to "
                 "write a config with the default roles."
             )
+        # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which
+        # pulls in kokua.core.tools -- a submodule of this package -- and importing it triggers
+        # kokua/core/__init__ to run, which imports this module. A top-level import here would close
+        # that cycle.
+        from kokua.toolsets.agents import build_registry
+
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
 
