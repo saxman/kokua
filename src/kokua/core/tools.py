@@ -33,6 +33,7 @@ from aimu.tools import tool
 
 from kokua.core.conversations import ConversationBook
 from kokua.core.messages import message_text
+from kokua.toolsets.registry import Toolset
 
 DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT = 30, 200
 DEFAULT_READ_CHARS, MAX_READ_CHARS = 8_000, 40_000
@@ -391,3 +392,18 @@ def make_conversation_tools(book: ConversationBook, turn_running: Callable[[str]
         return "\n".join(preamble + blocks)
 
     return [list_conversations, read_conversation, search_conversations]
+
+
+CONVERSATIONS_GUIDANCE = (
+    " You can see across the user's other chat conversations with `list_conversations`, "
+    "`read_conversation`, and `search_conversations`, which read their saved transcripts. They are "
+    "read-only, and this turn is not saved yet, so use your own context for the conversation you are in."
+)
+
+TOOLSET = Toolset(
+    name="conversations",
+    description="Read-only visibility across the user's other conversations.",
+    build=lambda ctx: make_conversation_tools(ctx.state.conversation_book, ctx.state.turn_running),
+    guidance=CONVERSATIONS_GUIDANCE,
+    cross_cutting=True,
+)

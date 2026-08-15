@@ -19,6 +19,7 @@ from aimu.tools import tool
 from kokua.config import store as config_store
 from kokua.config import table as runtime_settings
 from kokua.config import file as settings
+from kokua.toolsets.registry import Toolset
 
 logger = logging.getLogger(__name__)
 
@@ -83,3 +84,11 @@ def make_config_tools(config_path: Path, apply_hot: Callable[[str, str, object],
         return f"Set [{section}].{key} = {coerced!r} in config.toml. It takes effect the next time Kokua restarts."
 
     return [read_config, update_config]
+
+
+TOOLSET = Toolset(
+    name="config",
+    description="Read config.toml and change a runtime setting, persisted back to the file.",
+    build=lambda ctx: make_config_tools(ctx.config.config_path, ctx.state.reapply_config),
+    cross_cutting=True,
+)

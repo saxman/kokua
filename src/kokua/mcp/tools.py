@@ -22,6 +22,7 @@ from kokua.config import store as config_store
 from kokua.mcp import servers
 from kokua.mcp.auth import Notify
 from kokua.mcp.servers import RECONNECTABLE, BearerTokenRequired, ForEachAgent
+from kokua.toolsets.registry import Toolset
 
 logger = logging.getLogger(__name__)
 
@@ -120,3 +121,27 @@ def make_mcp_tools(
         return f"Disconnected {url}. Removed tools: {names}."
 
     return [add_mcp_server, remove_mcp_server]
+
+
+def _build(ctx) -> list:
+    """Wire the MCP management tools to the live connection list and the agent fan-out.
+
+    ``refresh_workers`` comes off the context rather than being imported: it lives in ``core.build``,
+    which imports this module, so a direct import would be circular.
+    """
+    return make_mcp_tools(
+        ctx.state.for_each_agent,
+        ctx.state.connections,
+        notify=ctx.state.notify,
+        oauth_storage_dir=ctx.state.oauth_storage_dir,
+        config_path=ctx.config.config_path,
+        refresh_workers=ctx.state.refresh_workers,
+    )
+
+
+TOOLSET = Toolset(
+    name="mcp-admin",
+    description="Connect and disconnect remote MCP servers at runtime.",
+    build=_build,
+    cross_cutting=True,
+)
