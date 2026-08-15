@@ -4,7 +4,7 @@ import pytest
 
 from kokua.config.file import ConfigError
 from kokua.config.schema import AgentConfig, AssistantConfig
-from kokua.toolsets.agents import build_registry, validate_agents
+from kokua.toolsets.agents import build_registry, unreferenced_toolsets, validate_agents
 from kokua.toolsets.registry import ToolsetError
 
 
@@ -154,6 +154,36 @@ def test_skills_on_a_worker_is_rejected_during_validation():
     with pytest.raises(ConfigError) as excinfo:
         validate_agents(config, build_registry(config))
     assert "skills" in str(excinfo.value)
+
+
+def test_unreferenced_toolsets_ignores_unnamed_builtin_and_core_groups():
+    """A built-in AIMU group or a core subsystem toolset ships whether or not any agent names it, so an
+    unnamed one is not a startup warning -- only a name the user provisioned earns one."""
+    config = _config({"assistant": AgentConfig(tools=["time"])})
+    registry = build_registry(config)
+    assert unreferenced_toolsets(config, registry) == []
+
+
+def test_unreferenced_toolsets_reports_an_unused_plugin(monkeypatch):
+    from kokua.toolsets import agents
+    from kokua.toolsets.registry import Toolset
+
+    unused = Toolset(name="weather", description="Forecasts.", build=lambda ctx: [])
+    monkeypatch.setattr(agents, "discover_toolsets", lambda: {"weather": unused})
+    config = AssistantConfig(agents={"assistant": AgentConfig(tools=["time"])}, load_plugins=True)
+    registry = build_registry(config)
+    assert unreferenced_toolsets(config, registry) == ["weather"]
+
+
+def test_unreferenced_toolsets_does_not_report_a_declared_plugin(monkeypatch):
+    from kokua.toolsets import agents
+    from kokua.toolsets.registry import Toolset
+
+    used = Toolset(name="weather", description="Forecasts.", build=lambda ctx: [])
+    monkeypatch.setattr(agents, "discover_toolsets", lambda: {"weather": used})
+    config = AssistantConfig(agents={"assistant": AgentConfig(tools=["time", "weather"])}, load_plugins=True)
+    registry = build_registry(config)
+    assert unreferenced_toolsets(config, registry) == []
 
 
 def test_a_diamond_shaped_graph_passes():

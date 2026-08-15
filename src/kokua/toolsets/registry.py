@@ -51,7 +51,22 @@ class Toolset:
     entry_point_only: bool = False
 
 
-def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> dict[str, Toolset]:
+class ToolsetRegistry(dict):
+    """A ``dict[str, Toolset]`` that also remembers which source registered each name.
+
+    Every ordinary consumer (``select``, ``build_tools``, ``LiveState.registry``) only ever needs the
+    mapping, so this stays a plain dict for all of them. ``providers`` exists solely for the startup
+    warning that has to tell a name nobody provisioned (an AIMU built-in group, a core subsystem) from
+    a name the user provisioned and then never referenced (a plugin, a configured MCP server); that
+    distinction has to come from provenance, not from anything a ``Toolset`` itself carries.
+    """
+
+    def __init__(self, toolsets: Mapping[str, Toolset], providers: Mapping[str, str]):
+        super().__init__(toolsets)
+        self.providers: dict[str, str] = dict(providers)
+
+
+def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistry:
     """Index every toolset by name, rejecting a name two providers claim.
 
     Each source is ``(provider_label, toolsets)``; the label appears in the collision message, which is
@@ -69,7 +84,7 @@ def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> dict[str, Tool
                 )
             registry[toolset.name] = toolset
             provider[toolset.name] = label
-    return registry
+    return ToolsetRegistry(registry, provider)
 
 
 def select(

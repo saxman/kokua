@@ -33,7 +33,6 @@ from kokua.core.build import (
     build_model_client,
     entry_agent_system_message,
     make_agent_builder,
-    unreferenced_mcp_servers,
 )
 from kokua.config import AssistantConfig, ConfigError
 from kokua.core.conversations import ConversationBook
@@ -147,7 +146,7 @@ class Assistant:
         # pulls in kokua.core.tools -- a submodule of this package -- and importing it triggers
         # kokua/core/__init__ to run, which imports this module. A top-level import here would close
         # that cycle.
-        from kokua.toolsets.agents import build_registry
+        from kokua.toolsets.agents import build_registry, unreferenced_toolsets
 
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
@@ -235,10 +234,9 @@ class Assistant:
         await reconnect_mcp_servers(
             for_each_agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
         )
-        for name in unreferenced_mcp_servers(config):
+        for name in unreferenced_toolsets(config, state.registry):
             logger.warning(
-                "MCP server %r is configured but no [subagents.roles.*] names it in `mcp_servers`; "
-                "the supervisor mounts no MCP tools itself, so this server reaches no agent.",
+                "Toolset %r is provisioned but no [agents.*] table names it in `tools`, so it reaches no agent.",
                 name,
             )
 
