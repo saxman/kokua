@@ -69,12 +69,12 @@ def test_pack_is_discovered_and_contributes_three_tools():
 
 def test_pack_tools_reach_a_role_that_names_the_pack(tmp_path):
     """The documented wiring: a role with tool_packs = ["aimu_agents"] gets the three agents as tools."""
-    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+    from kokua.core.build import _build_subagent_agent_types
 
     cfg = _assistant_config(
         tmp_path, subagent_roles={"reviewer": {"description": "Reviews.", "tool_packs": ["aimu_agents"]}}
     )
-    types = _build_subagent_agent_types(cfg, [], _load_plugin_tools_by_pack(cfg))
+    types = _build_subagent_agent_types(cfg)
     names = {fn.__name__ for fn in types["reviewer"]["tools"]}
     assert {"code_review", "research_report", "create_content"} <= names
 

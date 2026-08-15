@@ -8,6 +8,7 @@ import pytest
 
 from kokua.config import MCPServerConfig
 from kokua.core.assistant import Assistant
+from kokua.toolsets.context import LiveState
 from tests.channels import FakeChannel, _config, example_subagent_roles
 from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool
 from tests.helpers import MockAsyncModelClient
@@ -137,6 +138,8 @@ def test_worker_role_resolves_mcp_and_tool_pack_sources(tmp_path):
 
     from kokua.core.build import _build_subagent_agent_types
     from kokua.config import MCPServerConfig
+    from kokua.toolsets.agents import build_registry
+    from kokua.toolsets.registry import Toolset
 
     def stock_quote():  # fake MCP tool callable -- the resolver only reads __name__
         pass
@@ -158,8 +161,13 @@ def test_worker_role_resolves_mcp_and_tool_pack_sources(tmp_path):
         },
     )
     connections = [SimpleNamespace(url="https://broker/mcp", callables=[stock_quote])]
-    by_pack = {"pdf": [make_pdf]}
-    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg, connections, by_pack)["trader"]["tools"]}
+    # A registry standing in for the real one: the real "compute" group plus a fake "pdf" pack, so the
+    # test can tell a tool-pack's tools apart from a built-in group's without depending on the real pdf
+    # toolset's actual output.
+    registry = build_registry(cfg)
+    registry["pdf"] = Toolset(name="pdf", description="fake pack", build=lambda ctx: [make_pdf])
+    state = LiveState(config=cfg, connections=connections, registry=registry)
+    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg, state)["trader"]["tools"]}
     assert "stock_quote" in names  # named MCP server's tool
     assert "make_pdf" in names  # tool-pack's tool
     assert "calculate" in names  # built-in compute group still included
@@ -175,7 +183,8 @@ def test_worker_role_resolves_mcp_by_raw_url(tmp_path):
 
     cfg = _config(tmp_path, tools=["none"], subagent_roles={"r": {"mcp_servers": ["https://raw/mcp"]}})
     connections = [SimpleNamespace(url="https://raw/mcp", callables=[remote_tool])]
-    types = _build_subagent_agent_types(cfg, connections, {})
+    state = LiveState(config=cfg, connections=connections)
+    types = _build_subagent_agent_types(cfg, state)
     assert [fn.__name__ for fn in types["r"]["tools"]] == ["remote_tool"]
 
 
@@ -187,7 +196,7 @@ def test_worker_role_unknown_sources_drop_silently(tmp_path):
         tools=["all"],
         subagent_roles={"r": {"groups": ["web"], "mcp_servers": ["nope"], "tool_packs": ["ghost"]}},
     )
-    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg, [], {})["r"]["tools"]}
+    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg)["r"]["tools"]}
     assert "web_search" in names  # web group survived; unknown mcp/pack refs dropped without error
 
 
@@ -206,15 +215,6 @@ def test_supervisor_prompt_names_the_typed_delegate(tmp_path):
     from kokua.core.build import resolve_system_message
 
     assert "spawn_subagent(agent_type, task)" in resolve_system_message(_config(tmp_path))
-
-
-def test_load_plugin_tools_by_pack_groups_by_name(tmp_path):
-    from kokua.core.build import _load_plugin_tools_by_pack
-
-    by_pack = _load_plugin_tools_by_pack(_config(tmp_path))  # load_plugins on by default
-    assert "example" in by_pack
-    assert any(fn.__name__ == "roll_dice" for fn in by_pack["example"])
-    assert _load_plugin_tools_by_pack(_config(tmp_path, load_plugins=False)) == {}
 
 
 # The supervisor's COMPLETE toolset, grouped by where each group is built. Half of it comes from AIMU,
@@ -299,10 +299,10 @@ async def test_create_registers_the_conversation_tools(tmp_path):
 def test_conversation_tools_do_not_reach_the_workers(tmp_path):
     """Reading other conversations is supervisor-only: a worker shares no history and has no conversation
     identity, so the capability is meaningless to it (and would widen a spawn's blast radius)."""
-    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+    from kokua.core.build import _build_subagent_agent_types
 
     config = _config(tmp_path)
-    agent_types = _build_subagent_agent_types(config, [], _load_plugin_tools_by_pack(config))
+    agent_types = _build_subagent_agent_types(config)
     assert agent_types  # roles are configured, so this is not vacuous
     for role, spec in agent_types.items():
         assert CONVERSATION_TOOL_NAMES.isdisjoint({fn.__name__ for fn in spec["tools"]}), role
@@ -540,12 +540,16 @@ async def test_document_tools_round_trip(tmp_path):
     assert tools["read_document"]("/notes/standup.md") == "Yesterday, Today, Blockers"
 
 
-def test_build_memory_tools_carry_dispatch_attrs(tmp_path):
-    """build_memory returns AIMU's memory + document tools directly (no wrapping); they carry the
-    dispatch attributes AIMU needs. Thread-safety now lives inside the stores (aimu.memory), not here."""
-    from kokua.core.build import build_memory
+def test_memory_toolset_tools_carry_dispatch_attrs(tmp_path):
+    """The registry's memory + documents toolsets return AIMU's tools directly (no wrapping); they carry
+    the dispatch attributes AIMU needs. Thread-safety lives inside the stores (aimu.memory), not here."""
+    from kokua.toolsets import ToolsetContext
+    from kokua.toolsets.agents import build_registry
 
-    _, _, tools = build_memory(_config(tmp_path, memory=True))
+    config = _config(tmp_path, memory=True)
+    state = LiveState(config=config, registry=build_registry(config))
+    ctx = ToolsetContext(state=state, agent=None)
+    tools = state.registry["memory"].build(ctx) + state.registry["documents"].build(ctx)
     assert tools
     for fn in tools:
         assert fn.__name__
@@ -573,7 +577,8 @@ async def test_assistant_authors_and_registers_runnable_script(tmp_path):
 
 def test_make_agent_builder_wires_and_restores(tmp_path):
     from aimu.sessions import Session, TinyDBSessionStore
-    from kokua.core.build import build_memory, make_agent_builder
+    from kokua.core.build import make_agent_builder
+    from kokua.toolsets.agents import build_registry
 
     config = _config(tmp_path)  # existing helper
     store = TinyDBSessionStore(str(config.sessions_path))
@@ -583,25 +588,24 @@ def test_make_agent_builder_wires_and_restores(tmp_path):
         messages=[{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}],
     )
     store.save(session)
-    _, _, memory_tools = build_memory(config)
 
     async def noop(*a, **k):
         return None
 
+    state = LiveState(
+        config=config,
+        registry=build_registry(config),
+        oauth_storage_dir=config.data_dir / "mcp-oauth",
+        tool_approval=lambda name, args: True,
+        reapply_config=noop,
+        for_each_agent=lambda apply: None,
+    )
     build = make_agent_builder(
         config,
+        state,
         client_factory=lambda cid: MockAsyncModelClient([]),
-        notify=noop,
-        oauth_storage_dir=config.data_dir / "mcp-oauth",
-        connections=[],
-        memory_tools=memory_tools,
-        tool_approval=lambda name, args: True,
-        scheduler_tools=[],
-        conversation_tools=[],
         store=store,
         images_path=config.images_path,
-        for_each_agent=lambda apply: None,
-        reapply_config=noop,
     )
     agent = build("c1")
     assert agent.tool_approval is not None

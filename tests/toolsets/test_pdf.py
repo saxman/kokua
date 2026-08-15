@@ -42,10 +42,10 @@ def test_pdf_toolset_discovered():
 
 def test_markdown_to_pdf_reaches_a_role_that_names_the_pack(tmp_path):
     """The supervisor mounts no pack tools, so a role has to name `pdf` for the tool to reach a worker."""
-    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+    from kokua.core.build import _build_subagent_agent_types
 
     cfg = _config(tmp_path, subagent_roles={"writer": {"description": "Writes.", "tool_packs": ["pdf"]}})
-    types = _build_subagent_agent_types(cfg, [], _load_plugin_tools_by_pack(cfg))
+    types = _build_subagent_agent_types(cfg)
     assert "markdown_to_pdf" in {fn.__name__ for fn in types["writer"]["tools"]}
 
 
