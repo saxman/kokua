@@ -9,14 +9,15 @@ with ``apply_settings``).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from aimu import aio
 from aimu.aio.tools.builtin import make_async_subagent_tool
 
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME
-from kokua.config.schema import MEMORY_GUIDANCE, SUPERVISOR_GUIDANCE, AssistantConfig
+from kokua.config.schema import AssistantConfig
 from kokua.toolsets.context import LiveState
+from kokua.toolsets.registry import Toolset, select
 
 
 class ModelClientError(RuntimeError):
@@ -103,25 +104,30 @@ def _build_subagent_agent_types(config: AssistantConfig, state: Optional[LiveSta
     return agent_types
 
 
-def resolve_system_message(config: AssistantConfig) -> str:
-    """The system prompt for the model client: base message plus the memory guidance, when memory is on.
+def resolve_system_message(config: AssistantConfig, agent_name: str, toolsets: Sequence[Toolset]) -> str:
+    """One agent's system prompt: its declared opener plus the guidance its toolsets and delegation earn.
 
-    Shared by the initial build and a runtime model switch. The supervisor guidance is unconditional:
-    delegation is the only route to a domain tool, so there is no configuration under which the model
-    should be told anything else.
+    Shared by the initial build and a runtime model switch, so a switch reuses exactly the message the
+    agent was built with rather than recomputing a possibly different one.
     """
-    return config.system_message + (MEMORY_GUIDANCE if config.memory else "") + SUPERVISOR_GUIDANCE
+    # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which pulls
+    # in kokua.core.tools -- a submodule of this package -- and importing it triggers kokua/core/__init__
+    # to run, which imports this module. A top-level import here would close that cycle.
+    from kokua.toolsets.agents import assemble_system_message
+
+    return assemble_system_message(config, agent_name, toolsets)
 
 
-def build_model_client(config: AssistantConfig):
-    """Build the model client for ``config.model``.
+def build_model_client(config: AssistantConfig, system_message: str):
+    """Build the model client for ``config.model``, carrying ``system_message``.
 
-    The persisted model choice already lives in ``config.model`` (loaded from config.toml), so there is
-    no separate override to apply. Raises ``ModelClientError`` (carrying AIMU's message) instead of the
-    raw ValueError/TypeError so a front end can present it rather than a traceback.
+    The caller assembles the message (see ``resolve_system_message``) and passes it in, rather than this
+    function computing its own, so a runtime model switch and the initial build always give the client
+    the same message the agent was wired with. Raises ``ModelClientError`` (carrying AIMU's message)
+    instead of the raw ValueError/TypeError so a front end can present it rather than a traceback.
     """
     try:
-        return aio.client(config.model, system=resolve_system_message(config))
+        return aio.client(config.model, system=system_message)
     except (ValueError, TypeError) as e:
         raise ModelClientError(str(e)) from e
 
@@ -147,12 +153,19 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
     a sibling's by accident. ``client`` lets a caller that already has one (``make_agent_builder``, which
     layers per-conversation generation kwargs onto it) skip resolving a second, unused one from
     ``config``; omitting it resolves the model straight from ``config``, for a caller with no client of
-    its own.
+    its own. Only that second path assembles a system message: an injected client already carries
+    whatever system its own caller built it with, so computing one here and never using it would just be
+    wasted work implying a contract that does not exist.
     """
     from kokua.toolsets.agents import agent_tools  # see the comment in _build_subagent_agent_types
 
+    resolved_client = client
+    if resolved_client is None:
+        toolsets = select(_ENTRY_POINT_TOOLSETS, state.registry, agent=agent_name, entry_point=agent_name)
+        resolved_client = build_model_client(config, resolve_system_message(config, agent_name, toolsets))
+
     agent = aio.SkillAgent(
-        client if client is not None else build_model_client(config),
+        resolved_client,
         tools=[],
         skill_manager=state.skill_manager,
         name=agent_name,

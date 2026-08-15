@@ -13,48 +13,7 @@ from typing import Optional
 
 from kokua.config import paths as paths
 
-DEFAULT_SYSTEM_MESSAGE = (
-    "You are a personal assistant running on the user's own machine. Be concise and helpful. "
-    "When the user teaches you a repeatable procedure worth remembering, call `author_skill` to save "
-    "it as a reusable skill; name skills in kebab-case (lowercase words joined by hyphens, e.g. "
-    "'weekly-review'), never with underscores or spaces. When a procedure can be automated, call "
-    "`add_skill_script` to attach a runnable Python or shell script to a skill; the script becomes a "
-    "tool you can run immediately, even in the same turn. If a script fails, fix it by calling "
-    "`add_skill_script` again with the SAME filename to overwrite it (a different filename just "
-    "creates a duplicate and leaves the broken script). Scripts run with full access to this "
-    "machine, so only automate what the user asked for."
-)
-
-# Always appended to the system message: the assistant is a supervisor, and delegation is the only way
-# it reaches a domain tool. The "you have almost no direct tools" line is load-bearing -- without it the
-# model tries to answer web/file/code questions from memory instead of spawning a worker that actually
-# has the tools. It still answers trivial and conversational requests itself, keeping memory, skills,
-# config, scheduling, MCP-management, past conversations, and the clock. The cross-conversation sentence
-# is load-bearing too: no worker has those tools, so without it "what did we decide last week?" gets
-# delegated to a worker that cannot possibly answer.
-SUPERVISOR_GUIDANCE = (
-    " You are a lean supervisor. Answer trivial or conversational requests directly using your own "
-    "tools (date/time, memory, skills, config, scheduling, MCP management, reading past conversations). "
-    "For any specialized work -- web research, reading or writing files, running code, or anything "
-    "needing a domain tool -- you have almost no direct tools, so you MUST delegate by calling "
-    "`spawn_subagent(agent_type, task)`: pick the worker whose role fits, give it a complete, "
-    "self-contained task (it shares no history with you), then relay or synthesize its answer for the "
-    "user. Emit several `spawn_subagent` calls when subtasks are independent. You can also see across "
-    "the user's other chat conversations with `list_conversations`, `read_conversation`, and "
-    "`search_conversations`, which read their saved transcripts; they are read-only, and this turn is "
-    "not saved yet, so use your own context for the conversation you are in."
-)
-
-# Appended to the system message when memory is enabled, so the model actually uses the two stores
-# (without explicit direction the tools sit unused). Two distinct stores: short facts about the user
-# (semantic recall) vs. longer reference documents.
-MEMORY_GUIDANCE = (
-    " You have a persistent memory across conversations. When the user shares a durable fact about "
-    "themselves or a preference worth remembering, call `store_memory` to save it, and call "
-    "`search_memories` to recall such facts when they would help. For longer reference material the user "
-    "provides (notes, documents), call `save_document` with a descriptive path and `search_documents` to "
-    "find relevant passages later. Do not store transient chit-chat."
-)
+DEFAULT_SYSTEM_MESSAGE = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 
 
 @dataclass

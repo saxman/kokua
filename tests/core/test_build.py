@@ -465,24 +465,6 @@ async def test_runtime_removed_mcp_server_drops_from_lean_worker(tmp_path, monke
     assert "get_quote" not in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}  # worker dropped it
 
 
-def test_resolve_system_message_always_carries_supervisor_guidance(tmp_path):
-    """Delegation is the only route to a domain tool, so there is no configuration under which the
-    model should be told anything else."""
-    from kokua.core.build import resolve_system_message
-    from kokua.config.schema import SUPERVISOR_GUIDANCE
-
-    assert SUPERVISOR_GUIDANCE.strip() in resolve_system_message(_config(tmp_path))
-
-
-def test_supervisor_guidance_names_the_conversation_tools():
-    """No worker has these tools, so if the guidance stops naming them the capability is orphaned: the
-    model delegates "what did we decide last week?" to a worker that cannot answer."""
-    from kokua.config.schema import SUPERVISOR_GUIDANCE
-
-    for name in CONVERSATION_TOOL_NAMES:
-        assert name in SUPERVISOR_GUIDANCE, name
-
-
 async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
     import kokua.core.build as build_mod
 

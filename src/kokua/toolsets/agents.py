@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from kokua.config.file import ConfigError
-from kokua.config.schema import AssistantConfig
+from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
 from kokua.plugins import discover_toolsets
 from kokua.toolsets.builtin import BUILTIN_TOOLSETS
 from kokua.toolsets.context import LiveState, ToolsetContext
@@ -120,3 +120,39 @@ def _reject_cycles(config: AssistantConfig) -> None:
 
     for name in config.agents:
         walk(name)
+
+
+# The delegation mechanism, given to any agent with a non-empty delegates_to. The worker menu itself is
+# AIMU's: it renders the agent_types into the spawn tool's docstring.
+DELEGATION_GUIDANCE = (
+    " Delegate specialized work by calling `spawn_subagent(agent_type, task)`: pick the worker whose "
+    "role fits, give it a complete, self-contained task (it shares no history with you), then relay or "
+    "synthesize its answer for the user. Emit several `spawn_subagent` calls when subtasks are "
+    "independent."
+)
+
+# Added only when every toolset the agent declared is cross_cutting. Without this line a lean agent
+# answers web, file, and code questions from memory instead of spawning a worker that has the tools.
+# Derived from the declaration rather than asserted unconditionally, so granting the agent a domain
+# toolset removes the claim instead of leaving the prompt contradicting the advertised tools.
+LEAN_DELEGATION_GUIDANCE = (
+    " For any specialized work, web research, reading or writing files, running code, or anything "
+    "needing a domain tool, you have almost no direct tools, so you MUST delegate."
+)
+
+
+def assemble_system_message(config: AssistantConfig, agent_name: str, toolsets: Sequence[Toolset]) -> str:
+    """One agent's full system message: its declared opener plus the guidance it earned.
+
+    Guidance travels with the capability that needs it, so installing a toolset brings the instructions
+    that make the model use it and removing one takes them away. Nothing here is conditional on a
+    setting; it is conditional only on what the agent declares.
+    """
+    agent = config.agents[agent_name]
+    parts = [agent.system_message or DEFAULT_SYSTEM_MESSAGE]
+    parts.extend(toolset.guidance for toolset in toolsets if toolset.guidance)
+    if agent.delegates_to:
+        parts.append(DELEGATION_GUIDANCE)
+        if all(toolset.cross_cutting for toolset in toolsets):
+            parts.append(LEAN_DELEGATION_GUIDANCE)
+    return "".join(parts)
