@@ -71,17 +71,28 @@ def entry_agent_system_message(config: AssistantConfig, state: LiveState) -> str
     return resolve_system_message(config, name, toolsets)
 
 
-def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str) -> aio.SkillAgent:
+def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, client=None) -> aio.SkillAgent:
     """Build one fully-wired agent from its ``[agents.*]`` declaration: its own toolsets, the approval
     gate, and its delegate.
 
     Every agent is wired identically from its declaration, so a conversation's agent cannot differ from
     a sibling's by accident. Toolsets are selected once and the same list feeds both the system message
     and the built tools, so the two can never resolve a different toolset for the same declared names.
+
+    ``client`` lets a caller that already has one (``make_agent_builder``, whose factory layers
+    per-conversation generation kwargs onto it, and tests that inject a mock client so the suite runs
+    without a model) skip resolving a second, unused one from ``config``; omitting it resolves the
+    model straight from ``config``. Only that second path assembles and applies a system message: an
+    injected client already carries whatever system its own caller built it with, so computing one here
+    and overwriting it would defeat the injection.
     """
     toolsets = select(config.agents[agent_name].tools, state.registry, agent=agent_name, entry_point=config.entry_agent)
+    resolved_client = client
+    if resolved_client is None:
+        resolved_client = build_model_client(config, resolve_system_message(config, agent_name, toolsets))
+
     agent = aio.SkillAgent(
-        build_model_client(config, resolve_system_message(config, agent_name, toolsets)),
+        resolved_client,
         tools=[],
         skill_manager=state.skill_manager,
         name=agent_name,
@@ -97,14 +108,14 @@ def make_agent_builder(
     config: AssistantConfig,
     state: LiveState,
     *,
+    client_factory: Callable[[str], object],
     store,
     images_path: Path,
 ) -> Callable[[str], aio.SkillAgent]:
     """Return a builder that constructs and restores a per-conversation agent on demand.
 
-    Every conversation's agent is the entry agent, wired fresh by ``wire_agent``, which resolves its own
-    model client from ``config`` -- agents share no client, since a shared client's ``.messages`` would
-    defeat per-conversation isolation.
+    Each call to ``client_factory`` must return a fresh model client: agents share no client, since
+    a shared client's ``.messages`` would defeat per-conversation isolation.
     """
     from kokua.core.messages import expand_message_images
 
@@ -114,7 +125,7 @@ def make_agent_builder(
     state.refresh_workers = lambda agent: rebuild_delegation_tool(agent, state)
 
     def build(conversation_id: str) -> aio.SkillAgent:
-        agent = wire_agent(config, state, config.entry_agent)
+        agent = wire_agent(config, state, config.entry_agent, client=client_factory(conversation_id))
         session = store.get(conversation_id)
         if session is not None and session.messages:
             agent.restore(expand_message_images(session.messages, images_path))

@@ -711,3 +711,32 @@ async def test_runtime_mcp_rebuild_keeps_the_activity_reporter(tmp_path, monkeyp
     await add_mcp(url="https://broker/mcp")
 
     assert captured[-1] is assistant._subagent_reporter
+
+
+def test_wire_agent_uses_an_injected_client_as_is(tmp_path):
+    """The client injection seam that lets the whole suite run without a model: a caller-supplied
+    client is the client the agent ends up with, untouched. Rebuilding it, or assembling and applying a
+    fresh system message on top of it, would silently overwrite whatever the injecting caller built it
+    with (e.g. a mock's canned responses, or a model switch's already-restored messages).
+
+    Uses the declarative ``[agents.*]`` schema directly rather than ``tests.channels._config`` (which
+    still speaks the removed ``subagent_roles``/``memory`` vocabulary), so this needs no config helper.
+    """
+    from kokua.config.schema import AgentConfig, AssistantConfig
+    from kokua.core.build import wire_agent
+    from kokua.toolsets.agents import build_registry
+
+    config = AssistantConfig(
+        data_dir=tmp_path,
+        agents={"assistant": AgentConfig(tools=["time"])},
+        entry_agent="assistant",
+        load_plugins=False,
+    )
+    state = LiveState(config=config, registry=build_registry(config))
+    client = MockAsyncModelClient([])
+    client._system_message = "Injected system message."
+
+    agent = wire_agent(config, state, "assistant", client=client)
+
+    assert agent.model_client is client
+    assert agent.model_client.system_message == "Injected system message."
