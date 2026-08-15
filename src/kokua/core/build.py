@@ -146,6 +146,21 @@ _ENTRY_POINT_TOOLSETS = (
 )
 
 
+def entry_agent_system_message(config: AssistantConfig, state: LiveState) -> str:
+    """The assembled system message for the entry agent -- the one every client Kokua builds directly needs.
+
+    Every agent Kokua constructs directly (the initial build, a runtime model switch, and every later
+    per-conversation client) IS the entry agent, ``config.entry_agent``; only a spawned worker differs,
+    and it gets its own message from ``_build_subagent_agent_types``. Centralized here so the callers
+    that build a client for the entry agent -- ``wire_agent``, ``SettingsApplier.switch_model``, and
+    ``Assistant.create``'s per-conversation client factory -- resolve its toolsets exactly once, in one
+    place, instead of triplicating ``select`` plus ``resolve_system_message`` and risking the three
+    copies drifting apart.
+    """
+    toolsets = select(_ENTRY_POINT_TOOLSETS, state.registry, agent=config.entry_agent, entry_point=config.entry_agent)
+    return resolve_system_message(config, config.entry_agent, toolsets)
+
+
 def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, client=None) -> aio.SkillAgent:
     """Build one fully-wired agent: its declared toolsets, the approval gate, and its delegate.
 
@@ -161,8 +176,7 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
 
     resolved_client = client
     if resolved_client is None:
-        toolsets = select(_ENTRY_POINT_TOOLSETS, state.registry, agent=agent_name, entry_point=agent_name)
-        resolved_client = build_model_client(config, resolve_system_message(config, agent_name, toolsets))
+        resolved_client = build_model_client(config, entry_agent_system_message(config, state))
 
     agent = aio.SkillAgent(
         resolved_client,

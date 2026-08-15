@@ -31,6 +31,7 @@ from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.core.build import (
     ModelClientError,
     build_model_client,
+    entry_agent_system_message,
     make_agent_builder,
     unreferenced_mcp_servers,
 )
@@ -116,6 +117,7 @@ class Assistant:
             agent_for=lambda conversation_id: self._registry.get(conversation_id),
             active_agent=lambda: self._book.agent,
             cancel_active_turn=self._cancel_current_turn,
+            state=lambda: self._state,
         )
         # Turn execution, reactive and proactive. Reaches the store and the agent cache through the
         # conversation book, which already owns both.
@@ -174,11 +176,13 @@ class Assistant:
         elif client is not None:
 
             def raw_factory(conversation_id: str, _client=client, _initial=initial_id):
-                return _client if conversation_id == _initial else build_model_client(config)
+                if conversation_id == _initial:
+                    return _client
+                return build_model_client(config, entry_agent_system_message(config, state))
         else:
 
             def raw_factory(conversation_id: str):
-                return build_model_client(config)
+                return build_model_client(config, entry_agent_system_message(config, state))
 
         # Wrap the raw factory so every conversation's client carries the effective generation kwargs
         # the active agent has, not bare provider defaults.

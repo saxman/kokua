@@ -210,13 +210,6 @@ async def test_no_configured_roles_refuses_to_start(tmp_path):
         await Assistant.create(_config(tmp_path, subagent_roles={}), FakeChannel(), client=MockAsyncModelClient([]))
 
 
-def test_supervisor_prompt_names_the_typed_delegate(tmp_path):
-    """The prompt names the call it wants the model to make, and there is only one delegate shape."""
-    from kokua.core.build import resolve_system_message
-
-    assert "spawn_subagent(agent_type, task)" in resolve_system_message(_config(tmp_path))
-
-
 # The supervisor's COMPLETE toolset, grouped by where each group is built. Half of it comes from AIMU,
 # which is why no naming convention in this repo can answer "where are all the tools?" on its own. This
 # is the executable half of the inventory table in docs/explanation/architecture.md: adding or removing a

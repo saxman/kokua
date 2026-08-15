@@ -44,11 +44,13 @@ def test_a_non_delegating_agent_gets_no_delegation_guidance():
 
 
 def test_a_delegating_agent_gets_the_mechanism():
+    """The full call shape, not just the bare name: the parameter names are what tell the model how to
+    call the tool, so a weaker substring check could pass while the call shape had silently changed."""
     agents = {
         "assistant": AgentConfig(system_message="Opener.", tools=["time"], delegates_to=["researcher"]),
         "researcher": AgentConfig(tools=["web"]),
     }
-    assert "spawn_subagent" in _assemble(agents)
+    assert "spawn_subagent(agent_type, task)" in _assemble(agents)
 
 
 def test_a_lean_delegator_is_told_it_has_almost_no_direct_tools():
@@ -105,12 +107,15 @@ def test_the_stale_tool_enumeration_never_appears():
     config, scheduling, MCP management, reading past conversations") is gone for good: it is a
     hand-maintained copy of the declared toolset, exactly the kind of sentence this design exists to
     stop writing. A future edit that "restores" it for symmetry with the old prompt would be a
-    regression, not a fix."""
+    regression, not a fix. Two distinct phrases from that list are checked (not just one) so a
+    reintroduction that rewords the enumeration, rather than copying it verbatim, is still caught."""
     agents = {
         "assistant": AgentConfig(system_message="Opener.", tools=["time", "memory"], delegates_to=["r"]),
         "r": AgentConfig(tools=["web"]),
     }
-    assert "MCP management" not in _assemble(agents)
+    message = _assemble(agents)
+    assert "MCP management" not in message
+    assert "reading past conversations" not in message
 
 
 def test_the_default_opener_is_used_when_an_agent_declares_none():
