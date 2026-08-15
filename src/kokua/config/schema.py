@@ -36,17 +36,17 @@ class AgentConfig:
 class MCPServerConfig:
     """A remote MCP server to connect at startup.
 
-    ``token_env`` names an environment variable holding a bearer token, resolved at connect time so
-    the secret stays out of the config file. It is unset for an unauthenticated server (or one that
-    uses the OAuth flow, which triggers on an auth challenge).
+    ``name`` is how the server enters the toolset namespace, so an agent declares it exactly as it
+    declares any other capability. It is required: a server no agent can name reaches no agent.
 
-    ``name`` is an optional friendly label a sub-agent role can reference in its ``mcp_servers`` list
-    (instead of the full URL) to be given this server's tools; unset means "reference by URL".
+    ``token_env`` names an environment variable holding a bearer token, resolved at connect time so
+    the secret stays out of the config file. It is unset for an unauthenticated server, or one using
+    the OAuth flow that triggers on an auth challenge.
     """
 
     url: str
+    name: str
     token_env: Optional[str] = None
-    name: Optional[str] = None
 
 
 @dataclass

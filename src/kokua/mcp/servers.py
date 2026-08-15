@@ -15,6 +15,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 from aimu import aio
 
@@ -22,6 +23,17 @@ from kokua.config import AssistantConfig, MCPServerConfig
 from kokua.mcp.auth import Notify, build_chat_oauth
 
 logger = logging.getLogger(__name__)
+
+
+def name_from_url(url: str) -> str:
+    """A server name derived from its host, for a server added without one.
+
+    Names are the namespace an agent declares against, so every server needs one. A host is stable,
+    readable, and already unique per server in practice.
+    """
+    host = urlparse(url).hostname or "mcp"
+    return host.replace(".", "-")
+
 
 # Auth modes a server can be reconnected in at boot without a stored secret: unauthenticated, or the
 # persisted-token OAuth flow. A bearer-token server is session-only (its secret is never written to

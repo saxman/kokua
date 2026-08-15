@@ -85,17 +85,17 @@ async def test_connect_mcp_other_oauth_failure_reraises_unchanged(monkeypatch, t
 
 def test_resolve_server_token_reads_env(monkeypatch):
     monkeypatch.setenv("MY_MCP_TOKEN", "secret")
-    server = MCPServerConfig(url="https://svc/mcp", token_env="MY_MCP_TOKEN")
+    server = MCPServerConfig(url="https://svc/mcp", name="svc", token_env="MY_MCP_TOKEN")
     assert mcp._resolve_server_token(server) == "secret"
 
 
 def test_resolve_server_token_none_without_token_env():
-    assert mcp._resolve_server_token(MCPServerConfig(url="https://svc/mcp")) is None
+    assert mcp._resolve_server_token(MCPServerConfig(url="https://svc/mcp", name="svc")) is None
 
 
 def test_resolve_server_token_warns_when_env_unset(monkeypatch, caplog):
     monkeypatch.delenv("MISSING_MCP_TOKEN", raising=False)
-    server = MCPServerConfig(url="https://svc/mcp", token_env="MISSING_MCP_TOKEN")
+    server = MCPServerConfig(url="https://svc/mcp", name="svc", token_env="MISSING_MCP_TOKEN")
     with caplog.at_level("WARNING"):
         assert mcp._resolve_server_token(server) is None
     assert any("MISSING_MCP_TOKEN" in rec.message for rec in caplog.records)

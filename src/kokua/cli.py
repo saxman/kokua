@@ -19,6 +19,7 @@ from . import plugins
 from .aimu_compat import AimuVersionError, require_aimu
 from kokua.config import file as settings
 from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
+from kokua.mcp.servers import name_from_url
 from .logging_setup import configure_logging
 
 
@@ -119,7 +120,7 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
     take("system_message", args.system)
     take("show_thinking", args.show_thinking)
     take("show_tools", args.show_tools)
-    take("mcp_servers", args.mcp, lambda urls: [MCPServerConfig(url=url) for url in urls])
+    take("mcp_servers", args.mcp, lambda urls: [MCPServerConfig(url=url, name=name_from_url(url)) for url in urls])
     take("load_plugins", args.plugins)
     take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
     take("frontend", args.frontend)

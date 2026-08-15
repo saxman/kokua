@@ -67,6 +67,11 @@ def make_mcp_tools(
         Some servers require authentication but do not support the automatic OAuth flow. When that
         happens this returns a message asking for a bearer token: relay it, ask the user for a
         token, then call this tool again with that bearer_token.
+
+        A server added this way is recorded under a name derived from its URL, but that name reaches
+        no agent until a human adds it to that agent's tools list in config.toml's [agents.*] section:
+        that section is hand-edit only, so this tool cannot grant itself (or any agent) the new
+        capability it just connected.
         """
         if any(conn.url == url for conn in connections):
             return f"Already connected to {url}; its tools are available. Use remove_mcp_server to disconnect first."

@@ -59,12 +59,15 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
         if token_env is not None and not isinstance(token_env, str):
             raise ConfigError(f"[[mcp.server]].token_env must be a string (server {url})")
         name = entry.get("name")
-        if name is not None and not isinstance(name, str):
-            raise ConfigError(f"[[mcp.server]].name must be a string (server {url})")
+        if not isinstance(name, str) or not name:
+            raise ConfigError(
+                f"[[mcp.server]] requires a string 'name' (server {url}): a server is named so an "
+                "agent can declare it in its tools list."
+            )
         unknown = set(entry) - {"url", "token_env", "name"}
         if unknown:
             raise ConfigError(f"unknown key(s) in [[mcp.server]] (server {url}): {', '.join(sorted(unknown))}")
-        servers.append(MCPServerConfig(url=url, token_env=token_env, name=name))
+        servers.append(MCPServerConfig(url=url, name=name, token_env=token_env))
     return servers
 
 

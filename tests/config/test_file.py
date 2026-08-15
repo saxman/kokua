@@ -236,9 +236,11 @@ def test_mcp_server_tables_parse(tmp_path):
     path.write_text(
         "[[mcp.server]]\n"
         'url = "https://api.githubcopilot.com/mcp/"\n'
+        'name = "github"\n'
         'token_env = "GITHUB_MCP_TOKEN"\n\n'
         "[[mcp.server]]\n"
-        'url = "https://plain/mcp"\n',
+        'url = "https://plain/mcp"\n'
+        'name = "plain"\n',
         encoding="utf-8",
     )
     servers = settings.load(str(path))["mcp_servers"]
@@ -267,7 +269,7 @@ def test_mcp_server_missing_url_raises(tmp_path):
 
 def test_mcp_server_unknown_key_raises(tmp_path):
     path = tmp_path / "config.toml"
-    path.write_text('[[mcp.server]]\nurl = "https://x/mcp"\nbearer = "nope"\n', encoding="utf-8")
+    path.write_text('[[mcp.server]]\nurl = "https://x/mcp"\nname = "x"\nbearer = "nope"\n', encoding="utf-8")
     with pytest.raises(settings.ConfigError, match="bearer"):
         settings.load(str(path))
 

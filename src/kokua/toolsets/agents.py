@@ -46,15 +46,40 @@ def _tolerate_build_failures(toolset: Toolset) -> Toolset:
 
 # Provider labels `build_registry` hands to `register`. Named once here so `unreferenced_toolsets` can
 # tell a name nobody provisioned (a built-in AIMU group, a core subsystem) from a name the user actually
-# provisioned (a plugin, and eventually a configured MCP server) without duplicating the strings.
+# provisioned (a plugin, or a configured MCP server) without duplicating the strings.
 _AIMU_PROVIDER = "AIMU capability"
 _CORE_PROVIDER = "core subsystem"
 _PLUGIN_PROVIDER = "plugin"
+_MCP_PROVIDER = "MCP server"
 
 # Providers whose toolsets ship regardless of what any agent declares, so a name from one of these being
 # unreferenced is not news -- unlike a plugin the user installed, or a server the user configured, which
 # earn a spot in the [agents.*] tables specifically so they can be reached.
 _UNPROVISIONED_PROVIDERS = {_AIMU_PROVIDER, _CORE_PROVIDER}
+
+
+def _server_tools(url: str, state: LiveState) -> list:
+    """A configured server's live tools, empty when it is not currently connected.
+
+    Looked up at build time rather than snapshotted at registration, so the registry stays a pure
+    function of config while a reconnect or a runtime removal still reaches the next rebuild.
+    """
+    for connection in state.connections:
+        if getattr(connection, "url", None) == url:
+            return list(getattr(connection, "callables", []))
+    return []
+
+
+def mcp_toolsets(config: AssistantConfig) -> list[Toolset]:
+    """One toolset per configured MCP server, named by the server's ``name``."""
+    return [
+        Toolset(
+            name=server.name,
+            description=f"Tools from the MCP server at {server.url}.",
+            build=lambda ctx, _url=server.url: _server_tools(_url, ctx.state),
+        )
+        for server in config.mcp_servers
+    ]
 
 
 def build_registry(config: AssistantConfig) -> ToolsetRegistry:
@@ -67,6 +92,7 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     sources: list[tuple[str, list[Toolset]]] = [
         (_AIMU_PROVIDER, list(BUILTIN_TOOLSETS)),
         (_CORE_PROVIDER, list(CORE_TOOLSETS)),
+        (_MCP_PROVIDER, mcp_toolsets(config)),
     ]
     if config.load_plugins:
         sources.append((_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for t in discover_toolsets().values()]))
@@ -235,7 +261,7 @@ def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Op
     )
 
 
-def unreferenced_toolsets(config: AssistantConfig, registry: Mapping[str, Toolset]) -> list[str]:
+def unreferenced_toolsets(config: AssistantConfig, registry: ToolsetRegistry) -> list[str]:
     """Provisioned toolsets no agent names, for the startup warning.
 
     A toolset nobody names reaches no agent, and a plugin or MCP server in that position still cost
@@ -244,9 +270,16 @@ def unreferenced_toolsets(config: AssistantConfig, registry: Mapping[str, Toolse
     agent declares it, so its being unnamed says nothing about a mistake -- unlike a name the user
     actually provisioned by installing a plugin or configuring a server, which was named specifically so
     something could reach it.
+
+    Takes the concrete ``ToolsetRegistry`` (not a bare ``Mapping``) so ``registry.providers`` is
+    guaranteed rather than an optional attribute: every real caller builds the registry with
+    ``build_registry``, and a caller that didn't would have nothing meaningful to warn about anyway, so
+    a missing provider map should fail loudly here rather than be read as "nothing is provisioned" and
+    warn about every built-in group.
     """
     declared = {name for agent in config.agents.values() for name in agent.tools}
-    providers = getattr(registry, "providers", {})
     return sorted(
-        name for name in registry if name not in declared and providers.get(name) not in _UNPROVISIONED_PROVIDERS
+        name
+        for name in registry
+        if name not in declared and registry.providers.get(name) not in _UNPROVISIONED_PROVIDERS
     )

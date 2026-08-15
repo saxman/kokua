@@ -76,7 +76,7 @@ async def test_startup_mcp_servers_wire_tools(tmp_path, monkeypatch):
 
     monkeypatch.setenv("SVC_TOKEN", "tok")
     assistant = await Assistant.create(
-        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://svc/mcp", token_env="SVC_TOKEN")]),
+        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://svc/mcp", name="svc", token_env="SVC_TOKEN")]),
         FakeChannel(),
         client=MockAsyncModelClient([]),
     )
@@ -94,7 +94,7 @@ async def test_startup_mcp_connect_failure_does_not_crash(tmp_path, monkeypatch)
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
     assistant = await Assistant.create(
-        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://down/mcp")]),
+        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://down/mcp", name="down")]),
         FakeChannel(),
         client=MockAsyncModelClient([]),
     )
@@ -487,7 +487,7 @@ async def test_a_role_may_name_an_mcp_server_by_raw_url(tmp_path, monkeypatch, c
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
     config = _config(
         tmp_path,
-        mcp_servers=[MCPServerConfig(url="https://byurl/mcp")],
+        mcp_servers=[MCPServerConfig(url="https://byurl/mcp", name="byurl")],
         subagent_roles={"r": {"description": "Uses it.", "mcp_servers": ["https://byurl/mcp"]}},
     )
     with caplog.at_level(logging.WARNING, logger="kokua.core.assistant"):

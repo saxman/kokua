@@ -20,6 +20,7 @@ import tomlkit
 from tomlkit import TOMLDocument
 
 from kokua.config import file as settings
+from kokua.mcp.servers import name_from_url
 
 
 def _load(path: Path) -> TOMLDocument:
@@ -70,8 +71,10 @@ def _server_array(doc: TOMLDocument):
 def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
     """Append (or, by URL, replace) an ``[[mcp.server]]`` entry.
 
-    A runtime-added server (OAuth or unauthenticated) is recorded with just its URL so it reconnects
-    on the next restart; ``token_env`` is written only for a bearer-token server declared explicitly.
+    A runtime-added server (OAuth or unauthenticated) is recorded with just its URL and a name derived
+    from it, so it reconnects on the next restart; ``token_env`` is written only for a bearer-token
+    server declared explicitly. The derived name reaches no agent until a human names it in
+    ``[agents.*]``, since that section is hand-edit only and this write cannot grant capability.
     """
     doc = _load(path)
     servers = _server_array(doc)
@@ -81,6 +84,7 @@ def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
             break
     table = tomlkit.table()
     table["url"] = url
+    table["name"] = name_from_url(url)
     if token_env is not None:
         table["token_env"] = token_env
     servers.append(table)
