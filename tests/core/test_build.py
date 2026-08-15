@@ -308,6 +308,25 @@ def test_conversation_tools_do_not_reach_the_workers(tmp_path):
         assert CONVERSATION_TOOL_NAMES.isdisjoint({fn.__name__ for fn in spec["tools"]}), role
 
 
+def test_tool_packs_cannot_grant_a_cross_cutting_or_entry_point_only_toolset(tmp_path):
+    """A structural guarantee, not just a fact about the shipped example config: naming a cross-cutting
+    core toolset (``config``, ``conversations``) in a role's ``tool_packs`` must not hand a worker
+    ``update_config`` or the cross-conversation readers, and naming the ``entry_point_only`` ``skills``
+    toolset there must drop it (like any other unusable name) rather than aborting startup with an error
+    meant for a real agent's own declared toolsets."""
+    from kokua.core.build import _build_subagent_agent_types
+
+    cfg = _config(
+        tmp_path,
+        subagent_roles={"r": {"description": "R.", "tool_packs": ["config", "conversations", "skills"]}},
+    )
+    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg)["r"]["tools"]}
+    assert "update_config" not in names
+    assert "read_config" not in names
+    assert CONVERSATION_TOOL_NAMES.isdisjoint(names)
+    assert "author_skill" not in names
+
+
 async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
     """Boot reorder: config [[mcp.server]] servers connect before the first agent is built, so a lean
     supervisor's worker role that names one receives its tools (and the supervisor itself does not)."""
@@ -503,6 +522,33 @@ async def test_assistant_unknown_tool_group_raises(tmp_path):
         await Assistant.create(_config(tmp_path, tools=["bogus"]), FakeChannel(), client=MockAsyncModelClient([]))
 
 
+def test_legacy_tool_groups_are_all_real_toolsets(tmp_path):
+    """The [tools].groups vocabulary is an explicit list, not derived from registry membership (so an
+    unrelated registry change can't silently shrink or grow what it accepts). This is the other
+    direction: every name the explicit list claims must actually resolve, so the list itself can't name
+    a toolset that no longer exists."""
+    from kokua.core.build import _LEGACY_TOOL_GROUPS
+    from kokua.toolsets.agents import build_registry
+
+    registry = build_registry(_config(tmp_path))
+    for name in _LEGACY_TOOL_GROUPS:
+        assert name in registry, name
+
+
+def test_image_group_is_still_accepted_and_resolves_to_kokuas_toolset(tmp_path, monkeypatch):
+    """Regression test: [tools].groups' accepted vocabulary must not shrink just because the toolset
+    registry stopped registering AIMU's own "image" group (kokua/toolsets/builtin.py). "image" is still
+    a legal [tools].groups entry -- it now resolves to Kokua's own toolset of that name, which saves into
+    the servable images_path rather than into the aimu package."""
+    from kokua.core.build import _build_subagent_agent_types, _enabled_group_names
+
+    monkeypatch.setenv("AIMU_IMAGE_MODEL", "fake:model")  # Kokua's image toolset self-gates on this
+    cfg = _config(tmp_path, tools=["web", "image"], subagent_roles={"r": {"description": "R.", "groups": ["image"]}})
+    assert "image" in _enabled_group_names(cfg)  # does not raise, and the name survives
+    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg)["r"]["tools"]}
+    assert "generate_image" in names
+
+
 async def test_assistant_wires_author_skill_tool(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
@@ -585,6 +631,22 @@ async def test_assistant_authors_and_registers_runnable_script(tmp_path):
     # reload_skills() re-snapshotted the skill tools; the tool-loop engine reads them via
     # _effective_tools each round, so the new script tool is dispatchable on the next run.
     assert "disk__usage" in [fn.__name__ for fn in assistant._agent._effective_tools()]
+
+
+async def test_skill_authored_in_one_conversation_is_visible_in_another(tmp_path):
+    """LiveState.skill_manager is one manager shared across every conversation's agent, deliberately:
+    skills are files in one user-owned directory, so a skill taught in one conversation should be usable
+    in every other one, not just the one that authored it."""
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    first_agent = assistant._agent
+    author = next(t for t in first_agent.tools if t.__name__ == "author_skill")
+    await author(name="shared-skill", description="Shared.", body="# Shared\n\nDo X.")
+
+    await assistant.new_conversation()
+    second_agent = assistant._agent
+    assert second_agent.skill_manager is first_agent.skill_manager
+    assert "shared-skill" in second_agent.skill_manager.skills
 
 
 def test_make_agent_builder_wires_and_restores(tmp_path):

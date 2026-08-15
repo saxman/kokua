@@ -178,8 +178,9 @@ async def reconnect_mcp_servers(
     All servers now live in config.toml ``[[mcp.server]]`` (both hand-authored bearer-token servers and
     runtime-added ones the tool recorded there), so this is a single pass over ``config.mcp_servers``. A
     connect failure logs and continues so one unreachable server can't stop the assistant from starting.
-    Each connection is recorded in ``connections`` (so ``build_agent`` attaches it to conversations built
-    later) and fanned out to whatever agents are live at boot (initially just the active one).
+    Each connection is recorded in ``connections`` (so a worker role naming it resolves against it for
+    conversations built later) and fanned out to whatever agents are live at boot (initially just the
+    active one).
     """
     for server in config.mcp_servers:
         try:

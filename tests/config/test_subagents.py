@@ -37,8 +37,10 @@ def test_shipped_example_defines_the_built_in_roles(tmp_path):
 
 
 def test_shipped_example_roles_name_known_tool_groups(tmp_path):
-    """Stronger than checking against just the AIMU tool groups: every name a role lists in `groups`
-    must be a real toolset in the full registry, spanning every provider, not merely one of AIMU's."""
+    """Every name a shipped role lists in `groups` must be a registered toolset somewhere in the full
+    registry, which spans every provider (AIMU groups, core subsystems, and plugins) -- a looser check
+    than membership in the legacy `[tools].groups` vocabulary alone. The test right below this one is
+    what still pins a role to that narrower, legacy set."""
     from kokua.toolsets.agents import build_registry
 
     registry = build_registry(AssistantConfig(data_dir=tmp_path))

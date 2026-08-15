@@ -61,6 +61,19 @@ class LiveState:
 
     @cached_property
     def skill_manager(self) -> SkillManager:
+        """One SkillManager shared by every conversation's agent -- deliberately, the same reasoning
+        ``memory_store`` and ``document_store`` apply above. Skills are files in one user-owned
+        directory, and a skill the user teaches in one conversation should be usable in every other one,
+        not just the conversation that happened to author it. A manager per agent was the accident this
+        replaces: it gave each conversation its own catalog cache, so a skill authored in one was
+        invisible to another until that one happened to refresh on its own.
+
+        Turns on different conversations run concurrently, and both ``author_skill`` and
+        ``add_skill_script`` call ``manager.refresh()`` on this one shared instance. That is safe without
+        a lock: ``refresh()`` only invalidates the cached catalog, and the next read rebuilds it by
+        re-scanning the skills directory on disk, which is idempotent. Two concurrent refreshes therefore
+        race at worst to assign an equivalent map, never a torn or corrupt one.
+        """
         return SkillManager(skill_dirs=[str(self.config.skills_dir)])
 
     @cached_property

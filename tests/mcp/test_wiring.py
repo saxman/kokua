@@ -55,11 +55,12 @@ def _worker_tools(assistant) -> set[str]:
     from dataclasses import replace
 
     from kokua.core.build import _build_subagent_agent_types
+    from kokua.toolsets.agents import build_registry
     from kokua.toolsets.context import LiveState
 
     role = {"description": "Uses every connected server.", "mcp_servers": [c.url for c in assistant._mcp_servers]}
     config = replace(assistant._config, subagent_roles={"remote": role})
-    state = LiveState(config=config, connections=assistant._mcp_servers)
+    state = LiveState(config=config, connections=assistant._mcp_servers, registry=build_registry(config))
     types = _build_subagent_agent_types(config, state)
     return {fn.__name__ for spec in types.values() for fn in spec["tools"]}
 
