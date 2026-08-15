@@ -164,7 +164,7 @@ async def test_a_toolset_name_two_providers_claim_refuses_to_start_as_a_config_e
 # is the executable half of the inventory table in docs/explanation/architecture.md: adding or removing a
 # tool the shipped entry agent holds fails the test below, and the table needs the same edit in that
 # commit.
-SUPERVISOR_TOOLS = {
+ENTRY_AGENT_TOOLS = {
     "kokua core/tools.py": {"list_conversations", "read_conversation", "search_conversations"},
     "kokua config/tools.py": {"read_config", "update_config"},
     "kokua mcp/tools.py": {"add_mcp_server", "remove_mcp_server"},
@@ -184,7 +184,7 @@ SUPERVISOR_TOOLS = {
 }
 # Present because the shipped entry agent declares the `memory` and `documents` toolsets, so they are
 # asserted separately from the rest below.
-MEMORY_TOOLS = {
+STORE_TOOLS = {
     "aimu make_memory_tools + make_document_tools": {
         "store_memory",
         "search_memories",
@@ -202,7 +202,7 @@ def _expected(*groups: dict) -> set[str]:
 
 
 def _source_of(name: str) -> str:
-    for source, names in {**SUPERVISOR_TOOLS, **MEMORY_TOOLS}.items():
+    for source, names in {**ENTRY_AGENT_TOOLS, **STORE_TOOLS}.items():
         if name in names:
             return source
     return "unknown source"
@@ -226,7 +226,7 @@ async def test_entry_agent_toolset_is_exactly_the_documented_inventory(tmp_path)
     here, and so does adding a tool without updating the inventory table this list mirrors."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
-    expected = _expected(SUPERVISOR_TOOLS, MEMORY_TOOLS)
+    expected = _expected(ENTRY_AGENT_TOOLS, STORE_TOOLS)
 
     leaked = sorted(names - expected)
     missing = sorted(expected - names)
@@ -240,10 +240,10 @@ async def test_undeclaring_the_store_toolsets_drops_exactly_their_tools(tmp_path
     config = _config(tmp_path, agents=_without("memory", "documents"))
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
-    assert names == _expected(SUPERVISOR_TOOLS)
+    assert names == _expected(ENTRY_AGENT_TOOLS)
 
 
-CONVERSATION_TOOL_NAMES = SUPERVISOR_TOOLS["kokua core/tools.py"]
+CONVERSATION_TOOL_NAMES = ENTRY_AGENT_TOOLS["kokua core/tools.py"]
 
 
 async def test_create_registers_the_conversation_tools(tmp_path):

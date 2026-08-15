@@ -138,7 +138,7 @@ async def connect_mcp(
 async def attach_server(connections: list, url: str, client: Any, auth_mode: str) -> list[str]:
     """Record a connected server and return the names of the tools it makes usable.
 
-    The server's tools are NOT mounted on any agent: the supervisor carries no MCP callables, and a
+    The server's tools are NOT mounted on any agent: the entry agent carries no MCP callables, and a
     server reaches a worker only through a role that names it, via the rebuilt ``spawn_subagent``. The
     connection stores the tool callables so a lazily-built agent can resolve its roles against them
     without re-fetching. The full tool-name list is returned for the caller's message.

@@ -234,7 +234,7 @@ class Assistant:
         assistant._book.bind_registry(assistant._registry)
 
         # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when that
-        # agent is built: the supervisor's spawn_subagent snapshots `connections` at build time to give
+        # agent is built: the entry agent's spawn_subagent snapshots `connections` at build time to give
         # MCP-backed workers their tools. The fan-out is a no-op here (no agents are live yet); it just
         # fills `connections`.
         await reconnect_mcp_servers(

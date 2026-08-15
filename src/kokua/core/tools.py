@@ -1,14 +1,14 @@
 """Agent tools over core runtime state. Currently: reading across the user's other conversations.
 
 This is `core/`'s entry in the ``<subsystem>/tools.py`` convention (see ``docs/explanation/
-architecture.md`` for the full inventory of the supervisor's toolset and where each group comes from).
+architecture.md`` for the full inventory of the entry agent's toolset and where each group comes from).
 A tool group belongs here when it needs live objects the ``core/`` composition root owns and no other
 subsystem does; anything scoped to config, scheduling, or MCP goes in that subsystem's ``tools.py``
 instead.
 
 ``make_conversation_tools`` builds ``list_conversations``, ``read_conversation``, and
-``search_conversations``, which let the supervisor answer "what did we decide about X last week?" and
-carry context out of a past thread into a `spawn_subagent` task. They are supervisor-only, like the
+``search_conversations``, which let the entry agent answer "what did we decide about X last week?" and
+carry context out of a past thread into a `spawn_subagent` task. They are entry-agent-only, like the
 other cross-cutting tools: a worker shares no history and has no conversation identity, so "the user's
 other conversations" only means something to the agent the user is talking to.
 

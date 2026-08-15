@@ -2,7 +2,7 @@
 
 `mcp/`'s entry in the ``<subsystem>/tools.py`` convention: agent tools live in their subsystem's
 ``tools.py``, and the connection machinery they drive stays in ``servers.py``. See
-``docs/explanation/architecture.md`` for the full inventory of the supervisor's toolset.
+``docs/explanation/architecture.md`` for the full inventory of the entry agent's toolset.
 
 ``connect_mcp`` is called through the ``servers`` module rather than imported by name, deliberately:
 ``reconnect_mcp_servers`` calls it too, so a single patch point (``kokua.mcp.servers.connect_mcp``)
@@ -79,7 +79,7 @@ def make_mcp_tools(
             client, auth_mode = await servers.connect_mcp(
                 url, bearer_token=bearer_token, notify=notify, oauth_storage_dir=oauth_storage_dir
             )
-            # Lean mode: don't mount the raw tools on the supervisor; they reach workers via refresh below.
+            # Lean mode: don't mount the raw tools on the entry agent; they reach workers via refresh below.
             added = await servers.attach_server(connections, url, client, auth_mode)
         except BearerTokenRequired as exc:
             return str(exc)

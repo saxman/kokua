@@ -1,4 +1,4 @@
-"""The supervisor's read-only cross-conversation tools: flattening, bounding, and the honesty markers.
+"""The entry agent's read-only cross-conversation tools: flattening, bounding, and the honesty markers.
 
 The pure helpers are tested directly; the tools are built over a real ``TinyDBSessionStore`` and
 ``ConversationBook`` (no agents, no model) and called as plain coroutines.
