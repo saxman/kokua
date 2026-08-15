@@ -64,7 +64,10 @@ jobs:
         run: |
           cd /tmp
           /tmp/smoke/bin/kokua --list-frontends
-          /tmp/smoke/bin/kokua --list-tool-packs
+          # --list-toolsets reads the config file (the registry it prints depends on [[mcp.server]] and
+          # load_plugins), so scaffold one first: a clean environment has none.
+          KOKUA_HOME=/tmp/smoke-home /tmp/smoke/bin/kokua config init
+          KOKUA_HOME=/tmp/smoke-home /tmp/smoke/bin/kokua --list-toolsets
           /tmp/smoke/bin/kokua-web --help > /dev/null
           /tmp/smoke/bin/python - <<'PY'
           from importlib.resources import files

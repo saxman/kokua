@@ -50,7 +50,7 @@ does.
 | `mcp/` | remote MCP servers and their OAuth |
 | `scheduling/` | recurrence math, the durable task registry, and the agent-facing tools |
 | `channels/` | `ChannelUI` plus the concrete channels |
-| `frontends/`, `toolpacks/` | the built-in plugins |
+| `frontends/`, `toolsets/` | the toolset registry plus the built-in plugins |
 
 `cli.py`, `plugins.py`, `images.py`, `logging_setup.py`, `config.example.toml` and `web_static/` stay
 at the package root: entry points and package-data paths point at them.
@@ -61,9 +61,10 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 ## Conventions
 
 - Plain Python: dataclasses, functions, type hints. Keep the core small; push capability into plugins.
-- Add a **front end** (a new transport) or a **tool-pack** (new tools) as a plugin, in its own package or
-  under `src/kokua/frontends` / `src/kokua/toolpacks`, registered via the `kokua.frontends` / `kokua.tools`
-  entry-point groups. See `src/kokua/toolpacks/example.py` for the template.
+- Add a **front end** (a new transport) or a **toolset** (a named capability an agent can declare) as a
+  plugin, in its own package or under `src/kokua/frontends` / `src/kokua/toolsets`, registered via the
+  `kokua.frontends` / `kokua.toolsets` entry-point groups. See `src/kokua/toolsets/example.py` for the
+  template. Neither reaches an agent until an `[agents.*]` table in `config.toml` names it.
 - A new **runtime setting** is one entry in `config/table.py`'s `RUNTIME_SETTINGS`, one
   `AssistantConfig` field, and one input in the web panel. If it takes more edits than that, fix the
   table rather than working around it. Tests enforce the first two.

@@ -76,7 +76,7 @@ class AssistantConfig:
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     # Email (SMTP send). Recipients are LOCKED to email_to: the send_email tool takes no recipient, so
     # the assistant can only ever email the user. The password is read from KOKUA_EMAIL_PASSWORD (env),
-    # never TOML. The email tool-pack self-gates: it offers no tool unless host + email_to are set and
+    # never TOML. The email toolset self-gates: it offers no tool unless host + email_to are set and
     # that env var is present.
     email_host: Optional[str] = None
     email_port: int = 587

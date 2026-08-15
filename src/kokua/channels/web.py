@@ -106,7 +106,7 @@ _IMAGE_REF_RE = re.compile(r"/images/[\w.\-]+")
 def _image_frame_for(chunk: StreamChunk) -> Optional[dict]:
     """Return an ``image`` frame for a final IMAGE_GENERATING chunk, else None.
 
-    The chunk's ``result`` is the absolute path the image client wrote (the image toolpack directs it into
+    The chunk's ``result`` is the absolute path the image client wrote (the image toolset directs it into
     ``images_path``); the page loads it by its /images/<name> reference."""
     if chunk.phase != StreamingContentType.IMAGE_GENERATING:
         return None

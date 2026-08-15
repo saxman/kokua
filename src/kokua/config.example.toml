@@ -129,7 +129,9 @@ single, complete answer."""
 # (optional) names an environment variable holding a bearer token, read at startup so the secret stays
 # out of this file; omit it for an unauthenticated server (or one that uses the OAuth flow, which
 # triggers automatically on an auth challenge). Servers you add at runtime with the add_mcp_server tool
-# are appended here automatically.
+# are appended here automatically, with a `name` derived from the host (and a numeric suffix if that name
+# is taken), so the file always loads; that name still reaches no agent until you add it to a `tools` list
+# above yourself.
 # [[mcp.server]]
 # url = "https://api.githubcopilot.com/mcp/"
 # name = "github"

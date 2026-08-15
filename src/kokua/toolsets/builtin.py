@@ -22,7 +22,7 @@ from kokua.toolsets.registry import Toolset
 
 _GROUPS = {
     "web": (builtin.web, "Web search and page retrieval."),
-    "fs": (builtin.fs, "Read and write files on this machine."),
+    "fs": (builtin.fs, "Read files and list directories on this machine."),
     "compute": (builtin.compute, "Run Python, shell commands, and calculations."),
     "time": (builtin.time, "The current date and time, and timezone conversion."),
     "misc": (builtin.misc, "Assorted utilities."),

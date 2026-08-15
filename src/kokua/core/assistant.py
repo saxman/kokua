@@ -5,7 +5,7 @@
               a TinyDBSessionStore persists conversations across restarts
               author_skill / add_skill_script let the assistant grow its own skills
               memory tools give it persistent facts + documents
-              tool-pack plugins contribute extra tools
+              plugin toolsets contribute extra capabilities an agent can declare
 
 Kept transport-agnostic (it takes a `Channel`), so the CLI and web front ends share it
 unchanged. The CLI/web entry points live in `kokua.cli` / `kokua.frontends`.

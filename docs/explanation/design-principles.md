@@ -28,17 +28,53 @@ the core *does* rather than how it renders, it is a named boolean -- `supports_c
 
 ## 2. Grow by plugin, not by core change
 
-Capability arrives as an entry-point-registered `FrontEnd` or `ToolPack`, from any installed package.
-Kokua's own front ends and tool-packs register exactly the way a third party's would; if the built-in
+Capability arrives as an entry-point-registered `FrontEnd` or `Toolset`, from any installed package.
+Kokua's own front ends and toolsets register exactly the way a third party's would; if the built-in
 path and the plugin path ever diverge, the plugin path is the broken one.
 
-*How this cashes out:* `pyproject.toml`'s `kokua.frontends` and `kokua.tools` groups list
-`kokua.frontends.web:FRONTEND` and `kokua.toolpacks.pdf:TOOL_PACK` in the same table a third party's
-entry would go in. [`plugins.py`](../../src/kokua/plugins.py) is the only loader. A pack that raises
-in `build()` is logged and skipped, so one bad plugin cannot stop startup. `plugins` imports the
+*How this cashes out:* `pyproject.toml`'s `kokua.frontends` and `kokua.toolsets` groups list
+`kokua.frontends.web:FRONTEND` and `kokua.toolsets.pdf:TOOLSET` in the same table a third party's
+entry would go in. [`plugins.py`](../../src/kokua/plugins.py) is the only loader. A plugin toolset that
+raises in `build()` is logged and skipped, so one bad plugin cannot stop startup. `plugins` imports the
 built-in front ends lazily, and `kokua/__init__.py` exposes `Assistant` through PEP 562, so
 `import kokua` never pulls in `aimu.aio` or starlette for a caller that only wanted to list plugins.
-[`toolpacks/example.py`](../../src/kokua/toolpacks/example.py) exists as the template.
+[`toolsets/example.py`](../../src/kokua/toolsets/example.py) exists as the template.
+
+This now reaches Kokua's *own* capabilities, not just third-party ones. `config`, `conversations`,
+`mcp-admin`, and `scheduling` are each a `Toolset` declared in the subsystem `tools.py` whose live state
+it needs and indexed in [`toolsets/core.py`](../../src/kokua/toolsets/core.py); memory, documents, and
+skills are toolsets wrapping AIMU's own factories in
+[`toolsets/builtin.py`](../../src/kokua/toolsets/builtin.py). All of them land in the same registry
+namespace a plugin does. `kokua --list-toolsets` prints that namespace grouped by provider, and the
+grouping is the only way to tell a built-in from a plugin from the outside: an agent's `tools` list names
+`"scheduling"` and `"pdf"` identically, so a capability can change provider without touching an agent.
+Inside, one asymmetry remains and is deliberate: a plugin's `build` is wrapped so a raised exception is
+logged and yields no tools, while a core or AIMU toolset failing to build is a bug in this repository and
+must be loud.
+
+### Corollary: a capability is declared, never defaulted
+
+An agent's capability is exactly what its `[agents.<name>].tools` table declares. **No code path adds a
+tool an agent did not name, and no flag can disagree with a declaration.**
+
+*How this cashes out:* `[assistant].memory` and the `--memory` / `--tools` flags were removed rather
+than kept alongside the `memory` and `documents` toolsets, because a second switch for one capability
+means one of the two is lying. `time` is a toolset every agent that wants a clock declares, where it
+used to be added to every agent in code. The shared state a toolset draws on is a lazy property on
+[`LiveState`](../../src/kokua/toolsets/context.py), so the memory and document stores are opened because
+some agent declared the toolset that needs them, and not otherwise. An unknown name raises rather than being
+dropped ([`toolsets/registry.py`](../../src/kokua/toolsets/registry.py)'s `select`), since a dropped name
+is a declaration the code silently overruled.
+
+**`cross_cutting` is not an authorization boundary,** and reading it as one would be a false security
+conclusion. It decides exactly one sentence of prompt guidance (whether an agent is told it is a lean
+supervisor that must delegate) and nothing else. A worker whose table declares `tools = ["config"]`
+really does get `update_config`; a worker declaring `compute` really does get `execute_python`. That is
+intentional: filtering a declaration in code is precisely the behavior this design removes. The security
+boundary is elsewhere, and it is two things: `[agents.*]` can only be changed by hand-editing
+`config.toml`, so a human writing the table *is* the consent, and `[security] confirm_tools` gates the
+dangerous calls at call time no matter which agent makes them (a worker's gated call is routed to the
+user for approval, and an unattended turn auto-denies).
 
 ## 3. `config.toml` is the single source of settings, and the app writes it
 
@@ -49,7 +85,13 @@ else.
 *How this cashes out:* [`config/store.py`](../../src/kokua/config/store.py) does comment-preserving
 `tomlkit` writes; three writers (the web settings panel, `add_mcp_server`, and the assistant's own
 `update_config` tool) land in that one file. A `runtime-settings.json` store used to exist and was
-retired in favour of `[generation]`. A runtime-mutable setting is **one entry** in
+retired in favour of `[generation]`. Four things in the file are hand-edit only, refused by
+`update_config` even behind the approval prompt: `[security] confirm_tools` (the gate itself),
+`[email] to` (the locked recipient), `[paths] data_dir` (where all state lives), and the whole
+`[agents.*]` section. That last one is locked by section prefix rather than by a key entry, since agent
+names cannot be enumerated ahead of time, and it is locked for the obvious reason: `update_config` is a
+tool the assistant holds, so a writable agent table would let the assistant widen its own reach. A
+runtime-mutable setting is **one entry** in
 [`config/table.py`](../../src/kokua/config/table.py)'s `RUNTIME_SETTINGS`, which drives the TOML
 schema, the panel sanitizer, the hot-apply set, the live-apply loop, the channel mirroring, and the
 persist path at once -- and `tests/config/test_table.py` fails if an entry is not also a real config
@@ -107,7 +149,9 @@ Each one excludes things, and most of what is absent from Kokua is absent for a 
 **A small, transport-agnostic core** rules out transport branches in the core, and rules out a
 `Channel` contract that a new front end must implement twelve methods to satisfy. **Grow by plugin**
 rules out a hardcoded tool registry, an `if config.enable_x` switchboard, and importing a front end's
-dependencies at core-import time. **`config.toml` as the single source** rules out a second settings
+dependencies at core-import time. Its corollary, **declared and never defaulted**, additionally rules out
+a tool an agent gets without asking, a flag that grants capability, and a code path that filters a
+declaration it disagrees with. **`config.toml` as the single source** rules out a second settings
 store and rules out environment variables as a settings mechanism -- the three that exist
 (`KOKUA_HOME`, `KOKUA_CONFIG`, `KOKUA_EMAIL_PASSWORD`) are exactly the ones that *cannot* live in the
 file: the file's own location, twice, and a secret. **One directory the user owns** rules out writing
@@ -128,7 +172,8 @@ a rejection.
 The harder question is which principle a change *violates*. Some concrete forms that question takes
 here:
 
-- A new transport is a `FrontEnd`. A new capability is a `ToolPack`. Neither is a core change.
+- A new transport is a `FrontEnd`. A new capability is a `Toolset`. Neither is a core change, and
+  neither reaches an agent until an `[agents.*]` table names it.
 - A new runtime setting is one `RUNTIME_SETTINGS` entry, one `AssistantConfig` field, and one input in
   the web panel. If it takes more edits than that, the table needs fixing, not working around.
 - Anything that writes state derives its path from `AssistantConfig`, never from a new function in

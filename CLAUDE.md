@@ -56,10 +56,15 @@ each claim, is in [docs/explanation/design-principles.md](docs/explanation/desig
    Every optional rich frame degrades once, in `ChannelUI`, to a documented fallback. No
    `isinstance(channel, WebChannel)` in `core/` or `planning/`.
 2. **Grow by plugin, not by core change.** Capability arrives as an entry-point-registered `FrontEnd`
-   or `ToolPack`. Kokua's own register exactly as a third party's would.
+   or `Toolset`. Kokua's own register exactly as a third party's would, core capabilities included.
+   Its corollary: **a capability is declared, never defaulted.** An agent holds exactly what its
+   `[agents.<name>].tools` list names; no code path adds a tool an agent did not declare.
 3. **`config.toml` is the single source of settings, and the app writes it.** No parallel store. A
    runtime-mutable setting is one entry in `config/table.py`'s `RUNTIME_SETTINGS`, which drives the
    schema, the sanitizer, the hot-apply set, the live-apply loop, and the persist path at once.
+   `[agents.*]` is hand-edit only (locked by section prefix in `config/tools.py`), because
+   `update_config` is a tool the assistant holds and a writable agent table would let it widen its own
+   reach.
 4. **All state under one directory the user owns.** `$KOKUA_HOME`, default `~/.kokua`. Every leaf
    below `data/` is a derived `AssistantConfig` property, never a new function in `config/paths.py`.
 5. **A single user, one process, with concurrency rules written down.** The five turn invariants live
@@ -92,7 +97,10 @@ src/kokua/
   scheduling/   recurrence (pure math), registry (the JSON file), tools
   channels/     ui (ChannelUI), protocol (RichChannel), cli, web
   frontends/    cli, web           -- registered as plugins, exactly like a third party's
-  toolpacks/    example, pdf, image, email
+  toolsets/     registry (Toolset, select, build_tools), context (LiveState, ToolsetContext),
+                agents (build_registry, validate_agents, prompt assembly, delegation),
+                builtin (AIMU groups/stores/skills), core (Kokua's four TOOLSETs),
+                example, aimu_agents, pdf, image, email -- plugins, like a third party's
 ```
 
 `tests/` mirrors this layout. Public import surface: `kokua.plugins`, `kokua.config`, `kokua.core`,
@@ -133,14 +141,19 @@ Use English punctuation (no em dashes) and inclusive terminology (allowlist/bloc
 main branch). Keep the core small; prefer a plugin over a core change.
 
 **Agent tools live in `<subsystem>/tools.py`.** A module that defines an `@aimu.tool` is either a
-subsystem's `tools.py` (`core/`, `config/`, `mcp/`, `scheduling/`) or a tool-pack under `toolpacks/`;
-nothing else contains one. A tool group belongs to the subsystem whose live state it needs, and the
-factory takes that state as arguments (`make_scheduler_tools`, `make_conversation_tools`), so `grep -rl
-'@tool' src/kokua/` should only ever find those files. Note the convention is only half the answer:
-about half the supervisor's tools come from AIMU and are not in this repo at all, which is why
-[docs/explanation/architecture.md](docs/explanation/architecture.md#the-supervisors-tools) carries the
-full inventory and `tests/core/test_build.py` pins it as an exact set. Add a supervisor tool and that
-test fails until the table is updated in the same commit.
+subsystem's `tools.py` (`core/`, `config/`, `mcp/`, `scheduling/`) or a toolset module under
+`toolsets/`; nothing else contains one. A tool group belongs to the subsystem whose live state it needs,
+and the factory takes that state as arguments (`make_scheduler_tools`, `make_conversation_tools`), so
+`grep -rl '@tool' src/kokua/` should only ever find those files. Each of those four `tools.py` modules
+also exports a `TOOLSET` wrapping its factory, indexed in `toolsets/core.py`, so the capability is
+declared next to the tools it wraps rather than in a second list that could drift.
+
+Note the convention is only half the answer: about half the tools the shipped entry agent holds come
+from AIMU and are not in this repo at all, which is why
+[docs/explanation/architecture.md](docs/explanation/architecture.md#how-an-agents-tools-resolve) carries
+the full inventory and `tests/core/test_build.py` pins it as an exact set. That inventory is what
+`config.example.toml`'s `[agents.assistant]` declares, not a fixed list in code; add a tool to any
+toolset that table names and the test fails until the table in the doc is updated in the same commit.
 
 Docstrings explain *why*, and must stand on their own: no bare task or phase numbers ("Task 6",
 "Phase B"), which reference a design history that isn't in the repository. Name the behavior or link

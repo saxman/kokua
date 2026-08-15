@@ -94,7 +94,7 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
         if key in _REMOVED_AGENT_KEYS:
             raise ConfigError(
                 f"[agents.{name}].{key} is gone. List it in [agents.{name}].tools instead; every "
-                "toolset (AIMU group, tool-pack, or MCP server) is named the same way there now."
+                "toolset (AIMU group, plugin, or MCP server) is named the same way there now."
             )
         expected = _AGENT_KEYS.get(key)
         if expected is None:

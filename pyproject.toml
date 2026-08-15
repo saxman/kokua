@@ -24,7 +24,7 @@ classifiers = [
 # separately redirects development installs to the sibling checkout.
 dependencies = [
     "aimu[ollama,openai_compat]>=0.13.1",
-    # Markdown -> PDF for the built-in `pdf` tool-pack (both pure-Python, no system libraries).
+    # Markdown -> PDF for the built-in `pdf` toolset (both pure-Python, no system libraries).
     "fpdf2>=2.7",
     "markdown>=3.5",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
