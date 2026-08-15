@@ -24,7 +24,8 @@ from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.config.tools import make_config_tools
 from kokua.mcp.tools import make_mcp_tools
 from kokua.mcp.auth import Notify
-from kokua.plugins import discover_tool_packs
+from kokua.plugins import discover_toolsets
+from kokua.toolsets import LiveState, ToolsetContext
 
 logger = logging.getLogger(__name__)
 
@@ -174,10 +175,11 @@ def _load_plugin_tools_by_pack(config: AssistantConfig) -> dict[str, list]:
     taking the assistant down with it."""
     if not config.load_plugins:
         return {}
+    ctx = ToolsetContext(state=LiveState(config=config), agent=None)
     by_pack: dict[str, list] = {}
-    for name, pack in discover_tool_packs().items():
+    for name, toolset in discover_toolsets().items():
         try:
-            by_pack[name] = list(pack.build(config))
+            by_pack[name] = list(toolset.build(ctx))
         except Exception:
             logger.warning("Tool-pack %r failed to build; skipping.", name, exc_info=True)
     return by_pack

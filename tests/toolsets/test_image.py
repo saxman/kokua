@@ -1,4 +1,4 @@
-"""The image tool-pack: the env gate and the generator's saved-reference return.
+"""The image toolset: the env gate and the generator's saved-reference return.
 
 The generator path was previously untested -- only the gate was, and the module named `images.py`
 (the on-disk store) has a similar test module name, which made the gap easy to miss.
@@ -11,7 +11,7 @@ import types
 from pathlib import Path
 
 from kokua.config import AssistantConfig
-from kokua.toolpacks.image import build
+from kokua.toolsets.image import build
 
 
 def _config(tmp_path: Path) -> AssistantConfig:

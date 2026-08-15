@@ -69,3 +69,12 @@ def test_build_tools_concatenates_and_keeps_the_first_tool_of_a_repeated_name():
     second.__name__ = "first"
     tools = build_tools([_toolset("a", tools=[first]), _toolset("b", tools=[second])], ctx=None)
     assert tools == [first]
+
+
+def test_plugins_module_reexports_the_public_contract():
+    from kokua import plugins
+
+    assert plugins.Toolset is Toolset
+    assert plugins.TOOLSET_GROUP == "kokua.toolsets"
+    assert hasattr(plugins, "ToolsetContext")
+    assert hasattr(plugins, "discover_toolsets")

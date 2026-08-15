@@ -21,7 +21,7 @@ Kokua **extends itself**: it writes and runs new skills to take on capabilities 
 ```bash
 kokua                              # chat in the terminal
 kokua --frontend web               # or a browser UI at http://127.0.0.1:8000
-kokua --list-tool-packs            # see what capability is installed
+kokua --list-toolsets              # see what capability is installed
 kokua config init                  # scaffold ~/.kokua/config.toml, every key documented
 ```
 
@@ -103,9 +103,9 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 ### Files and media
 
 - **[Images in and out](src/kokua/images.py).** Attach an image and the assistant reads it (needs a [vision-capable model](https://saxman.info/aimu/reference/model-matrix/)): the composer's paperclip or a paste in the web UI, `/attach <path>` in the CLI. It can also [generate images](https://saxman.info/aimu/how-to/generate-images/) when [`$AIMU_IMAGE_MODEL`](https://saxman.info/aimu/reference/env-vars/) is set (e.g. `gemini:nano-banana`, or a HuggingFace diffusers `hf:<repo>`); without it, no generation tool is offered at all. Images live in `data/images/` and are served at `/images/<name>`; a conversation stores only a short reference, so `sessions.json` stays compact.
-- **[PDFs](src/kokua/toolpacks/pdf.py).** The built-in `pdf` tool-pack adds `markdown_to_pdf`: ask for something as a PDF and it writes to `data/downloads/`, handing back a download link in the web UI or a path from the CLI.
-- **[AIMU agents](src/kokua/toolpacks/aimu_agents.py).** The `aimu_agents` tool-pack mounts AIMU's prebuilt orchestrators -- `code_review`, `research_report`, `create_content` -- and is the worked example of wiring an agent built with AIMU into Kokua: any `Runner` exposes `.run(task) -> str`, so a tool-pack is the whole bridge and the core learns nothing new. Nothing is mounted until you ask for it: give a role `tool_packs = ["aimu_agents"]` in `config.toml`. They are synchronous, so a nested run gets no sub-agent card, no `/stop`, and no approval gate on its workers; and a `coder` role with `fs` + `compute` is a stronger reviewer than the tool-less `CodeReviewAgent`. Copy the shape, not necessarily the agents.
-- **[Email](src/kokua/toolpacks/email.py).** The `email` tool-pack lets the assistant mail information to you -- digests, summaries, reports -- written in Markdown and delivered as formatted HTML with a plain-text fallback, optionally attaching files already in `data/downloads/` or `data/images/`. It can only email **you**: the recipient is fixed to `[email] to`, so the tool takes no recipient argument. Configure `[email]` (`host`, `port`, `from`, `to`, `use_ssl`) and put the password in `$KOKUA_EMAIL_PASSWORD`, never in the config file (for Gmail, an App Password). The tool appears only once host, `to`, and the password are all present. Sending is ungated, so a daily digest can send itself.
+- **[PDFs](src/kokua/toolsets/pdf.py).** The built-in `pdf` tool-pack adds `markdown_to_pdf`: ask for something as a PDF and it writes to `data/downloads/`, handing back a download link in the web UI or a path from the CLI.
+- **[AIMU agents](src/kokua/toolsets/aimu_agents.py).** The `aimu_agents` tool-pack mounts AIMU's prebuilt orchestrators -- `code_review`, `research_report`, `create_content` -- and is the worked example of wiring an agent built with AIMU into Kokua: any `Runner` exposes `.run(task) -> str`, so a tool-pack is the whole bridge and the core learns nothing new. Nothing is mounted until you ask for it: give a role `tool_packs = ["aimu_agents"]` in `config.toml`. They are synchronous, so a nested run gets no sub-agent card, no `/stop`, and no approval gate on its workers; and a `coder` role with `fs` + `compute` is a stronger reviewer than the tool-less `CodeReviewAgent`. Copy the shape, not necessarily the agents.
+- **[Email](src/kokua/toolsets/email.py).** The `email` tool-pack lets the assistant mail information to you -- digests, summaries, reports -- written in Markdown and delivered as formatted HTML with a plain-text fallback, optionally attaching files already in `data/downloads/` or `data/images/`. It can only email **you**: the recipient is fixed to `[email] to`, so the tool takes no recipient argument. Configure `[email]` (`host`, `port`, `from`, `to`, `use_ssl`) and put the password in `$KOKUA_EMAIL_PASSWORD`, never in the config file (for Gmail, an App Password). The tool appears only once host, `to`, and the password are all present. Sending is ungated, so a daily digest can send itself.
 
 ## Configuration
 
@@ -145,17 +145,17 @@ Point `data/` elsewhere with `[paths] data_dir`. Nothing is written to your work
 Kokua discovers two kinds of plugin at runtime through Python entry points, so a third party adds capability by publishing a package, with no change to Kokua's core:
 
 - **Front ends** (`kokua.frontends` group): how the assistant runs -- terminal, web, a future Telegram or Slack. A front end is a `kokua.plugins.FrontEnd` whose `run(config, args)` drives the assistant.
-- **Tool-packs** (`kokua.tools` group): extra agent tools. A tool-pack is a `kokua.plugins.ToolPack` whose `build(config)` returns [`@aimu.tool`](https://saxman.info/aimu/how-to/add-custom-tool/) callables, merged into the agent automatically.
+- **Toolsets** (`kokua.toolsets` group): extra agent tools. A toolset is a `kokua.plugins.Toolset` whose `build(ctx)` returns [`@aimu.tool`](https://saxman.info/aimu/how-to/add-custom-tool/) callables, merged into the agent automatically.
 
-The built-in `cli` / `web` front ends and the five tool-packs are registered exactly this way in Kokua's own `pyproject.toml` -- if the built-in path and the plugin path ever diverge, the plugin path is the broken one. To add your own from another package:
+The built-in `cli` / `web` front ends and the five toolsets are registered exactly this way in Kokua's own `pyproject.toml` -- if the built-in path and the plugin path ever diverge, the plugin path is the broken one. To add your own from another package:
 
 ```toml
 # in your package's pyproject.toml
-[project.entry-points."kokua.tools"]
-weather = "my_weather_pack:TOOL_PACK"
+[project.entry-points."kokua.toolsets"]
+weather = "my_weather_pack:TOOLSET"
 ```
 
-`pip install` it, and `kokua --list-tool-packs` shows it. Its tools do **not** appear automatically: the assistant is a lean supervisor and mounts no pack tools, so give a role `tool_packs = ["weather"]` in `config.toml` and the workers spawned for that role carry them. See [`toolpacks/example.py`](src/kokua/toolpacks/example.py) for the template, and [`toolpacks/aimu_agents.py`](src/kokua/toolpacks/aimu_agents.py) for the same shape carrying a whole AIMU agent rather than a plain function. [Set up a toolset](docs/how-to/set-up-toolsets.md) is the full walkthrough: how a role assembles its toolset from groups, packs, and MCP servers, and which mistyped names fail loudly versus silently.
+`pip install` it, and `kokua --list-toolsets` shows it. Its tools do **not** appear automatically: the assistant is a lean supervisor and mounts no pack tools, so give a role `tool_packs = ["weather"]` in `config.toml` and the workers spawned for that role carry them. See [`toolsets/example.py`](src/kokua/toolsets/example.py) for the template, and [`toolsets/aimu_agents.py`](src/kokua/toolsets/aimu_agents.py) for the same shape carrying a whole AIMU agent rather than a plain function. [Set up a toolset](docs/how-to/set-up-toolsets.md) is the full walkthrough: how a role assembles its toolset from groups, packs, and MCP servers, and which mistyped names fail loudly versus silently.
 
 ## Security
 
@@ -190,7 +190,7 @@ mcp/          remote MCP servers and their OAuth
 scheduling/   recurrence math, the durable task registry, the agent-facing tools
 channels/     ChannelUI plus the concrete channels
 frontends/    cli, web        -- registered as plugins, exactly like a third party's would be
-toolpacks/    example, aimu_agents, pdf, image, email
+toolsets/     example, aimu_agents, pdf, image, email
 ```
 
 The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`, `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
@@ -203,7 +203,7 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 - 💡 [Design principles](docs/explanation/design-principles.md): the six that decide what belongs in the core, each with the code that backs it and the patterns it excludes.
 - 🏗️ [Architecture](docs/explanation/architecture.md): module layout, control flow, and the concurrency model.
 - ⚙️ [`config.example.toml`](src/kokua/config.example.toml): every setting, documented at its default.
-- 🧩 [`toolpacks/example.py`](src/kokua/toolpacks/example.py): the tool-pack template.
+- 🧩 [`toolsets/example.py`](src/kokua/toolsets/example.py): the toolset template.
 - 📋 [CHANGELOG](CHANGELOG.md) · [TODO](TODO.md): what changed, and what's known but not yet scheduled.
 
 ### AIMU

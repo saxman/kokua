@@ -1,10 +1,10 @@
-"""A built-in tool-pack that mounts AIMU's prebuilt orchestrator agents as tools.
+"""A built-in toolset that mounts AIMU's prebuilt orchestrator agents as tools.
 
 This is the worked example of wiring an agent built with AIMU into Kokua. Any `Runner` -- an `Agent`,
 a `Chain`, a `Router`, an `OrchestratorAgent`, a remote A2A agent -- exposes `.run(task) -> str`, so a
-tool-pack is all the bridge that is needed, and the core does not have to learn about it. Copy this
-shape for your own agent: register a `ToolPack` under the `kokua.tools` entry-point group, and give a
-sub-agent role `tool_packs = ["<your pack>"]` in config.toml to scope a worker to it.
+toolset is all the bridge that is needed, and the core does not have to learn about it. Copy this
+shape for your own agent: register a `Toolset` under the `kokua.toolsets` entry-point group, and give a
+sub-agent role `tool_packs = ["<your toolset>"]` in config.toml to scope a worker to it.
 
 Three tools, one per prebuilt: `code_review`, `research_report`, `create_content`. Each prebuilt is an
 orchestrator that fans a task out to three specialist workers of its own and synthesizes their answers.
@@ -31,7 +31,7 @@ from aimu.agents.prebuilt import CodeReviewAgent, ContentCreationAgent, Research
 from aimu.tools import builtin, tool
 
 from kokua.config import AssistantConfig
-from kokua.plugins import ToolPack
+from kokua.toolsets import Toolset
 
 
 def _research_worker_tools(config: AssistantConfig) -> Optional[list[Callable]]:
@@ -39,7 +39,7 @@ def _research_worker_tools(config: AssistantConfig) -> Optional[list[Callable]]:
 
     `ResearchReportAgent` is the one prebuilt that takes worker tools, and a research agent without
     them is reduced to reciting training data. Gating on ``config.tools`` keeps the same contract a
-    sub-agent role has: the global tool policy is the ceiling, and a pack cannot raise it. Passing
+    sub-agent role has: the global tool policy is the ceiling, and a toolset cannot raise it. Passing
     tools also switches the prebuilt's own workers to concurrent dispatch.
     """
     if "all" in config.tools or "web" in config.tools:
@@ -48,7 +48,7 @@ def _research_worker_tools(config: AssistantConfig) -> Optional[list[Callable]]:
 
 
 def build(config: AssistantConfig) -> list:
-    """Return this pack's tools: one per AIMU prebuilt orchestrator.
+    """Return this toolset's tools: one per AIMU prebuilt orchestrator.
 
     Each tool constructs its agent inside the call rather than here, for two reasons. ``build`` runs
     once per conversation agent and every prebuilt creates one orchestrator client plus three worker
@@ -101,8 +101,8 @@ def build(config: AssistantConfig) -> list:
     return [code_review, research_report, create_content]
 
 
-TOOL_PACK = ToolPack(
+TOOLSET = Toolset(
     name="aimu_agents",
     description="AIMU's prebuilt orchestrator agents (code review, research report, content creation) as tools.",
-    build=build,
+    build=lambda ctx: build(ctx.config),
 )

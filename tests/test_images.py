@@ -187,11 +187,11 @@ def test_images_route_serves_and_guards(tmp_path):
     assert client.get("/images/sub/evil.png").status_code == 404  # traversal blocked by the route converter
 
 
-# --- image generation toolpack ----------------------------------------------------------------
+# --- image generation toolset -----------------------------------------------------------------
 
 
-def test_image_toolpack_gated_on_model_env(tmp_path, monkeypatch):
-    from kokua.toolpacks.image import build
+def test_image_toolset_gated_on_model_env(tmp_path, monkeypatch):
+    from kokua.toolsets.image import build
 
     monkeypatch.delenv("AIMU_IMAGE_MODEL", raising=False)
     assert build(_config(tmp_path)) == []  # no model configured -> no tool offered

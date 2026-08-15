@@ -1,4 +1,4 @@
-"""Tests for the `aimu_agents` tool-pack: AIMU's prebuilt orchestrator agents mounted as tools.
+"""Tests for the `aimu_agents` toolset: AIMU's prebuilt orchestrator agents mounted as tools.
 
 The prebuilts each build one orchestrator client plus three worker clients and then talk to a model,
 so every test here stubs both the client factory and the prebuilt classes. What is actually under test
@@ -16,8 +16,8 @@ import pytest
 from tests.channels import _config as _assistant_config
 from kokua import plugins
 from kokua.config import AssistantConfig
-from kokua.plugins import ToolPack
-from kokua.toolpacks import aimu_agents
+from kokua.plugins import Toolset
+from kokua.toolsets import LiveState, ToolsetContext, aimu_agents
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
@@ -59,10 +59,11 @@ def _tool(tools: list, name: str):
 
 
 def test_pack_is_discovered_and_contributes_three_tools():
-    packs = plugins.discover_tool_packs()
-    assert "aimu_agents" in packs
-    assert isinstance(packs["aimu_agents"], ToolPack)
-    names = {getattr(fn, "__name__", None) for fn in packs["aimu_agents"].build(AssistantConfig())}
+    toolsets = plugins.discover_toolsets()
+    assert "aimu_agents" in toolsets
+    assert isinstance(toolsets["aimu_agents"], Toolset)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    names = {getattr(fn, "__name__", None) for fn in toolsets["aimu_agents"].build(ctx)}
     assert {"code_review", "research_report", "create_content"} <= names
 
 

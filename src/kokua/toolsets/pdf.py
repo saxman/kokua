@@ -1,8 +1,8 @@
-"""A built-in tool-pack that renders Markdown to a PDF file.
+"""A built-in toolset that renders Markdown to a PDF file.
 
 Contributes one tool, ``markdown_to_pdf``, that converts Markdown -> HTML (via the ``markdown``
 package) -> PDF (via ``fpdf2``), saving into the downloads folder. Both libraries are pure Python
-(no system libraries), so the pack works out of the box wherever Kokua is installed.
+(no system libraries), so the toolset works out of the box wherever Kokua is installed.
 
 PDFs go in ``downloads_path`` rather than ``documents_path`` on purpose: the DocumentStore scans the
 documents folder as UTF-8 text at startup, so a binary PDF there would break document loading. The web
@@ -17,7 +17,7 @@ from pathlib import Path
 from aimu.tools import tool
 
 from kokua.config import AssistantConfig
-from kokua.plugins import ToolPack
+from kokua.toolsets import Toolset
 
 # fpdf2's built-in fonts (helvetica, ...) are Latin-1 only, so LLM-authored Markdown full of smart
 # quotes / dashes would raise. Map the common offenders to ASCII, then drop anything else outside
@@ -60,7 +60,7 @@ def _safe_pdf_name(filename: str) -> str:
 
 
 def build(config: AssistantConfig) -> list:
-    """Return this pack's tools, bound to the configured downloads folder."""
+    """Return this toolset's tools, bound to the configured downloads folder."""
 
     @tool
     def markdown_to_pdf(markdown_text: str, filename: str = "document.pdf") -> str:
@@ -89,8 +89,8 @@ def build(config: AssistantConfig) -> list:
     return [markdown_to_pdf]
 
 
-TOOL_PACK = ToolPack(
+TOOLSET = Toolset(
     name="pdf",
     description="Render Markdown to a downloadable PDF saved in the downloads folder (fpdf2 + markdown).",
-    build=build,
+    build=lambda ctx: build(ctx.config),
 )

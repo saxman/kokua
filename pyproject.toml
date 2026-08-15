@@ -70,12 +70,12 @@ kokua-web = "kokua.cli:main_web"
 cli = "kokua.frontends.cli:FRONTEND"
 web = "kokua.frontends.web:FRONTEND"
 
-[project.entry-points."kokua.tools"]
-example = "kokua.toolpacks.example:TOOL_PACK"
-aimu_agents = "kokua.toolpacks.aimu_agents:TOOL_PACK"
-pdf = "kokua.toolpacks.pdf:TOOL_PACK"
-image = "kokua.toolpacks.image:TOOL_PACK"
-email = "kokua.toolpacks.email:TOOL_PACK"
+[project.entry-points."kokua.toolsets"]
+example = "kokua.toolsets.example:TOOLSET"
+aimu_agents = "kokua.toolsets.aimu_agents:TOOLSET"
+pdf = "kokua.toolsets.pdf:TOOLSET"
+image = "kokua.toolsets.image:TOOLSET"
+email = "kokua.toolsets.email:TOOLSET"
 
 # Kokua and AIMU are developed together, so a `uv sync` here installs the sibling checkout
 # editable: architectural changes can move code across the boundary and be exercised

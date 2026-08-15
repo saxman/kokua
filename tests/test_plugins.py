@@ -1,4 +1,4 @@
-"""Tests for the entry-point plugin system (front ends + tool-packs)."""
+"""Tests for the entry-point plugin system (front ends + toolsets)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ from kokua import plugins
 from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
 from tests.channels import example_subagent_roles
-from kokua.plugins import FrontEnd, ToolPack
+from kokua.plugins import FrontEnd, Toolset
+from kokua.toolsets import LiveState, ToolsetContext
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
@@ -44,14 +45,15 @@ def test_builtin_frontends_available_without_entry_points(monkeypatch):
     assert {"cli", "web"} <= set(frontends)
 
 
-# --- Tool-pack discovery ---------------------------------------------------------------------
+# --- Toolset discovery ------------------------------------------------------------------------
 
 
-def test_example_tool_pack_discovered():
-    packs = plugins.discover_tool_packs()
-    assert "example" in packs
-    assert isinstance(packs["example"], ToolPack)
-    built = packs["example"].build(AssistantConfig())
+def test_example_toolset_discovered():
+    toolsets = plugins.discover_toolsets()
+    assert "example" in toolsets
+    assert isinstance(toolsets["example"], Toolset)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    built = toolsets["example"].build(ctx)
     assert any(getattr(fn, "__name__", None) == "roll_dice" for fn in built)
 
 

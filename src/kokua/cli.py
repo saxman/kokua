@@ -3,7 +3,7 @@
 Resolves an :class:`~kokua.config.AssistantConfig` from (in increasing precedence) built-in
 defaults, an optional TOML config file, and command-line flags, then runs the selected front end
 (default ``cli``; ``web`` and any installed plugin are also selectable). ``--list-frontends`` /
-``--list-tool-packs`` introspect the plugin registry.
+``--list-toolsets`` introspect the plugin registry.
 
 Flag defaults are the ``None`` sentinel rather than the real default value, so an unspecified flag
 defers to the config file (and then the built-in default) instead of overriding it.
@@ -32,12 +32,12 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Front end to run: 'cli' (terminal), 'web' (browser), or any installed plugin. Default: cli.",
     )
     parser.add_argument("--list-frontends", action="store_true", help="List available front ends and exit.")
-    parser.add_argument("--list-tool-packs", action="store_true", help="List installed tool-pack plugins and exit.")
+    parser.add_argument("--list-toolsets", action="store_true", help="List installed toolsets and exit.")
     parser.add_argument(
         "--plugins",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Discover tool-pack plugins via the 'kokua.tools' entry-point group. Default: on "
+        help="Discover toolset plugins via the 'kokua.toolsets' entry-point group. Default: on "
         "(use --no-plugins to disable for this run).",
     )
 
@@ -193,12 +193,12 @@ def main() -> None:
         for name, frontend in sorted(plugins.discover_frontends().items()):
             print(f"{name}: {frontend.description}")
         return
-    if args.list_tool_packs:
-        packs = plugins.discover_tool_packs()
-        if not packs:
-            print("No tool-pack plugins installed.")
-        for name, pack in sorted(packs.items()):
-            print(f"{name}: {pack.description}")
+    if args.list_toolsets:
+        toolsets = plugins.discover_toolsets()
+        if not toolsets:
+            print("No toolset plugins installed.")
+        for name, toolset in sorted(toolsets.items()):
+            print(f"{name}: {toolset.description}")
         return
 
     # A ConfigError is a user mistake with a known fix (a missing config.toml, no sub-agent roles, a

@@ -27,7 +27,7 @@
 # Persistent memory across conversations (facts + user documents).
 memory = true
 
-# Discover tool-pack plugins via the "kokua.tools" entry-point group.
+# Discover toolset plugins via the "kokua.toolsets" entry-point group.
 load_plugins = true
 
 # The assistant is a lean supervisor: it keeps only its cross-cutting tools (memory, skills, MCP
@@ -78,11 +78,11 @@ concurrent = true
 # A role's worker toolset is the union of: its `groups` (intersected with [tools] groups above, so a
 # role narrows within the enabled tools but never exceeds them); the tools of any MCP servers it lists
 # in `mcp_servers` (by the server's `name` below, or its raw URL); and the tools of any tool-packs it
-# lists in `tool_packs` (installed kokua.tools plugins, e.g. "pdf", "email"). `system_message` is
+# lists in `tool_packs` (installed kokua.toolsets plugins, e.g. "pdf", "email"). `system_message` is
 # optional. No role needs to list "time": it is added to every role from [tools].groups.
 #
 # Note that an installed tool-pack and a configured MCP server both do NOTHING until some role names
-# them. Startup warns about an MCP server no role references; run `kokua --list-tool-packs` to see
+# them. Startup warns about an MCP server no role references; run `kokua --list-toolsets` to see
 # which packs are installed and available to name here.
 
 [subagents.roles.researcher]

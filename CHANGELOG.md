@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Breaking:** the tool-pack plugin contract is now `kokua.plugins.Toolset`, discovered from the
+  `kokua.toolsets` entry-point group instead of `kokua.tools`, and its `build` takes a
+  `ToolsetContext` rather than an `AssistantConfig`. A third-party package registering under
+  `kokua.tools` is no longer discovered and must re-register.
+- `--list-tool-packs` is now `--list-toolsets`.
+
 ## 0.1.0 (unreleased)
 
 First release. Kokua starts from AIMU's `examples/personal-assistant/` and restructures it into an

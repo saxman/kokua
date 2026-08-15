@@ -119,7 +119,7 @@ class AssistantConfig:
     generation: dict = field(default_factory=dict)
     # Persistent memory: a SemanticMemoryStore for facts + a DocumentStore for documents. On by default.
     memory: bool = True
-    # Load tool-pack plugins discovered via the "kokua.tools" entry-point group.
+    # Load toolset plugins discovered via the "kokua.toolsets" entry-point group.
     load_plugins: bool = True
     # Sub-agent roles (AIMU agent_types), read whole from [subagents.roles.*]. This is the entire menu
     # spawn_subagent offers AND the switch that turns delegation on: nothing is defaulted in code, and

@@ -1,4 +1,4 @@
-"""Tests for the built-in `email` tool-pack (send_email). Mock-only: no real SMTP server."""
+"""Tests for the built-in `email` toolset (send_email). Mock-only: no real SMTP server."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from kokua.config import AssistantConfig
-from kokua.toolpacks import email as email_pack
-from kokua.toolpacks.email import _resolve_attachment, build
+from kokua.toolsets import email as email_toolset
+from kokua.toolsets.email import _resolve_attachment, build
 
 _FULL = {
     "email_host": "smtp.example.com",
@@ -199,10 +199,10 @@ def test_auth_failure_leaks_neither_password_nor_server_text(tmp_path, monkeypat
 # --- discovery / landing on the agent --------------------------------------------------------
 
 
-def test_email_toolpack_registered(monkeypatch):
+def test_email_toolset_registered(monkeypatch):
     from kokua import plugins
-    from kokua.plugins import ToolPack
+    from kokua.plugins import Toolset
 
-    assert isinstance(email_pack.TOOL_PACK, ToolPack)
-    packs = plugins.discover_tool_packs()
-    assert packs.get("email") is email_pack.TOOL_PACK
+    assert isinstance(email_toolset.TOOLSET, Toolset)
+    toolsets = plugins.discover_toolsets()
+    assert toolsets.get("email") is email_toolset.TOOLSET

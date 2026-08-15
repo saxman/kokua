@@ -100,8 +100,8 @@ def test_main_lists_frontends(monkeypatch, capsys):
     assert "cli:" in out and "web:" in out
 
 
-def test_main_lists_tool_packs(monkeypatch, capsys):
-    _run_main(monkeypatch, ["--list-tool-packs"])
+def test_main_lists_toolsets(monkeypatch, capsys):
+    _run_main(monkeypatch, ["--list-toolsets"])
     out = capsys.readouterr().out
     assert "example:" in out
 

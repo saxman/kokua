@@ -1,4 +1,4 @@
-"""Tests for the built-in `pdf` tool-pack (markdown_to_pdf)."""
+"""Tests for the built-in `pdf` toolset (markdown_to_pdf)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ from pathlib import Path
 from kokua import plugins
 from kokua.config import AssistantConfig
 from tests.channels import example_subagent_roles
-from kokua.plugins import ToolPack
-from kokua.toolpacks.pdf import _safe_pdf_name, build
+from kokua.plugins import Toolset
+from kokua.toolsets import LiveState, ToolsetContext
+from kokua.toolsets.pdf import _safe_pdf_name, build
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
@@ -30,11 +31,12 @@ class FakeChannelStub:
         pass
 
 
-def test_pdf_tool_pack_discovered():
-    packs = plugins.discover_tool_packs()
-    assert "pdf" in packs
-    assert isinstance(packs["pdf"], ToolPack)
-    built = packs["pdf"].build(AssistantConfig())
+def test_pdf_toolset_discovered():
+    toolsets = plugins.discover_toolsets()
+    assert "pdf" in toolsets
+    assert isinstance(toolsets["pdf"], Toolset)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    built = toolsets["pdf"].build(ctx)
     assert any(getattr(fn, "__name__", None) == "markdown_to_pdf" for fn in built)
 
 
