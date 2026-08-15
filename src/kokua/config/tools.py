@@ -30,6 +30,17 @@ BLOCKLIST: frozenset[tuple[str, str]] = frozenset(
 )
 
 
+def _is_locked(section: str, key: str) -> bool:
+    """Whether only a hand-edit may change this key.
+
+    ``[agents.*]`` is locked wholesale, and by prefix rather than by an entry in ``BLOCKLIST``, because a
+    section name is per-agent (``agents.<name>``) and so cannot be enumerated ahead of time. It declares
+    what every agent can do, and ``update_config`` is a tool the assistant holds, so a writable agent
+    table would let the assistant widen its own reach. Granting a capability stays a human decision.
+    """
+    return (section, key) in BLOCKLIST or section == "agents" or section.startswith("agents.")
+
+
 def make_config_tools(config_path: Path, apply_hot: Callable[[str, str, object], Awaitable[None]]) -> list[Callable]:
     """Build ``read_config`` / ``update_config`` bound to the config file and the live-apply callback.
 
@@ -59,7 +70,7 @@ def make_config_tools(config_path: Path, apply_hot: Callable[[str, str, object],
         setting is saved and takes effect the next time Kokua restarts (the result says which). A few
         security-critical keys cannot be changed here and must be hand-edited in the file.
         """
-        if (section, key) in BLOCKLIST:
+        if _is_locked(section, key):
             return (
                 f"[{section}].{key} is security-critical and can only be changed by hand-editing "
                 "config.toml, not with this tool."

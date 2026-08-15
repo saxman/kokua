@@ -15,7 +15,7 @@ from kokua.config import AssistantConfig
 
 
 def test_every_runtime_setting_is_an_assistant_config_field():
-    config = AssistantConfig(memory=False)
+    config = AssistantConfig()
     for setting in runtime_settings.RUNTIME_SETTINGS:
         assert hasattr(config, setting.field), f"{setting.field} is not an AssistantConfig field"
 

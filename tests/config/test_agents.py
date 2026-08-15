@@ -86,6 +86,51 @@ def test_removed_memory_key_names_the_toolsets_that_replace_it(tmp_path):
     assert "documents" in message
 
 
+def test_the_agents_section_cannot_be_written_by_the_assistant():
+    from kokua.config.tools import _is_locked
+
+    assert _is_locked("agents.assistant", "tools")
+    assert _is_locked("agents", "assistant")
+    assert _is_locked("security", "confirm_tools")
+    assert not _is_locked("display", "show_tools")
+
+
+async def test_update_config_refuses_an_agent_table_and_still_writes_a_runtime_setting(tmp_path):
+    """The predicate is wired into the tool, not just defined: an agent table is refused and unchanged,
+    while an ordinary runtime setting still goes through."""
+    from kokua.config.tools import make_config_tools
+
+    path = tmp_path / "config.toml"
+    path.write_text('[agents.assistant]\ntools = ["time"]\n', encoding="utf-8")
+
+    async def apply_hot(section, key, value):
+        return None
+
+    update = next(t for t in make_config_tools(path, apply_hot) if t.__name__ == "update_config")
+
+    refusal = await update(section="agents.assistant", key="tools", value="fs, compute")
+    assert "hand-editing" in refusal
+    assert 'tools = ["time"]' in path.read_text(encoding="utf-8")
+
+    assert "9100" in await update(section="web", key="port", value="9100")
+    assert "9100" in path.read_text(encoding="utf-8")
+
+
+def test_the_shipped_example_config_loads_and_validates(tmp_path):
+    import shutil
+    from importlib.resources import files
+
+    from kokua.config.file import load
+    from kokua.toolsets.agents import build_registry, validate_agents
+
+    source = files("kokua").joinpath("config.example.toml")
+    path = tmp_path / "config.toml"
+    shutil.copyfile(str(source), path)
+    config = AssistantConfig(**load(str(path)))
+    validate_agents(config, build_registry(config))
+    assert config.entry_agent in config.agents
+
+
 def test_a_removed_per_agent_key_fails(tmp_path):
     body = MINIMAL + '\n[agents.coder]\ntool_packs = ["pdf"]\n'
     with pytest.raises(ConfigError) as excinfo:

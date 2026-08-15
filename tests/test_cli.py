@@ -8,7 +8,7 @@ import pytest
 
 
 from kokua.cli import build_arg_parser, resolve_config
-from kokua.config import AssistantConfig, paths
+from kokua.config import paths
 from tests.channels import _config
 
 
@@ -43,21 +43,6 @@ def test_arg_parser_overrides():
     assert cfg.frontend == "web"
     assert cfg.host == "0.0.0.0"
     assert cfg.port == 9000
-
-
-def test_default_tools_groups():
-    assert AssistantConfig().tools == ["web", "fs", "compute", "time", "misc"]
-    assert resolve_config(build_arg_parser().parse_args([])).tools == ["web", "fs", "compute", "time", "misc"]
-
-
-def test_tools_flag_parses_groups():
-    assert resolve_config(build_arg_parser().parse_args(["--tools", "web, misc"])).tools == ["web", "misc"]
-    assert resolve_config(build_arg_parser().parse_args(["--tools", "none"])).tools == ["none"]
-
-
-def test_memory_flag_parses():
-    assert resolve_config(build_arg_parser().parse_args([])).memory is True
-    assert resolve_config(build_arg_parser().parse_args(["--no-memory"])).memory is False
 
 
 def test_confirm_tools_flag_parses():
@@ -147,7 +132,7 @@ def test_main_reports_a_missing_config_without_a_traceback(monkeypatch, capsys, 
     assert "Traceback" not in err
 
 
-def test_main_reports_a_config_with_no_roles_without_a_traceback(monkeypatch, capsys):
+def test_main_reports_a_config_with_no_agents_without_a_traceback(monkeypatch, capsys):
     import pytest
 
     from kokua.config import paths
@@ -155,9 +140,9 @@ def test_main_reports_a_config_with_no_roles_without_a_traceback(monkeypatch, ca
     # configure_logging runs before the front end and calls faulthandler.enable(), which needs a real
     # stderr file descriptor that pytest's capture does not provide. Logging is not what is under test.
     monkeypatch.setattr("kokua.cli.configure_logging", lambda config: None)
-    paths.config_path().write_text("[assistant]\nmemory = false\n", encoding="utf-8")
+    paths.config_path().write_text('[assistant]\nagent = "assistant"\n', encoding="utf-8")
     with pytest.raises(SystemExit) as caught:
         _run_main(monkeypatch, ["--frontend", "cli"])
     assert caught.value.code != 0
     err = capsys.readouterr().err
-    assert "subagents.roles" in err and "Traceback" not in err
+    assert "[agents." in err and "Traceback" not in err

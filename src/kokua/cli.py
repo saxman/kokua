@@ -185,7 +185,7 @@ def main() -> None:
             print(f"{name}: {toolset.description}")
         return
 
-    # A ConfigError is a user mistake with a known fix (a missing config.toml, no sub-agent roles, a
+    # A ConfigError is a user mistake with a known fix (a missing config.toml, no [agents.*] tables, a
     # bad key), so it prints as an instruction. A traceback here would bury the one line that matters.
     try:
         config = resolve_config(args)
@@ -199,7 +199,7 @@ def main() -> None:
         asyncio.run(frontend.run(config, args))
     except KeyboardInterrupt:
         pass
-    except ConfigError as e:  # raised at boot, e.g. a config that defines no sub-agent roles
+    except ConfigError as e:  # raised at boot, e.g. a config defining no agents or an unknown toolset
         print(e, file=sys.stderr)
         raise SystemExit(2) from None
 

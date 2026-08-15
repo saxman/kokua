@@ -6,14 +6,14 @@ from pathlib import Path
 
 from kokua import plugins
 from kokua.config import AssistantConfig
-from tests.channels import example_subagent_roles
+from tests.channels import example_agents
 from kokua.plugins import Toolset
 from kokua.toolsets import LiveState, ToolsetContext
 from kokua.toolsets.pdf import _safe_pdf_name, build
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles()}
+    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -40,13 +40,21 @@ def test_pdf_toolset_discovered():
     assert any(getattr(fn, "__name__", None) == "markdown_to_pdf" for fn in built)
 
 
-def test_markdown_to_pdf_reaches_a_role_that_names_the_pack(tmp_path):
-    """The supervisor mounts no pack tools, so a role has to name `pdf` for the tool to reach a worker."""
-    from kokua.core.build import _build_subagent_agent_types
+def test_markdown_to_pdf_reaches_an_agent_that_names_the_toolset(tmp_path):
+    """Nothing is added in code, so an agent has to name `pdf` for the tool to reach it."""
+    from kokua.config.schema import AgentConfig
+    from kokua.toolsets.agents import build_agent_specs, build_registry
 
-    cfg = _config(tmp_path, subagent_roles={"writer": {"description": "Writes.", "tool_packs": ["pdf"]}})
-    types = _build_subagent_agent_types(cfg)
-    assert "markdown_to_pdf" in {fn.__name__ for fn in types["writer"]["tools"]}
+    cfg = _config(
+        tmp_path,
+        agents={
+            "assistant": AgentConfig(tools=["time"], delegates_to=["writer"]),
+            "writer": AgentConfig(description="Writes.", tools=["pdf"]),
+        },
+    )
+    state = LiveState(config=cfg, registry=build_registry(cfg))
+    names = {fn.__name__ for fn in build_agent_specs(cfg, state, "assistant")["writer"]["tools"]}
+    assert "markdown_to_pdf" in names
 
 
 def test_markdown_to_pdf_writes_valid_pdf(tmp_path):

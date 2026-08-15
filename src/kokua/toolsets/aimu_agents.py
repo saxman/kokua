@@ -3,8 +3,8 @@
 This is the worked example of wiring an agent built with AIMU into Kokua. Any `Runner` -- an `Agent`,
 a `Chain`, a `Router`, an `OrchestratorAgent`, a remote A2A agent -- exposes `.run(task) -> str`, so a
 toolset is all the bridge that is needed, and the core does not have to learn about it. Copy this
-shape for your own agent: register a `Toolset` under the `kokua.toolsets` entry-point group, and give a
-sub-agent role `tool_packs = ["<your toolset>"]` in config.toml to scope a worker to it.
+shape for your own agent: register a `Toolset` under the `kokua.toolsets` entry-point group, and name it
+in an agent's `tools` list in config.toml's `[agents.<name>]` table to scope that agent to it.
 
 Three tools, one per prebuilt: `code_review`, `research_report`, `create_content`. Each prebuilt is an
 orchestrator that fans a task out to three specialist workers of its own and synthesizes their answers.
@@ -17,9 +17,9 @@ Two caveats worth knowing before leaning on these:
   by `/stop`, and its workers run without the approval gate. That last one is harmless in practice --
   the only tools any of these workers get are `builtin.web`, none of which are in the default
   `confirm_tools` -- but it would matter if you gave them `compute`.
-- **They overlap `spawn_subagent`.** A `coder` role with `fs` + `compute` is a stronger code reviewer
+- **They overlap `spawn_subagent`.** An agent declaring `fs` + `compute` is a stronger code reviewer
   than `CodeReviewAgent`, whose workers have no tools at all. Reach for these as an illustration of the
-  wiring, not because they beat a role.
+  wiring, not because they beat a configured agent.
 """
 
 from __future__ import annotations

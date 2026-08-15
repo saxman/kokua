@@ -191,9 +191,13 @@ def assemble_system_message(config: AssistantConfig, agent_name: str, toolsets: 
     Guidance travels with the capability that needs it, so installing a toolset brings the instructions
     that make the model use it and removing one takes them away. Nothing here is conditional on a
     setting; it is conditional only on what the agent declares.
+
+    An agent's own ``system_message`` wins, falling back to ``[assistant].system_message`` (which
+    ``--system`` also sets) so that key keeps meaning what it always did: the opener for an agent that
+    declares none of its own.
     """
     agent = config.agents[agent_name]
-    parts = [agent.system_message or DEFAULT_SYSTEM_MESSAGE]
+    parts = [agent.system_message or config.system_message or DEFAULT_SYSTEM_MESSAGE]
     parts.extend(toolset.guidance for toolset in toolsets if toolset.guidance)
     if agent.delegates_to:
         parts.append(DELEGATION_GUIDANCE)

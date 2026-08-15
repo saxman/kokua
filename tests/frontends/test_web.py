@@ -7,7 +7,7 @@ import asyncio
 from tests.helpers import MockAsyncModelClient
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME, WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
-from tests.channels import example_subagent_roles
+from tests.channels import example_agents
 from kokua.frontends.web import build_app
 
 from aimu.aio.channels.base import ChannelMessage
@@ -36,7 +36,7 @@ class _FakeWS:
 
 
 def _config(tmp_path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles()}
+    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
     base.update(overrides)
     return AssistantConfig(**base)
 

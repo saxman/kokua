@@ -20,7 +20,7 @@ _FULL = {
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, **_FULL}
+    base = {"data_dir": tmp_path, **_FULL}
     base.update(overrides)
     return AssistantConfig(**base)
 

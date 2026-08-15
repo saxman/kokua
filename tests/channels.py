@@ -7,6 +7,7 @@ fakes -- and because a test importing another test module makes the suite's layo
 from __future__ import annotations
 
 import tomllib
+from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 from typing import AsyncIterator
@@ -17,6 +18,7 @@ from aimu.models import StreamingContentType
 
 from kokua.config import AssistantConfig
 from kokua.config import file as settings
+from kokua.config.schema import AgentConfig
 
 
 class FakeChannel(Channel):
@@ -64,31 +66,31 @@ class SubagentCapturingChannel(FakeChannel):
 
 
 @lru_cache(maxsize=1)
-def _shipped_roles() -> dict[str, dict]:
-    return tomllib.loads(settings.example_text())["subagents"]["roles"]
+def _shipped_agents() -> dict[str, dict]:
+    return tomllib.loads(settings.example_text())["agents"]
 
 
-def example_subagent_roles() -> dict[str, dict]:
-    """The sub-agent roles Kokua ships in config.example.toml, parsed from that file.
+def example_agents() -> dict[str, AgentConfig]:
+    """The agents Kokua ships in config.example.toml, parsed from that file.
 
-    Read rather than copied on purpose: roles live only in config.toml now, so a Python copy here
-    would drift from the shipped ones and the role tests would stop describing what users run.
-    Returns fresh dicts so a caller mutating a role cannot corrupt another test's config.
+    Read rather than copied on purpose: agents live only in config.toml now, so a Python copy here
+    would drift from the shipped ones and the tests would stop describing what users run. Deep-copied
+    off the cached parse so a caller mutating one agent's `tools` list cannot corrupt another test's
+    config.
     """
-    return {name: dict(spec) for name, spec in _shipped_roles().items()}
+    return {name: AgentConfig(**deepcopy(spec)) for name, spec in _shipped_agents().items()}
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
     base = {
         # All leaf paths derive from data_dir; point it at the test's tmp dir.
         "data_dir": tmp_path,
-        # Memory is on by default in real runs, but off here so the bulk of the tests stay fast and
-        # hermetic (no ChromaDB init / state writes). The memory tests opt in with memory=True.
-        "memory": False,
-        # At least one role is required (Assistant.create refuses an empty set), and roles are also the
-        # only route to a built-in group, tool-pack, or MCP server. Mirror what a real install runs by
-        # using the roles config.example.toml ships, rather than a Python copy that could drift.
-        "subagent_roles": example_subagent_roles(),
+        # At least one agent is required (Assistant.create refuses an empty set), and an agent's `tools`
+        # list is the only route to a built-in group, a plugin toolset, or an MCP server. Mirror what a
+        # real install runs by using the agents config.example.toml ships, rather than a Python copy
+        # that could drift.
+        "agents": example_agents(),
+        "entry_agent": "assistant",
     }
     base.update(overrides)
     return AssistantConfig(**base)

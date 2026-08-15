@@ -15,7 +15,7 @@ from kokua.toolsets.image import build
 
 
 def _config(tmp_path: Path) -> AssistantConfig:
-    return AssistantConfig(data_dir=tmp_path, memory=False)
+    return AssistantConfig(data_dir=tmp_path)
 
 
 class _Chunk:

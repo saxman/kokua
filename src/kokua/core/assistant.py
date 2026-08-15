@@ -133,20 +133,21 @@ class Assistant:
     async def create(
         cls, config: AssistantConfig, channel: Channel, *, client=None, client_factory=None
     ) -> "Assistant":
-        # The assistant is always a lean supervisor, so its only route to a domain tool is a worker.
-        # With no roles it could not browse, read a file, or compute; refuse rather than start something
-        # that looks running and cannot work.
-        if not config.subagent_roles:
-            raise ConfigError(
-                "no sub-agent roles configured: the assistant delegates all specialized work, so it "
-                "needs at least one [subagents.roles.*] in config.toml. Run `kokua config init` to "
-                "write a config with the default roles."
-            )
         # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which
         # pulls in kokua.core.tools -- a submodule of this package -- and importing it triggers
         # kokua/core/__init__ to run, which imports this module. A top-level import here would close
         # that cycle.
-        from kokua.toolsets.agents import build_registry, unreferenced_toolsets
+        from kokua.toolsets.agents import build_registry, unreferenced_toolsets, validate_agents
+        from kokua.toolsets.registry import ToolsetError
+
+        # Two providers claiming one toolset name is a config mistake like any other (a duplicated
+        # [[mcp.server]].name, a plugin colliding with a built-in group), so it is presented as one:
+        # translated here rather than left as the registry's internal exception type, so a front end has a
+        # single ConfigError family to catch for everything wrong with config.toml.
+        try:
+            registry = build_registry(config)
+        except ToolsetError as error:
+            raise ConfigError(str(error)) from error
 
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
@@ -208,8 +209,12 @@ class Assistant:
             tool_approval=assistant._approve,
             reapply_config=assistant._settings.apply_one,
             observer=assistant._subagent_reporter,
-            registry=build_registry(config),
+            registry=registry,
         )
+        # Every agent's declaration is checked against the registry before anything is built, so an
+        # unknown toolset name, a missing entry agent, or a delegation cycle fails here, naming the
+        # offending value, instead of surfacing as a half-built assistant or an exhausted stack.
+        validate_agents(config, state.registry)
         # Assigned after construction because it closes over assistant._registry, which is built below it.
         state.for_each_agent = for_each_agent
         assistant._state = state

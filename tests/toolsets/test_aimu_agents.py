@@ -68,15 +68,20 @@ def test_pack_is_discovered_and_contributes_three_tools():
     assert {"code_review", "research_report", "create_content"} <= names
 
 
-def test_pack_tools_reach_a_role_that_names_the_pack(tmp_path):
-    """The documented wiring: a role with tool_packs = ["aimu_agents"] gets the three agents as tools."""
-    from kokua.core.build import _build_subagent_agent_types
+def test_toolset_tools_reach_an_agent_that_names_the_toolset(tmp_path):
+    """The documented wiring: an agent with tools = ["aimu_agents"] gets the three agents as tools."""
+    from kokua.config.schema import AgentConfig
+    from kokua.toolsets.agents import build_agent_specs, build_registry
 
     cfg = _assistant_config(
-        tmp_path, subagent_roles={"reviewer": {"description": "Reviews.", "tool_packs": ["aimu_agents"]}}
+        tmp_path,
+        agents={
+            "assistant": AgentConfig(tools=["time"], delegates_to=["reviewer"]),
+            "reviewer": AgentConfig(description="Reviews.", tools=["aimu_agents"]),
+        },
     )
-    types = _build_subagent_agent_types(cfg)
-    names = {fn.__name__ for fn in types["reviewer"]["tools"]}
+    state = LiveState(config=cfg, registry=build_registry(cfg))
+    names = {fn.__name__ for fn in build_agent_specs(cfg, state, "assistant")["reviewer"]["tools"]}
     assert {"code_review", "research_report", "create_content"} <= names
 
 

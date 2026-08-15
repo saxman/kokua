@@ -29,7 +29,7 @@ sync_api = pytest.importorskip("playwright.sync_api")
 expect = sync_api.expect
 
 from aimu.models import StreamChunk, StreamingContentType  # noqa: E402
-from tests.channels import example_subagent_roles  # noqa: E402
+from tests.channels import example_agents  # noqa: E402
 from tests.helpers import MockAsyncModelClient  # noqa: E402
 
 from kokua.config.schema import AssistantConfig  # noqa: E402
@@ -98,8 +98,8 @@ def live_server():
     """Factory: start the real web app (backed by a `_SlowClient`) under uvicorn in a thread.
 
     Returns a callable `start(delay=0.0, seed=None, tail="") -> base_url`. Servers are torn down after the
-    test. Memory and plugins are off so startup is fast and model-free; the mock client handles turns.
-    Roles are the shipped ones (`Assistant.create` refuses an empty set), and nothing here spawns a
+    test. Plugins are off so startup is fast and model-free; the mock client handles turns. The agents
+    are the shipped ones (`Assistant.create` refuses an empty set), and nothing here spawns a
     sub-agent, so they only need to exist. `seed`, if given, is called with the `AssistantConfig`
     before the app is built, so a test can plant a conversation (e.g. a session with recorded
     sub-agent events) ahead of startup.
@@ -107,9 +107,7 @@ def live_server():
     started: list[tuple] = []
 
     def start(delay: float = 0.0, seed=None, tail: str = "", tool_response: str = "") -> str:
-        config = AssistantConfig(
-            memory=False, subagent_roles=example_subagent_roles(), load_plugins=False, tools=["none"]
-        )
+        config = AssistantConfig(agents=example_agents(), entry_agent="assistant", load_plugins=False)
         if seed is not None:
             seed(config)
         app = build_app(

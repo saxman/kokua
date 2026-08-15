@@ -5,8 +5,8 @@ from kokua.toolsets.agents import assemble_system_message, build_registry
 from kokua.toolsets.registry import Toolset, select
 
 
-def _assemble(agents, name="assistant"):
-    config = AssistantConfig(agents=agents, entry_agent="assistant", load_plugins=False)
+def _assemble(agents, name="assistant", **config_kwargs):
+    config = AssistantConfig(agents=agents, entry_agent="assistant", load_plugins=False, **config_kwargs)
     registry = build_registry(config)
     toolsets = select(agents[name].tools, registry, agent=name, entry_point="assistant")
     return assemble_system_message(config, name, toolsets)
@@ -15,6 +15,18 @@ def _assemble(agents, name="assistant"):
 def test_the_declared_message_comes_first():
     agents = {"assistant": AgentConfig(system_message="Custom opener.", tools=["memory"])}
     assert _assemble(agents).startswith("Custom opener.")
+
+
+def test_an_agent_with_no_message_of_its_own_falls_back_to_the_global_one():
+    """[assistant].system_message (which --system also sets) is the opener for an agent that declares
+    none of its own, so setting it is not silently ignored."""
+    agents = {"assistant": AgentConfig(tools=["time"])}
+    assert _assemble(agents, system_message="Global opener.").startswith("Global opener.")
+
+
+def test_an_agents_own_message_wins_over_the_global_one():
+    agents = {"assistant": AgentConfig(system_message="Mine.", tools=["time"])}
+    assert _assemble(agents, system_message="Global opener.").startswith("Mine.")
 
 
 def test_a_toolsets_guidance_is_appended():
