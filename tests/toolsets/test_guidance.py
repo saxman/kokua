@@ -59,6 +59,14 @@ def test_a_lean_delegator_is_told_it_has_almost_no_direct_tools():
     assert "almost no direct tools" in _assemble(agents)
 
 
+def test_a_lean_delegator_is_told_it_is_a_lean_supervisor():
+    agents = {
+        "assistant": AgentConfig(system_message="Opener.", tools=["time", "memory"], delegates_to=["r"]),
+        "r": AgentConfig(tools=["web"]),
+    }
+    assert "lean supervisor" in _assemble(agents)
+
+
 def test_a_delegator_holding_a_domain_toolset_is_not():
     agents = {
         "assistant": AgentConfig(system_message="Opener.", tools=["time", "fs"], delegates_to=["r"]),
@@ -67,6 +75,42 @@ def test_a_delegator_holding_a_domain_toolset_is_not():
     message = _assemble(agents)
     assert "spawn_subagent" in message
     assert "almost no direct tools" not in message
+
+
+def test_a_delegator_holding_a_domain_toolset_is_not_called_a_lean_supervisor():
+    agents = {
+        "assistant": AgentConfig(system_message="Opener.", tools=["time", "fs"], delegates_to=["r"]),
+        "r": AgentConfig(tools=["web"]),
+    }
+    assert "lean supervisor" not in _assemble(agents)
+
+
+def test_any_delegating_agent_is_told_to_answer_trivia_itself():
+    """Unconditional: over-delegating a greeting is the mirror problem the lean clause exists to
+    prevent for domain work, so the instruction cannot be gated on cross_cutting the way that clause is."""
+    lean = {
+        "assistant": AgentConfig(system_message="Opener.", tools=["time", "memory"], delegates_to=["r"]),
+        "r": AgentConfig(tools=["web"]),
+    }
+    tool_heavy = {
+        "assistant": AgentConfig(system_message="Opener.", tools=["time", "fs"], delegates_to=["r"]),
+        "r": AgentConfig(tools=["web"]),
+    }
+    assert "directly with your own tools" in _assemble(lean)
+    assert "directly with your own tools" in _assemble(tool_heavy)
+
+
+def test_the_stale_tool_enumeration_never_appears():
+    """The old hardcoded list of the entry agent's cross-cutting tools ("date/time, memory, skills,
+    config, scheduling, MCP management, reading past conversations") is gone for good: it is a
+    hand-maintained copy of the declared toolset, exactly the kind of sentence this design exists to
+    stop writing. A future edit that "restores" it for symmetry with the old prompt would be a
+    regression, not a fix."""
+    agents = {
+        "assistant": AgentConfig(system_message="Opener.", tools=["time", "memory"], delegates_to=["r"]),
+        "r": AgentConfig(tools=["web"]),
+    }
+    assert "MCP management" not in _assemble(agents)
 
 
 def test_the_default_opener_is_used_when_an_agent_declares_none():

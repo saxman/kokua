@@ -122,22 +122,31 @@ def _reject_cycles(config: AssistantConfig) -> None:
         walk(name)
 
 
-# The delegation mechanism, given to any agent with a non-empty delegates_to. The worker menu itself is
-# AIMU's: it renders the agent_types into the spawn tool's docstring.
+# The delegation mechanism, given to any agent with a non-empty delegates_to. "Answer trivial or
+# conversational requests directly with your own tools" is unconditional -- true of any delegating agent
+# regardless of what it holds, and without it the model over-delegates, spawning a worker to answer a
+# greeting. It deliberately does not enumerate which tools those are: that enumeration would be a
+# hand-maintained copy of the agent's declared toolset, stale the moment config.toml changes, and
+# redundant besides -- the model already sees its actual tools in the tool schema, and each toolset's own
+# guidance already says what it is for. The worker menu itself is AIMU's: it renders the agent_types into
+# the spawn tool's docstring.
 DELEGATION_GUIDANCE = (
-    " Delegate specialized work by calling `spawn_subagent(agent_type, task)`: pick the worker whose "
-    "role fits, give it a complete, self-contained task (it shares no history with you), then relay or "
-    "synthesize its answer for the user. Emit several `spawn_subagent` calls when subtasks are "
-    "independent."
+    " Answer trivial or conversational requests directly with your own tools. Delegate specialized work "
+    "by calling `spawn_subagent(agent_type, task)`: pick the worker whose role fits, give it a complete, "
+    "self-contained task (it shares no history with you), then relay or synthesize its answer for the "
+    "user. Emit several `spawn_subagent` calls when subtasks are independent."
 )
 
-# Added only when every toolset the agent declared is cross_cutting. Without this line a lean agent
-# answers web, file, and code questions from memory instead of spawning a worker that has the tools.
-# Derived from the declaration rather than asserted unconditionally, so granting the agent a domain
-# toolset removes the claim instead of leaving the prompt contradicting the advertised tools.
+# Added only when every toolset the agent declared is cross_cutting. Without the "almost no direct
+# tools" clause a lean agent answers web, file, and code questions from memory instead of spawning a
+# worker that has the tools; without the "lean supervisor" framing preceding it, the sentence has no
+# subject. Both halves are derived from the declaration rather than asserted unconditionally: an agent
+# holding a domain toolset is neither a lean supervisor nor genuinely short on direct tools, so granting
+# it one removes both claims instead of leaving the prompt contradicting the advertised tools.
 LEAN_DELEGATION_GUIDANCE = (
-    " For any specialized work, web research, reading or writing files, running code, or anything "
-    "needing a domain tool, you have almost no direct tools, so you MUST delegate."
+    " You are a lean supervisor. For any specialized work, web research, reading or writing files, "
+    "running code, or anything needing a domain tool, you have almost no direct tools, so you MUST "
+    "delegate."
 )
 
 
