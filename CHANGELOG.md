@@ -1,15 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Changed
-
-- **Breaking:** the tool-pack plugin contract is now `kokua.plugins.Toolset`, discovered from the
-  `kokua.toolsets` entry-point group instead of `kokua.tools`, and its `build` takes a
-  `ToolsetContext` rather than an `AssistantConfig`. A third-party package registering under
-  `kokua.tools` is no longer discovered and must re-register.
-- `--list-tool-packs` is now `--list-toolsets`.
-
 ## 0.1.0 (unreleased)
 
 First release. Kokua starts from AIMU's `examples/personal-assistant/` and restructures it into an
@@ -24,11 +14,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
 - `src`-layout `kokua` package with two console scripts: `kokua` runs the selected front end (default
   `cli`), `kokua-web` is a convenience for `kokua --frontend web`. Both route through `kokua.cli`, so
   both run the AIMU preflight described under [Diagnostics](#diagnostics-and-error-reporting).
-- **Plugin system** (`kokua.plugins`). Front ends and tool-packs are discovered through the
-  `kokua.frontends` and `kokua.tools` entry-point groups. The built-in `cli` / `web` front ends and the
-  five built-in tool-packs register exactly as a third party's package would, so if the built-in path
+- **Plugin system** (`kokua.plugins`). Front ends and toolsets are discovered through the
+  `kokua.frontends` and `kokua.toolsets` entry-point groups. The built-in `cli` / `web` front ends and
+  the five built-in toolsets register exactly as a third party's package would, so if the built-in path
   and the plugin path ever diverge, the plugin path is the broken one. Inspect with `--list-frontends`
-  and `--list-tool-packs`; disable discovery with `--no-plugins`.
+  and `--list-toolsets`; disable discovery with `--no-plugins`.
 - The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
   `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
 
