@@ -155,7 +155,7 @@ The built-in `cli` / `web` front ends and the five tool-packs are registered exa
 weather = "my_weather_pack:TOOL_PACK"
 ```
 
-`pip install` it, and `kokua --list-tool-packs` shows it. Its tools do **not** appear automatically: the assistant is a lean supervisor and mounts no pack tools, so give a role `tool_packs = ["weather"]` in `config.toml` and the workers spawned for that role carry them. See [`toolpacks/example.py`](src/kokua/toolpacks/example.py) for the template, and [`toolpacks/aimu_agents.py`](src/kokua/toolpacks/aimu_agents.py) for the same shape carrying a whole AIMU agent rather than a plain function.
+`pip install` it, and `kokua --list-tool-packs` shows it. Its tools do **not** appear automatically: the assistant is a lean supervisor and mounts no pack tools, so give a role `tool_packs = ["weather"]` in `config.toml` and the workers spawned for that role carry them. See [`toolpacks/example.py`](src/kokua/toolpacks/example.py) for the template, and [`toolpacks/aimu_agents.py`](src/kokua/toolpacks/aimu_agents.py) for the same shape carrying a whole AIMU agent rather than a plain function. [Set up a toolset](docs/how-to/set-up-toolsets.md) is the full walkthrough: how a role assembles its toolset from groups, packs, and MCP servers, and which mistyped names fail loudly versus silently.
 
 ## Security
 
@@ -199,6 +199,7 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 
 ### Kokua
 
+- 📘 [How-to guides](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (roles, tool groups, writing a tool-pack) · [add a skill](docs/how-to/add-skills.md) · [add an MCP service](docs/how-to/add-mcp-services.md).
 - 💡 [Design principles](docs/explanation/design-principles.md): the six that decide what belongs in the core, each with the code that backs it and the patterns it excludes.
 - 🏗️ [Architecture](docs/explanation/architecture.md): module layout, control flow, and the concurrency model.
 - ⚙️ [`config.example.toml`](src/kokua/config.example.toml): every setting, documented at its default.

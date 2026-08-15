@@ -399,6 +399,11 @@ notice on startup.
 - The six principles that decide what belongs in the core, each with the code that backs it, are in
   [docs/explanation/design-principles.md](docs/explanation/design-principles.md); the architecture
   narrative is in [docs/explanation/architecture.md](docs/explanation/architecture.md).
+- Task-oriented guides for the three ways to add capability are in
+  [docs/how-to/](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (tool groups,
+  sub-agent roles, writing a tool-pack), [add a skill](docs/how-to/add-skills.md), and
+  [add an MCP service](docs/how-to/add-mcp-services.md). All three converge on the same rule: nothing
+  reaches an agent until a `[subagents.roles.*]` table names it.
 - **Verifiable without a model.** The default test suite is mock-only: no model, no network, no keys.
   This is why the model client is injectable and the builders are free functions. Client-side page JS is
   covered by an opt-in Playwright suite (`pytest -m e2e`) driving the real `index.html` in headless
