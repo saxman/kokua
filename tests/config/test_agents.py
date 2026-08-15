@@ -56,9 +56,12 @@ def test_an_unknown_key_in_an_agent_table_is_named(tmp_path):
 @pytest.mark.parametrize(
     "config_text, removed, replacement",
     [
-        (MINIMAL + '\n[tools]\ngroups = ["web"]\n', "[tools]", "tools"),
+        # `replacement` must not be a substring of `removed` (or vice versa): otherwise the second
+        # assertion is satisfied for free by the first and proves nothing about the replacement
+        # guidance specifically. "tools" is a substring of "[tools]" itself, so the replacement here
+        # is the concrete path the message actually points at instead.
+        (MINIMAL + '\n[tools]\ngroups = ["web"]\n', "[tools]", "[agents.<name>].tools"),
         (MINIMAL + "\n[subagents]\nconcurrent = true\n", "[subagents]", "concurrent_tools"),
-        (_MEMORY_STILL_SET, "memory", "memory"),
         (MINIMAL + '\n[subagents.roles.x]\ndescription = "x"\n', "[subagents.roles", "[agents."),
     ],
 )
@@ -68,6 +71,19 @@ def test_a_removed_key_fails_and_names_its_replacement(tmp_path, config_text, re
     message = str(excinfo.value)
     assert removed in message
     assert replacement in message
+
+
+def test_removed_memory_key_names_the_toolsets_that_replace_it(tmp_path):
+    """A dedicated test, not a parametrize case: "memory" is both the removed key and part of any
+    honest replacement guidance ("declare the memory toolset..."), so the two assertions cannot use
+    the same word without one becoming free. The replacement is checked with "documents" instead,
+    which appears only in the guidance and names the second toolset [assistant].memory used to gate,
+    so the assertion fails if that guidance is ever dropped or reworded into uselessness."""
+    with pytest.raises(ConfigError) as excinfo:
+        _load(tmp_path, _MEMORY_STILL_SET)
+    message = str(excinfo.value)
+    assert "memory" in message
+    assert "documents" in message
 
 
 def test_a_removed_per_agent_key_fails(tmp_path):
