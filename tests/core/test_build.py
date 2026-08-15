@@ -520,8 +520,20 @@ async def test_memory_wires_both_stores(tmp_path):
     assistant = await Assistant.create(_config(tmp_path, memory=True), FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
     assert _MEMORY_TOOL_NAMES <= names
+
+
+async def test_memory_stores_exist_when_memory_is_on(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path, memory=True), FakeChannel(), client=MockAsyncModelClient([]))
     assert assistant._memory_store is not None
     assert assistant._document_store is not None
+
+
+def test_memory_stores_are_not_built_until_a_toolset_asks(tmp_path):
+    """The laziness is the mechanism, so it is asserted directly: nothing constructs a store on disk
+    just because a LiveState exists."""
+    state = LiveState(config=_config(tmp_path, memory=True))
+    assert "memory_store" not in state.__dict__
+    assert "document_store" not in state.__dict__
 
 
 async def test_no_memory_omits_tools_and_stores(tmp_path):

@@ -22,7 +22,6 @@ from typing import Callable, Optional
 from aimu import aio
 from aimu.aio import Channel, ModelConnectionError, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
-from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.sessions import Session, TinyDBSessionStore
 
 from kokua.config import table as runtime_settings
@@ -31,7 +30,6 @@ from kokua.channels.ui import ChannelUI
 from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.core.build import (
     ModelClientError,
-    build_memory,
     build_model_client,
     make_agent_builder,
     unreferenced_mcp_servers,
@@ -41,13 +39,13 @@ from kokua.core.conversations import ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
 from kokua.core.subagents import SubagentReporter
-from kokua.core.tools import make_conversation_tools
 from kokua.mcp.servers import ServerConnection, reconnect_mcp_servers
-from kokua.scheduling import make_scheduler_tools
 from kokua.core.settings_runtime import SettingsApplier
 from kokua.core.turn_gate import TurnGate
 from kokua.core.turns import TurnRunner
 from kokua.core.turn_registry import TurnInfo, TurnTracker
+from kokua.toolsets.agents import build_registry
+from kokua.toolsets.context import LiveState
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +78,9 @@ class Assistant:
         # Live remote-MCP connections (startup + runtime-added) kept alive for their lifetime
         # and closed on shutdown. Assigned by create().
         self._mcp_servers: list[ServerConnection] = []
-        # Persistent memory stores (None when --no-memory). Assigned by create(); persistence is
-        # automatic (Chroma PersistentClient / DocumentStore disk writes), so no teardown needed.
-        self._memory_store: Optional[SemanticMemoryStore] = None
-        self._document_store: Optional[DocumentStore] = None
+        # Every toolset's shared live state (memory/document stores, connections, the registry, ...).
+        # Assigned by create(); the ``_memory_store`` / ``_document_store`` properties read through it.
+        self._state: Optional[LiveState] = None
         # The readers-writer gate: turns on different conversations run concurrently (each is its own
         # "reader", serialized per-conversation by the registry's per-conversation lock); a config
         # mutation is the exclusive "writer" that waits for in-flight turns to drain. Constructed with
@@ -145,8 +142,6 @@ class Assistant:
                 "needs at least one [subagents.roles.*] in config.toml. Run `kokua config init` to "
                 "write a config with the default roles."
             )
-        memory_store, document_store, memory_tools = build_memory(config)
-
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
 
@@ -165,8 +160,6 @@ class Assistant:
             if setting.mirror_on_channel:
                 assistant._ui.set_display_flag(setting.field, getattr(config, setting.field))
         assistant._mcp_servers = connections  # same list the MCP tools append to / remove from
-        assistant._memory_store = memory_store
-        assistant._document_store = document_store
 
         # Per-conversation model clients: an explicit factory wins; else the injected client backs the
         # initial conversation (single-conversation tests) and further conversations build their own;
@@ -185,16 +178,6 @@ class Assistant:
         # Wrap the raw factory so every conversation's client carries the effective generation kwargs
         # the active agent has, not bare provider defaults.
         assistant._settings.layered_factory(raw_factory)
-        scheduler_tools, arm_tasks, task_controls = make_scheduler_tools(
-            scheduler, config.scheduled_tasks_path, assistant._proactive
-        )
-        assistant._tasks = task_controls
-
-        # Read-only visibility across conversations, bound to the live book. Built here rather than in
-        # build.py because the book is app state, not a config value, so no tool-pack could reach it.
-        # Safe this early: these tools read the store through the book and never touch the agent
-        # registry, which is bound below.
-        conversation_tools = make_conversation_tools(assistant._book, assistant.turn_running)
 
         # Fan a global tool mutation (MCP add/remove) out across every live conversation's agent. Reads
         # the registry lazily: it is set just below and only ever called at runtime (add/remove) or by the
@@ -203,22 +186,34 @@ class Assistant:
             for agent in assistant._registry.live_agents():
                 apply(agent)
 
+        # Every toolset's shared live state, built once here (the composition root) rather than threaded
+        # through build.py's functions by hand.
+        state = LiveState(
+            config=config,
+            notify=channel.send,
+            oauth_storage_dir=oauth_storage_dir,
+            connections=connections,
+            scheduler=scheduler,
+            proactive=assistant._proactive,
+            conversation_book=assistant._book,
+            turn_running=assistant.turn_running,
+            tool_approval=assistant._approve,
+            reapply_config=assistant._settings.apply_one,
+            observer=assistant._subagent_reporter,
+            registry=build_registry(config),
+        )
+        # Assigned after construction because it closes over assistant._registry, which is built below it.
+        state.for_each_agent = for_each_agent
+        assistant._state = state
+        assistant._tasks = state.task_controls
+
         assistant._registry = AgentRegistry(
             make_agent_builder(
                 config,
+                state,
                 client_factory=lambda cid: assistant._settings.client_factory(cid),
-                notify=channel.send,
-                oauth_storage_dir=oauth_storage_dir,
-                connections=connections,
-                memory_tools=memory_tools,
-                tool_approval=assistant._approve,
-                scheduler_tools=scheduler_tools,
-                conversation_tools=conversation_tools,
                 store=store,
                 images_path=config.images_path,
-                for_each_agent=for_each_agent,
-                reapply_config=assistant._settings.apply_one,
-                subagent_observer=assistant._subagent_reporter,
             ),
             cap=config.agent_cache_cap,
         )
@@ -242,7 +237,7 @@ class Assistant:
         # snapshots the provider base for later re-layering).
         assistant._registry.get(assistant._active_id)
 
-        arm_tasks()
+        state.arm_tasks()
         return assistant
 
     @property
@@ -270,6 +265,22 @@ class Assistant:
         doesn't need to reach into `_tracker` directly (e.g. to decide whether to show a "working"
         indicator on switching into a conversation)."""
         return self._tracker.running(conversation_id)
+
+    @property
+    def _memory_store(self):
+        """The shared semantic memory store, or None when no agent declared the memory toolset.
+
+        Read through ``LiveState`` rather than cached here, so merely asking whether a store exists does
+        not force it into existence."""
+        return self._state.__dict__.get("memory_store") if self._state else None
+
+    @property
+    def _document_store(self):
+        """The shared document store, or None when no agent declared the documents toolset.
+
+        Read through ``LiveState`` rather than cached here, so merely asking whether a store exists does
+        not force it into existence."""
+        return self._state.__dict__.get("document_store") if self._state else None
 
     @property
     def history(self) -> list[dict]:
