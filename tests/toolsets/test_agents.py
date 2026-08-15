@@ -2,8 +2,9 @@
 
 import pytest
 
-from kokua.config.schema import AssistantConfig
-from kokua.toolsets.agents import build_registry
+from kokua.config.file import ConfigError
+from kokua.config.schema import AgentConfig, AssistantConfig
+from kokua.toolsets.agents import build_registry, validate_agents
 from kokua.toolsets.registry import ToolsetError
 
 
@@ -77,3 +78,92 @@ def test_core_and_builtin_toolsets_are_not_wrapped_with_tolerance():
     registry = build_registry(AssistantConfig(load_plugins=True))
     for source in (*BUILTIN_TOOLSETS, *CORE_TOOLSETS):
         assert registry[source.name].build is source.build, source.name
+
+
+def _config(agents, entry="assistant") -> AssistantConfig:
+    return AssistantConfig(agents=agents, entry_agent=entry, load_plugins=False)
+
+
+def _valid() -> dict:
+    return {
+        "assistant": AgentConfig(tools=["time"], delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+
+
+def test_a_valid_graph_passes():
+    config = _config(_valid())
+    validate_agents(config, build_registry(config))
+
+
+def test_no_agents_at_all_is_rejected():
+    config = _config({})
+    with pytest.raises(ConfigError, match="at least one"):
+        validate_agents(config, build_registry(config))
+
+
+def test_a_missing_entry_agent_is_rejected():
+    config = _config(_valid(), entry="supervisor")
+    with pytest.raises(ConfigError) as excinfo:
+        validate_agents(config, build_registry(config))
+    assert "supervisor" in str(excinfo.value)
+
+
+def test_an_unknown_delegation_target_is_rejected():
+    agents = _valid()
+    agents["assistant"] = AgentConfig(tools=["time"], delegates_to=["reasercher"])
+    config = _config(agents)
+    with pytest.raises(ConfigError) as excinfo:
+        validate_agents(config, build_registry(config))
+    assert "reasercher" in str(excinfo.value)
+
+
+def test_a_delegation_cycle_is_rejected_and_named():
+    agents = {
+        "assistant": AgentConfig(delegates_to=["a"]),
+        "a": AgentConfig(delegates_to=["b"]),
+        "b": AgentConfig(delegates_to=["a"]),
+    }
+    config = _config(agents)
+    with pytest.raises(ConfigError) as excinfo:
+        validate_agents(config, build_registry(config))
+    message = str(excinfo.value)
+    assert "a" in message and "b" in message
+    assert "cycle" in message.lower()
+
+
+def test_an_agent_delegating_to_itself_is_rejected():
+    config = _config({"assistant": AgentConfig(delegates_to=["assistant"])})
+    with pytest.raises(ConfigError, match="cycle"):
+        validate_agents(config, build_registry(config))
+
+
+def test_an_unknown_toolset_name_is_rejected_during_validation():
+    config = _config({"assistant": AgentConfig(tools=["memry"])})
+    with pytest.raises(ConfigError) as excinfo:
+        validate_agents(config, build_registry(config))
+    assert "memry" in str(excinfo.value)
+
+
+def test_skills_on_a_worker_is_rejected_during_validation():
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["skills"]),
+    }
+    config = _config(agents)
+    with pytest.raises(ConfigError) as excinfo:
+        validate_agents(config, build_registry(config))
+    assert "skills" in str(excinfo.value)
+
+
+def test_a_diamond_shaped_graph_passes():
+    """Two agents delegating to a shared target is not a cycle: the DFS must mark a finished node
+    ``done`` so revisiting it through a second path does not re-walk it or read as a cycle."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["a", "b"]),
+        "a": AgentConfig(delegates_to=["shared"]),
+        "b": AgentConfig(delegates_to=["shared"]),
+        "shared": AgentConfig(),
+    }
+    config = _config(agents)
+    validate_agents(config, build_registry(config))
