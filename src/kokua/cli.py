@@ -69,14 +69,6 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Show tool calls as they happen. Default: on (use --no-show-tools to hide).",
     )
     parser.add_argument(
-        "--tools",
-        default=None,
-        help="Comma-separated AIMU built-in tool groups to expose: web, fs, compute, time, misc, image, "
-        "audio, speech, transcription (or 'all' / 'none'). Default: web,fs,compute,time,misc. The "
-        "generative groups (image/audio/speech/transcription) require their AIMU_*_MODEL env var. "
-        "Enabling 'time' also gives every sub-agent role the clock, whatever its own groups.",
-    )
-    parser.add_argument(
         "--mcp",
         action="append",
         default=None,
@@ -85,13 +77,6 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         "unauthenticated (or via OAuth on an auth challenge); for a server needing a bearer token, "
         "configure it in config.toml under [[mcp.server]] with token_env. The assistant can also "
         "connect more servers mid-session via the add_mcp_server tool.",
-    )
-    parser.add_argument(
-        "--memory",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Persistent memory across conversations: facts about the user (semantic) plus "
-        "user-provided documents. Default: on (use --no-memory to disable).",
     )
     parser.add_argument(
         "--confirm-tools",
@@ -134,9 +119,7 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
     take("system_message", args.system)
     take("show_thinking", args.show_thinking)
     take("show_tools", args.show_tools)
-    take("tools", args.tools, lambda v: [group.strip() for group in v.split(",") if group.strip()])
     take("mcp_servers", args.mcp, lambda urls: [MCPServerConfig(url=url) for url in urls])
-    take("memory", args.memory)
     take("load_plugins", args.plugins)
     take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
     take("frontend", args.frontend)

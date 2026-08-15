@@ -25,32 +25,6 @@ class ModelClientError(RuntimeError):
     front end can present it instead of a traceback."""
 
 
-# The legacy [tools].groups vocabulary, which the declarative-agents work replaces entirely. Explicit
-# rather than derived from BUILTIN_TOOLSETS membership: "image" here resolves to Kokua's own toolset of
-# that name (see kokua/toolsets/builtin.py for why AIMU's own "image" group is not registered), and
-# deriving the ceiling from registry membership would let an unrelated registry change (adding, removing,
-# or renaming a builtin toolset for its own reasons) silently change what this list accepts. A test in
-# tests/core/test_build.py pins every name here to a real toolset, so the two can't drift the other way.
-_LEGACY_TOOL_GROUPS = ("web", "fs", "compute", "time", "misc", "image", "audio", "speech", "transcription")
-
-
-def _enabled_group_names(config: AssistantConfig) -> set[str]:
-    """The legacy tool-group names workers may draw from, validated.
-
-    Also the one place ``[tools].groups`` is checked. Nothing else expands that list any more (the
-    entry point agent mounts no built-in groups, and a role's own ``groups`` are intersected with this
-    set and otherwise ignored), so without an explicit check a typo like ``groups = ["complete"]`` would
-    silently produce tool-less workers instead of failing at startup.
-    """
-    for name in config.tools:
-        if name not in _LEGACY_TOOL_GROUPS and name not in ("all", "none"):
-            valid = ", ".join(sorted(_LEGACY_TOOL_GROUPS)) + ", all, none"
-            raise ValueError(f"unknown tool group {name!r}; choose from: {valid}")
-    if "all" in config.tools:
-        return set(_LEGACY_TOOL_GROUPS)
-    return {g for g in config.tools if g != "none"}
-
-
 def unreferenced_mcp_servers(config: AssistantConfig) -> list[str]:
     """Configured MCP servers that no sub-agent role names, and so reach no agent at all.
 
@@ -77,7 +51,6 @@ def _build_subagent_agent_types(config: AssistantConfig, state: Optional[LiveSta
     builds an untyped delegate instead.
 
     A role's worker toolset is the union, deduped by ``__name__``, of:
-      - its ``groups``, intersected with the assistant's enabled ``config.tools``;
       - its ``tool_packs``, filtered to registered toolsets that are neither ``cross_cutting`` nor
         ``entry_point_only``. A role is not itself an agent (it is passed to ``agent_tools`` as its own
         label and never as the entry point), so without this filter a name that happens to match a
@@ -87,17 +60,15 @@ def _build_subagent_agent_types(config: AssistantConfig, state: Optional[LiveSta
       - the tools of any MCP servers it names in ``mcp_servers``, matched against the live
         ``state.connections`` by the server's configured ``name`` first, then its raw URL. MCP servers
         are per-connection, not named capabilities, so they stay outside the registry;
-      - the ``time`` group, added to every role when it is globally enabled, because a worker that
-        cannot tell the time is broken whatever its domain. This is the one addition a role does not
-        ask for, and it still respects the global set rather than exceeding it.
-    Both ``groups`` and ``tool_packs`` are otherwise resolved the same way, through ``agent_tools``
-    against the same registry a real agent draws from; an unrecognized name in either is dropped rather
-    than raised, which is the forgiving contract a typo'd group or pack has always had (unlike a real
-    agent's declared toolsets, where an unknown name is a startup error). ``state`` defaults to a fresh
-    one built from ``config`` (no live connections, the full registry), which is enough to resolve a
-    role's built-in groups and tool-packs even before the MCP/plugin sources are wired. The role
-    ``description`` becomes the first line of the built ``system_message`` (AIMU shows it in the tool's
-    role menu).
+      - the ``time`` group, added to every role unconditionally, because a worker that cannot tell the
+        time is broken whatever its domain. This is the one addition a role does not ask for.
+    ``tool_packs`` is otherwise resolved through ``agent_tools`` against the same registry a real agent
+    draws from; an unrecognized name in it is dropped rather than raised, which is the forgiving contract
+    a typo'd pack has always had (unlike a real agent's declared toolsets, where an unknown name is a
+    startup error). ``state`` defaults to a fresh one built from ``config`` (no live connections, the
+    full registry), which is enough to resolve a role's tool-packs even before the MCP/plugin sources are
+    wired. The role ``description`` becomes the first line of the built ``system_message`` (AIMU shows it
+    in the tool's role menu).
     """
     # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which pulls
     # in kokua.core.tools -- a submodule of this package -- and importing it triggers kokua/core/__init__
@@ -105,17 +76,10 @@ def _build_subagent_agent_types(config: AssistantConfig, state: Optional[LiveSta
     from kokua.toolsets.agents import agent_tools, build_registry
 
     state = state or LiveState(config=config, registry=build_registry(config))
-    enabled = _enabled_group_names(config)
     url_by_name = {s.name: s.url for s in config.mcp_servers if getattr(s, "name", None)}
     callables_by_url = {getattr(c, "url", None): getattr(c, "callables", []) for c in state.connections}
-    # Every role also gets the time group, on top of whatever its own `groups` name. A worker scoped to
-    # compute or to a single tool-pack still has to resolve "by tomorrow morning", and a role that
-    # forgot to ask for a clock produced a worker that silently could not tell the time. Gated on the
-    # global set, so this still never grants a tool the user disabled in [tools].groups.
-    ambient = ["time"] if "time" in enabled else []
     agent_types: dict[str, dict] = {}
     for name, role in config.subagent_roles.items():
-        groups = [g for g in role.get("groups", []) if g in enabled]
         packs = [
             p
             for p in role.get("tool_packs", [])
@@ -123,7 +87,7 @@ def _build_subagent_agent_types(config: AssistantConfig, state: Optional[LiveSta
             and not toolset.cross_cutting
             and not toolset.entry_point_only
         ]
-        toolset_names = [n for n in groups + packs + ambient if n in state.registry]
+        toolset_names = [n for n in packs + ["time"] if n in state.registry]
         tools = agent_tools(None, toolset_names, state, entry_point=_ENTRY_POINT_NAME, agent_name=name)
         seen = {getattr(fn, "__name__", None) for fn in tools}
         for ref in role.get("mcp_servers", []):
@@ -174,10 +138,6 @@ _ENTRY_POINT_TOOLSETS = (
     "scheduling",
     "conversations",
 )
-# The two toolsets that back --no-memory: unlike every other name in _ENTRY_POINT_TOOLSETS, the built-in
-# memory/documents toolsets have no config gate of their own (they build their tools unconditionally from
-# whatever store LiveState hands them), so wire_agent is the one place that still has to check the flag.
-_MEMORY_TOOLSETS = frozenset({"memory", "documents"})
 
 
 def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, client=None) -> aio.SkillAgent:
@@ -198,10 +158,7 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
         name=agent_name,
         concurrent_tool_calls=config.subagents_concurrent,
     )
-    names = (
-        _ENTRY_POINT_TOOLSETS if config.memory else tuple(n for n in _ENTRY_POINT_TOOLSETS if n not in _MEMORY_TOOLSETS)
-    )
-    agent.tools = agent_tools(agent, names, state, entry_point=agent_name, agent_name=agent_name)
+    agent.tools = agent_tools(agent, _ENTRY_POINT_TOOLSETS, state, entry_point=agent_name, agent_name=agent_name)
     agent.tool_approval = state.tool_approval
     add_subagent_tool(agent, config, state)
     return agent
@@ -241,9 +198,9 @@ def add_subagent_tool(agent: aio.SkillAgent, config: AssistantConfig, state: Liv
     """Append the typed ``spawn_subagent(agent_type, task)`` delegate, the entry point's only route to a
     domain tool.
 
-    Each spawn clones the active model and gets its role's scoped tool subset: built-in groups
-    (intersected with ``config.tools``) plus any MCP servers and non-cross-cutting tool-packs the role
-    names, resolved against ``state.connections`` and the toolset registry. The parent-only stateful
+    Each spawn clones the active model and gets its role's scoped tool subset: any MCP servers and
+    non-cross-cutting tool-packs the role names, plus the ambient time group, resolved against
+    ``state.connections`` and the toolset registry. The parent-only stateful
     toolsets (memory, skills, MCP management, config, scheduling, conversations) are enforced withheld,
     not just conventionally: every one of them is ``cross_cutting`` (or, for ``skills``, additionally
     ``entry_point_only``), and ``_build_subagent_agent_types`` filters a role's ``tool_packs`` on exactly

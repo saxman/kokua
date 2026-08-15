@@ -1,7 +1,7 @@
 """Assistant configuration and the default prompts.
 
 `AssistantConfig` is plain data describing one assistant: which model, where its state lives,
-which tool groups and MCP servers to load, whether memory is on, and how it presents itself.
+which agents exist and what each one holds, which MCP servers to load, and how it presents itself.
 The CLI builds one of these from flags; tests build them directly.
 """
 
@@ -58,6 +58,22 @@ MEMORY_GUIDANCE = (
 
 
 @dataclass
+class AgentConfig:
+    """One agent, declared whole in ``config.toml``.
+
+    ``tools`` names toolsets in the single registry namespace, so an entry may be an AIMU built-in
+    group, a plugin, or a configured MCP server, and the agent does not say which. A non-empty
+    ``delegates_to`` is what makes this agent a delegator: there is no separate switch that could
+    disagree with it.
+    """
+
+    description: str = ""
+    system_message: str = ""
+    tools: list[str] = field(default_factory=list)
+    delegates_to: list[str] = field(default_factory=list)
+
+
+@dataclass
 class MCPServerConfig:
     """A remote MCP server to connect at startup.
 
@@ -97,9 +113,6 @@ class AssistantConfig:
     # (prose reasoning + verdict), executor, and every revision -- under labeled phase headers, showing
     # every intermediate version. Overrides result_review's "hide until vetted" gate. Off by default.
     show_reasoning: bool = False
-    # AIMU built-in tool groups to expose (see kokua.toolsets.builtin.BUILTIN_TOOLSETS; "all"/"none" also
-    # accepted).
-    tools: list[str] = field(default_factory=lambda: ["web", "fs", "compute", "time", "misc"])
     # Remote MCP servers to connect at startup; each may name an env var holding its bearer token.
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     # Email (SMTP send). Recipients are LOCKED to email_to: the send_email tool takes no recipient, so
@@ -118,18 +131,15 @@ class AssistantConfig:
     # config.toml, so this is the single effective layer. Kept as a plain dict so provider-specific keys
     # pass through untouched.
     generation: dict = field(default_factory=dict)
-    # Persistent memory: a SemanticMemoryStore for facts + a DocumentStore for documents. On by default.
-    memory: bool = True
     # Load toolset plugins discovered via the "kokua.toolsets" entry-point group.
     load_plugins: bool = True
-    # Sub-agent roles (AIMU agent_types), read whole from [subagents.roles.*]. This is the entire menu
-    # spawn_subagent offers AND the switch that turns delegation on: nothing is defaulted in code, and
-    # there is no separate on/off flag to contradict it. At least one role is required, because the
-    # assistant is always a lean supervisor and a supervisor with no workers cannot do specialized work
-    # at all; Assistant.create rejects an empty set rather than starting something useless.
-    subagent_roles: dict[str, dict] = field(default_factory=dict)
-    # Run independent tool calls in one turn concurrently (so several spawn_subagent calls overlap).
-    subagents_concurrent: bool = True
+    # Every agent, keyed by name, read whole from [agents.*]. Nothing is defaulted in code: an agent's
+    # capability is exactly what its table declares, and a capability no agent names reaches nothing.
+    agents: dict[str, AgentConfig] = field(default_factory=dict)
+    # The agent the user talks to, and the root of the delegation graph.
+    entry_agent: str = "assistant"
+    # Run independent tool calls in one turn concurrently, so several delegations overlap.
+    concurrent_tools: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
     confirm_tools: list[str] = field(
