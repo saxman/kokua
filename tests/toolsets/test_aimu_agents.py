@@ -3,7 +3,8 @@
 The prebuilts each build one orchestrator client plus three worker clients and then talk to a model,
 so every test here stubs both the client factory and the prebuilt classes. What is actually under test
 is Kokua's wiring: that construction is deferred to call time, that a call gets a fresh agent, that the
-global tool policy still governs the workers, and that a bad model does not raise into the agent loop.
+research worker unconditionally receives web tools, and that a bad model does not raise into the agent
+loop.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from kokua.toolsets import LiveState, ToolsetContext, aimu_agents
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "model": "anthropic:claude-sonnet-4-6"}
+    base = {"data_dir": tmp_path, "model": "anthropic:claude-sonnet-4-6"}
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -109,24 +110,14 @@ def test_the_model_is_read_at_call_time(tmp_path, stub_prebuilts):
     assert stub_prebuilts["models"] == ["anthropic:claude-opus-4-1"]
 
 
-def test_research_workers_get_web_tools_when_the_web_group_is_enabled(tmp_path, stub_prebuilts):
-    tools = aimu_agents.build(_config(tmp_path, tools=["web", "compute"]))
+def test_research_workers_always_get_web_tools(tmp_path, stub_prebuilts):
+    """There is no global tool policy left to gate this on: naming ``aimu_agents`` in an agent's
+    ``tools`` is itself the consent, so building the toolset must not raise and the research worker
+    must receive the web tools unconditionally."""
+    tools = aimu_agents.build(_config(tmp_path))
     _tool(tools, "research_report")("photosynthesis")
     worker_tools = stub_prebuilts["instances"][0].kwargs["worker_tools"]
     assert {fn.__name__ for fn in worker_tools} >= {"web_search", "get_webpage"}
-
-
-def test_research_workers_get_no_tools_when_the_web_group_is_disabled(tmp_path, stub_prebuilts):
-    """A role never exceeds [tools].groups; a pack-mounted agent's workers must not either."""
-    tools = aimu_agents.build(_config(tmp_path, tools=["none"]))
-    _tool(tools, "research_report")("photosynthesis")
-    assert stub_prebuilts["instances"][0].kwargs["worker_tools"] is None
-
-
-def test_tools_all_also_enables_the_research_workers_web_tools(tmp_path, stub_prebuilts):
-    tools = aimu_agents.build(_config(tmp_path, tools=["all"]))
-    _tool(tools, "research_report")("photosynthesis")
-    assert stub_prebuilts["instances"][0].kwargs["worker_tools"]
 
 
 def test_an_unresolvable_model_returns_a_message_instead_of_raising(tmp_path, monkeypatch):

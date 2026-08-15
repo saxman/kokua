@@ -24,7 +24,7 @@ Two caveats worth knowing before leaning on these:
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 import aimu
 from aimu.agents.prebuilt import CodeReviewAgent, ContentCreationAgent, ResearchReportAgent
@@ -34,17 +34,18 @@ from kokua.config import AssistantConfig
 from kokua.toolsets import Toolset
 
 
-def _research_worker_tools(config: AssistantConfig) -> Optional[list[Callable]]:
-    """Web tools for `ResearchReportAgent`'s workers, or ``None`` when the web group is disabled.
+def _research_worker_tools() -> list[Callable]:
+    """Web tools for `ResearchReportAgent`'s workers, given unconditionally.
 
     `ResearchReportAgent` is the one prebuilt that takes worker tools, and a research agent without
-    them is reduced to reciting training data. Gating on ``config.tools`` keeps the same contract a
-    sub-agent role has: the global tool policy is the ceiling, and a toolset cannot raise it. Passing
+    them is reduced to reciting training data. There is no longer a global tool policy that could cap
+    this: an agent's capability is exactly what its ``tools`` table declares, so naming `aimu_agents`
+    there is itself the consent for its research workers to reach the web. (Gating this on whether the
+    declaring agent also holds the `web` toolset was considered and rejected: a worker's ``build``
+    receives ``agent=None``, so the declaring agent's name is not reachable from the context.) Passing
     tools also switches the prebuilt's own workers to concurrent dispatch.
     """
-    if "all" in config.tools or "web" in config.tools:
-        return list(builtin.web)
-    return None
+    return list(builtin.web)
 
 
 def build(config: AssistantConfig) -> list:
@@ -87,7 +88,7 @@ def build(config: AssistantConfig) -> list:
         Args:
             topic: The subject to research.
         """
-        return run_prebuilt(ResearchReportAgent, topic, worker_tools=_research_worker_tools(config))
+        return run_prebuilt(ResearchReportAgent, topic, worker_tools=_research_worker_tools())
 
     @tool
     def create_content(brief: str) -> str:
