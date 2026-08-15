@@ -5,6 +5,7 @@ tool groups, an installed plugin, and a configured MCP server all register here,
 declaration names a capability without naming what kind of thing provides it.
 """
 
+from kokua.toolsets.context import LiveState, ToolsetContext
 from kokua.toolsets.registry import Toolset, ToolsetError, build_tools, register, select
 
-__all__ = ["Toolset", "ToolsetError", "build_tools", "register", "select"]
+__all__ = ["LiveState", "Toolset", "ToolsetContext", "ToolsetError", "build_tools", "register", "select"]
