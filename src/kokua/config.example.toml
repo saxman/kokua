@@ -51,9 +51,9 @@ show_tools = true
 # ("web", "fs", "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own
 # ("memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations"), an installed
 # plugin toolset ("pdf", "email", ...), or an MCP server configured under [[mcp.server]] below, named by
-# its `name`. The agent does not say which, and `kokua --list-toolsets` prints every name available to
-# this install. An unknown name is a startup error that lists the valid ones, so a typo can never quietly
-# leave an agent with a smaller toolset than you wrote.
+# its `name`. The agent does not say which; run `kokua --list-toolsets` for every name this install
+# accepts here, grouped by what provides it. An unknown name is a startup error that lists the valid ones,
+# so a typo can never quietly leave an agent with a smaller toolset than you wrote.
 #
 # A non-empty `delegates_to` is what makes an agent delegate: it gets a `spawn_subagent(agent_type, task)`
 # tool offering exactly the agents it names, each built from its own table. A worker's gated-tool calls

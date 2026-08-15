@@ -45,6 +45,12 @@ def test_arg_parser_overrides():
     assert cfg.port == 9000
 
 
+def test_system_flag_sets_the_global_system_message():
+    """--system writes [assistant].system_message, the opener any agent declaring none of its own falls
+    back to (tests/toolsets/test_guidance.py covers the other half of that hop)."""
+    assert resolve_config(build_arg_parser().parse_args(["--system", "Be terse."])).system_message == "Be terse."
+
+
 def test_confirm_tools_flag_parses():
     cfg = resolve_config(build_arg_parser().parse_args(["--confirm-tools", "add_skill_script, execute_python"]))
     assert cfg.confirm_tools == ["add_skill_script", "execute_python"]
@@ -85,14 +91,32 @@ def test_main_lists_frontends(monkeypatch, capsys):
     assert "cli:" in out and "web:" in out
 
 
-def test_main_lists_toolsets(monkeypatch, capsys):
+def test_main_lists_every_provider_kind_of_toolset(monkeypatch, capsys):
+    """The single namespace needs one discovery command, so this lists the whole registry rather than the
+    plugin entry points: a list omitting the built-in groups and core capabilities would read as "web and
+    scheduling are not available to you", which is the opposite of true. Asserted one name per provider
+    kind so the flag cannot silently narrow back to plugins only."""
+    path = paths.config_path()
+    path.write_text(
+        path.read_text(encoding="utf-8") + '\n[[mcp.server]]\nurl = "https://broker/mcp"\nname = "stocks"\n',
+        encoding="utf-8",
+    )
     _run_main(monkeypatch, ["--list-toolsets"])
     out = capsys.readouterr().out
-    assert "example:" in out
+
+    assert "web:" in out  # an AIMU built-in group
+    assert "scheduling:" in out  # a Kokua core capability
+    assert "example:" in out  # an installed plugin toolset
+    assert "stocks:" in out  # a server configured in [[mcp.server]]
+    # Grouped, because a flat list of names would not tell a user where any of them comes from.
+    for provider in ("AIMU capability:", "core subsystem:", "plugin:", "MCP server:"):
+        assert provider in out, provider
 
 
-def test_main_listing_does_not_build_an_assistant(monkeypatch, capsys):
-    """A listing must not resolve a model, so it works before anything is configured."""
+def test_listing_frontends_does_not_read_the_config(monkeypatch, capsys):
+    """Which front ends exist is a property of the install, not of config.toml, so this listing answers
+    before anything is configured. (--list-toolsets deliberately differs: the registry it prints depends
+    on the file, so it resolves the config first.)"""
 
     def explode(*args, **kwargs):
         raise AssertionError("main() built a config/assistant for a plain listing")

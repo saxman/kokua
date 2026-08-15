@@ -14,7 +14,7 @@ from kokua.config import MCPServerConfig
 from kokua.config.schema import AgentConfig
 from kokua.core.assistant import Assistant
 from tests.channels import FakeChannel, _config
-from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool
+from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
 from tests.helpers import MockAsyncModelClient
 
 
@@ -27,24 +27,6 @@ def _using(name: str, url: str) -> dict:
         },
         "mcp_servers": [MCPServerConfig(url=url, name=name)],
     }
-
-
-def _offline_until_connected(monkeypatch, tool_name: str) -> None:
-    """Patch the one connect seam so a configured server fails at boot and succeeds on every later try.
-
-    Declared-but-offline is what keeps the runtime-connect assertions honest: a server already connected
-    by the boot reconnect would make the runtime add a no-op ("Already connected") that every later
-    assertion still passed.
-    """
-    attempts = {"count": 0}
-
-    async def fake_connect(url, **kwargs):
-        attempts["count"] += 1
-        if attempts["count"] == 1:
-            raise RuntimeError("unreachable at boot")
-        return _FakeMCP([_fake_mcp_tool(tool_name)]), "none"
-
-    monkeypatch.setattr("kokua.mcp.servers.connect_mcp", fake_connect)
 
 
 @pytest.fixture

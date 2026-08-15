@@ -11,7 +11,7 @@ from kokua.config.schema import AgentConfig
 from kokua.core.assistant import Assistant
 from kokua.toolsets.context import LiveState
 from tests.channels import FakeChannel, _config, example_agents
-from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool
+from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
 from tests.helpers import MockAsyncModelClient
 
 
@@ -304,24 +304,6 @@ def _trading_via(name: str, *, url: str) -> dict:
         },
         "mcp_servers": [MCPServerConfig(url=url, name=name)],
     }
-
-
-def _offline_until_connected(monkeypatch, tool_name: str = "get_quote") -> None:
-    """Make the configured server unreachable at boot and reachable on every later attempt.
-
-    The declared-but-offline start is what keeps the runtime-connect tests honest: if the boot reconnect
-    succeeded, the worker would already hold the server's tools and the runtime add would be a no-op that
-    every assertion below still passed.
-    """
-    attempts = {"count": 0}
-
-    async def fake_connect(url, **kwargs):
-        attempts["count"] += 1
-        if attempts["count"] == 1:
-            raise RuntimeError("unreachable at boot")
-        return _FakeMCP([_fake_mcp_tool(tool_name)]), "none"
-
-    monkeypatch.setattr("kokua.mcp.servers.connect_mcp", fake_connect)
 
 
 def _capturing_subagent_factory(captured: list):
@@ -617,7 +599,10 @@ async def test_spawn_subagent_is_built_with_the_activity_reporter(tmp_path, monk
 
 async def test_runtime_mcp_rebuild_keeps_the_activity_reporter(tmp_path, monkeypatch):
     """A runtime MCP add rebuilds spawn_subagent; dropping the observer there would silently stop
-    sub-agent display for the rest of the process."""
+    sub-agent display for the rest of the process.
+
+    The captures are cleared and counted rather than just read at [-1]: the boot build already handed the
+    reporter over, so a bare last-element check would hold even if the add rebuilt nothing at all."""
     import kokua.toolsets.agents as agents_mod
 
     captured: list = []
@@ -628,8 +613,10 @@ async def test_runtime_mcp_rebuild_keeps_the_activity_reporter(tmp_path, monkeyp
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
     add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    captured.clear()
     await add_mcp(url="https://broker/mcp")
 
+    assert len(captured) == 1  # one rebuild, for the one live agent
     assert captured[-1] is assistant._subagent_reporter
 
 

@@ -2,8 +2,9 @@
 
 Resolves an :class:`~kokua.config.AssistantConfig` from (in increasing precedence) built-in
 defaults, an optional TOML config file, and command-line flags, then runs the selected front end
-(default ``cli``; ``web`` and any installed plugin are also selectable). ``--list-frontends`` /
-``--list-toolsets`` introspect the plugin registry.
+(default ``cli``; ``web`` and any installed plugin are also selectable). ``--list-frontends`` lists the
+front-end plugins; ``--list-toolsets`` lists the whole toolset registry, which is the discovery command
+for the single namespace an ``[agents.*]`` table's ``tools`` list draws on.
 
 Flag defaults are the ``None`` sentinel rather than the real default value, so an unspecified flag
 defers to the config file (and then the built-in default) instead of overriding it.
@@ -33,7 +34,11 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Front end to run: 'cli' (terminal), 'web' (browser), or any installed plugin. Default: cli.",
     )
     parser.add_argument("--list-frontends", action="store_true", help="List available front ends and exit.")
-    parser.add_argument("--list-toolsets", action="store_true", help="List installed toolsets and exit.")
+    parser.add_argument(
+        "--list-toolsets",
+        action="store_true",
+        help="List every toolset name an [agents.<name>].tools list may use, grouped by provider, and exit.",
+    )
     parser.add_argument(
         "--plugins",
         action=argparse.BooleanOptionalAction,
@@ -148,6 +153,40 @@ def _init_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_toolsets(config: AssistantConfig) -> None:
+    """Print every name an ``[agents.*]`` table may put in ``tools``, grouped by what provides it.
+
+    Grouped by provider because the single namespace deliberately hides provenance from the agent: a
+    config says ``web``, not ``aimu:web``, so this command is the one place a user can learn that ``web``
+    comes from AIMU, ``scheduling`` from Kokua, ``pdf`` from an installed plugin, and their own server
+    from ``[[mcp.server]]``. Reads the whole registry rather than only the plugin entry points, because a
+    list that omitted the built-in groups would read as "those are unavailable to you".
+    """
+    # Imported here, not at module level: kokua.toolsets.agents reaches kokua.core, which imports the
+    # AIMU surface `preflight` exists to check, and this module must be importable before that check runs.
+    from kokua.toolsets.agents import build_registry
+    from kokua.toolsets.registry import ToolsetError
+
+    try:
+        registry = build_registry(config)
+    except ToolsetError as e:
+        # Same reason Assistant.create translates this: a name two providers claim is a config mistake,
+        # and this command is exactly where a user comes to diagnose one.
+        print(e, file=sys.stderr)
+        raise SystemExit(2) from None
+
+    by_provider: dict[str, list[str]] = {}
+    for name in registry:
+        by_provider.setdefault(registry.providers[name], []).append(name)
+
+    print("Toolsets available to this install. Name any of these in an [agents.<name>].tools list.\n")
+    for provider, names in by_provider.items():
+        print(f"{provider}:")
+        for name in sorted(names):
+            print(f"  {name}: {registry[name].description}")
+        print()
+
+
 def preflight() -> None:
     """Fail with an instruction, not a traceback, when the installed AIMU is too old.
 
@@ -177,13 +216,6 @@ def main() -> None:
         for name, frontend in sorted(plugins.discover_frontends().items()):
             print(f"{name}: {frontend.description}")
         return
-    if args.list_toolsets:
-        toolsets = plugins.discover_toolsets()
-        if not toolsets:
-            print("No toolset plugins installed.")
-        for name, toolset in sorted(toolsets.items()):
-            print(f"{name}: {toolset.description}")
-        return
 
     # A ConfigError is a user mistake with a known fix (a missing config.toml, no [agents.*] tables, a
     # bad key), so it prints as an instruction. A traceback here would bury the one line that matters.
@@ -192,6 +224,12 @@ def main() -> None:
     except ConfigError as e:
         print(e, file=sys.stderr)
         raise SystemExit(2) from None
+
+    # After resolve_config, not before it: the registry it lists depends on the file (load_plugins, and
+    # every [[mcp.server]] name), so this command cannot answer honestly without one.
+    if args.list_toolsets:
+        _print_toolsets(config)
+        return
 
     configure_logging(config)  # rotating file log + faulthandler, before the assistant starts
     frontend = plugins.get_frontend(config.frontend)

@@ -148,6 +148,11 @@ class Assistant:
             registry = build_registry(config)
         except ToolsetError as error:
             raise ConfigError(str(error)) from error
+        # Validated before anything else in this method, because everything else touches something: the
+        # next statements open a session store (which mints and persists an empty session) and connect to
+        # remote servers. An unknown toolset name, a missing entry agent, or a delegation cycle therefore
+        # fails naming the offending value, with nothing written and nothing connected.
+        validate_agents(config, registry)
 
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
@@ -211,10 +216,6 @@ class Assistant:
             observer=assistant._subagent_reporter,
             registry=registry,
         )
-        # Every agent's declaration is checked against the registry before anything is built, so an
-        # unknown toolset name, a missing entry agent, or a delegation cycle fails here, naming the
-        # offending value, instead of surfacing as a half-built assistant or an exhausted stack.
-        validate_agents(config, state.registry)
         # Assigned after construction because it closes over assistant._registry, which is built below it.
         state.for_each_agent = for_each_agent
         assistant._state = state
