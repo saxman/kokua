@@ -78,10 +78,13 @@ markdown.
 into a skill that already exists, then reloads the agent's skills so the new tool is callable in the same
 turn.
 
-- The tool it creates is named `{skill_name}__{stem}`, with the skill's slug used verbatim:
-  `collect_notes.py` inside `weekly-digest` becomes `weekly-digest__collect_notes`.
-- `collect_notes.py` and `collect_notes.sh` map to the *same* tool name, and the `.py` file wins. Give
-  two scripts in one skill two different stems.
+- The tool it creates is named `{skill_name}__{stem}`, with both halves lowercased and every run of
+  other characters collapsed to `_`, so `collect_notes.py` inside `weekly-digest` becomes
+  `weekly_digest__collect_notes`. Note the hyphen becomes an underscore; the `__` stays the only
+  separator.
+- Because names collapse, two scripts in one skill can collide and only the first is registered:
+  `collect_notes.py` with `collect_notes.sh` (same stem), and `collect-notes.py` with
+  `collect_notes.py` (same slug). Give each script a distinct stem.
 - **To fix a broken script, reuse the exact same filename.** That overwrites in place and the tool keeps
   its name. A different filename creates a second script and leaves the broken one callable.
 - The skill must exist first. Calling it for an unknown skill returns the list of skills that do exist.
