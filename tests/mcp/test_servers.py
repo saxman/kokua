@@ -5,7 +5,15 @@ from aimu import aio
 
 from kokua.mcp import servers as mcp
 from kokua.config import MCPServerConfig
-from kokua.mcp.servers import _looks_like_auth_required, _looks_like_registration_unsupported
+from kokua.mcp.servers import _looks_like_auth_required, _looks_like_registration_unsupported, name_from_url
+
+
+def test_name_from_url_replaces_dots_in_the_host_with_hyphens():
+    assert name_from_url("https://broker.example.com/mcp") == "broker-example-com"
+
+
+def test_name_from_url_falls_back_to_mcp_when_there_is_no_host():
+    assert name_from_url("not-a-url") == "mcp"
 
 
 @pytest.mark.parametrize(

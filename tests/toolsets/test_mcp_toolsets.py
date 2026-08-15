@@ -65,7 +65,33 @@ def test_a_server_whose_name_collides_with_a_core_toolset_is_rejected():
 
     with pytest.raises(ToolsetError) as excinfo:
         build_registry(config)
-    assert "MCP server" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "memory" in message
+    assert "AIMU capability" in message
+    assert "MCP server" in message
+
+
+def test_two_servers_colliding_under_the_same_provider_label_name_their_urls():
+    """Two MCP servers claiming one name collide under the identical 'MCP server' label on both sides,
+    so the label alone can't tell them apart; each toolset's description (which for a server is its URL)
+    is what still lets a user find both entries in config.toml."""
+    config = AssistantConfig(
+        agents={"assistant": AgentConfig(tools=["shared"])},
+        entry_agent="assistant",
+        load_plugins=False,
+        mcp_servers=[
+            MCPServerConfig(url="https://one.example.com/mcp", name="shared"),
+            MCPServerConfig(url="https://two.example.com/mcp", name="shared"),
+        ],
+    )
+    from kokua.toolsets.registry import ToolsetError
+
+    with pytest.raises(ToolsetError) as excinfo:
+        build_registry(config)
+    message = str(excinfo.value)
+    assert "shared" in message
+    assert "https://one.example.com/mcp" in message
+    assert "https://two.example.com/mcp" in message
 
 
 def test_a_server_without_a_name_is_a_config_error(tmp_path):

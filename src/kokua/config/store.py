@@ -68,6 +68,24 @@ def _server_array(doc: TOMLDocument):
     return servers
 
 
+def _unique_name(servers, url: str) -> str:
+    """A name derived from ``url``, disambiguated against every name already in ``servers``.
+
+    Two servers on one host (a service exposing several MCP endpoints under one domain) derive the same
+    base name; appending a numeric suffix until the name is free keeps a successful ``add_mcp_server``
+    call from producing a config the registry's collision check would later reject at boot, deferred
+    past the point where the tool could still report the problem usefully.
+    """
+    base = name_from_url(url)
+    used = {entry.get("name") for entry in servers}
+    if base not in used:
+        return base
+    suffix = 2
+    while f"{base}-{suffix}" in used:
+        suffix += 1
+    return f"{base}-{suffix}"
+
+
 def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
     """Append (or, by URL, replace) an ``[[mcp.server]]`` entry.
 
@@ -75,16 +93,23 @@ def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
     from it, so it reconnects on the next restart; ``token_env`` is written only for a bearer-token
     server declared explicitly. The derived name reaches no agent until a human names it in
     ``[agents.*]``, since that section is hand-edit only and this write cannot grant capability.
+
+    Replacing an existing entry for the same URL keeps that entry's ``name`` rather than re-deriving
+    one, since a human may have hand-edited it to match an ``[agents.*]`` reference that this write
+    cannot see or repair. A brand-new entry gets a freshly derived name, disambiguated against every
+    name already on file so this call can never write a name collision the registry would reject later.
     """
     doc = _load(path)
     servers = _server_array(doc)
+    existing_name = None
     for i, entry in enumerate(servers):
         if entry.get("url") == url:
+            existing_name = entry.get("name")
             del servers[i]
             break
     table = tomlkit.table()
     table["url"] = url
-    table["name"] = name_from_url(url)
+    table["name"] = existing_name or _unique_name(servers, url)
     if token_env is not None:
         table["token_env"] = token_env
     servers.append(table)

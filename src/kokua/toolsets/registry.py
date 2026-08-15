@@ -70,17 +70,23 @@ def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistr
     """Index every toolset by name, rejecting a name two providers claim.
 
     Each source is ``(provider_label, toolsets)``; the label appears in the collision message, which is
-    why sources are labeled rather than flattened by the caller.
+    why sources are labeled rather than flattened by the caller. Two toolsets from the *same* provider
+    (two MCP servers whose names both derive from one host, say) collide under one label, which alone
+    would leave nothing to tell them apart, so the message also carries each side's ``description`` --
+    for an MCP server that already names its URL, so both entries in the config are identifiable without
+    a new field.
     """
     registry: dict[str, Toolset] = {}
     provider: dict[str, str] = {}
     for label, toolsets in sources:
         for toolset in toolsets:
             if toolset.name in registry:
+                existing = registry[toolset.name]
                 raise ToolsetError(
-                    f"toolset name {toolset.name!r} is claimed by two providers "
-                    f"({provider[toolset.name]} and {label}). Rename one, or drop it: an agent names a "
-                    "toolset without saying what provides it, so the name has to be unique."
+                    f"toolset name {toolset.name!r} is claimed by two providers: "
+                    f"{provider[toolset.name]} ({existing.description}) and {label} ({toolset.description}). "
+                    "Rename one, or drop it: an agent names a toolset without saying what provides it, so "
+                    "the name has to be unique."
                 )
             registry[toolset.name] = toolset
             provider[toolset.name] = label
