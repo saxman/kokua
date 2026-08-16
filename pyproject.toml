@@ -18,12 +18,13 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# 0.13.1 is the first AIMU release carrying everything Kokua needs (aio.channels/Scheduler,
-# SubagentObserver, make_document_tools, MCPClient url=, `response` on the web tool frame). This
-# floor is what ships in the wheel and what a PyPI install resolves; [tool.uv.sources] below
-# separately redirects development installs to the sibling checkout.
+# 0.14.0 is the first AIMU release carrying everything Kokua needs. It adds SkillManager(include=...),
+# which is how a worker's skills are scoped to what its [agents.*] table declares; 0.13.1 supplied the
+# rest (aio.channels/Scheduler, SubagentObserver, make_document_tools, MCPClient url=, `response` on the
+# web tool frame). This floor is what ships in the wheel and what a PyPI install resolves;
+# [tool.uv.sources] below separately redirects development installs to the sibling checkout.
 dependencies = [
-    "aimu[ollama,openai_compat]>=0.13.1",
+    "aimu[ollama,openai_compat]>=0.14.0",
     # Markdown -> PDF for the built-in `pdf` toolset (both pure-Python, no system libraries).
     "fpdf2>=2.7",
     "markdown>=3.5",

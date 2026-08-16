@@ -41,23 +41,53 @@ def test_a_missing_aimu_is_reported_as_such(monkeypatch):
         require_aimu()
 
 
+def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
+    """The floor moves with the capabilities Kokua uses, so the previous release must fail."""
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.13.2")
+    with pytest.raises(AimuVersionError, match="0.13.2"):
+        require_aimu()
+
+
 def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch):
-    """An editable checkout's version says what its branch claims, not what its code contains."""
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.13.1")
+    """An editable checkout's version says what its branch claims, not what its code contains.
+
+    The probe is a signature check rather than a name lookup because the capability Kokua needs
+    is a keyword argument: a SkillManager without `include` cannot scope a worker's skills, and
+    no `getattr` would notice.
+    """
+
+    class SkillManagerWithoutInclude:
+        def __init__(self, skill_dirs=None):
+            pass
+
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.0")
     monkeypatch.setattr(
         aimu_compat.importlib,
         "import_module",
-        lambda name: SimpleNamespace(__file__="/somewhere/aimu/aio/tools/builtin.py"),
+        lambda name: SimpleNamespace(
+            __file__="/somewhere/aimu/skills/__init__.py", SkillManager=SkillManagerWithoutInclude
+        ),
     )
-    with pytest.raises(AimuVersionError, match="SubagentObserver"):
+    with pytest.raises(AimuVersionError, match="include"):
+        require_aimu()
+
+
+def test_an_aimu_missing_the_probed_symbol_entirely_is_caught(monkeypatch):
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.0")
+    monkeypatch.setattr(
+        aimu_compat.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(__file__="/somewhere/aimu/skills/__init__.py"),
+    )
+    with pytest.raises(AimuVersionError, match="SkillManager"):
         require_aimu()
 
 
 def test_an_unimportable_aimu_carries_the_import_error(monkeypatch):
     def broken(name):
-        raise ImportError("no module named aimu.aio")
+        raise ImportError("no module named aimu.skills")
 
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.13.1")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.0")
     monkeypatch.setattr(aimu_compat.importlib, "import_module", broken)
-    with pytest.raises(AimuVersionError, match="no module named aimu.aio"):
+    with pytest.raises(AimuVersionError, match="no module named aimu.skills"):
         require_aimu()
