@@ -83,6 +83,43 @@ def test_add_mcp_server_updates_existing_url(tmp_path):
     assert [(s.url, s.token_env) for s in servers] == [("https://x/mcp", "TOK")]
 
 
+def test_add_mcp_server_two_urls_on_one_host_get_distinct_names(tmp_path):
+    """Two endpoints on one host derive the same base name; the write has to disambiguate them itself,
+    since a successful add_mcp_server call must not be able to produce a config the registry's collision
+    check would later reject at boot."""
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    config_store.add_mcp_server(path, "https://broker.example.com/mcp/quotes")
+    config_store.add_mcp_server(path, "https://broker.example.com/mcp/orders")
+    servers = settings.load(str(path))["mcp_servers"]
+    names = [s.name for s in servers]
+    assert len(set(names)) == len(names)
+    assert names[0] == "broker-example-com"
+    assert names[1] == "broker-example-com-2"
+
+    from kokua.toolsets.agents import build_registry
+    from kokua.config.schema import AgentConfig, AssistantConfig
+
+    config = AssistantConfig(
+        agents={"assistant": AgentConfig(tools=names)},
+        entry_agent="assistant",
+        load_plugins=False,
+        mcp_servers=servers,
+    )
+    registry = build_registry(config)  # must not raise a collision
+    assert set(names) <= set(registry)
+
+
+def test_add_mcp_server_replacing_an_existing_url_keeps_its_hand_edited_name(tmp_path):
+    """Re-adding an already-recorded URL must not silently rename an entry a human named by hand: that
+    name may be the one an [agents.*] table (hand-edit only) already references."""
+    path = tmp_path / "config.toml"
+    path.write_text('[[mcp.server]]\nurl = "https://x/mcp"\nname = "custom-name"\n', encoding="utf-8")
+    config_store.add_mcp_server(path, "https://x/mcp", token_env="TOK")
+    servers = settings.load(str(path))["mcp_servers"]
+    assert [(s.url, s.name, s.token_env) for s in servers] == [("https://x/mcp", "custom-name", "TOK")]
+
+
 def test_remove_mcp_server(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("", encoding="utf-8")

@@ -20,10 +20,18 @@ import tomlkit
 from tomlkit import TOMLDocument
 
 from kokua.config import file as settings
+from kokua.mcp.servers import disambiguate_name, name_from_url
 
 
 def _load(path: Path) -> TOMLDocument:
-    """Parse the file for editing, seeding from the shipped example if it does not exist yet."""
+    """Parse the file for editing, seeding from the shipped example if it does not exist yet.
+
+    That seed includes the shipped example's ``[agents.*]`` tables: if the file is deleted mid-session,
+    the next write here (from ``update_config`` or ``add_mcp_server``) recreates it, default agents and
+    all. The content is exactly what ``kokua config init`` would write, so this is not a way to grant a
+    capability beyond what a hand-edit already could -- but it is a path by which ``[agents.*]`` reappears
+    on disk without a human typing it.
+    """
     if path.exists():
         return tomlkit.parse(path.read_text(encoding="utf-8"))
     return tomlkit.parse(settings.example_text())
@@ -67,20 +75,41 @@ def _server_array(doc: TOMLDocument):
     return servers
 
 
+def _unique_name(servers, url: str) -> str:
+    """A name derived from ``url``, disambiguated against every name already in ``servers``.
+
+    Appending a numeric suffix until the name is free (see ``disambiguate_name``) keeps a successful
+    ``add_mcp_server`` call from producing a config the registry's collision check would later reject at
+    boot, deferred past the point where the tool could still report the problem usefully.
+    """
+    used = {entry.get("name") for entry in servers}
+    return disambiguate_name(name_from_url(url), used)
+
+
 def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
     """Append (or, by URL, replace) an ``[[mcp.server]]`` entry.
 
-    A runtime-added server (OAuth or unauthenticated) is recorded with just its URL so it reconnects
-    on the next restart; ``token_env`` is written only for a bearer-token server declared explicitly.
+    A runtime-added server (OAuth or unauthenticated) is recorded with just its URL and a name derived
+    from it, so it reconnects on the next restart; ``token_env`` is written only for a bearer-token
+    server declared explicitly. The derived name reaches no agent until a human names it in
+    ``[agents.*]``, since that section is hand-edit only and this write cannot grant capability.
+
+    Replacing an existing entry for the same URL keeps that entry's ``name`` rather than re-deriving
+    one, since a human may have hand-edited it to match an ``[agents.*]`` reference that this write
+    cannot see or repair. A brand-new entry gets a freshly derived name, disambiguated against every
+    name already on file so this call can never write a name collision the registry would reject later.
     """
     doc = _load(path)
     servers = _server_array(doc)
+    existing_name = None
     for i, entry in enumerate(servers):
         if entry.get("url") == url:
+            existing_name = entry.get("name")
             del servers[i]
             break
     table = tomlkit.table()
     table["url"] = url
+    table["name"] = existing_name or _unique_name(servers, url)
     if token_env is not None:
         table["token_env"] = token_env
     servers.append(table)

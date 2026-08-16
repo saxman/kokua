@@ -8,7 +8,7 @@ import pytest
 
 
 from kokua.cli import build_arg_parser, resolve_config
-from kokua.config import AssistantConfig, paths
+from kokua.config import paths
 from tests.channels import _config
 
 
@@ -45,19 +45,39 @@ def test_arg_parser_overrides():
     assert cfg.port == 9000
 
 
-def test_default_tools_groups():
-    assert AssistantConfig().tools == ["web", "fs", "compute", "time", "misc"]
-    assert resolve_config(build_arg_parser().parse_args([])).tools == ["web", "fs", "compute", "time", "misc"]
+def test_system_flag_sets_the_override_not_the_fallback():
+    """--system lands in system_message_override, distinct from system_message (the [assistant].
+    system_message fallback), so an override can be told apart from that field merely being at its
+    default. tests/toolsets/test_guidance.py covers the assembly-time half of that hop."""
+    cfg = resolve_config(build_arg_parser().parse_args(["--system", "Be terse."]))
+    assert cfg.system_message_override == "Be terse."
 
 
-def test_tools_flag_parses_groups():
-    assert resolve_config(build_arg_parser().parse_args(["--tools", "web, misc"])).tools == ["web", "misc"]
-    assert resolve_config(build_arg_parser().parse_args(["--tools", "none"])).tools == ["none"]
+def test_system_flag_unset_leaves_no_override():
+    assert resolve_config(build_arg_parser().parse_args([])).system_message_override is None
 
 
-def test_memory_flag_parses():
-    assert resolve_config(build_arg_parser().parse_args([])).memory is True
-    assert resolve_config(build_arg_parser().parse_args(["--no-memory"])).memory is False
+def test_two_mcp_urls_on_one_host_get_distinct_names():
+    """Two endpoints on one host derive the same base name (see mcp.servers.name_from_url); the flag has
+    to disambiguate them itself, since there is no way to name a --mcp-derived server explicitly."""
+    args = build_arg_parser().parse_args(
+        ["--mcp", "https://broker.example.com/mcp/quotes", "--mcp", "https://broker.example.com/mcp/orders"]
+    )
+    servers = resolve_config(args).mcp_servers
+    names = [s.name for s in servers]
+    assert names == ["broker-example-com", "broker-example-com-2"]
+
+    from kokua.config.schema import AgentConfig, AssistantConfig
+    from kokua.toolsets.agents import build_registry
+
+    config = AssistantConfig(
+        agents={"assistant": AgentConfig(tools=names)},
+        entry_agent="assistant",
+        load_plugins=False,
+        mcp_servers=servers,
+    )
+    registry = build_registry(config)  # must not raise a collision
+    assert set(names) <= set(registry)
 
 
 def test_confirm_tools_flag_parses():
@@ -100,14 +120,34 @@ def test_main_lists_frontends(monkeypatch, capsys):
     assert "cli:" in out and "web:" in out
 
 
-def test_main_lists_tool_packs(monkeypatch, capsys):
-    _run_main(monkeypatch, ["--list-tool-packs"])
+def test_main_lists_every_provider_kind_of_toolset(monkeypatch, capsys):
+    """The single namespace needs one discovery command, so this lists the whole registry rather than the
+    plugin entry points: a list omitting the built-in groups and core capabilities would read as "web and
+    scheduling are not available to you", which is the opposite of true. Asserted one name per provider
+    kind so the flag cannot silently narrow back to plugins only."""
+    path = paths.config_path()
+    path.write_text(
+        path.read_text(encoding="utf-8") + '\n[[mcp.server]]\nurl = "https://broker/mcp"\nname = "stocks"\n',
+        encoding="utf-8",
+    )
+    _run_main(monkeypatch, ["--list-toolsets"])
     out = capsys.readouterr().out
-    assert "example:" in out
+
+    assert "web:" in out  # an AIMU built-in group
+    assert "scheduling:" in out  # a Kokua core capability
+    assert "example:" in out  # one of Kokua's own five built-in plugin toolsets
+    assert "stocks:" in out  # a server configured in [[mcp.server]]
+    # Grouped, because a flat list of names would not tell a user where any of them comes from. No
+    # third-party plugin is installed in this test environment, so "plugin:" itself is not asserted here;
+    # test_agents.py's collision tests cover that label with a synthetic third-party toolset instead.
+    for provider in ("AIMU capability:", "core subsystem:", "built-in toolset:", "MCP server:"):
+        assert provider in out, provider
 
 
-def test_main_listing_does_not_build_an_assistant(monkeypatch, capsys):
-    """A listing must not resolve a model, so it works before anything is configured."""
+def test_listing_frontends_does_not_read_the_config(monkeypatch, capsys):
+    """Which front ends exist is a property of the install, not of config.toml, so this listing answers
+    before anything is configured. (--list-toolsets deliberately differs: the registry it prints depends
+    on the file, so it resolves the config first.)"""
 
     def explode(*args, **kwargs):
         raise AssertionError("main() built a config/assistant for a plain listing")
@@ -147,7 +187,7 @@ def test_main_reports_a_missing_config_without_a_traceback(monkeypatch, capsys, 
     assert "Traceback" not in err
 
 
-def test_main_reports_a_config_with_no_roles_without_a_traceback(monkeypatch, capsys):
+def test_main_reports_a_config_with_no_agents_without_a_traceback(monkeypatch, capsys):
     import pytest
 
     from kokua.config import paths
@@ -155,9 +195,9 @@ def test_main_reports_a_config_with_no_roles_without_a_traceback(monkeypatch, ca
     # configure_logging runs before the front end and calls faulthandler.enable(), which needs a real
     # stderr file descriptor that pytest's capture does not provide. Logging is not what is under test.
     monkeypatch.setattr("kokua.cli.configure_logging", lambda config: None)
-    paths.config_path().write_text("[assistant]\nmemory = false\n", encoding="utf-8")
+    paths.config_path().write_text('[assistant]\nagent = "assistant"\n', encoding="utf-8")
     with pytest.raises(SystemExit) as caught:
         _run_main(monkeypatch, ["--frontend", "cli"])
     assert caught.value.code != 0
     err = capsys.readouterr().err
-    assert "subagents.roles" in err and "Traceback" not in err
+    assert "[agents." in err and "Traceback" not in err

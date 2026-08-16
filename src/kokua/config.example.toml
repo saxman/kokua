@@ -1,6 +1,6 @@
 # Kokua configuration. Run `kokua config init` to write this to $KOKUA_HOME/config.toml (default
 # ~/.kokua/config.toml), copy it there yourself, or point at it with --config PATH or $KOKUA_CONFIG.
-# The file itself is REQUIRED and Kokua will not start without it, because the sub-agent roles below
+# The file itself is REQUIRED and Kokua will not start without it, because the [agents.*] tables below
 # exist nowhere else and the assistant cannot work without at least one. Every individual key is
 # optional and the value shown is the built-in default. Command-line flags override anything set here.
 # An unknown key or wrong-typed value is a hard error (startup fails and names the key).
@@ -8,7 +8,7 @@
 # This file is the single source of settings: besides hand-editing, the web settings panel, the
 # add_mcp_server tool, and the assistant's own update_config tool write to it too (comments are
 # preserved). A few security-critical keys ([security].confirm_tools, [email].to, [paths].data_dir)
-# can only be changed by hand-editing, never by the assistant.
+# and the whole [agents.*] section can only be changed by hand-editing, never by the assistant.
 
 [assistant]
 # Model string, e.g. "ollama:qwen3:8b". Unset -> $AIMU_LANGUAGE_MODEL, else the first already-running
@@ -22,20 +22,17 @@
 #   model = "openai-compat:my-model@http://gpu-box:9000/v1;tools,thinking"
 # model = "ollama:qwen3:8b"
 
+# Fallback opener for any agent below that sets no `system_message` of its own.
 # system_message = "You are a personal assistant running on the user's own machine. ..."
 
-# Persistent memory across conversations (facts + user documents).
-memory = true
+# Which [agents.<name>] table is the agent you talk to, and the root of the delegation graph.
+agent = "assistant"
 
-# Discover tool-pack plugins via the "kokua.tools" entry-point group.
+# Run independent tool calls in one turn concurrently, so several spawn_subagent calls overlap.
+concurrent_tools = true
+
+# Discover toolset plugins via the "kokua.toolsets" entry-point group.
 load_plugins = true
-
-# The assistant is a lean supervisor: it keeps only its cross-cutting tools (memory, skills, MCP
-# management, config, scheduling, reading its other conversations, date/time) and hands ALL specialized
-# work (web, files, code, and every domain/MCP tool) to sub-agent workers via spawn_subagent. That is
-# not configurable, so the [subagents.roles.*] tables further down are what give the assistant its
-# actual capability, and at least one is required. A sub-agent's gated-tool calls (the confirm_tools,
-# e.g. execute_python) are routed to the parent for approval and are not run unattended.
 
 # Max per-conversation agents kept live in memory (AgentRegistry LRU cap). Evicted agents rebuild
 # from persisted state on next access, so the cap bounds memory, not correctness.
@@ -47,88 +44,97 @@ agent_cache_cap = 8
 show_thinking = true
 show_tools = true
 
-[tools]
-# AIMU built-in tool groups the WORKERS may draw from. Also accepts ["all"] or ["none"]. This is a
-# ceiling, not a toolset: the assistant mounts none of these itself, and a role gets its own `groups`
-# intersected with this list. Setting it to ["none"] leaves your workers with nothing to draw on.
-# The generative groups (image, audio, speech, transcription) each require their AIMU_*_MODEL env var:
-# there is no default, so the tool raises if it is unset rather than downloading weights you did not
-# ask for. Values and accepted formats: https://saxman.info/aimu/reference/env-vars/
-# "time" (the clock + timezone conversion) is the one exception to "workers only": the assistant keeps
-# it, and it is added to every sub-agent role whatever that role's own `groups` say, since a worker that
-# cannot tell the time is broken regardless of its domain. Drop "time" here and no agent gets it.
-groups = ["web", "fs", "compute", "time", "misc"]
-
-# Images: the assistant reads images you attach (web upload / paste, or the CLI `/attach <path>`
-# command); a vision-capable model is needed (Claude models qualify). It can also generate images when
-# the AIMU_IMAGE_MODEL env var is set (e.g. "gemini:nano-banana" or a HuggingFace diffusers "hf:<repo>");
-# without it, no image-generation tool is offered. Uploaded and generated images are stored under
-# data/images and served by the web UI at /images; sessions keep only a small reference, not inline data.
-
-[subagents]
-# Run independent tool calls in one turn concurrently, so several spawn_subagent calls overlap.
-concurrent = true
-
-# Sub-agent roles the model can pick via spawn_subagent(agent_type, task). These ARE the assistant's
-# capability: it delegates all specialized work, so a role is the only way a built-in group, a
-# tool-pack, or an MCP server reaches any agent. Nothing is defaulted in code, so edit, delete, or add
-# to the three below and that is exactly what you get. At least one role is required; delete them all
-# and Kokua refuses to start rather than run an assistant that cannot do anything.
+# Every agent, declared whole. An agent's `tools` list IS its capability: nothing is added in code, so a
+# toolset you delete from a list is gone and one you add is there on the next start.
 #
-# A role's worker toolset is the union of: its `groups` (intersected with [tools] groups above, so a
-# role narrows within the enabled tools but never exceeds them); the tools of any MCP servers it lists
-# in `mcp_servers` (by the server's `name` below, or its raw URL); and the tools of any tool-packs it
-# lists in `tool_packs` (installed kokua.tools plugins, e.g. "pdf", "email"). `system_message` is
-# optional. No role needs to list "time": it is added to every role from [tools].groups.
+# There is one namespace for every capability, so a name in `tools` may be an AIMU built-in tool group
+# ("web", "fs", "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own
+# ("memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations"), an installed
+# plugin toolset ("pdf", "email", ...), or an MCP server configured under [[mcp.server]] below, named by
+# its `name`. The agent does not say which; run `kokua --list-toolsets` for every name this install
+# accepts here, grouped by what provides it. An unknown name is a startup error that lists the valid ones,
+# so a typo can never quietly leave an agent with a smaller toolset than you wrote.
 #
-# Note that an installed tool-pack and a configured MCP server both do NOTHING until some role names
-# them. Startup warns about an MCP server no role references; run `kokua --list-tool-packs` to see
-# which packs are installed and available to name here.
+# A non-empty `delegates_to` is what makes an agent delegate: it gets a `spawn_subagent(agent_type, task)`
+# tool offering exactly the agents it names, each built from its own table. A worker's gated-tool calls
+# (the confirm_tools below, e.g. execute_python) are routed to you for approval, not run unattended.
+# The graph must be acyclic. `description` is the label the delegator sees in its worker menu, and
+# `system_message` is optional (see [assistant].system_message above).
+#
+# Nothing is implicit, including the clock: "time" is added to no agent in code, which is why every agent
+# below lists it. An installed plugin toolset and a configured MCP server likewise do nothing until some
+# agent names them, and startup warns about one nothing names.
+#
+# This whole section can only be changed by hand-editing this file. `update_config` is a tool the
+# assistant holds, so a writable agent table would let the assistant widen its own reach; granting a
+# capability stays your decision.
 
-[subagents.roles.researcher]
+[agents.assistant]
+# The agent you talk to (see [assistant].agent above). It keeps the cross-cutting tools it needs to
+# manage itself and hands specialized work to the three workers below.
+description = "The assistant the user talks to."
+system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
+tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "time"]
+delegates_to = ["researcher", "coder", "generalist"]
+
+[agents.researcher]
 description = "Research specialist: gather and verify information from the web."
-groups = ["web", "misc"]
+tools = ["web", "misc", "time"]
 system_message = """\
 You are a research sub-agent. Investigate the task with web search and page lookups, verify claims \
 against sources rather than memory, and return a concise, well-organized findings summary that names \
 its sources."""
 
-[subagents.roles.coder]
+[agents.coder]
 description = "Coding specialist: read/write files and run code to complete a task."
-groups = ["fs", "compute"]
+tools = ["fs", "compute", "time"]
 system_message = """\
 You are a coding sub-agent. Complete the task by reading and writing files and running code (Python, \
 shell, or calculations). Report exactly what you did and the concrete result."""
 
-[subagents.roles.generalist]
+[agents.generalist]
 description = "General-purpose helper with the full built-in toolset; use when no specialist fits."
-groups = ["web", "fs", "compute", "misc"]
+tools = ["web", "fs", "compute", "misc", "time"]
 system_message = """\
 You are a general-purpose sub-agent. Complete the self-contained task you are given and return a \
 single, complete answer."""
 
-# More roles to copy. A role can draw on an MCP server or a tool-pack instead of (or as well as)
-# built-in groups -- `reviewer` below is the worked example of mounting an agent built with AIMU,
-# via the `aimu_agents` tool-pack (see README, "Tool packs").
-# [subagents.roles.stock-trader]
+# More agents to copy. Each mixes built-in groups, MCP servers, and plugin toolsets in the one list --
+# `reviewer` below is the worked example of mounting an agent built with AIMU, via the `aimu_agents`
+# toolset (see README, "Toolsets").
+# [agents.stock-trader]
 # description = "Looks up quotes and places trades."
-# mcp_servers = ["stocks"]        # matches [[mcp.server]].name below
-# groups = ["compute"]
-# [subagents.roles.report-writer]
+# tools = ["stocks", "compute", "time"]   # "stocks" matches [[mcp.server]].name below
+# [agents.report-writer]
 # description = "Builds and emails PDF reports."
-# tool_packs = ["pdf", "email"]
-# [subagents.roles.reviewer]
+# tools = ["pdf", "email", "time"]
+# [agents.reviewer]
 # description = "Reviews code for security, performance, and readability."
-# tool_packs = ["aimu_agents"]
+# tools = ["aimu_agents", "time"]
+
+# Images: the assistant reads images you attach (web upload / paste, or the CLI `/attach <path>`
+# command); a vision-capable model is needed (Claude models qualify). It can also generate images when
+# the AIMU_IMAGE_MODEL env var is set (e.g. "gemini:nano-banana" or a HuggingFace diffusers "hf:<repo>"),
+# via the `image` toolset an agent has to name; without that env var the toolset offers no tool at all.
+# Uploaded and generated images are stored under data/images and served by the web UI at /images;
+# sessions keep only a small reference, not inline data.
+#
+# The generative built-in groups ("audio", "speech", "transcription") each require their AIMU_*_MODEL env
+# var too: there is no default, so the tool raises if it is unset rather than downloading weights you did
+# not ask for. Values and accepted formats: https://saxman.info/aimu/reference/env-vars/
 
 # Remote MCP servers to connect at startup. Each server is its own [[mcp.server]] table.
-# `url` is required. `token_env` (optional) names an environment variable holding a bearer token,
-# read at startup so the secret stays out of this file; omit it for an unauthenticated server (or
-# one that uses the OAuth flow, which triggers automatically on an auth challenge). `name` (optional)
-# is a friendly label a sub-agent role can reference in its `mcp_servers` list instead of the full URL.
-# Servers you add at runtime with the add_mcp_server tool are appended here automatically (URL only).
+# `url` and `name` are both required: `name` is how the server enters the toolset namespace, so it is
+# what an agent lists in its `tools` above, and a server no agent can name reaches no agent. `token_env`
+# (optional) names an environment variable holding a bearer token, read at startup so the secret stays
+# out of this file; omit it for an unauthenticated server (or one that uses the OAuth flow, which
+# triggers automatically on an auth challenge). Servers you add at runtime with the add_mcp_server tool
+# are appended here automatically, with a `name` derived from the host (and a numeric suffix if that name
+# is taken), so the file always loads; that name still reaches no agent until you add it to a `tools` list
+# above yourself.
 # [[mcp.server]]
 # url = "https://api.githubcopilot.com/mcp/"
+# name = "github"
 # token_env = "GITHUB_MCP_TOKEN"
 #
 # [[mcp.server]]
@@ -139,7 +145,7 @@ single, complete answer."""
 # Tools that require interactive confirmation before each call (terminal y/N, or Allow/Deny in the
 # web UI). These run with full machine access. Set to [] to disable approval. Proactive (unprompted)
 # turns auto-deny these regardless. `update_config` is here because it lets the assistant rewrite this
-# file (except the security-critical keys, which it can never change).
+# file (except the security-critical keys and [agents.*], which it can never change).
 confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
 
 [paths]
@@ -163,10 +169,11 @@ port = 8000
 level = "INFO"
 
 [email]
-# Let the assistant email information to you (digests, summaries, reports) via SMTP. The assistant can
-# ONLY email `to` below; the send_email tool takes no recipient, so it can never mail arbitrary people.
-# Sending is UNGATED (no per-send confirmation) so scheduled/proactive turns can send. The email tool is
-# offered only when `host` and `to` are set AND the KOKUA_EMAIL_PASSWORD environment variable is present.
+# Let the assistant email information to you (digests, summaries, reports) via SMTP, through the `email`
+# toolset an agent has to name in its `tools` above. The assistant can ONLY email `to` below; the
+# send_email tool takes no recipient, so it can never mail arbitrary people. Sending is UNGATED (no
+# per-send confirmation) so scheduled/proactive turns can send. The toolset offers a tool only when
+# `host` and `to` are set AND the KOKUA_EMAIL_PASSWORD environment variable is present.
 #
 # The password is read from KOKUA_EMAIL_PASSWORD, NEVER from this file (adding it here is a config error).
 # For Gmail / Google Workspace, use an App Password. Leave everything unset to disable email.

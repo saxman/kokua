@@ -8,12 +8,12 @@ from kokua.config import AssistantConfig
 
 
 def test_sessions_path_under_data_dir(tmp_path):
-    cfg = AssistantConfig(data_dir=tmp_path, memory=False)
+    cfg = AssistantConfig(data_dir=tmp_path)
     assert cfg.sessions_path == tmp_path / "sessions.json"
 
 
 def test_logs_path_under_data_dir(tmp_path):
-    cfg = AssistantConfig(data_dir=tmp_path, memory=False)
+    cfg = AssistantConfig(data_dir=tmp_path)
     assert cfg.logs_path == tmp_path / "logs"
 
 

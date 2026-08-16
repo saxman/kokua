@@ -477,7 +477,7 @@ const SPAWN_TOOL_NAME = "spawn_subagent";
 
 // A spawn card's first body line: the call's arguments, rendered exactly as a tool block's body
 // is. `agent_type` is reconstructed from the frame's role because kokua always builds AIMU's
-// typed spawn tool, whose parameters are agent_type and task (see _build_subagent_agent_types);
+// typed spawn tool, whose parameters are agent_type and task (see toolsets/agents.py's build_agent_specs);
 // AIMU's untyped mode, which kokua never builds, would take task alone.
 function spawnArgsLine(frame) {
   const el = document.createElement("div");

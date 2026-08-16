@@ -16,12 +16,12 @@
 
 **Kokua** (Hawaiian: *help, assistance*) is a hackable, modular personal-assistant application (OpenClaw / Hermes Agent style) built on the [AIMU](https://saxman.info/aimu/) library. It runs an always-on assistant that chats with you, authors and runs its own skills, connects to remote tool services, delegates independent subtasks to isolated sub-agents, schedules its own proactive work, and remembers facts and documents across conversations.
 
-Kokua **extends itself**: it writes and runs new skills to take on capabilities it didn't ship with, and grows its reach by connecting to remote MCP services on its own. Where it can't extend itself, you extend it: front ends and tool-packs are **plugins** you add by installing a package, never by editing the core.
+Kokua **extends itself**: it writes and runs new skills to take on capabilities it didn't ship with, and grows its reach by connecting to remote MCP services on its own. Where it can't extend itself, you extend it: front ends and toolsets are **plugins** you add by installing a package, never by editing the core.
 
 ```bash
 kokua                              # chat in the terminal
 kokua --frontend web               # or a browser UI at http://127.0.0.1:8000
-kokua --list-tool-packs            # see what capability is installed
+kokua --list-toolsets              # see what capability is installed
 kokua config init                  # scaffold ~/.kokua/config.toml, every key documented
 ```
 
@@ -60,7 +60,7 @@ kokua --model ollama:qwen3:8b
 
 The model string is AIMU's [`provider:model_id`](https://saxman.info/aimu/how-to/switch-providers/) form, so any provider AIMU supports works here. Omit `--model` and AIMU [resolves a default](https://saxman.info/aimu/how-to/switch-providers/#use-whatever-model-is-already-available-locally): [`$AIMU_LANGUAGE_MODEL`](https://saxman.info/aimu/reference/env-vars/) if set, else the first already-running local model found (Ollama, then a local OpenAI-compatible server). A cloud model is never auto-selected, and startup fails with an actionable message if nothing resolves. Chat at the prompt; Ctrl-D exits.
 
-Useful flags: `--tools web,fs,compute,time,misc` ([AIMU built-in tool groups](https://saxman.info/aimu/reference/api/tools/)), `--mcp <url>` (repeatable), `--no-memory`, `--no-plugins`, `--system`, `--config <path>`, `--host` / `--port` (web).
+Useful flags: `--list-toolsets` (every capability name this install accepts, grouped by what provides it), `--mcp <url>` (repeatable), `--no-plugins`, `--system` (overrides the entry agent's system message for this run only; a worker's own declared message is untouched), `--config <path>`, `--host` / `--port` (web). What each agent can *do* is not a flag: it is that agent's `tools` list in `config.toml` (see [Configuration](#configuration)).
 
 Two commands worth knowing: **`/stop`** cancels a reply that's still streaming and keeps the partial turn, so the conversation continues (the web UI has a Stop button for the same). **`/diag`** reports the in-flight turn, the gate state, and a stuck turn's async stack; it never takes the turn gate, so it answers even when a hung turn is holding it. Rotating logs go to `$KOKUA_HOME/data/logs/kokua.log`, and `kill -USR1 <pid>` dumps all thread stacks there.
 
@@ -80,9 +80,10 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 
 - **[Self-authored skills](https://saxman.info/aimu/how-to/use-skills/).** Built on AIMU's `SkillAgent`: the assistant writes `SKILL.md` skills (the same format Claude Code uses), and bundles runnable Python/shell scripts it can author and execute in the same turn, so it takes on capabilities it did not ship with.
 - **[Remote MCP services](https://saxman.info/aimu/how-to/use-mcp-tools/).** Kokua wires AIMU's `MCPClient` to config and to the agent. Connect a server with `--mcp <url>` or `[[mcp.server]]`, or let the assistant connect one itself with its `add_mcp_server` tool. OAuth is handled by posting the authorization link into the chat and persisting the tokens; bearer-token servers read their secret from an env var named by `token_env`, never from the config file.
-- **[Sub-agents](https://saxman.info/aimu/how-to/spawn-subagents/).** AIMU's `spawn_subagent(agent_type, task)` delegates an independent subtask to a fresh, isolated agent. Roles are defined entirely in `config.toml` under `[subagents.roles.*]`, with none baked into the code: `kokua config init` writes `researcher`, `coder`, and `generalist`, and you edit, delete, or add to that list freely. Each role clones the active model with its own tool subset (its groups intersected with your enabled `[tools]` groups, plus the `time` group so no worker is left unable to tell the time; parent-only memory/skills/MCP tools are withheld), and can also name specific MCP servers and tool-packs. At least one role is required: roles are the only switch for delegation, so a config with none is refused at startup rather than run as an assistant that can do nothing. Independent spawns in one turn run concurrently. In the web UI each spawn gets its own foldable card in the conversation that spawned it, holding the sub-agent's thinking, tool calls, and live-streamed answer as the same collapsible blocks the assistant's own turn uses (nested reasoning follows `show_thinking`, nested tool calls follow `show_tools`), and the card replays on reload.
-- **The assistant is a lean supervisor**, always. It mounts only cross-cutting tools (memory, skills, MCP management, config, scheduling, cross-conversation reads, and the `time` group) plus `spawn_subagent`, answers trivial requests itself, and delegates every piece of specialized work to the role-scoped workers above. This keeps the always-on agent's tool context small. `[tools] groups` is therefore the universe **workers** may draw from, not the assistant's own toolset: the supervisor has no calculator of its own and delegates arithmetic like anything else. The consequence worth internalizing is that **a built-in group, a tool-pack, or an MCP server reaches nothing until some role names it** -- roles are where capability is granted.
-- **Persistent memory.** AIMU's [semantic store](https://saxman.info/aimu/how-to/use-semantic-memory/) for facts and [document store](https://saxman.info/aimu/how-to/use-document-memory/) for text, shared across all conversations and surviving restarts. Both live under [`data/`](#state); `--no-memory` turns them off.
+- **[Every agent is declared, none is baked in](docs/how-to/set-up-toolsets.md).** One `[agents.<name>]` table per agent in `config.toml`, each with a `description`, a `system_message`, a `tools` list of toolset names, and a `delegates_to` list. `[assistant].agent` says which one you talk to. `kokua config init` writes `assistant`, `researcher`, `coder`, and `generalist`, and you edit, delete, or add to them freely. At least one agent is required, so a config with none is refused at startup rather than run as an assistant that can do nothing. The shipped tables make the agent you talk to a **lean supervisor** -- the cross-cutting toolsets it needs to manage itself, no domain tools, and everything specialized delegated -- which keeps the always-on agent's tool context small. That is what the config declares, not a rule in the code: give it `"compute"` and it runs Python itself.
+- **[Sub-agents](https://saxman.info/aimu/how-to/spawn-subagents/).** A non-empty `delegates_to` is itself the declaration: that agent gets AIMU's `spawn_subagent(agent_type, task)` offering exactly the agents it names, each cloning the active model with the tools its own table declares. Delegation nests, since an agent you delegate to that delegates in turn gets its own menu of its own targets; the graph has to be acyclic and a cycle is a startup error that prints the path. A worker's approval-gated call is routed to you rather than run unattended. Independent spawns in one turn run concurrently. In the web UI each spawn gets its own foldable card in the conversation that spawned it, holding the sub-agent's thinking, tool calls, and live-streamed answer as the same collapsible blocks the assistant's own turn uses (nested reasoning follows `show_thinking`, nested tool calls follow `show_tools`), and the card replays on reload.
+- **One namespace, and nothing is implicit.** Every capability an agent can hold is a named toolset in a single namespace: AIMU's built-in tool groups, Kokua's own memory / documents / skills / config / MCP admin / scheduling / conversation capabilities, each installed plugin toolset, and each configured MCP server by its `name`. `kokua --list-toolsets` prints the lot, grouped by what provides it. **A capability is declared, never defaulted:** no code path adds a tool an agent did not name, not even the clock, so an installed toolset or a connected server reaches nothing until some agent's `tools` list names it. An unknown name is a startup error listing the valid ones, and two providers claiming one name is one too.
+- **Persistent memory.** AIMU's [semantic store](https://saxman.info/aimu/how-to/use-semantic-memory/) for facts and [document store](https://saxman.info/aimu/how-to/use-document-memory/) for text, shared across every agent that declares the `memory` and `documents` toolsets and surviving restarts. Both live under [`data/`](#state); drop those names from an agent's `tools` and it has neither, and drop them from every agent and no store is opened at all.
 
 ### Proactive work
 
@@ -103,23 +104,36 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 ### Files and media
 
 - **[Images in and out](src/kokua/images.py).** Attach an image and the assistant reads it (needs a [vision-capable model](https://saxman.info/aimu/reference/model-matrix/)): the composer's paperclip or a paste in the web UI, `/attach <path>` in the CLI. It can also [generate images](https://saxman.info/aimu/how-to/generate-images/) when [`$AIMU_IMAGE_MODEL`](https://saxman.info/aimu/reference/env-vars/) is set (e.g. `gemini:nano-banana`, or a HuggingFace diffusers `hf:<repo>`); without it, no generation tool is offered at all. Images live in `data/images/` and are served at `/images/<name>`; a conversation stores only a short reference, so `sessions.json` stays compact.
-- **[PDFs](src/kokua/toolpacks/pdf.py).** The built-in `pdf` tool-pack adds `markdown_to_pdf`: ask for something as a PDF and it writes to `data/downloads/`, handing back a download link in the web UI or a path from the CLI.
-- **[AIMU agents](src/kokua/toolpacks/aimu_agents.py).** The `aimu_agents` tool-pack mounts AIMU's prebuilt orchestrators -- `code_review`, `research_report`, `create_content` -- and is the worked example of wiring an agent built with AIMU into Kokua: any `Runner` exposes `.run(task) -> str`, so a tool-pack is the whole bridge and the core learns nothing new. Nothing is mounted until you ask for it: give a role `tool_packs = ["aimu_agents"]` in `config.toml`. They are synchronous, so a nested run gets no sub-agent card, no `/stop`, and no approval gate on its workers; and a `coder` role with `fs` + `compute` is a stronger reviewer than the tool-less `CodeReviewAgent`. Copy the shape, not necessarily the agents.
-- **[Email](src/kokua/toolpacks/email.py).** The `email` tool-pack lets the assistant mail information to you -- digests, summaries, reports -- written in Markdown and delivered as formatted HTML with a plain-text fallback, optionally attaching files already in `data/downloads/` or `data/images/`. It can only email **you**: the recipient is fixed to `[email] to`, so the tool takes no recipient argument. Configure `[email]` (`host`, `port`, `from`, `to`, `use_ssl`) and put the password in `$KOKUA_EMAIL_PASSWORD`, never in the config file (for Gmail, an App Password). The tool appears only once host, `to`, and the password are all present. Sending is ungated, so a daily digest can send itself.
+- **[PDFs](src/kokua/toolsets/pdf.py).** The built-in `pdf` toolset adds `markdown_to_pdf`: ask for something as a PDF and it writes to `data/downloads/`, handing back a download link in the web UI or a path from the CLI.
+- **[AIMU agents](src/kokua/toolsets/aimu_agents.py).** The `aimu_agents` toolset mounts AIMU's prebuilt orchestrators -- `code_review`, `research_report`, `create_content` -- and is the worked example of wiring an agent built with AIMU into Kokua: any `Runner` exposes `.run(task) -> str`, so a toolset is the whole bridge and the core learns nothing new. Nothing is mounted until you ask for it: name it in an agent's `tools` in `config.toml`. They are synchronous, so a nested run gets no sub-agent card, no `/stop`, and no approval gate on its workers; and an agent declaring `fs` + `compute` is a stronger reviewer than the tool-less `CodeReviewAgent`. Copy the shape, not necessarily the agents.
+- **[Email](src/kokua/toolsets/email.py).** The `email` toolset lets the assistant mail information to you -- digests, summaries, reports -- written in Markdown and delivered as formatted HTML with a plain-text fallback, optionally attaching files already in `data/downloads/` or `data/images/`. It can only email **you**: the recipient is fixed to `[email] to`, so the tool takes no recipient argument. Configure `[email]` (`host`, `port`, `from`, `to`, `use_ssl`) and put the password in `$KOKUA_EMAIL_PASSWORD`, never in the config file (for Gmail, an App Password). The toolset offers the tool only once host, `to`, and the password are all present, and only to an agent that names `email`. Sending is ungated, so a daily digest can send itself.
 
 ## Configuration
 
 Settings come from a TOML file, so you don't repeat flags. Precedence, highest first: **command-line flag > config file > built-in default**. The file is read from `--config <path>`, else `$KOKUA_CONFIG`, else `$KOKUA_HOME/config.toml` (default `~/.kokua/config.toml`).
 
-**The file is required.** Kokua will not start without one, and will tell you to run `kokua config init`. Sub-agent roles exist nowhere else and the assistant cannot work without at least one, so there is no useful "no config" state to fall back to. Every individual *key* still has a built-in default, so you set only what you want to change.
+**The file is required.** Kokua will not start without one, and will tell you to run `kokua config init`. The `[agents.*]` tables exist nowhere else and the assistant cannot work without at least one agent, so there is no useful "no config" state to fall back to. Every individual *key* still has a built-in default, so you set only what you want to change.
 
 ```bash
 kokua config init           # writes the documented example; --force to overwrite
 ```
 
-The scaffold comments every key at its default, so changing a default in a later release still reaches keys you left commented. See [`config.example.toml`](src/kokua/config.example.toml) for the full set.
+The scaffold comments every key at its default, so changing a default in a later release still reaches keys you left commented, and it ships the four `[agents.*]` tables live rather than commented, since an agent is the one thing Kokua cannot default. See [`config.example.toml`](src/kokua/config.example.toml) for the full set, and [set up a toolset](docs/how-to/set-up-toolsets.md) for the walkthrough of declaring an agent.
 
-`config.toml` is also **app-written**: the settings panel, the assistant's own `update_config` tool, and a runtime `add_mcp_server` all write back to it, with your comments preserved. There is no second settings store.
+An agent table is four keys:
+
+```toml
+[assistant]
+agent = "assistant"          # which table below is the agent you talk to
+
+[agents.assistant]
+description = "The assistant the user talks to."
+system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
+tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "time"]
+delegates_to = ["researcher", "coder", "generalist"]
+```
+
+`config.toml` is also **app-written**: the settings panel, the assistant's own `update_config` tool, and a runtime `add_mcp_server` all write back to it, with your comments preserved. There is no second settings store. Four things in it are hand-edit only and refused by `update_config`: `[security] confirm_tools`, `[email] to`, `[paths] data_dir`, and the whole `[agents.*]` section, so which capability an agent holds stays your decision.
 
 ### State
 
@@ -145,23 +159,25 @@ Point `data/` elsewhere with `[paths] data_dir`. Nothing is written to your work
 Kokua discovers two kinds of plugin at runtime through Python entry points, so a third party adds capability by publishing a package, with no change to Kokua's core:
 
 - **Front ends** (`kokua.frontends` group): how the assistant runs -- terminal, web, a future Telegram or Slack. A front end is a `kokua.plugins.FrontEnd` whose `run(config, args)` drives the assistant.
-- **Tool-packs** (`kokua.tools` group): extra agent tools. A tool-pack is a `kokua.plugins.ToolPack` whose `build(config)` returns [`@aimu.tool`](https://saxman.info/aimu/how-to/add-custom-tool/) callables, merged into the agent automatically.
+- **Toolsets** (`kokua.toolsets` group): one named capability an agent can declare. A toolset is a `kokua.plugins.Toolset` whose `build(ctx)` returns [`@aimu.tool`](https://saxman.info/aimu/how-to/add-custom-tool/) callables, plus an optional `guidance` string appended to the prompt of any agent holding it. Installing it puts the name in the namespace; an agent still has to declare it.
 
-The built-in `cli` / `web` front ends and the five tool-packs are registered exactly this way in Kokua's own `pyproject.toml` -- if the built-in path and the plugin path ever diverge, the plugin path is the broken one. To add your own from another package:
+The built-in `cli` / `web` front ends and the five built-in toolsets are registered exactly this way in Kokua's own `pyproject.toml` -- if the built-in path and the plugin path ever diverge, the plugin path is the broken one. To add your own from another package:
 
 ```toml
 # in your package's pyproject.toml
-[project.entry-points."kokua.tools"]
-weather = "my_weather_pack:TOOL_PACK"
+[project.entry-points."kokua.toolsets"]
+weather = "my_weather_pack:TOOLSET"
 ```
 
-`pip install` it, and `kokua --list-tool-packs` shows it. Its tools do **not** appear automatically: the assistant is a lean supervisor and mounts no pack tools, so give a role `tool_packs = ["weather"]` in `config.toml` and the workers spawned for that role carry them. See [`toolpacks/example.py`](src/kokua/toolpacks/example.py) for the template, and [`toolpacks/aimu_agents.py`](src/kokua/toolpacks/aimu_agents.py) for the same shape carrying a whole AIMU agent rather than a plain function. [Set up a toolset](docs/how-to/set-up-toolsets.md) is the full walkthrough: how a role assembles its toolset from groups, packs, and MCP servers, and which mistyped names fail loudly versus silently.
+`pip install` it, and `kokua --list-toolsets` shows it. Its tools do **not** appear automatically: name it in an agent's `tools` list in `config.toml`, since a capability is declared and never defaulted. See [`toolsets/example.py`](src/kokua/toolsets/example.py) for the template, and [`toolsets/aimu_agents.py`](src/kokua/toolsets/aimu_agents.py) for the same shape carrying a whole AIMU agent rather than a plain function. [Set up a toolset](docs/how-to/set-up-toolsets.md) is the full walkthrough: what is in the namespace, how an agent declares its `tools` and `delegates_to`, and exactly which mistakes fail at startup.
 
 ## Security
 
 Kokua can author and run Python/shell scripts as **real subprocesses with your user privileges (no sandbox)**, and connect to remote MCP servers and run whatever tools they expose. Real capability is the point of a personal assistant, but it means a prompt-injected or mistaken model can run arbitrary code on your machine and call arbitrary remote tools. Only run Kokua with a model, inputs, and MCP servers you trust. The CLI prints a notice on startup.
 
-**Tool approval.** The riskiest tools require confirmation before each call -- a `y/N` prompt in the terminal, Allow/Deny buttons in the web UI. By default this gates `add_skill_script`, `add_mcp_server`, and `execute_python`. Adjust with `[security] confirm_tools` or `--confirm-tools name1,name2` (empty disables it). Proactive and backgrounded turns auto-deny these regardless, so the assistant never runs a full-access tool unattended, and an approval prompt only ever appears for the conversation you are currently viewing.
+**Tool approval.** The riskiest tools require confirmation before each call -- a `y/N` prompt in the terminal, Allow/Deny buttons in the web UI. By default this gates `add_skill_script`, `add_mcp_server`, `execute_python`, and `update_config`. Adjust with `[security] confirm_tools` or `--confirm-tools name1,name2` (empty disables it). Gating is by tool name, so it applies to a sub-agent's call as much as the assistant's own: a worker's gated call is routed to you. Proactive and backgrounded turns auto-deny these regardless, so the assistant never runs a full-access tool unattended, and an approval prompt only ever appears for the conversation you are currently viewing.
+
+**Capability is granted by hand.** `[agents.*]` decides what every agent can call, and it is the one section the assistant can never write: `update_config` refuses it outright, and the settings panel does not touch it. So the assistant can connect an MCP server, but it cannot give itself or a worker the server's tools: that takes an edit you make. Note the flip side, since it is easy to misread: there is no privilege tier among agents. An agent whose table declares `config` really does get `update_config`, and one declaring `compute` really does get `execute_python`. Your hand-edit is the consent, and `confirm_tools` is the gate at call time.
 
 **Injection crosses conversations.** The assistant can read every saved conversation, and a transcript is untrusted text (a worker may have pasted web content into it), so an injection that lands in one conversation can influence what the assistant does in another. The three read tools are ungated by default, since they only read and gating them would make an unattended scheduled run that reads history fail silently; add `read_conversation` and `search_conversations` to `[security] confirm_tools` if you would rather approve each one.
 
@@ -190,7 +206,7 @@ mcp/          remote MCP servers and their OAuth
 scheduling/   recurrence math, the durable task registry, the agent-facing tools
 channels/     ChannelUI plus the concrete channels
 frontends/    cli, web        -- registered as plugins, exactly like a third party's would be
-toolpacks/    example, aimu_agents, pdf, image, email
+toolsets/     example, aimu_agents, pdf, image, email
 ```
 
 The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`, `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
@@ -199,11 +215,11 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 
 ### Kokua
 
-- 📘 [How-to guides](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (roles, tool groups, writing a tool-pack) · [add a skill](docs/how-to/add-skills.md) · [add an MCP service](docs/how-to/add-mcp-services.md).
+- 📘 [How-to guides](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace, declaring an agent, writing a toolset) · [add a skill](docs/how-to/add-skills.md) · [add an MCP service](docs/how-to/add-mcp-services.md).
 - 💡 [Design principles](docs/explanation/design-principles.md): the six that decide what belongs in the core, each with the code that backs it and the patterns it excludes.
 - 🏗️ [Architecture](docs/explanation/architecture.md): module layout, control flow, and the concurrency model.
 - ⚙️ [`config.example.toml`](src/kokua/config.example.toml): every setting, documented at its default.
-- 🧩 [`toolpacks/example.py`](src/kokua/toolpacks/example.py): the tool-pack template.
+- 🧩 [`toolsets/example.py`](src/kokua/toolsets/example.py): the toolset template.
 - 📋 [CHANGELOG](CHANGELOG.md) · [TODO](TODO.md): what changed, and what's known but not yet scheduled.
 
 ### AIMU
@@ -212,7 +228,7 @@ Kokua is a thin application over [AIMU](https://saxman.info/aimu/), so most capa
 
 - 🔌 [Switch providers](https://saxman.info/aimu/how-to/switch-providers/): the `provider:model_id` string, default-model resolution, timeouts, and failover -- what `--model` accepts and how it resolves when you omit it.
 - 🤖 [Personal-assistant primitives](https://saxman.info/aimu/how-to/build-personal-assistant/): the `Channel` transport, the `Scheduler`, and runtime skill authoring. The three pieces Kokua is built from.
-- 🛠️ [Built-in tools](https://saxman.info/aimu/reference/api/tools/) · [custom tools](https://saxman.info/aimu/how-to/add-custom-tool/) · [MCP](https://saxman.info/aimu/how-to/use-mcp-tools/): what `--tools`, a tool-pack, and `--mcp` draw on.
+- 🛠️ [Built-in tools](https://saxman.info/aimu/reference/api/tools/) · [custom tools](https://saxman.info/aimu/how-to/add-custom-tool/) · [MCP](https://saxman.info/aimu/how-to/use-mcp-tools/): what an agent's `tools` list and `--mcp` draw on.
 - 🧠 [Semantic memory](https://saxman.info/aimu/how-to/use-semantic-memory/) · [documents](https://saxman.info/aimu/how-to/use-document-memory/) · [skills](https://saxman.info/aimu/how-to/use-skills/) · [sub-agents](https://saxman.info/aimu/how-to/spawn-subagents/): the capability layer.
 - 📊 [Model matrix](https://saxman.info/aimu/reference/model-matrix/) · [environment variables](https://saxman.info/aimu/reference/env-vars/): which models support vision, tools, and reasoning, and the AIMU env vars Kokua inherits.
 

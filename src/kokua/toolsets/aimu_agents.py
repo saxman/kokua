@@ -1,10 +1,10 @@
-"""A built-in tool-pack that mounts AIMU's prebuilt orchestrator agents as tools.
+"""A built-in toolset that mounts AIMU's prebuilt orchestrator agents as tools.
 
 This is the worked example of wiring an agent built with AIMU into Kokua. Any `Runner` -- an `Agent`,
 a `Chain`, a `Router`, an `OrchestratorAgent`, a remote A2A agent -- exposes `.run(task) -> str`, so a
-tool-pack is all the bridge that is needed, and the core does not have to learn about it. Copy this
-shape for your own agent: register a `ToolPack` under the `kokua.tools` entry-point group, and give a
-sub-agent role `tool_packs = ["<your pack>"]` in config.toml to scope a worker to it.
+toolset is all the bridge that is needed, and the core does not have to learn about it. Copy this
+shape for your own agent: register a `Toolset` under the `kokua.toolsets` entry-point group, and name it
+in an agent's `tools` list in config.toml's `[agents.<name>]` table to scope that agent to it.
 
 Three tools, one per prebuilt: `code_review`, `research_report`, `create_content`. Each prebuilt is an
 orchestrator that fans a task out to three specialist workers of its own and synthesizes their answers.
@@ -17,38 +17,39 @@ Two caveats worth knowing before leaning on these:
   by `/stop`, and its workers run without the approval gate. That last one is harmless in practice --
   the only tools any of these workers get are `builtin.web`, none of which are in the default
   `confirm_tools` -- but it would matter if you gave them `compute`.
-- **They overlap `spawn_subagent`.** A `coder` role with `fs` + `compute` is a stronger code reviewer
+- **They overlap `spawn_subagent`.** An agent declaring `fs` + `compute` is a stronger code reviewer
   than `CodeReviewAgent`, whose workers have no tools at all. Reach for these as an illustration of the
-  wiring, not because they beat a role.
+  wiring, not because they beat a configured agent.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 import aimu
 from aimu.agents.prebuilt import CodeReviewAgent, ContentCreationAgent, ResearchReportAgent
 from aimu.tools import builtin, tool
 
 from kokua.config import AssistantConfig
-from kokua.plugins import ToolPack
+from kokua.toolsets import Toolset
 
 
-def _research_worker_tools(config: AssistantConfig) -> Optional[list[Callable]]:
-    """Web tools for `ResearchReportAgent`'s workers, or ``None`` when the web group is disabled.
+def _research_worker_tools() -> list[Callable]:
+    """Web tools for `ResearchReportAgent`'s workers, given unconditionally.
 
     `ResearchReportAgent` is the one prebuilt that takes worker tools, and a research agent without
-    them is reduced to reciting training data. Gating on ``config.tools`` keeps the same contract a
-    sub-agent role has: the global tool policy is the ceiling, and a pack cannot raise it. Passing
+    them is reduced to reciting training data. There is no longer a global tool policy that could cap
+    this: an agent's capability is exactly what its ``tools`` table declares, so naming `aimu_agents`
+    there is itself the consent for its research workers to reach the web. (Gating this on whether the
+    declaring agent also holds the `web` toolset was considered and rejected: a worker's ``build``
+    receives ``agent=None``, so the declaring agent's name is not reachable from the context.) Passing
     tools also switches the prebuilt's own workers to concurrent dispatch.
     """
-    if "all" in config.tools or "web" in config.tools:
-        return list(builtin.web)
-    return None
+    return list(builtin.web)
 
 
 def build(config: AssistantConfig) -> list:
-    """Return this pack's tools: one per AIMU prebuilt orchestrator.
+    """Return this toolset's tools: one per AIMU prebuilt orchestrator.
 
     Each tool constructs its agent inside the call rather than here, for two reasons. ``build`` runs
     once per conversation agent and every prebuilt creates one orchestrator client plus three worker
@@ -87,7 +88,7 @@ def build(config: AssistantConfig) -> list:
         Args:
             topic: The subject to research.
         """
-        return run_prebuilt(ResearchReportAgent, topic, worker_tools=_research_worker_tools(config))
+        return run_prebuilt(ResearchReportAgent, topic, worker_tools=_research_worker_tools())
 
     @tool
     def create_content(brief: str) -> str:
@@ -101,8 +102,8 @@ def build(config: AssistantConfig) -> list:
     return [code_review, research_report, create_content]
 
 
-TOOL_PACK = ToolPack(
+TOOLSET = Toolset(
     name="aimu_agents",
     description="AIMU's prebuilt orchestrator agents (code review, research report, content creation) as tools.",
-    build=build,
+    build=lambda ctx: build(ctx.config),
 )

@@ -8,6 +8,26 @@ callable tool.
 Skills are the one capability the assistant keeps for itself rather than delegating, so this guide is
 shorter than it looks: there is one directory, and three ways to put something in it.
 
+## One toolset, entry agent only
+
+Skill authoring is a single toolset named `skills`, covering the whole skill directory. An agent gets it
+by declaring it like anything else:
+
+```toml
+[agents.assistant]
+tools = ["skills", "memory", "time"]      # `kokua config init` writes this and more
+```
+
+Only the **entry agent** (the one `[assistant].agent` names) can hold it. Declaring `skills` on any other
+agent is a startup error, because a spawned worker is a plain AIMU `Agent` rather than a `SkillAgent`, so
+there is nothing for skill injection to hook. The registry marks the toolset `entry_point_only` so you
+find that out at startup rather than through a worker that quietly has no skills.
+
+Drop `skills` from the entry agent's `tools` and the assistant loses `author_skill` and
+`add_skill_script`, so it can no longer write skills or attach scripts. It can still *use* the skills
+already in the directory: the entry agent is a `SkillAgent` either way, so the catalogue and
+`activate_skill` come from AIMU rather than from this toolset.
+
 ## Where Kokua looks
 
 **Only `$KOKUA_HOME/data/skills/`** (by default `~/.kokua/data/skills/`, or `<data_dir>/skills` if you
@@ -15,9 +35,9 @@ set `[paths] data_dir`).
 
 This is worth stating plainly because AIMU's `SkillManager` defaults to scanning four search paths
 (`.agents/skills/`, `.claude/skills/`, and their `~` equivalents). Kokua passes `skill_dirs` explicitly
-([`core/build.py`](../../src/kokua/core/build.py)), so those defaults **do not apply here**. A skill in
-`~/.claude/skills/` is invisible to Kokua. This follows from the principle that all state lives under
-one directory you own; nothing is read from your working directory.
+([`toolsets/context.py`](../../src/kokua/toolsets/context.py)), so those defaults **do not apply here**. A
+skill in `~/.claude/skills/` is invisible to Kokua. This follows from the principle that all state lives
+under one directory you own; nothing is read from your working directory.
 
 ## The `SKILL.md` format
 
@@ -31,7 +51,7 @@ description: Compile the week's notes into a digest and email it.
 
 1. Read the documents saved this week.
 2. Group them by project, newest first.
-3. Draft the digest in Markdown, then delegate the send to the report-writer role.
+3. Draft the digest in Markdown, then delegate the send to the report-writer agent.
 ```
 
 `name` and `description` are required. `name` must be a kebab-case slug: lowercase words joined by
@@ -55,15 +75,17 @@ it as a trigger ("when you need to ..."), not a title.
         └── collect_notes.py
 ```
 
-A skill manager is built per conversation agent, so a skill you add by hand is picked up the next time an
-agent is built: a new conversation, or an existing one whose cached agent has been evicted from the LRU.
-The conversation you are sitting in keeps the catalogue already injected into its system message. Start a
-new conversation, or restart Kokua, to be certain the skill is live.
+One `SkillManager` is shared by every conversation, so a skill authored in one conversation is usable in
+all of them. The flip side is that the manager caches its catalogue and only re-scans the directory when
+something refreshes it, which `author_skill` and `add_skill_script` do and a hand-written directory cannot:
+**restart Kokua after adding a skill by hand.** Starting a new conversation is not enough, since the new
+agent reads the same cached catalogue.
 
 ### Ask the assistant to write it
 
-The supervisor has an `author_skill` tool, and its system prompt tells it to reach for that tool when you
-teach it a repeatable procedure worth remembering. So the shortest path is a sentence:
+The entry agent has an `author_skill` tool, and the guidance the `skills` toolset carries into its prompt
+tells it to reach for that tool when you teach it a repeatable procedure worth remembering. So the
+shortest path is a sentence:
 
 > "That worked. Save it as a skill called `weekly-digest` so you can do it the same way next Friday."
 
@@ -97,19 +119,20 @@ loading the skill's instructions first.
 
 ## Who gets skills, and who does not
 
-The **supervisor** is an AIMU `SkillAgent`; every sub-agent worker is a plain `Agent`. Workers get no
-skill catalogue, no `activate_skill`, and no script tools. This has a practical consequence for how you
-write a skill:
+The entry agent is an AIMU `SkillAgent`; every agent it spawns is a plain `Agent`. Workers get no skill
+catalogue, no `activate_skill`, and no script tools, which is why `skills` cannot be declared on one. This
+has a practical consequence for how you write a skill:
 
-Write the procedure from the supervisor's point of view, as a plan it carries out by delegating. The
-supervisor has almost no domain tools of its own, so a skill body that says "search the web for X, then
-write the file" describes work the supervisor cannot do. "Delegate the lookup to the `researcher` role,
-then have the `coder` role write the file" describes work it can. Naming the role you expect is the
-single most useful thing a skill body can do.
+Write the procedure from the entry agent's point of view, as a plan it carries out with the tools it
+declares plus delegation. In the shipped config that agent holds only cross-cutting toolsets, so a skill
+body saying "search the web for X, then write the file" describes work it cannot do. "Delegate the lookup
+to `researcher`, then have `coder` write the file" describes work it can. Naming the agent you expect is
+the single most useful thing a skill body can do. If you have edited `[agents.*]` to give the entry agent
+domain toolsets of its own, write to what you gave it.
 
-Skill *scripts* are the exception, and a deliberate one: a `{skill}__{stem}` tool is mounted on the
-supervisor, so a script is the one way to give the supervisor a concrete capability of its own without
-touching the core.
+Skill *scripts* are the exception, and a deliberate one: a `{skill}__{stem}` tool is mounted on the entry
+agent, so a script is one way to give it a concrete capability of its own without touching the core or
+installing a toolset.
 
 ## Security
 
@@ -126,9 +149,10 @@ Review `~/.kokua/data/skills/*/scripts/` the way you would review anything else 
 
 ## See also
 
-- [Set up a toolset](set-up-toolsets.md): how tools reach a *worker*, which is the other half of the
-  picture a skill body needs.
+- [Set up a toolset](set-up-toolsets.md): how any capability reaches any agent, which is the other half of
+  the picture a skill body needs.
 - [Add an MCP service](add-mcp-services.md): the third source of capability.
-- [Architecture](../explanation/architecture.md#the-supervisors-tools): the supervisor's full toolset.
+- [Architecture](../explanation/architecture.md#how-an-agents-tools-resolve): how a declaration becomes
+  tools, and the shipped entry agent's full inventory.
 - AIMU: [use skills](https://saxman.info/aimu/how-to/use-skills/) for `SkillAgent`, the catalogue, and
   the full `SKILL.md` reference.

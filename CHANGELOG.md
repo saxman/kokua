@@ -14,11 +14,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
 - `src`-layout `kokua` package with two console scripts: `kokua` runs the selected front end (default
   `cli`), `kokua-web` is a convenience for `kokua --frontend web`. Both route through `kokua.cli`, so
   both run the AIMU preflight described under [Diagnostics](#diagnostics-and-error-reporting).
-- **Plugin system** (`kokua.plugins`). Front ends and tool-packs are discovered through the
-  `kokua.frontends` and `kokua.tools` entry-point groups. The built-in `cli` / `web` front ends and the
-  five built-in tool-packs register exactly as a third party's package would, so if the built-in path
+- **Plugin system** (`kokua.plugins`). Front ends and toolsets are discovered through the
+  `kokua.frontends` and `kokua.toolsets` entry-point groups. The built-in `cli` / `web` front ends and
+  the five built-in toolsets register exactly as a third party's package would, so if the built-in path
   and the plugin path ever diverge, the plugin path is the broken one. Inspect with `--list-frontends`
-  and `--list-tool-packs`; disable discovery with `--no-plugins`.
+  and `--list-toolsets`; disable discovery with `--no-plugins`.
 - The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
   `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
 
@@ -112,37 +112,73 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
 
 ### Agents and tools
 
-- **One agent shape.** Every agent is a lean supervisor: it mounts the cross-cutting tools (skills, MCP
-  management, memory, config, scheduling, conversation reads), the `time` group, and `spawn_subagent`,
-  and nothing else. Specialized work is delegated to workers whose roles carry the scoped toolsets,
-  which keeps the advertised per-request tool set small. Two consequences worth knowing:
-  `[tools].groups` is a **ceiling on what workers may draw from**, not the assistant's own toolset, and
-  an installed tool-pack or configured MCP server **reaches nothing until some role names it**.
-- **Sub-agent roles come from `config.toml` only.** `researcher`, `coder`, and `generalist` ship as
-  live tables in `config.example.toml` -- which is what `kokua config init` writes -- and are edited,
-  deleted, or added to like any other setting. Because roles exist nowhere else and a supervisor with
-  no workers cannot browse, read a file, or compute, **Kokua refuses to start without a config file, or
-  with one that defines no roles**, naming `kokua config init` in the error rather than running
+- **Every agent is declared whole in `config.toml`.** One `[agents.<name>]` table per agent, carrying a
+  `description` (the label a delegator sees), a `system_message`, a `tools` list of toolset names, and a
+  `delegates_to` list. `[assistant].agent` names the **entry agent**, the one you talk to and the root of
+  the delegation graph. `assistant`, `researcher`, `coder`, and `generalist` ship as live tables in
+  `config.example.toml`, which is what `kokua config init` writes, and are edited, deleted, or added to
+  like any other setting. Nothing about an agent is defaulted in code, so **Kokua refuses to start
+  without a config file, with one that defines no agents, or with one whose `[assistant].agent` names no
+  table**, naming a remedy that works from that state -- a config file that exists but declares no
+  agents is told to add an `[agents.<name>]` table by hand or overwrite it with `kokua config init
+  --force`, since plain `kokua config init` refuses a file that is already there -- rather than running
   something that looks alive and cannot work.
-- **`spawn_subagent(agent_type, task)`** is typed. Each role clones the active model with its own tool
-  subset: built-in `groups` intersected with the enabled `[tools].groups`, plus `tool_packs` and
-  `mcp_servers` (by a server's optional `name` or its URL), with the parent-only memory / skills / MCP
-  management withheld. Independent spawns in one turn run concurrently (`[subagents] concurrent`,
-  default on). A worker's gated-tool call is routed to the parent for approval and is never run
-  unattended.
-- **Every agent can tell the time.** AIMU's clock and timezone converter form a `time` group, in the
-  default set (`web,fs,compute,time,misc`). It is mounted on the supervisor whole and added to *every*
-  sub-agent role on top of that role's own `groups`, since a worker that cannot resolve "by tomorrow
-  morning" is broken whatever its domain. That addition is gated on `time` being in `[tools].groups`,
-  so dropping it there still removes it everywhere. Note that a model with a calculator is not the same
-  as one that uses it: the supervisor deliberately has no `calculate` / `execute_python` of its own and
-  must delegate arithmetic to a worker.
-- **The assistant can look across your other conversations.** Three read-only supervisor tools:
+- **One namespace of named toolsets.** A *toolset* is one named capability an agent can declare: a name,
+  a description, a `build(ctx)` returning tool callables, and optional `guidance`. Every provider lands
+  in one namespace -- AIMU's built-in tool groups plus its two stores and skills, Kokua's own `config` /
+  `conversations` / `mcp-admin` / `scheduling`, each installed plugin toolset, and each configured MCP
+  server by its (now required) `name` -- so a `tools` list says `"stocks"`, never `"mcp:stocks"`, and a
+  capability can change provider without touching an agent. The cost is paid at startup: two providers
+  claiming one name is a `ConfigError` naming both. `kokua --list-toolsets` prints the whole registry
+  grouped by provider, and is the discovery command for the namespace.
+- **A capability is declared, never defaulted.** There is no code path that adds a tool an agent did not
+  name, and no flag that can disagree with a declaration. Not even the clock: `time` is a toolset that
+  every agent wanting one declares. The state a toolset draws on is a lazy property on one `LiveState`, so
+  two agents declaring one toolset share one store rather than opening two, and the memory and document
+  stores are opened because some agent declared them and not otherwise.
+  An unknown name raises rather than being dropped, since a dropped name is a declaration silently
+  overruled.
+- **`spawn_subagent(agent_type, task)`** is typed, and a non-empty `delegates_to` is the whole switch
+  for it: that agent gets a delegate offering exactly the agents it names, each cloning the active model
+  with the tools its own table declares. Delegation nesting is Kokua's rather than AIMU's `max_depth`,
+  so an agent you delegate to that delegates in turn gets its own menu of its own targets; the graph must
+  be acyclic and a cycle fails startup printing the cycle as a path. Independent spawns in one turn run
+  concurrently (`[assistant] concurrent_tools`, default on). A worker's gated-tool call is routed to the
+  user for approval and is never run unattended.
+- **Guidance travels with the capability.** Each toolset carries the prompt text that makes the model use
+  it, appended to any agent holding it, so installing a toolset brings its instructions and removing one
+  takes them away. An agent's system message is its own opener (falling back to
+  `[assistant].system_message`, then the built-in default), then its toolsets' guidance in declared
+  order, then the delegation instructions when it delegates, and finally a "you are a lean supervisor,
+  you MUST delegate" clause only when every toolset it declared is marked `cross_cutting` -- something an
+  agent holds to manage itself rather than to do domain work. `cross_cutting` decides that one sentence
+  and nothing else: it is **not** an authorization boundary, and an agent declaring `config` really does
+  get `update_config`. The boundaries are that `[agents.*]` is hand-edit only and that `confirm_tools`
+  gates by tool name whoever calls it.
+- **`--system` overrides the entry agent's opener for that run**, winning outright over its declared
+  `system_message` (and over the `[assistant].system_message` fallback), since the message a person is
+  talking to is a prompt, not the capability `[agents.*]` is the single source of. A worker's own
+  declared opener is untouched: the flag only ever reaches the agent the user is talking to.
+- **The shipped config, not the code, is what makes the assistant lean.** `[agents.assistant]` declares
+  the cross-cutting toolsets and no domain tools, delegating web, file, and compute work, which keeps the
+  always-on agent's tool context small; give it `"compute"` and it runs Python itself. The one structural
+  restriction is `skills`, marked entry-point-only because a spawned worker is a plain AIMU `Agent`
+  rather than a `SkillAgent`, so declaring it elsewhere fails startup instead of producing a worker whose
+  skill tools quietly do nothing.
+- **Startup validates the whole graph before touching anything.** An unknown toolset name (with the
+  valid names listed), a duplicate provider name, a missing or absent entry agent, no agents at all, an
+  unknown delegation target, a delegation cycle, and `skills` on a non-entry agent each fail before the
+  session store is opened or any MCP server connected, so a bad config leaves nothing written and nothing
+  connected. One agent shape backs this: `wire_agent` builds any agent from its declaration, selecting
+  its toolsets once and feeding the same list to both its tools and its prompt.
+- **The assistant can look across your other conversations.** The `conversations` toolset, three
+  read-only tools:
   `list_conversations` (ids, last-active times, message counts, titles), `read_conversation` (one
   transcript as plain text), and `search_conversations` (case-insensitive text across every saved
   conversation, with snippets). So "what did we decide about the deployment last week?" is answerable,
-  and context from a past thread can be carried into a `spawn_subagent` task. They are supervisor-only,
-  like memory and skills: a worker shares no history and has no conversation identity.
+  and context from a past thread can be carried into a `spawn_subagent` task. The shipped config gives it
+  to the entry agent and to no worker, and a test pins that: a worker shares no history and has no
+  conversation identity, so the capability would widen a spawn's blast radius for nothing.
 
   Reads come from the last persisted snapshot, never a rebuilt agent -- building one to read it would
   allocate a model client, re-expand every stored image, and evict live agents from the LRU cache, and
@@ -156,19 +192,26 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
   message. Search matches the phrase first and falls back to all-of-these-words within one message,
   saying which it used.
 - **Agent tools are findable.** A module defining an `@aimu.tool` is either a subsystem's `tools.py`
-  (`core/`, `config/`, `mcp/`, `scheduling/`) or a tool-pack under `toolpacks/`, so
-  `grep -rl '@tool' src/kokua/` finds exactly those. Because about half the supervisor's 27 tools come
-  from AIMU and cannot be grepped here at all,
-  [docs/explanation/architecture.md](docs/explanation/architecture.md#the-supervisors-tools) carries the
-  full inventory with the factory that builds each, and `tests/core/test_build.py` pins it as an
-  **exact set**: adding a supervisor tool fails the suite until the table is updated in the same commit,
-  and a tool-pack leaking onto the supervisor fails it too, naming the offender.
-- **Skills**: AIMU's skill authoring plus runnable skill scripts.
-- **Memory**, on by default: a `SemanticMemoryStore` for facts and a `DocumentStore` for documents,
-  shared across conversations. Concurrent-turn safety lives inside AIMU's stores (a re-entrant per-store
-  lock) rather than a Kokua-side wrapper.
+  (`core/`, `config/`, `mcp/`, `scheduling/`) or a toolset module under `toolsets/`, so
+  `grep -rl '@tool' src/kokua/` finds exactly those; each of those four `tools.py` modules also exports the
+  `TOOLSET` that wraps its factory, indexed in `toolsets/core.py`. Because about half the 27 tools the
+  shipped entry agent holds come from AIMU and cannot be grepped here at all,
+  [docs/explanation/architecture.md](docs/explanation/architecture.md#how-an-agents-tools-resolve) carries
+  the full inventory with the factory that builds each and the toolset it is declared as, and
+  `tests/core/test_build.py` pins it as an **exact set**: adding a tool to the entry agent fails the suite
+  until the table is updated in the same commit, and a plugin toolset leaking onto it fails too, naming the
+  offender.
+- **Skills**: AIMU's skill authoring plus runnable skill scripts, as the `skills` toolset.
+- **Memory**: a `SemanticMemoryStore` for facts (`memory`) and a `DocumentStore` for documents
+  (`documents`), shared by every agent that declares them. Concurrent-turn safety lives inside AIMU's
+  stores (a re-entrant per-store lock) rather than a Kokua-side wrapper.
 
-### Built-in tool-packs
+### Built-in plugin toolsets
+
+These five register through the `kokua.toolsets` entry-point group exactly as a third party's package
+would, so they appear in `--list-toolsets` alongside anything you install -- grouped under their own
+`built-in toolset` provider rather than `plugin`, which is what keeps the unreferenced-toolset warning
+(below) from firing on all five of them by default, since the shipped `config.example.toml` names none.
 
 - **`pdf`**: `markdown_to_pdf` renders Markdown to a PDF (`fpdf2` + `markdown`, both pure-Python, no
   system libraries) in `data/downloads/`. The web front end serves that folder at
@@ -185,13 +228,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
 - **`aimu_agents`**: mounts AIMU's prebuilt `CodeReviewAgent`, `ResearchReportAgent`, and
   `ContentCreationAgent` as the tools `code_review`, `research_report`, and `create_content`. It exists
   mainly as the worked example of wiring an AIMU-built agent into Kokua: every `Runner` exposes
-  `.run(task) -> str`, so a tool-pack is the entire bridge and the core gains no new surface. Each call
+  `.run(task) -> str`, so a toolset is the entire bridge and the core gains no new surface. Each call
   builds a fresh agent, reading `config.model` at call time so a runtime model switch reaches it. The
   caveats are documented in the module: the prebuilts are synchronous, so a nested run gets no sub-agent
   card, no `/stop`, and no approval gate on its workers.
 - **`example`**: the template for writing your own.
 
-Nothing a pack contributes is mounted until a role asks for it with `tool_packs = [...]`.
+Nothing a toolset contributes reaches an agent until that agent's `tools` list names it, and startup logs
+a warning for a third-party plugin toolset (or a configured MCP server) nothing names, since it was
+provisioned specifically to be reachable -- these five ship regardless of what any agent declares, so an
+unnamed one among them is not that kind of news; see "Startup warns about a provisioned toolset" below.
 
 ### Proactive work: scheduled tasks
 
@@ -269,6 +315,28 @@ Nothing a pack contributes is mounted until a role asks for it with `tool_packs 
   sits at its built-in default, documented.
 - **Strict parsing**: an unknown key or non-table section fails fast with a `ConfigError` naming the
   key, so typos and removed keys surface immediately instead of being silently ignored.
+- **`[agents.*]` describes every agent, and replaces the per-role vocabulary this line of development
+  went through.** Nothing has been released, so there is nothing to migrate from, but a config or a
+  script written against an earlier commit of this development line hits the following, and a config key
+  in the left column fails with a message naming its replacement rather than a generic unknown-key error:
+
+  | Was | Now |
+  |---|---|
+  | the whole `[tools]` section (`groups`, and `--tools` overriding it) | each agent lists what it holds in `[agents.<name>].tools` |
+  | `[subagents.roles.<name>]` | `[agents.<name>]` |
+  | a role's `groups` / `tool_packs` / `mcp_servers` | one flat `tools` list over the single namespace |
+  | `[subagents].concurrent` | `[assistant].concurrent_tools` |
+  | `[assistant].memory` (and `--memory` / `--no-memory`) | declare the `memory` and `documents` toolsets on an agent |
+  | an implicit `time` group on every agent | `"time"` in the `tools` list of each agent that wants a clock |
+  | an optional `[[mcp.server]].name` | required: it is how the server enters the namespace |
+
+  `[assistant].agent` is the new key naming the entry agent. The `--tools`, `--memory` and `--no-memory`
+  flags are gone rather than deprecated, since a flag that could contradict a declaration is exactly what
+  the declarative model rules out; argparse rejects them as unrecognized. `--list-tool-packs` became
+  `--list-toolsets` and widened: it prints the entire registry grouped by provider, not just the installed
+  plugins, and reads the config file first because the registry depends on it. The plugin contract renamed
+  with the concept: `ToolPack` is `Toolset` (with `build(ctx)` in place of `build(config)`), the
+  entry-point group `kokua.tools` is `kokua.toolsets`, and `src/kokua/toolpacks/` is `src/kokua/toolsets/`.
 - **One runtime-settings table.** `config/table.py`'s `RUNTIME_SETTINGS` is the single declaration of
   what can change without a restart, driving the TOML schema, the panel sanitizer, the hot-apply set,
   the live-apply loop, the channel mirroring, and the persist path at once. Adding a setting is one
@@ -276,9 +344,11 @@ Nothing a pack contributes is mounted until a role asks for it with `tool_packs 
 - **The assistant can inspect and repair its own configuration**: `read_config` / `update_config`.
   `update_config` validates and coerces the value, applies hot-appliable keys immediately and persists
   only after a successful apply (so a bad model is not saved), and reports "restart required" for
-  everything else. A blocklist -- `[security] confirm_tools`, `[email] to`, `[paths] data_dir` -- can
-  never be changed by the tool, only by hand. `update_config` is in the default `confirm_tools` list, so
-  each write goes through the approval prompt.
+  everything else. A blocklist -- `[security] confirm_tools`, `[email] to`, `[paths] data_dir`, and the
+  whole `[agents.*]` section (matched by section prefix, since agent names cannot be enumerated ahead of
+  time) -- can never be changed by the tool, only by hand: `update_config` is a tool the assistant holds,
+  so a writable agent table would let it widen its own reach. `update_config` is also in the default
+  `confirm_tools` list, so each write it *is* allowed goes through the approval prompt.
 - **Remote and custom model endpoints.** `[assistant] model` accepts AIMU's extended
   `provider:model_id[@base_url][;flags]` form, so Kokua can target a remote OpenAI-compatible server or
   a model id not in AIMU's catalog, e.g.
@@ -293,10 +363,19 @@ Nothing a pack contributes is mounted until a role asks for it with `tool_packs 
 
 - Remote MCP servers from a startup `--mcp <url>` (repeatable) or `[[mcp.server]]` tables in
   `config.toml`, plus `add_mcp_server` / `remove_mcp_server` at runtime. Servers connect before the
-  first agent is built so config-declared servers reach workers, and a runtime add or remove rebuilds
-  each live agent's `spawn_subagent` so roles pick the server up or drop it immediately.
-- **Per-server bearer tokens via environment variables.** Each `[[mcp.server]]` takes a required `url`,
-  an optional `name`, and an optional `token_env` naming the variable holding that server's token, read
+  first agent is built so config-declared servers reach the agents that name them, and a runtime add or
+  remove rebuilds each live agent's `spawn_subagent` so its workers pick the server up or drop it
+  immediately.
+- **Each configured server is a toolset, named by its `name`.** `name` is required: it is how the server
+  enters the one namespace an agent declares against, so a server nothing can name reaches nothing. A
+  runtime `add_mcp_server`, and the startup `--mcp <url>` flag, both derive a name from the server's host
+  and disambiguate it (shared logic) against every other name already claimed -- on file for
+  `add_mcp_server`, across the flag's own URLs for `--mcp` -- so neither can produce a config, or a set of
+  servers in one run, the registry's collision check would reject. That derived name still reaches no
+  agent until a human puts it in an `[agents.*]` table, since that section is hand-edit only: neither can
+  grant itself the capability.
+- **Per-server bearer tokens via environment variables.** Each `[[mcp.server]]` takes a required `url`, a
+  required `name`, and an optional `token_env` naming the variable holding that server's token, read
   at startup so the secret stays out of `config.toml`. A `token_env` whose variable is unset logs a
   warning and connects tokenless rather than aborting startup.
 - **OAuth**: `add_mcp_server` starts the OAuth flow for a server that signals its auth requirement with
@@ -304,9 +383,11 @@ Nothing a pack contributes is mounted until a role asks for it with `tool_packs 
   cannot complete because the server lacks dynamic client registration, it returns an actionable "provide
   a bearer token and add the server again" message instead of a raw `OAuthRegistrationError`, and its
   docstring tells the assistant to relay that, ask for a token, and retry with `bearer_token`.
-- **Startup warns about a server no role names.** Since the supervisor mounts no MCP callables, such a
-  server connects, spends its token on the handshake, and is then reachable by nobody. That is now a
-  warning naming the server.
+- **Startup warns about a provisioned toolset no agent names**, which covers a configured server as well
+  as a third-party plugin: it connects, spends its token on the handshake, and is then reachable by
+  nobody. Built-in AIMU and core toolsets, and the five built-in plugin toolsets above, are excluded from
+  the warning (told apart from a third party's by which distribution registered the entry point), since
+  they ship whether or not anything declares them.
 
 ### Images
 
@@ -390,7 +471,7 @@ notice on startup.
 ### Internals and development
 
 - `src/kokua/` is grouped by subsystem -- `core/`, `config/`, `planning/`, `mcp/`, `scheduling/`,
-  `channels/`, `frontends/`, `toolpacks/` -- and `tests/` mirrors it exactly.
+  `channels/`, `frontends/`, `toolsets/` -- and `tests/` mirrors it exactly.
 - `Assistant` is a composition root and the serve loop; it delegates to `ConversationBook` (store +
   agent cache + active pointer), `TurnRunner`, `HumanGate`, `SettingsApplier`, and `ChannelUI`.
   `ChannelUI` is the one adapter that probes each optional channel capability once and gives every rich
@@ -400,10 +481,10 @@ notice on startup.
   [docs/explanation/design-principles.md](docs/explanation/design-principles.md); the architecture
   narrative is in [docs/explanation/architecture.md](docs/explanation/architecture.md).
 - Task-oriented guides for the three ways to add capability are in
-  [docs/how-to/](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (tool groups,
-  sub-agent roles, writing a tool-pack), [add a skill](docs/how-to/add-skills.md), and
-  [add an MCP service](docs/how-to/add-mcp-services.md). All three converge on the same rule: nothing
-  reaches an agent until a `[subagents.roles.*]` table names it.
+  [docs/how-to/](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace,
+  declaring an agent, writing a toolset), [add a skill](docs/how-to/add-skills.md), and
+  [add an MCP service](docs/how-to/add-mcp-services.md). All three converge on the same rule: a capability
+  is declared, never defaulted, and nothing reaches an agent until an `[agents.*]` table names it.
 - **Verifiable without a model.** The default test suite is mock-only: no model, no network, no keys.
   This is why the model client is injectable and the builders are free functions. Client-side page JS is
   covered by an opt-in Playwright suite (`pytest -m e2e`) driving the real `index.html` in headless

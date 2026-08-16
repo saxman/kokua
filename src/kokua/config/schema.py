@@ -1,7 +1,7 @@
 """Assistant configuration and the default prompts.
 
 `AssistantConfig` is plain data describing one assistant: which model, where its state lives,
-which tool groups and MCP servers to load, whether memory is on, and how it presents itself.
+which agents exist and what each one holds, which MCP servers to load, and how it presents itself.
 The CLI builds one of these from flags; tests build them directly.
 """
 
@@ -13,71 +13,52 @@ from typing import Optional
 
 from kokua.config import paths as paths
 
-DEFAULT_SYSTEM_MESSAGE = (
-    "You are a personal assistant running on the user's own machine. Be concise and helpful. "
-    "When the user teaches you a repeatable procedure worth remembering, call `author_skill` to save "
-    "it as a reusable skill; name skills in kebab-case (lowercase words joined by hyphens, e.g. "
-    "'weekly-review'), never with underscores or spaces. When a procedure can be automated, call "
-    "`add_skill_script` to attach a runnable Python or shell script to a skill; the script becomes a "
-    "tool you can run immediately, even in the same turn. If a script fails, fix it by calling "
-    "`add_skill_script` again with the SAME filename to overwrite it (a different filename just "
-    "creates a duplicate and leaves the broken script). Scripts run with full access to this "
-    "machine, so only automate what the user asked for."
-)
+DEFAULT_SYSTEM_MESSAGE = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 
-# Always appended to the system message: the assistant is a supervisor, and delegation is the only way
-# it reaches a domain tool. The "you have almost no direct tools" line is load-bearing -- without it the
-# model tries to answer web/file/code questions from memory instead of spawning a worker that actually
-# has the tools. It still answers trivial and conversational requests itself, keeping memory, skills,
-# config, scheduling, MCP-management, past conversations, and the clock. The cross-conversation sentence
-# is load-bearing too: no worker has those tools, so without it "what did we decide last week?" gets
-# delegated to a worker that cannot possibly answer.
-SUPERVISOR_GUIDANCE = (
-    " You are a lean supervisor. Answer trivial or conversational requests directly using your own "
-    "tools (date/time, memory, skills, config, scheduling, MCP management, reading past conversations). "
-    "For any specialized work -- web research, reading or writing files, running code, or anything "
-    "needing a domain tool -- you have almost no direct tools, so you MUST delegate by calling "
-    "`spawn_subagent(agent_type, task)`: pick the worker whose role fits, give it a complete, "
-    "self-contained task (it shares no history with you), then relay or synthesize its answer for the "
-    "user. Emit several `spawn_subagent` calls when subtasks are independent. You can also see across "
-    "the user's other chat conversations with `list_conversations`, `read_conversation`, and "
-    "`search_conversations`, which read their saved transcripts; they are read-only, and this turn is "
-    "not saved yet, so use your own context for the conversation you are in."
-)
 
-# Appended to the system message when memory is enabled, so the model actually uses the two stores
-# (without explicit direction the tools sit unused). Two distinct stores: short facts about the user
-# (semantic recall) vs. longer reference documents.
-MEMORY_GUIDANCE = (
-    " You have a persistent memory across conversations. When the user shares a durable fact about "
-    "themselves or a preference worth remembering, call `store_memory` to save it, and call "
-    "`search_memories` to recall such facts when they would help. For longer reference material the user "
-    "provides (notes, documents), call `save_document` with a descriptive path and `search_documents` to "
-    "find relevant passages later. Do not store transient chit-chat."
-)
+@dataclass
+class AgentConfig:
+    """One agent, declared whole in ``config.toml``.
+
+    ``tools`` names toolsets in the single registry namespace, so an entry may be an AIMU built-in
+    group, a plugin, or a configured MCP server, and the agent does not say which. A non-empty
+    ``delegates_to`` is what makes this agent a delegator: there is no separate switch that could
+    disagree with it.
+    """
+
+    description: str = ""
+    system_message: str = ""
+    tools: list[str] = field(default_factory=list)
+    delegates_to: list[str] = field(default_factory=list)
 
 
 @dataclass
 class MCPServerConfig:
     """A remote MCP server to connect at startup.
 
-    ``token_env`` names an environment variable holding a bearer token, resolved at connect time so
-    the secret stays out of the config file. It is unset for an unauthenticated server (or one that
-    uses the OAuth flow, which triggers on an auth challenge).
+    ``name`` is how the server enters the toolset namespace, so an agent declares it exactly as it
+    declares any other capability. It is required: a server no agent can name reaches no agent.
 
-    ``name`` is an optional friendly label a sub-agent role can reference in its ``mcp_servers`` list
-    (instead of the full URL) to be given this server's tools; unset means "reference by URL".
+    ``token_env`` names an environment variable holding a bearer token, resolved at connect time so
+    the secret stays out of the config file. It is unset for an unauthenticated server, or one using
+    the OAuth flow that triggers on an auth challenge.
     """
 
     url: str
+    name: str
     token_env: Optional[str] = None
-    name: Optional[str] = None
 
 
 @dataclass
 class AssistantConfig:
     model: Optional[str] = None
     system_message: str = DEFAULT_SYSTEM_MESSAGE
+    # Set only by `--system` (never by config.toml, which has no key for it). `system_message` above
+    # already has a value whether or not anyone set it -- its own default -- so "was --system passed"
+    # cannot be answered by looking at that field; this one is None exactly when it wasn't. Wins over the
+    # entry agent's declared `system_message` in assemble_system_message, since a prompt is not the
+    # capability this design made [agents.*] the single source of; a worker's declared opener is untouched.
+    system_message_override: Optional[str] = None
     # Surface the model's reasoning and tool calls in the channel, not just the final answer.
     show_thinking: bool = True
     show_tools: bool = True
@@ -97,13 +78,11 @@ class AssistantConfig:
     # (prose reasoning + verdict), executor, and every revision -- under labeled phase headers, showing
     # every intermediate version. Overrides result_review's "hide until vetted" gate. Off by default.
     show_reasoning: bool = False
-    # AIMU built-in tool groups to expose (see build._TOOL_GROUPS; "all"/"none" also accepted).
-    tools: list[str] = field(default_factory=lambda: ["web", "fs", "compute", "time", "misc"])
     # Remote MCP servers to connect at startup; each may name an env var holding its bearer token.
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     # Email (SMTP send). Recipients are LOCKED to email_to: the send_email tool takes no recipient, so
     # the assistant can only ever email the user. The password is read from KOKUA_EMAIL_PASSWORD (env),
-    # never TOML. The email tool-pack self-gates: it offers no tool unless host + email_to are set and
+    # never TOML. The email toolset self-gates: it offers no tool unless host + email_to are set and
     # that env var is present.
     email_host: Optional[str] = None
     email_port: int = 587
@@ -117,18 +96,15 @@ class AssistantConfig:
     # config.toml, so this is the single effective layer. Kept as a plain dict so provider-specific keys
     # pass through untouched.
     generation: dict = field(default_factory=dict)
-    # Persistent memory: a SemanticMemoryStore for facts + a DocumentStore for documents. On by default.
-    memory: bool = True
-    # Load tool-pack plugins discovered via the "kokua.tools" entry-point group.
+    # Load toolset plugins discovered via the "kokua.toolsets" entry-point group.
     load_plugins: bool = True
-    # Sub-agent roles (AIMU agent_types), read whole from [subagents.roles.*]. This is the entire menu
-    # spawn_subagent offers AND the switch that turns delegation on: nothing is defaulted in code, and
-    # there is no separate on/off flag to contradict it. At least one role is required, because the
-    # assistant is always a lean supervisor and a supervisor with no workers cannot do specialized work
-    # at all; Assistant.create rejects an empty set rather than starting something useless.
-    subagent_roles: dict[str, dict] = field(default_factory=dict)
-    # Run independent tool calls in one turn concurrently (so several spawn_subagent calls overlap).
-    subagents_concurrent: bool = True
+    # Every agent, keyed by name, read whole from [agents.*]. Nothing is defaulted in code: an agent's
+    # capability is exactly what its table declares, and a capability no agent names reaches nothing.
+    agents: dict[str, AgentConfig] = field(default_factory=dict)
+    # The agent the user talks to, and the root of the delegation graph.
+    entry_agent: str = "assistant"
+    # Run independent tool calls in one turn concurrently, so several delegations overlap.
+    concurrent_tools: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
     confirm_tools: list[str] = field(

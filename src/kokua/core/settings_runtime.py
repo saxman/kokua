@@ -22,8 +22,9 @@ from aimu import aio
 
 from kokua.config import store as config_store
 from kokua.config import table as runtime_settings
-from kokua.core.build import build_model_client, resolve_system_message
+from kokua.core.build import build_model_client, entry_agent_system_message
 from kokua.config import AssistantConfig
+from kokua.toolsets.context import LiveState
 
 
 def layer_generate_kwargs(client, base: dict, config: AssistantConfig) -> None:
@@ -53,6 +54,7 @@ class SettingsApplier:
         agent_for: Callable[[str], object],
         active_agent: Callable[[], object],
         cancel_active_turn: Callable[[], Awaitable[None]],
+        state: Callable[[], LiveState],
     ):
         self._config = config
         self._ui = ui
@@ -62,6 +64,10 @@ class SettingsApplier:
         self._agent_for = agent_for
         self._active_agent = active_agent
         self._cancel_active_turn = cancel_active_turn
+        # Lazy accessor rather than the object itself: constructed before Assistant.create builds the
+        # LiveState this needs (see the same pattern on live_agents/cached_ids/agent_for above), so a
+        # closure that reads it at call time is the only shape that works.
+        self._state = state
         # The active client's provider built-in generate kwargs, snapshotted before any override is
         # layered on, so a settings change (or a cleared field) can rebuild from a clean base.
         self._base_generate_kwargs: dict = {}
@@ -185,7 +191,7 @@ class SettingsApplier:
         is swapped, and no partial swap happens in practice. Also updates the client factory so
         conversations built later use the new model.
         """
-        system = resolve_system_message(self._config)
+        system = entry_agent_system_message(self._config, self._state())
         for conversation_id in self._cached_ids():
             agent = self._agent_for(conversation_id)
             new_client = aio.client(model, system=system)
@@ -196,4 +202,10 @@ class SettingsApplier:
         self._base_generate_kwargs = dict(self._active_agent().model_client.default_generate_kwargs)
         # Later-built conversations go through build_model_client (so a since-broken model raises
         # ModelClientError, not a raw ValueError/TypeError) and get the same layered generation kwargs.
-        self.layered_factory(lambda conversation_id: build_model_client(self._config))
+        # Recomputed per call (not the `system` snapshotted above) so a conversation built after another
+        # runtime change (e.g. a config edit) still gets the current message, not this switch's.
+        self.layered_factory(
+            lambda conversation_id: build_model_client(
+                self._config, entry_agent_system_message(self._config, self._state())
+            )
+        )

@@ -39,6 +39,25 @@ async def _await_value(value):
     return value
 
 
+def _offline_until_connected(monkeypatch, tool_name: str = "get_quote") -> None:
+    """Patch the one connect seam so a configured server fails at boot and succeeds on every later try.
+
+    Declared-but-offline is what keeps a runtime-connect test honest. A server an agent can name has to
+    be in ``[[mcp.server]]`` to be in the registry at all, but that also means the boot reconnect
+    connects it -- so a later ``add_mcp_server`` would answer "Already connected", rebuild nothing, and
+    leave every assertion about the rebuild passing for the wrong reason.
+    """
+    attempts = {"count": 0}
+
+    async def fake_connect(url, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("unreachable at boot")
+        return _FakeMCP([_fake_mcp_tool(tool_name)]), "none"
+
+    monkeypatch.setattr("kokua.mcp.servers.connect_mcp", fake_connect)
+
+
 class _SeedsSystemMessage:
     """Mixin: seed the system message into an empty transcript, the way the real clients do.
 

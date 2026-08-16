@@ -12,7 +12,7 @@ from kokua.core.messages import compact_message_images, expand_message_images
 from kokua.channels.cli import CLIChannel
 from kokua.channels.web import WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
-from tests.channels import example_subagent_roles
+from tests.channels import example_agents
 from kokua.frontends.web import build_app
 
 # A 1x1 PNG, the smallest valid image; used to exercise the real encode/decode paths.
@@ -23,7 +23,7 @@ _PNG_DATA_URL = (
 
 
 def _config(tmp_path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles()}
+    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -187,11 +187,11 @@ def test_images_route_serves_and_guards(tmp_path):
     assert client.get("/images/sub/evil.png").status_code == 404  # traversal blocked by the route converter
 
 
-# --- image generation toolpack ----------------------------------------------------------------
+# --- image generation toolset -----------------------------------------------------------------
 
 
-def test_image_toolpack_gated_on_model_env(tmp_path, monkeypatch):
-    from kokua.toolpacks.image import build
+def test_image_toolset_gated_on_model_env(tmp_path, monkeypatch):
+    from kokua.toolsets.image import build
 
     monkeypatch.delenv("AIMU_IMAGE_MODEL", raising=False)
     assert build(_config(tmp_path)) == []  # no model configured -> no tool offered

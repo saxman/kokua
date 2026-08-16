@@ -1,22 +1,21 @@
 """Agent tools over core runtime state. Currently: reading across the user's other conversations.
 
 This is `core/`'s entry in the ``<subsystem>/tools.py`` convention (see ``docs/explanation/
-architecture.md`` for the full inventory of the supervisor's toolset and where each group comes from).
+architecture.md`` for the full inventory of the entry agent's toolset and where each group comes from).
 A tool group belongs here when it needs live objects the ``core/`` composition root owns and no other
 subsystem does; anything scoped to config, scheduling, or MCP goes in that subsystem's ``tools.py``
 instead.
 
 ``make_conversation_tools`` builds ``list_conversations``, ``read_conversation``, and
-``search_conversations``, which let the supervisor answer "what did we decide about X last week?" and
-carry context out of a past thread into a `spawn_subagent` task. They are supervisor-only, like the
+``search_conversations``, which let the entry agent answer "what did we decide about X last week?" and
+carry context out of a past thread into a `spawn_subagent` task. They are entry-agent-only, like the
 other cross-cutting tools: a worker shares no history and has no conversation identity, so "the user's
 other conversations" only means something to the agent the user is talking to.
 
-None of this can be a tool-pack: a ``ToolPack.build()`` receives only the ``AssistantConfig``, and these
-need the live ``ConversationBook`` and the assistant's ``turn_running``. That is app state, not
-settings, so no plugin can reach it. The shape is the one ``scheduling.make_scheduler_tools`` and
-``config.tools.make_config_tools`` already use: a factory closing over live objects, whose result
-``wire_agent`` appends to every per-conversation agent.
+Registered below as ``TOOLSET`` (see ``kokua.toolsets.core.CORE_TOOLSETS``), resolved through the same
+registry as every other capability: ``ToolsetContext`` carries the live ``ConversationBook`` and the
+assistant's ``turn_running`` off ``LiveState``, which is what lets ``make_conversation_tools`` build
+these without this module importing ``core.assistant`` directly.
 
 Every read goes through the session store, never ``ConversationBook.agent_for``; see
 ``make_conversation_tools`` for why, and for the two markers that keep a store snapshot honest.
@@ -32,6 +31,7 @@ from aimu.tools import tool
 
 from kokua.core.conversations import ConversationBook
 from kokua.core.messages import message_text
+from kokua.toolsets.registry import Toolset
 
 DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT = 30, 200
 DEFAULT_READ_CHARS, MAX_READ_CHARS = 8_000, 40_000
@@ -390,3 +390,18 @@ def make_conversation_tools(book: ConversationBook, turn_running: Callable[[str]
         return "\n".join(preamble + blocks)
 
     return [list_conversations, read_conversation, search_conversations]
+
+
+CONVERSATIONS_GUIDANCE = (
+    " You can see across the user's other chat conversations with `list_conversations`, "
+    "`read_conversation`, and `search_conversations`, which read their saved transcripts. They are "
+    "read-only, and this turn is not saved yet, so use your own context for the conversation you are in."
+)
+
+TOOLSET = Toolset(
+    name="conversations",
+    description="Read-only visibility across the user's other conversations.",
+    build=lambda ctx: make_conversation_tools(ctx.state.conversation_book, ctx.state.turn_running),
+    guidance=CONVERSATIONS_GUIDANCE,
+    cross_cutting=True,
+)

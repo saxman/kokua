@@ -15,6 +15,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 from aimu import aio
 
@@ -22,6 +23,33 @@ from kokua.config import AssistantConfig, MCPServerConfig
 from kokua.mcp.auth import Notify, build_chat_oauth
 
 logger = logging.getLogger(__name__)
+
+
+def name_from_url(url: str) -> str:
+    """A server name derived from its host, for a server added without one.
+
+    Names are the namespace an agent declares against, so every server needs one. A host is stable,
+    readable, and already unique per server in practice.
+    """
+    host = urlparse(url).hostname or "mcp"
+    return host.replace(".", "-")
+
+
+def disambiguate_name(base: str, used: set[str]) -> str:
+    """``base``, or ``base-2``, ``base-3``, ... -- the first not already in ``used``.
+
+    Two servers on one host (a service exposing several MCP endpoints under one domain) derive the same
+    ``name_from_url`` base; shared by every caller that turns a URL into a registry name (the
+    ``add_mcp_server`` config write and the ``--mcp`` CLI flag), so a config that names two collides the
+    same way regardless of which of them derived the name.
+    """
+    if base not in used:
+        return base
+    suffix = 2
+    while f"{base}-{suffix}" in used:
+        suffix += 1
+    return f"{base}-{suffix}"
+
 
 # Auth modes a server can be reconnected in at boot without a stored secret: unauthenticated, or the
 # persisted-token OAuth flow. A bearer-token server is session-only (its secret is never written to
@@ -126,10 +154,10 @@ async def connect_mcp(
 async def attach_server(connections: list, url: str, client: Any, auth_mode: str) -> list[str]:
     """Record a connected server and return the names of the tools it makes usable.
 
-    The server's tools are NOT mounted on any agent: the supervisor carries no MCP callables, and a
-    server reaches a worker only through a role that names it, via the rebuilt ``spawn_subagent``. The
-    connection stores the tool callables so a lazily-built agent can resolve its roles against them
-    without re-fetching. The full tool-name list is returned for the caller's message.
+    This mounts nothing on any agent; it only records the connection. An agent reaches the server by
+    naming it in its ``[agents.*].tools``, which is resolved when that agent (or a sub-agent's spec) is
+    built, so recording the callables here is what lets a later build resolve against them without
+    re-fetching. The full tool-name list is returned for the caller's message.
     """
     new_tools = await client.as_tools()
     added_names = [fn.__name__ for fn in new_tools]
@@ -178,8 +206,10 @@ async def reconnect_mcp_servers(
     All servers now live in config.toml ``[[mcp.server]]`` (both hand-authored bearer-token servers and
     runtime-added ones the tool recorded there), so this is a single pass over ``config.mcp_servers``. A
     connect failure logs and continues so one unreachable server can't stop the assistant from starting.
-    Each connection is recorded in ``connections`` (so ``build_agent`` attaches it to conversations built
-    later) and fanned out to whatever agents are live at boot (initially just the active one).
+    Each connection is recorded in ``connections`` (so an agent naming it resolves against it when built,
+    including conversations built later) and fanned out to whatever agents are live at boot (initially just
+    the active one). Boot connects before the first agent is built, which is what lets a config-declared
+    server reach an agent's own tool list at all, rather than only its next spawned sub-agent.
     """
     for server in config.mcp_servers:
         try:

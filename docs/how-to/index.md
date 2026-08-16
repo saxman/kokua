@@ -3,17 +3,17 @@
 Task-oriented recipes for giving Kokua new capability. Each guide answers one question: how do I add
 *this*?
 
-All three share a single rule, which is the thing to understand before reading any of them. The
-assistant is a lean supervisor: it holds only cross-cutting tools (memory, skills, config, scheduling,
-MCP management, the clock, reading its other conversations) and delegates every piece of specialized
-work to a sub-agent worker. So a built-in tool group, a tool-pack, and an MCP server all reach an agent
-by exactly one route, a `[subagents.roles.*]` table in `config.toml` that names them. Installing or
-connecting something is never the last step.
+All three share a single rule, which is the thing to understand before reading any of them. **A
+capability is declared, never defaulted.** Every capability an agent can hold is a named *toolset* in one
+namespace, and a built-in tool group, an installed plugin toolset, and a connected MCP server all reach an
+agent by exactly one route: an `[agents.<name>]` table in `config.toml` whose `tools` list names it.
+Installing or connecting something is never the last step, and no code path adds a tool an agent did not
+name.
 
 ## Capability
 
-- [Set up a toolset](set-up-toolsets.md): what `[tools] groups` and a role's `groups` / `tool_packs` /
-  `mcp_servers` each contribute, and how to write a tool-pack plugin of your own.
+- [Set up a toolset](set-up-toolsets.md): the one namespace and what is in it, declaring an agent's
+  `tools` and `delegates_to`, and how to write a toolset plugin of your own.
 - [Add a skill](add-skills.md): the `SKILL.md` format, the one directory Kokua scans, and the three ways
   a skill gets there (by hand, `author_skill`, `add_skill_script`).
 - [Add an MCP service](add-mcp-services.md): `[[mcp.server]]` and the runtime `add_mcp_server` tool,

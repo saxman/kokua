@@ -1,8 +1,8 @@
 """MCP servers wired into a live assistant: startup, runtime add/remove, OAuth, persistence.
 
-An MCP server's tools reach WORKERS, never the supervisor, and only the workers whose roles name the
-server. So these tests configure a role that names the server under test and then assert on that role's
-resolved toolset (``_worker_tools``) rather than on ``assistant._agent.tools``.
+An MCP server's tools reach the agents that name the server in their ``tools`` list, and no others. The
+entry agent here names none of them, so these tests assert on the toolset a worker declaring the server
+resolves to (``_worker_tools``) rather than on ``assistant._agent.tools``.
 """
 
 from __future__ import annotations
@@ -11,55 +11,75 @@ import pytest
 
 
 from kokua.config import MCPServerConfig
+from kokua.config.schema import AgentConfig
 from kokua.core.assistant import Assistant
 from tests.channels import FakeChannel, _config
-from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool
+from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
 from tests.helpers import MockAsyncModelClient
 
 
-def _using(url: str) -> dict:
-    """Config override adding a role that draws on ``url``, so that server's tools reach a worker."""
-    return {"subagent_roles": {"remote": {"description": "Uses the server.", "mcp_servers": [url]}}}
+def _using(name: str, url: str) -> dict:
+    """Config overrides for a worker that declares the server ``name``, so its tools reach an agent."""
+    return {
+        "agents": {
+            "assistant": AgentConfig(tools=["mcp-admin", "time"], delegates_to=["remote"]),
+            "remote": AgentConfig(description="Uses the server.", tools=[name]),
+        },
+        "mcp_servers": [MCPServerConfig(url=url, name=name)],
+    }
 
 
 @pytest.fixture
 def delegates(monkeypatch):
     """Record the ``agent_types`` every ``spawn_subagent`` delegate is built with, newest last.
 
-    A runtime MCP add or remove is applied by REBUILDING each live agent's delegate, since the
-    supervisor never holds MCP callables itself. Capturing what each rebuild was handed is how to see
-    that the change actually reached that agent's workers; the supervisor's own tool list is the wrong
-    place to look and would make these assertions vacuous.
+    A runtime MCP add or remove is applied by REBUILDING each live agent's delegate, since an agent that
+    does not declare the server never holds its callables. Capturing what each rebuild was handed is how
+    to see that the change actually reached that agent's workers; the entry agent's own tool list is the
+    wrong place to look and would make these assertions vacuous.
     """
-    import kokua.core.build as build_mod
+    import kokua.toolsets.agents as agents_mod
 
     built: list[set[str]] = []
-    real = build_mod.make_async_subagent_tool
+    real = agents_mod.make_async_subagent_tool
 
     def capturing(model, **kwargs):
         types = kwargs.get("agent_types") or {}
         built.append({fn.__name__ for spec in types.values() for fn in spec["tools"]})
         return real(model, **kwargs)
 
-    monkeypatch.setattr(build_mod, "make_async_subagent_tool", capturing)
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", capturing)
     return built
 
 
 def _worker_tools(assistant) -> set[str]:
     """The tools a worker would receive from the assistant's live MCP connections.
 
-    Resolved against a role naming every connected server, rather than making each test declare one:
-    these tests are about connection plumbing (connect, retry, persist, reconnect, remove), and which
-    roles name which server is covered in ``tests/core/test_build.py``.
+    Resolved against one worker declaring every connected server, rather than making each test declare
+    one: these tests are about connection plumbing (connect, retry, persist, reconnect, remove), and
+    which agent declares which server is covered in ``tests/core/test_build.py``.
+
+    Read what this does and does not show. It builds a FRESH config and ``ToolsetRegistry`` naming every
+    connection, so it answers "is this server connected and exposing callables a worker could resolve",
+    which is what a plumbing test wants. It is not evidence of live reachability: the running assistant's
+    own ``state.registry`` is built once in ``Assistant.create`` and never gains an entry, so a server
+    absent from ``config.mcp_servers`` at startup is referable by no agent until a restart. See
+    ``test_a_new_server_is_persisted_but_reaches_no_agent_this_process``, which pins that.
     """
     from dataclasses import replace
 
-    from kokua.core.build import _build_subagent_agent_types
+    from kokua.toolsets.agents import build_agent_specs, build_registry
+    from kokua.toolsets.context import LiveState
 
-    role = {"description": "Uses every connected server.", "mcp_servers": [c.url for c in assistant._mcp_servers]}
-    config = replace(assistant._config, subagent_roles={"remote": role})
-    types = _build_subagent_agent_types(config, assistant._mcp_servers, {})
-    return {fn.__name__ for spec in types.values() for fn in spec["tools"]}
+    servers = [MCPServerConfig(url=conn.url, name=f"server-{i}") for i, conn in enumerate(assistant._mcp_servers)]
+    agents = {
+        "assistant": AgentConfig(delegates_to=["remote"]),
+        "remote": AgentConfig(description="Uses every connected server.", tools=[s.name for s in servers]),
+    }
+    config = replace(assistant._config, agents=agents, entry_agent="assistant", mcp_servers=servers)
+    state = LiveState(config=config, connections=assistant._mcp_servers, registry=build_registry(config))
+    specs = build_agent_specs(config, state, "assistant")
+    return {fn.__name__ for spec in specs.values() for fn in spec["tools"]}
 
 
 async def test_startup_mcp_servers_wire_tools(tmp_path, monkeypatch):
@@ -73,7 +93,7 @@ async def test_startup_mcp_servers_wire_tools(tmp_path, monkeypatch):
 
     monkeypatch.setenv("SVC_TOKEN", "tok")
     assistant = await Assistant.create(
-        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://svc/mcp", token_env="SVC_TOKEN")]),
+        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://svc/mcp", name="svc", token_env="SVC_TOKEN")]),
         FakeChannel(),
         client=MockAsyncModelClient([]),
     )
@@ -91,14 +111,22 @@ async def test_startup_mcp_connect_failure_does_not_crash(tmp_path, monkeypatch)
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
     assistant = await Assistant.create(
-        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://down/mcp")]),
+        _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://down/mcp", name="down")]),
         FakeChannel(),
         client=MockAsyncModelClient([]),
     )
     assert assistant._mcp_servers == []
 
 
-async def test_add_mcp_server_tool_adds_tools_at_runtime(tmp_path, monkeypatch):
+async def test_add_mcp_server_connects_once_and_exposes_its_callables(tmp_path, monkeypatch):
+    """The tool connects, reports the server's tool names, and refuses a second connect to the same URL.
+
+    Scope, because the name of this test used to promise more: what is asserted is connection plumbing,
+    via ``_worker_tools``, which resolves against a registry rebuilt from the current connections rather
+    than the assistant's live one (see that helper). It does NOT show that any agent in this process can
+    reach the server, which for a server new to the session is false; the two tests below cover the case
+    that does reach a worker and the limitation that stops this one from doing so.
+    """
     from aimu import aio
 
     async def fake_connect(*, url=None, auth=None, **kw):
@@ -119,6 +147,44 @@ async def test_add_mcp_server_tool_adds_tools_at_runtime(tmp_path, monkeypatch):
     assert "Already connected" in msg2
     assert len(assistant._mcp_servers) == 1
     assert sorted(_worker_tools(assistant)).count("remote_search") == 1
+
+
+async def test_a_new_server_is_persisted_but_reaches_no_agent_this_process(tmp_path, monkeypatch, delegates):
+    """A server absent from config.toml at startup is recorded for the next start and reaches nothing now.
+
+    This pins the limitation the tool results and the how-to describe. ``build_registry`` runs once, in
+    ``Assistant.create``, over ``config.mcp_servers`` as loaded at startup, and nothing mutates the
+    registry afterwards, so the derived name is not a key in it. No ``[agents.*]`` table could reference
+    that name either (one naming an unknown toolset fails startup, and config.toml is not reread), so the
+    delegate rebuild has nothing to hand a worker. Only a restart closes the loop, which is what makes the
+    persisted entry the useful half of this call.
+    """
+    from aimu import aio
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("get_quote")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+
+    agents = {
+        "assistant": AgentConfig(tools=["mcp-admin", "time"], delegates_to=["remote"]),
+        "remote": AgentConfig(description="A worker that declares no server.", tools=["time"]),
+    }
+    cfg = _config(tmp_path, agents=agents)  # no [[mcp.server]] at startup
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    add_mcp = next(t for t in assistant._agent.tools if t.__name__ == "add_mcp_server")
+    await add_mcp(url="https://new.example.com/mcp")
+
+    (persisted,) = _persisted_servers(cfg)
+    assert persisted.url == "https://new.example.com/mcp"  # recorded, so the next start can use it
+    # The pin: the name written to config.toml is not a key in the live registry, so no agent can name
+    # it. This is what breaks if the registry ever gains entries at runtime.
+    assert persisted.name not in assistant._state.registry
+    # Corroboration rather than the pin, since no agent here could have declared that name anyway (a
+    # config naming an unknown toolset fails startup): the rebuild the connect triggered carried nothing.
+    assert "get_quote" not in delegates[-1]
+    assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}
 
 
 async def test_add_mcp_server_tool_reports_connect_failure(tmp_path, monkeypatch):
@@ -307,22 +373,23 @@ async def test_remove_mcp_server_drops_tools_and_forgets(tmp_path, monkeypatch):
     assert "remote_search" not in _worker_tools(a2)
 
 
-async def test_runtime_added_server_reaches_workers_in_the_same_turn(tmp_path, monkeypatch, delegates):
-    """A server added mid-turn is usable by a worker spawned later in that same turn.
+async def test_connecting_a_startup_declared_server_reaches_workers_in_the_same_turn(tmp_path, monkeypatch, delegates):
+    """A server declared at startup but offline then is usable by a worker spawned later in the same turn.
 
-    The supervisor never carries MCP callables, so what has to happen immediately is a delegate
-    REBUILD: add_mcp_server re-resolves every role against the new connection and swaps spawn_subagent,
-    and remove_mcp_server does the reverse. Without that, a runtime-added server would only reach
-    workers after the conversation's agent was rebuilt.
+    Note what ``_using`` sets up, because it is what makes this reachable: the server is a
+    ``[[mcp.server]]`` entry at startup (so its name is in the registry) and the ``remote`` agent already
+    names it, while ``_offline_until_connected`` keeps it from connecting until ``add_mcp_server`` runs.
+    That is the reconnect case. A server absent from config at startup cannot reach an agent at all this
+    process, which ``test_a_new_server_is_persisted_but_reaches_no_agent_this_process`` pins.
+
+    An agent that does not declare the server never carries its callables, so what has to happen
+    immediately is a delegate REBUILD: add_mcp_server re-resolves every agent against the new connection
+    and swaps spawn_subagent, and remove_mcp_server does the reverse. Without that, the connection would
+    only reach workers after the conversation's agent was rebuilt.
     """
-    from aimu import aio
-
-    async def fake_connect(*, url=None, auth=None, **kw):
-        return _FakeMCP([_fake_mcp_tool("get_portfolio")])
-
-    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    _offline_until_connected(monkeypatch, "get_portfolio")
     assistant = await Assistant.create(
-        _config(tmp_path, **_using("https://svc/mcp")), FakeChannel(), client=MockAsyncModelClient([])
+        _config(tmp_path, **_using("svc", "https://svc/mcp")), FakeChannel(), client=MockAsyncModelClient([])
     )
     agent = assistant._agent
     assert "get_portfolio" not in delegates[-1]  # not connected yet
@@ -337,18 +404,15 @@ async def test_runtime_added_server_reaches_workers_in_the_same_turn(tmp_path, m
 
 
 async def test_add_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypatch, delegates):
-    """Adding a server at runtime reaches every live agent's workers, not just the active one."""
-    cfg = _config(tmp_path, **_using("https://example/mcp"))
+    """Connecting a server at runtime reaches every live agent's workers, not just the active one."""
+    _offline_until_connected(monkeypatch, "remote_ping")
+    cfg = _config(tmp_path, **_using("broker", "https://example/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
     first = assistant._active_id
     await assistant.new_conversation()
     await assistant.select_conversation(first)
     assert len(assistant._registry.live_agents()) == 2
 
-    monkeypatch.setattr(
-        "kokua.mcp.servers.connect_mcp",
-        lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none")),
-    )
     add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     delegates.clear()
     await add_tool("https://example/mcp")
@@ -360,16 +424,13 @@ async def test_add_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypatch,
 
 async def test_remove_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypatch, delegates):
     """Removing a server drops its tools from every live agent's workers."""
-    cfg = _config(tmp_path, **_using("https://example/mcp"))
+    _offline_until_connected(monkeypatch, "remote_ping")
+    cfg = _config(tmp_path, **_using("broker", "https://example/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
     first = assistant._active_id
     await assistant.new_conversation()
     await assistant.select_conversation(first)
 
-    monkeypatch.setattr(
-        "kokua.mcp.servers.connect_mcp",
-        lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none")),
-    )
     add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_tool("https://example/mcp")
     assert all("remote_ping" in rebuilt for rebuilt in delegates[-2:])  # the add landed on both
@@ -410,17 +471,15 @@ async def test_remove_mcp_server_keeps_tool_still_owned_by_another_server(tmp_pa
 
 
 async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeypatch, delegates):
-    """A conversation whose agent is built after a server was added still reaches that server.
+    """A conversation whose agent is built after a server was connected still reaches that server.
 
-    The new agent resolves its roles against the shared `connections` list, so it needs no fan-out.
+    The new agent resolves its declared toolsets against the shared `connections` list, so it needs no
+    fan-out.
     """
-    cfg = _config(tmp_path, **_using("https://example/mcp"))
+    _offline_until_connected(monkeypatch, "remote_ping")
+    cfg = _config(tmp_path, **_using("broker", "https://example/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
 
-    monkeypatch.setattr(
-        "kokua.mcp.servers.connect_mcp",
-        lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("remote_ping")]), "none")),
-    )
     add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_tool("https://example/mcp")
 
@@ -431,10 +490,9 @@ async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeyp
     assert "remote_ping" in delegates[0]  # and already carrying the connected server
 
 
-async def test_mcp_server_no_role_names_is_warned_about(tmp_path, monkeypatch, caplog):
-    """A lean supervisor mounts no MCP callables, so a server only reaches the workers whose roles name
-    it. An unreferenced server therefore connects, holds a token, and is reachable by nobody -- silently,
-    until now."""
+async def test_mcp_server_no_agent_names_is_warned_about(tmp_path, monkeypatch, caplog):
+    """A server reaches only the agents that name it, so an unnamed one connects, holds a token, and is
+    reachable by nobody -- silently, without this warning."""
     import logging
 
     from aimu import aio
@@ -443,17 +501,13 @@ async def test_mcp_server_no_role_names_is_warned_about(tmp_path, monkeypatch, c
         return _FakeMCP([_fake_mcp_tool("remote_search")])
 
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
-    config = _config(
-        tmp_path,
-        mcp_servers=[MCPServerConfig(url="https://orphan/mcp", name="orphan")],
-        subagent_roles={"coder": {"description": "Codes.", "groups": ["fs"]}},
-    )
+    config = _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://orphan/mcp", name="orphan")])
     with caplog.at_level(logging.WARNING, logger="kokua.core.assistant"):
         await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
     assert any("orphan" in record.getMessage() for record in caplog.records)
 
 
-async def test_mcp_server_a_role_names_is_not_warned_about(tmp_path, monkeypatch, caplog):
+async def test_mcp_server_an_agent_names_is_not_warned_about(tmp_path, monkeypatch, caplog):
     import logging
 
     from aimu import aio
@@ -462,31 +516,7 @@ async def test_mcp_server_a_role_names_is_not_warned_about(tmp_path, monkeypatch
         return _FakeMCP([_fake_mcp_tool("remote_search")])
 
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
-    config = _config(
-        tmp_path,
-        mcp_servers=[MCPServerConfig(url="https://named/mcp", name="named")],
-        subagent_roles={"r": {"description": "Uses it.", "mcp_servers": ["named"]}},
-    )
+    config = _config(tmp_path, **_using("named", "https://named/mcp"))
     with caplog.at_level(logging.WARNING, logger="kokua.core.assistant"):
         await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
     assert not any("named" in record.getMessage() for record in caplog.records)
-
-
-async def test_a_role_may_name_an_mcp_server_by_raw_url(tmp_path, monkeypatch, caplog):
-    """`name` is optional, so the warning has to accept a raw-URL reference as a match too."""
-    import logging
-
-    from aimu import aio
-
-    async def fake_connect(*, url=None, auth=None, **kw):
-        return _FakeMCP([_fake_mcp_tool("remote_search")])
-
-    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
-    config = _config(
-        tmp_path,
-        mcp_servers=[MCPServerConfig(url="https://byurl/mcp")],
-        subagent_roles={"r": {"description": "Uses it.", "mcp_servers": ["https://byurl/mcp"]}},
-    )
-    with caplog.at_level(logging.WARNING, logger="kokua.core.assistant"):
-        await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
-    assert not any("byurl" in record.getMessage() for record in caplog.records)

@@ -1,4 +1,4 @@
-"""A built-in tool-pack that generates images from a text prompt.
+"""A built-in toolset that generates images from a text prompt.
 
 Contributes one tool, ``generate_image``, that runs an AIMU ``ImageClient`` and saves the result into
 ``images_path`` (the same folder uploaded images live in, served by the web front end at
@@ -7,7 +7,7 @@ inline (live via the IMAGE_GENERATING stream, and on reload via history replay).
 
 Unlike AIMU's built-in ``image`` tool group, this saves into Kokua's servable ``images_path`` rather than
 a folder inside the aimu package, and it defers building the client until the tool is first called: the
-client reads the ``AIMU_IMAGE_MODEL`` env var and raises if it is unset, so building it at pack-load time
+client reads the ``AIMU_IMAGE_MODEL`` env var and raises if it is unset, so building it at toolset-load time
 would break startup for every user who has not configured an image model.
 """
 
@@ -19,7 +19,7 @@ from pathlib import Path
 from aimu.tools import tool
 
 from kokua.config import AssistantConfig
-from kokua.plugins import ToolPack
+from kokua.toolsets import Toolset
 
 # AIMU's image client resolves this env var for the model; without it, generation cannot work, so the
 # tool is not offered at all (the model never sees an option it can't fulfill).
@@ -27,7 +27,7 @@ _IMAGE_MODEL_ENV = "AIMU_IMAGE_MODEL"
 
 
 def build(config: AssistantConfig) -> list:
-    """Return this pack's tools when an image model is configured, else nothing.
+    """Return this toolset's tools when an image model is configured, else nothing.
 
     Gated on ``AIMU_IMAGE_MODEL`` so a default install (no image model) doesn't expose a
     generate_image tool the model could call but never satisfy."""
@@ -78,8 +78,8 @@ def build(config: AssistantConfig) -> list:
     return [generate_image]
 
 
-TOOL_PACK = ToolPack(
+TOOLSET = Toolset(
     name="image",
     description="Generate images from a text prompt (needs the AIMU_IMAGE_MODEL environment variable set).",
-    build=build,
+    build=lambda ctx: build(ctx.config),
 )

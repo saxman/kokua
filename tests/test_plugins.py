@@ -1,4 +1,4 @@
-"""Tests for the entry-point plugin system (front ends + tool-packs)."""
+"""Tests for the entry-point plugin system (front ends + toolsets)."""
 
 from __future__ import annotations
 
@@ -10,12 +10,13 @@ from tests.helpers import MockAsyncModelClient
 from kokua import plugins
 from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
-from tests.channels import example_subagent_roles
-from kokua.plugins import FrontEnd, ToolPack
+from tests.channels import example_agents
+from kokua.plugins import FrontEnd, Toolset
+from kokua.toolsets import LiveState, ToolsetContext
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles()}
+    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -44,38 +45,54 @@ def test_builtin_frontends_available_without_entry_points(monkeypatch):
     assert {"cli", "web"} <= set(frontends)
 
 
-# --- Tool-pack discovery ---------------------------------------------------------------------
+# --- Toolset discovery ------------------------------------------------------------------------
 
 
-def test_example_tool_pack_discovered():
-    packs = plugins.discover_tool_packs()
-    assert "example" in packs
-    assert isinstance(packs["example"], ToolPack)
-    built = packs["example"].build(AssistantConfig())
+def test_example_toolset_discovered():
+    toolsets = plugins.discover_toolsets()
+    assert "example" in toolsets
+    assert isinstance(toolsets["example"], Toolset)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    built = toolsets["example"].build(ctx)
     assert any(getattr(fn, "__name__", None) == "roll_dice" for fn in built)
 
 
-def test_tool_pack_tools_reach_a_role_that_names_the_pack(tmp_path):
-    """A pack's tools only ever reach the workers whose roles name it; the supervisor mounts none."""
-    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+def _worker_specs(cfg) -> dict[str, dict]:
+    from kokua.toolsets.agents import build_agent_specs, build_registry
 
-    cfg = _config(tmp_path, subagent_roles={"roller": {"description": "Rolls.", "tool_packs": ["example"]}})
-    types = _build_subagent_agent_types(cfg, [], _load_plugin_tools_by_pack(cfg))
-    assert "roll_dice" in {fn.__name__ for fn in types["roller"]["tools"]}
+    state = LiveState(config=cfg, registry=build_registry(cfg))
+    return build_agent_specs(cfg, state, cfg.entry_agent)
 
 
-def test_a_role_that_names_no_pack_gets_no_pack_tools(tmp_path):
-    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+def _two_workers(tmp_path):
+    """One worker declaring the `example` plugin toolset and one declaring only a built-in group."""
+    from kokua.config.schema import AgentConfig
 
-    cfg = _config(tmp_path, subagent_roles={"plain": {"description": "Plain.", "groups": ["compute"]}})
-    types = _build_subagent_agent_types(cfg, [], _load_plugin_tools_by_pack(cfg))
-    assert "roll_dice" not in {fn.__name__ for fn in types["plain"]["tools"]}
+    return _config(
+        tmp_path,
+        agents={
+            "assistant": AgentConfig(tools=["time"], delegates_to=["roller", "plain"]),
+            "roller": AgentConfig(description="Rolls.", tools=["example"]),
+            "plain": AgentConfig(description="Plain.", tools=["compute"]),
+        },
+    )
 
 
-async def test_no_plugins_flag_omits_tool_pack_tools(tmp_path):
-    from kokua.core.build import _load_plugin_tools_by_pack
+def test_plugin_tools_reach_an_agent_that_names_the_toolset(tmp_path):
+    """A plugin's tools reach an agent by one route only: that agent naming the toolset in `tools`."""
+    specs = _worker_specs(_two_workers(tmp_path))
+    assert "roll_dice" in {fn.__name__ for fn in specs["roller"]["tools"]}
 
-    assert _load_plugin_tools_by_pack(_config(tmp_path, load_plugins=False)) == {}
+
+def test_an_agent_that_names_no_plugin_gets_no_plugin_tools(tmp_path):
+    specs = _worker_specs(_two_workers(tmp_path))
+    assert "roll_dice" not in {fn.__name__ for fn in specs["plain"]["tools"]}
+
+
+async def test_no_plugins_flag_omits_plugin_toolsets(tmp_path):
+    from kokua.toolsets.agents import build_registry
+
+    assert "example" not in build_registry(_config(tmp_path, load_plugins=False))
     assistant = await Assistant.create(
         _config(tmp_path, load_plugins=False), FakeChannelStub(), client=MockAsyncModelClient([])
     )

@@ -1,4 +1,4 @@
-"""Building an agent: tool groups, sub-agent roles, the lean supervisor, memory, and skills."""
+"""Building an agent from its ``[agents.*]`` declaration: toolsets, delegation, memory, and skills."""
 
 from __future__ import annotations
 
@@ -7,9 +7,11 @@ import pytest
 
 
 from kokua.config import MCPServerConfig
+from kokua.config.schema import AgentConfig
 from kokua.core.assistant import Assistant
-from tests.channels import FakeChannel, _config, example_subagent_roles
-from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool
+from kokua.toolsets.context import LiveState
+from tests.channels import FakeChannel, _config, example_agents
+from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
 from tests.helpers import MockAsyncModelClient
 
 
@@ -24,30 +26,23 @@ _MEMORY_TOOL_NAMES = {
 }
 
 
-def test_builtin_groups_reach_the_workers(tmp_path):
-    """[tools].groups is the workers' ceiling, not the supervisor's toolset, so the default groups have
-    to be verified where they actually land."""
-    from kokua.core.build import _build_subagent_agent_types
+def _specs(config, state=None) -> dict[str, dict]:
+    """The AIMU ``agent_types`` the entry agent's delegate is built with, for this config."""
+    from kokua.toolsets.agents import build_agent_specs, build_registry
 
-    worker_tools = {
-        fn.__name__ for spec in _build_subagent_agent_types(_config(tmp_path)).values() for fn in spec["tools"]
-    }
-    # Default groups are present...
+    if state is None:
+        state = LiveState(config=config, registry=build_registry(config))
+    return build_agent_specs(config, state, config.entry_agent)
+
+
+def test_the_shipped_agents_give_their_workers_the_tools_they_declare(tmp_path):
+    """The [agents.*] tables Kokua ships are what a real install runs, so the toolsets they name have to
+    resolve to actual tools on the workers the entry agent delegates to."""
+    worker_tools = {fn.__name__ for spec in _specs(_config(tmp_path)).values() for fn in spec["tools"]}
+    # The groups the shipped workers declare are present...
     assert {"get_weather", "read_file", "calculate", "get_current_date_and_time", "convert_time"} <= worker_tools
-    # ...and the generative groups (opt-in, need AIMU_*_MODEL) are not.
+    # ...and the generative toolsets, which no shipped agent names and nothing adds in code, are not.
     assert "generate_image" not in worker_tools
-
-
-async def test_tools_none_leaves_workers_with_nothing_and_the_supervisor_intact(tmp_path):
-    from kokua.core.build import _build_subagent_agent_types
-
-    config = _config(tmp_path, tools=["none"])
-    worker_tools = {fn.__name__ for spec in _build_subagent_agent_types(config).values() for fn in spec["tools"]}
-    assert worker_tools == set()  # not even the ambient clock, which is gated on the global set
-
-    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
-    names = {fn.__name__ for fn in assistant._agent.tools}
-    assert {"author_skill", "add_skill_script", "add_mcp_server"} <= names  # cross-cutting tools remain
 
 
 async def test_assistant_wires_subagent_tool(tmp_path):
@@ -56,10 +51,10 @@ async def test_assistant_wires_subagent_tool(tmp_path):
     assert "spawn_subagent" in names
 
 
-async def test_subagent_tool_is_typed_when_roles_are_configured(tmp_path):
+async def test_subagent_tool_is_typed_with_the_agents_the_entry_agent_delegates_to(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     spawn = next(t for t in assistant._agent.tools if t.__name__ == "spawn_subagent")
-    # Typed mode takes (agent_type, task); the docstring lists the configured roles.
+    # Typed mode takes (agent_type, task); the docstring lists the configured targets.
     import inspect
 
     params = list(inspect.signature(spawn).parameters)
@@ -67,161 +62,109 @@ async def test_subagent_tool_is_typed_when_roles_are_configured(tmp_path):
     assert "researcher" in spawn.__doc__ and "coder" in spawn.__doc__
 
 
-def test_build_subagent_agent_types_clamps_to_enabled_groups(tmp_path):
-    from kokua.core.build import _build_subagent_agent_types
-
-    # coder wants fs+compute; only web enabled globally -> coder ends up with no tools.
-    cfg = _config(tmp_path, tools=["web"])
-    types = _build_subagent_agent_types(cfg)
-    assert types["coder"]["tools"] == []
-    researcher_names = {fn.__name__ for fn in types["researcher"]["tools"]}
-    assert "web_search" in researcher_names  # web group survived
-    # The description is the first line of the built system_message (AIMU's menu line).
-    assert types["researcher"]["system_message"].splitlines()[0] == (
-        "Research specialist: gather and verify information from the web."
-    )
-
-
-def test_configured_roles_nonempty_when_tools_all(tmp_path):
-    from kokua.core.build import _build_subagent_agent_types
-
-    cfg = _config(tmp_path, tools=["all"])
-    types = _build_subagent_agent_types(cfg)
-    assert types["coder"]["tools"]  # non-empty: fs+compute groups now enabled
-    assert any(fn.__name__ == "execute_python" for fn in types["coder"]["tools"])
-    assert types["generalist"]["tools"]  # non-empty: all groups enabled
-
-
-def test_every_role_gets_the_time_tools_whatever_its_own_groups(tmp_path):
-    """A worker that cannot tell the time is broken whatever its domain, so the time group is added to
-    every role rather than each role having to remember to ask for it."""
-    from kokua.core.build import _build_subagent_agent_types
-
-    cfg = _config(
-        tmp_path,
-        tools=["fs", "compute", "time"],
-        subagent_roles={**example_subagent_roles(), "trader": {"description": "Trades.", "groups": ["compute"]}},
-    )
-    types = _build_subagent_agent_types(cfg)
-    # `coder` names fs+compute and `trader` names only compute; neither asks for the time group.
-    for role in ("coder", "trader"):
-        names = {fn.__name__ for fn in types[role]["tools"]}
-        assert {"get_current_date_and_time", "convert_time"} <= names, role
-        assert "echo" not in names, role  # the clock arrives without misc riding along
-
-
-def test_a_role_with_no_sources_still_gets_the_time_tools(tmp_path):
-    """A role defined only by a tool-pack or MCP server (no `groups` at all) is the case that silently
-    produced a clockless worker."""
-    from kokua.core.build import _build_subagent_agent_types
-
-    cfg = _config(tmp_path, subagent_roles={"reporter": {"description": "Writes reports."}})
-    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg)["reporter"]["tools"]}
-    assert names == {"get_current_date_and_time", "convert_time"}
-
-
-def test_disabling_the_time_group_withholds_it_from_every_role(tmp_path):
-    """The ambient add is gated on the global set, so it never grants a tool the user turned off."""
-    from kokua.core.build import _build_subagent_agent_types
-
-    cfg = _config(tmp_path, tools=["fs", "compute"])
-    types = _build_subagent_agent_types(cfg)
-    for role in ("coder", "generalist"):
-        names = {fn.__name__ for fn in types[role]["tools"]}
-        assert "get_current_date_and_time" not in names, role
-        assert "convert_time" not in names, role
-
-
-def test_worker_role_resolves_mcp_and_tool_pack_sources(tmp_path):
+def test_a_worker_resolves_a_group_an_mcp_server_and_a_plugin_from_one_list(tmp_path):
+    """One namespace, one list: an agent names a built-in group, a configured MCP server, and a plugin
+    toolset the same way, and receives the tools of all three."""
     from types import SimpleNamespace
 
-    from kokua.core.build import _build_subagent_agent_types
-    from kokua.config import MCPServerConfig
+    from kokua.toolsets.agents import build_registry
+    from kokua.toolsets.registry import Toolset
 
     def stock_quote():  # fake MCP tool callable -- the resolver only reads __name__
         pass
 
-    def make_pdf():  # fake tool-pack tool
+    def make_pdf():  # fake plugin-toolset tool
         pass
 
     cfg = _config(
         tmp_path,
-        tools=["compute"],
-        mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
-        subagent_roles={
-            "trader": {
-                "description": "Trades.",
-                "groups": ["compute"],
-                "mcp_servers": ["stocks"],  # matched by name
-                "tool_packs": ["pdf"],
-            }
+        agents={
+            "assistant": AgentConfig(tools=["time"], delegates_to=["trader"]),
+            "trader": AgentConfig(description="Trades.", tools=["compute", "stocks", "pdf"]),
         },
+        mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
     )
     connections = [SimpleNamespace(url="https://broker/mcp", callables=[stock_quote])]
-    by_pack = {"pdf": [make_pdf]}
-    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg, connections, by_pack)["trader"]["tools"]}
-    assert "stock_quote" in names  # named MCP server's tool
-    assert "make_pdf" in names  # tool-pack's tool
-    assert "calculate" in names  # built-in compute group still included
+    # A registry standing in for the real one: everything real except a fake "pdf" toolset, so the test
+    # can tell a plugin's tools apart from a built-in group's without depending on the real pdf
+    # toolset's actual output.
+    registry = build_registry(cfg)
+    registry["pdf"] = Toolset(name="pdf", description="fake plugin", build=lambda ctx: [make_pdf])
+    state = LiveState(config=cfg, connections=connections, registry=registry)
+    names = {fn.__name__ for fn in _specs(cfg, state)["trader"]["tools"]}
+    assert "stock_quote" in names  # the named MCP server's tool
+    assert "make_pdf" in names  # the plugin toolset's tool
+    assert "calculate" in names  # the built-in compute group's tool
 
 
-def test_worker_role_resolves_mcp_by_raw_url(tmp_path):
-    from types import SimpleNamespace
-
-    from kokua.core.build import _build_subagent_agent_types
-
-    def remote_tool():
-        pass
-
-    cfg = _config(tmp_path, tools=["none"], subagent_roles={"r": {"mcp_servers": ["https://raw/mcp"]}})
-    connections = [SimpleNamespace(url="https://raw/mcp", callables=[remote_tool])]
-    types = _build_subagent_agent_types(cfg, connections, {})
-    assert [fn.__name__ for fn in types["r"]["tools"]] == ["remote_tool"]
+# --- Startup validation: every invalid config fails here, naming the offending value ----------
 
 
-def test_worker_role_unknown_sources_drop_silently(tmp_path):
-    from kokua.core.build import _build_subagent_agent_types
+async def test_no_configured_agents_refuses_to_start(tmp_path):
+    """Agents exist only in config.toml, so a config with none would start something that looks running
+    and has no capability at all. Refuse instead, and name the command that fixes it."""
+    from kokua.config import ConfigError
+
+    with pytest.raises(ConfigError, match="at least one"):
+        await Assistant.create(_config(tmp_path, agents={}), FakeChannel(), client=MockAsyncModelClient([]))
+
+
+async def test_an_unknown_toolset_name_refuses_to_start(tmp_path):
+    """A misspelled toolset used to leave the agent quietly smaller than the config said."""
+    from kokua.config import ConfigError
+
+    cfg = _config(tmp_path, agents={"assistant": AgentConfig(tools=["bogus"])})
+    with pytest.raises(ConfigError, match="bogus"):
+        await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+
+async def test_a_missing_entry_agent_refuses_to_start(tmp_path):
+    from kokua.config import ConfigError
+
+    cfg = _config(tmp_path, entry_agent="supervisor")
+    with pytest.raises(ConfigError, match="supervisor"):
+        await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+
+async def test_a_delegation_cycle_refuses_to_start(tmp_path):
+    """A delegate is built by recursing into its targets, so a cycle would exhaust the stack at startup."""
+    from kokua.config import ConfigError
 
     cfg = _config(
         tmp_path,
-        tools=["all"],
-        subagent_roles={"r": {"groups": ["web"], "mcp_servers": ["nope"], "tool_packs": ["ghost"]}},
+        agents={
+            "assistant": AgentConfig(tools=["time"], delegates_to=["helper"]),
+            "helper": AgentConfig(tools=["fs"], delegates_to=["assistant"]),
+        },
     )
-    names = {fn.__name__ for fn in _build_subagent_agent_types(cfg, [], {})["r"]["tools"]}
-    assert "web_search" in names  # web group survived; unknown mcp/pack refs dropped without error
+    with pytest.raises(ConfigError, match="cycle"):
+        await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
 
-async def test_no_configured_roles_refuses_to_start(tmp_path):
-    """Roles are the assistant's only route to a domain tool, so a config with none would start
-    something that looks running and cannot browse, read a file, or compute. Refuse instead, and name
-    the command that fixes it."""
+async def test_a_toolset_name_two_providers_claim_refuses_to_start_as_a_config_error(tmp_path):
+    """The registry reports a collision with its own ``ToolsetError``, but from a user's side a duplicate
+    [[mcp.server]].name is a config mistake like any other, so startup presents the whole family as
+    ``ConfigError`` rather than leaking an internal exception type a front end does not catch."""
     from kokua.config import ConfigError
 
-    with pytest.raises(ConfigError, match="subagents.roles"):
-        await Assistant.create(_config(tmp_path, subagent_roles={}), FakeChannel(), client=MockAsyncModelClient([]))
+    cfg = _config(
+        tmp_path,
+        agents={"assistant": AgentConfig(tools=["shared"])},
+        mcp_servers=[
+            MCPServerConfig(url="https://one/mcp", name="shared"),
+            MCPServerConfig(url="https://two/mcp", name="shared"),
+        ],
+    )
+    with pytest.raises(ConfigError, match="shared"):
+        await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
 
-def test_supervisor_prompt_names_the_typed_delegate(tmp_path):
-    """The prompt names the call it wants the model to make, and there is only one delegate shape."""
-    from kokua.core.build import resolve_system_message
-
-    assert "spawn_subagent(agent_type, task)" in resolve_system_message(_config(tmp_path))
-
-
-def test_load_plugin_tools_by_pack_groups_by_name(tmp_path):
-    from kokua.core.build import _load_plugin_tools_by_pack
-
-    by_pack = _load_plugin_tools_by_pack(_config(tmp_path))  # load_plugins on by default
-    assert "example" in by_pack
-    assert any(fn.__name__ == "roll_dice" for fn in by_pack["example"])
-    assert _load_plugin_tools_by_pack(_config(tmp_path, load_plugins=False)) == {}
-
-
-# The supervisor's COMPLETE toolset, grouped by where each group is built. Half of it comes from AIMU,
+# The entry agent's COMPLETE toolset, grouped by where each group is built. Half of it comes from AIMU,
 # which is why no naming convention in this repo can answer "where are all the tools?" on its own. This
 # is the executable half of the inventory table in docs/explanation/architecture.md: adding or removing a
-# supervisor tool fails the test below, and the table needs the same edit in that commit.
-SUPERVISOR_TOOLS = {
+# tool the shipped entry agent holds fails the test below, and the table needs the same edit in that
+# commit.
+ENTRY_AGENT_TOOLS = {
     "kokua core/tools.py": {"list_conversations", "read_conversation", "search_conversations"},
     "kokua config/tools.py": {"read_config", "update_config"},
     "kokua mcp/tools.py": {"add_mcp_server", "remove_mcp_server"},
@@ -239,8 +182,9 @@ SUPERVISOR_TOOLS = {
     "aimu builtin.time": {"get_current_date_and_time", "convert_time"},
     "aimu make_async_subagent_tool": {"spawn_subagent"},
 }
-# Only present with memory enabled, so they are asserted separately below.
-MEMORY_TOOLS = {
+# Present because the shipped entry agent declares the `memory` and `documents` toolsets, so they are
+# asserted separately from the rest below.
+STORE_TOOLS = {
     "aimu make_memory_tools + make_document_tools": {
         "store_memory",
         "search_memories",
@@ -258,37 +202,48 @@ def _expected(*groups: dict) -> set[str]:
 
 
 def _source_of(name: str) -> str:
-    for source, names in {**SUPERVISOR_TOOLS, **MEMORY_TOOLS}.items():
+    for source, names in {**ENTRY_AGENT_TOOLS, **STORE_TOOLS}.items():
         if name in names:
             return source
     return "unknown source"
 
 
-async def test_supervisor_toolset_is_exactly_the_documented_inventory(tmp_path):
-    """The supervisor's tool context is the point of the design: it holds what mutates shared state
-    (skills, MCP, memory, config, scheduling), reading its other conversations, the clock, and the
-    delegate. Built-in groups and tool-packs live on the workers.
+def _without(*toolsets: str) -> dict[str, AgentConfig]:
+    """The shipped agents with ``toolsets`` struck from the entry agent's declaration."""
+    agents = example_agents()
+    entry = agents["assistant"]
+    entry.tools = [name for name in entry.tools if name not in toolsets]
+    return agents
 
-    Asserted as an exact set rather than a sample, so a tool-pack leaking onto the supervisor fails here,
-    and so does adding a supervisor tool without updating the inventory table this list mirrors."""
-    # memory=True so the memory tools are present and we can confirm they STAY on the supervisor.
-    assistant = await Assistant.create(_config(tmp_path, memory=True), FakeChannel(), client=MockAsyncModelClient([]))
+
+async def test_entry_agent_toolset_is_exactly_the_documented_inventory(tmp_path):
+    """The entry agent's tool context is the point of the design: what the shipped [agents.assistant]
+    table declares, and nothing else. It holds what mutates shared state (skills, MCP, memory, config,
+    scheduling), reading its other conversations, the clock, and the delegate; the built-in groups and
+    plugin toolsets are declared by the workers instead.
+
+    Asserted as an exact set rather than a sample, so a plugin toolset leaking onto the entry agent fails
+    here, and so does adding a tool without updating the inventory table this list mirrors."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
-    expected = _expected(SUPERVISOR_TOOLS, MEMORY_TOOLS)
+    expected = _expected(ENTRY_AGENT_TOOLS, STORE_TOOLS)
 
     leaked = sorted(names - expected)
     missing = sorted(expected - names)
-    assert not leaked, f"undocumented tools on the supervisor: {leaked} (a worker tool leaking here?)"
+    assert not leaked, f"undocumented tools on the entry agent: {leaked} (a worker tool leaking here?)"
     assert not missing, f"documented tools absent: {[(n, _source_of(n)) for n in missing]}"
 
 
-async def test_disabling_memory_drops_exactly_the_memory_tools(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path, memory=False), FakeChannel(), client=MockAsyncModelClient([]))
+async def test_undeclaring_the_store_toolsets_drops_exactly_their_tools(tmp_path):
+    """Declaration is the only switch: strike `memory` and `documents` from the entry agent's list and it
+    loses exactly their tools, with nothing else disturbed."""
+    config = _config(tmp_path, agents=_without("memory", "documents"))
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
-    assert names == _expected(SUPERVISOR_TOOLS)
+    assert names == _expected(ENTRY_AGENT_TOOLS)
 
 
-CONVERSATION_TOOL_NAMES = SUPERVISOR_TOOLS["kokua core/tools.py"]
+CONVERSATION_TOOL_NAMES = ENTRY_AGENT_TOOLS["kokua core/tools.py"]
 
 
 async def test_create_registers_the_conversation_tools(tmp_path):
@@ -296,22 +251,19 @@ async def test_create_registers_the_conversation_tools(tmp_path):
     assert CONVERSATION_TOOL_NAMES <= {getattr(fn, "__name__", None) for fn in assistant._agent.tools}
 
 
-def test_conversation_tools_do_not_reach_the_workers(tmp_path):
-    """Reading other conversations is supervisor-only: a worker shares no history and has no conversation
-    identity, so the capability is meaningless to it (and would widen a spawn's blast radius)."""
-    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
-
-    config = _config(tmp_path)
-    agent_types = _build_subagent_agent_types(config, [], _load_plugin_tools_by_pack(config))
-    assert agent_types  # roles are configured, so this is not vacuous
-    for role, spec in agent_types.items():
-        assert CONVERSATION_TOOL_NAMES.isdisjoint({fn.__name__ for fn in spec["tools"]}), role
+def test_conversation_tools_do_not_reach_the_shipped_workers(tmp_path):
+    """Reading other conversations is meaningless to a worker (it shares no history and has no
+    conversation identity), so no shipped worker declares that toolset."""
+    specs = _specs(_config(tmp_path))
+    assert specs  # the shipped entry agent delegates, so this is not vacuous
+    for name, spec in specs.items():
+        assert CONVERSATION_TOOL_NAMES.isdisjoint({fn.__name__ for fn in spec["tools"]}), name
 
 
-async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
-    """Boot reorder: config [[mcp.server]] servers connect before the first agent is built, so a lean
-    supervisor's worker role that names one receives its tools (and the supervisor itself does not)."""
-    import kokua.core.build as build_mod
+async def test_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
+    """Boot reorder: config [[mcp.server]] servers connect before the first agent is built, so a worker
+    declaring one receives its tools (and the entry agent, which does not declare it, does not)."""
+    import kokua.toolsets.agents as agents_mod
     from aimu import aio
 
     async def fake_connect(*, url=None, auth=None, **kw):
@@ -334,22 +286,29 @@ async def test_lean_worker_receives_boot_connected_mcp_server(tmp_path, monkeypa
         spawn_subagent.__tool_spec__ = {"function": {"name": "spawn_subagent"}}
         return spawn_subagent
 
-    monkeypatch.setattr(build_mod, "make_async_subagent_tool", fake_make)
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make)
 
-    cfg = _config(
-        tmp_path,
-        mcp_servers=[MCPServerConfig(url="https://broker/mcp", name="stocks")],
-        subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["stocks"]}},
-    )
+    cfg = _config(tmp_path, **_trading_via("stocks", url="https://broker/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
     trader_tools = {fn.__name__ for fn in captured["agent_types"]["trader"]["tools"]}
-    assert "get_quote" in trader_tools  # worker got the boot-connected server's tool
-    assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # not on the lean supervisor
+    assert "get_quote" in trader_tools  # the worker got the boot-connected server's tool
+    assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # not on the entry agent
+
+
+def _trading_via(name: str, *, url: str) -> dict:
+    """Config overrides for an entry agent delegating to one worker that declares the server ``name``."""
+    return {
+        "agents": {
+            "assistant": AgentConfig(tools=["mcp-admin", "time"], delegates_to=["trader"]),
+            "trader": AgentConfig(description="Trades.", tools=[name]),
+        },
+        "mcp_servers": [MCPServerConfig(url=url, name=name)],
+    }
 
 
 def _capturing_subagent_factory(captured: list):
     """A make_async_subagent_tool stand-in that records each build's agent_types and returns a
-    spawn_subagent stub (so rebuild_subagent_tool can find and replace it by name)."""
+    spawn_subagent stub (so rebuild_delegation_tool can find and replace it by name)."""
 
     def fake_make(model, *, agent_types, tool_approval, **kwargs):
         captured.append(agent_types)
@@ -367,48 +326,38 @@ def _capturing_subagent_factory(captured: list):
     return fake_make
 
 
-async def test_runtime_added_mcp_server_reaches_lean_worker(tmp_path, monkeypatch):
-    """Rebuild trigger: adding an MCP server at runtime rebuilds spawn_subagent, so a lean worker role
-    that names the server gets its tools without a restart -- and the raw tools stay off the supervisor."""
-    import kokua.core.build as build_mod
+async def test_runtime_added_mcp_server_reaches_the_worker_that_declares_it(tmp_path, monkeypatch):
+    """Rebuild trigger: connecting a configured-but-offline server at runtime rebuilds spawn_subagent, so
+    the worker declaring it gets its tools without a restart -- and the raw tools stay off the entry
+    agent."""
+    import kokua.toolsets.agents as agents_mod
 
     captured: list = []
-    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
-    monkeypatch.setattr(
-        "kokua.mcp.servers.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
-    )
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
+    _offline_until_connected(monkeypatch)
 
-    cfg = _config(
-        tmp_path,
-        subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
-    )
+    cfg = _config(tmp_path, **_trading_via("stocks", url="https://broker/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
-    # Server not connected at create -> the worker has none of its tools yet (only the ambient clock,
-    # which every role gets regardless of its own groups).
+    # The server is declared but not connected at create, so the worker has none of its tools yet.
     assert "get_quote" not in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}
 
     add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_mcp(url="https://broker/mcp")
 
     assert "get_quote" in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}  # worker got it via rebuild
-    assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # supervisor stayed lean
+    assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # entry agent stayed lean
 
 
-async def test_runtime_added_mcp_server_reaches_all_lean_conversations(tmp_path, monkeypatch):
-    """The rebuild fans out: a runtime add updates the spawn_subagent of EVERY live conversation's
-    supervisor, not just the one whose add_mcp_server ran."""
-    import kokua.core.build as build_mod
+async def test_runtime_added_mcp_server_reaches_all_live_conversations(tmp_path, monkeypatch):
+    """The rebuild fans out: a runtime connect updates the spawn_subagent of EVERY live conversation's
+    agent, not just the one whose add_mcp_server ran."""
+    import kokua.toolsets.agents as agents_mod
 
     captured: list = []
-    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
-    monkeypatch.setattr(
-        "kokua.mcp.servers.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
-    )
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
+    _offline_until_connected(monkeypatch)
 
-    cfg = _config(
-        tmp_path,
-        subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
-    )
+    cfg = _config(tmp_path, **_trading_via("stocks", url="https://broker/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
     first = assistant._active_id
     await assistant.new_conversation()  # a second live conversation/agent
@@ -416,26 +365,22 @@ async def test_runtime_added_mcp_server_reaches_all_lean_conversations(tmp_path,
     assert len(assistant._registry.live_agents()) == 2
 
     add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    captured.clear()
     await add_mcp(url="https://broker/mcp")
 
-    # The add's refresh rebuilt spawn_subagent on both agents -> the two most recent builds both have it.
-    recent = captured[-2:]
-    assert all("get_quote" in {fn.__name__ for fn in c["trader"]["tools"]} for c in recent)
+    # One rebuild per live agent, each carrying the newly connected server's tools.
+    assert len(captured) == 2
+    assert all("get_quote" in {fn.__name__ for fn in c["trader"]["tools"]} for c in captured)
 
 
-async def test_runtime_removed_mcp_server_drops_from_lean_worker(tmp_path, monkeypatch):
-    import kokua.core.build as build_mod
+async def test_runtime_removed_mcp_server_drops_from_the_worker(tmp_path, monkeypatch):
+    import kokua.toolsets.agents as agents_mod
 
     captured: list = []
-    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
-    monkeypatch.setattr(
-        "kokua.mcp.servers.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
-    )
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
+    _offline_until_connected(monkeypatch)
 
-    cfg = _config(
-        tmp_path,
-        subagent_roles={"trader": {"description": "Trades.", "mcp_servers": ["https://broker/mcp"]}},
-    )
+    cfg = _config(tmp_path, **_trading_via("stocks", url="https://broker/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
     add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_mcp(url="https://broker/mcp")
@@ -446,26 +391,8 @@ async def test_runtime_removed_mcp_server_drops_from_lean_worker(tmp_path, monke
     assert "get_quote" not in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}  # worker dropped it
 
 
-def test_resolve_system_message_always_carries_supervisor_guidance(tmp_path):
-    """Delegation is the only route to a domain tool, so there is no configuration under which the
-    model should be told anything else."""
-    from kokua.core.build import resolve_system_message
-    from kokua.config.schema import SUPERVISOR_GUIDANCE
-
-    assert SUPERVISOR_GUIDANCE.strip() in resolve_system_message(_config(tmp_path))
-
-
-def test_supervisor_guidance_names_the_conversation_tools():
-    """No worker has these tools, so if the guidance stops naming them the capability is orphaned: the
-    model delegates "what did we decide last week?" to a worker that cannot answer."""
-    from kokua.config.schema import SUPERVISOR_GUIDANCE
-
-    for name in CONVERSATION_TOOL_NAMES:
-        assert name in SUPERVISOR_GUIDANCE, name
-
-
 async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
-    import kokua.core.build as build_mod
+    import kokua.toolsets.agents as agents_mod
 
     captured = {}
 
@@ -483,24 +410,19 @@ async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
         spawn_subagent.__tool_spec__ = {"function": {"name": "spawn_subagent"}}
         return spawn_subagent
 
-    monkeypatch.setattr(build_mod, "make_async_subagent_tool", fake_make_async_subagent_tool)
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make_async_subagent_tool)
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     assert captured["tool_approval"] == assistant._approve
 
 
-async def test_subagent_concurrent_flag_reaches_agent(tmp_path):
+async def test_concurrent_tools_flag_reaches_agent(tmp_path):
     on = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     assert on._agent.concurrent_tool_calls is True
     off = await Assistant.create(
-        _config(tmp_path, subagents_concurrent=False), FakeChannel(), client=MockAsyncModelClient([])
+        _config(tmp_path, concurrent_tools=False), FakeChannel(), client=MockAsyncModelClient([])
     )
     assert off._agent.concurrent_tool_calls is False
-
-
-async def test_assistant_unknown_tool_group_raises(tmp_path):
-    with pytest.raises(ValueError, match="unknown tool group"):
-        await Assistant.create(_config(tmp_path, tools=["bogus"]), FakeChannel(), client=MockAsyncModelClient([]))
 
 
 async def test_assistant_wires_author_skill_tool(tmp_path):
@@ -516,16 +438,29 @@ async def test_assistant_wires_author_skill_tool(tmp_path):
     assert "format-standup" in assistant._agent.skill_manager.skills
 
 
-async def test_memory_wires_both_stores(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path, memory=True), FakeChannel(), client=MockAsyncModelClient([]))
+async def test_declaring_the_store_toolsets_wires_both_stores(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
     assert _MEMORY_TOOL_NAMES <= names
+
+
+async def test_memory_stores_exist_when_an_agent_declares_them(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     assert assistant._memory_store is not None
     assert assistant._document_store is not None
 
 
-async def test_no_memory_omits_tools_and_stores(tmp_path):
-    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+def test_memory_stores_are_not_built_until_a_toolset_asks(tmp_path):
+    """The laziness is the mechanism, so it is asserted directly: nothing constructs a store on disk
+    just because a LiveState exists."""
+    state = LiveState(config=_config(tmp_path))
+    assert "memory_store" not in state.__dict__
+    assert "document_store" not in state.__dict__
+
+
+async def test_no_store_declaration_omits_the_tools_and_the_stores(tmp_path):
+    config = _config(tmp_path, agents=_without("memory", "documents"))
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
     names = {fn.__name__ for fn in assistant._agent.tools}
     assert _MEMORY_TOOL_NAMES.isdisjoint(names)
     assert assistant._memory_store is None
@@ -534,18 +469,22 @@ async def test_no_memory_omits_tools_and_stores(tmp_path):
 
 async def test_document_tools_round_trip(tmp_path):
     """The document tools are wired to a working DocumentStore (pure-Python, hermetic)."""
-    assistant = await Assistant.create(_config(tmp_path, memory=True), FakeChannel(), client=MockAsyncModelClient([]))
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     tools = {fn.__name__: fn for fn in assistant._agent.tools}
     assert tools["save_document"]("/notes/standup.md", "Yesterday, Today, Blockers") == "Saved /notes/standup.md."
     assert tools["read_document"]("/notes/standup.md") == "Yesterday, Today, Blockers"
 
 
-def test_build_memory_tools_carry_dispatch_attrs(tmp_path):
-    """build_memory returns AIMU's memory + document tools directly (no wrapping); they carry the
-    dispatch attributes AIMU needs. Thread-safety now lives inside the stores (aimu.memory), not here."""
-    from kokua.core.build import build_memory
+def test_memory_toolset_tools_carry_dispatch_attrs(tmp_path):
+    """The registry's memory + documents toolsets return AIMU's tools directly (no wrapping); they carry
+    the dispatch attributes AIMU needs. Thread-safety lives inside the stores (aimu.memory), not here."""
+    from kokua.toolsets import ToolsetContext
+    from kokua.toolsets.agents import build_registry
 
-    _, _, tools = build_memory(_config(tmp_path, memory=True))
+    config = _config(tmp_path)
+    state = LiveState(config=config, registry=build_registry(config))
+    ctx = ToolsetContext(state=state, agent=None)
+    tools = state.registry["memory"].build(ctx) + state.registry["documents"].build(ctx)
     assert tools
     for fn in tools:
         assert fn.__name__
@@ -571,9 +510,26 @@ async def test_assistant_authors_and_registers_runnable_script(tmp_path):
     assert "disk__usage" in [fn.__name__ for fn in assistant._agent._effective_tools()]
 
 
+async def test_skill_authored_in_one_conversation_is_visible_in_another(tmp_path):
+    """LiveState.skill_manager is one manager shared across every conversation's agent, deliberately:
+    skills are files in one user-owned directory, so a skill taught in one conversation should be usable
+    in every other one, not just the one that authored it."""
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    first_agent = assistant._agent
+    author = next(t for t in first_agent.tools if t.__name__ == "author_skill")
+    await author(name="shared-skill", description="Shared.", body="# Shared\n\nDo X.")
+
+    await assistant.new_conversation()
+    second_agent = assistant._agent
+    assert second_agent.skill_manager is first_agent.skill_manager
+    assert "shared-skill" in second_agent.skill_manager.skills
+
+
 def test_make_agent_builder_wires_and_restores(tmp_path):
     from aimu.sessions import Session, TinyDBSessionStore
-    from kokua.core.build import build_memory, make_agent_builder
+    from kokua.core.build import make_agent_builder
+    from kokua.toolsets.agents import build_registry
 
     config = _config(tmp_path)  # existing helper
     store = TinyDBSessionStore(str(config.sessions_path))
@@ -583,25 +539,24 @@ def test_make_agent_builder_wires_and_restores(tmp_path):
         messages=[{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}],
     )
     store.save(session)
-    _, _, memory_tools = build_memory(config)
 
     async def noop(*a, **k):
         return None
 
+    state = LiveState(
+        config=config,
+        registry=build_registry(config),
+        oauth_storage_dir=config.data_dir / "mcp-oauth",
+        tool_approval=lambda name, args: True,
+        reapply_config=noop,
+        for_each_agent=lambda apply: None,
+    )
     build = make_agent_builder(
         config,
+        state,
         client_factory=lambda cid: MockAsyncModelClient([]),
-        notify=noop,
-        oauth_storage_dir=config.data_dir / "mcp-oauth",
-        connections=[],
-        memory_tools=memory_tools,
-        tool_approval=lambda name, args: True,
-        scheduler_tools=[],
-        conversation_tools=[],
         store=store,
         images_path=config.images_path,
-        for_each_agent=lambda apply: None,
-        reapply_config=noop,
     )
     agent = build("c1")
     assert agent.tool_approval is not None
@@ -632,10 +587,10 @@ def _observer_capturing_factory(captured: list):
 
 async def test_spawn_subagent_is_built_with_the_activity_reporter(tmp_path, monkeypatch):
     """The reporter must reach AIMU's factory, or a spawn stays invisible in the UI."""
-    import kokua.core.build as build_mod
+    import kokua.toolsets.agents as agents_mod
 
     captured: list = []
-    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _observer_capturing_factory(captured))
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _observer_capturing_factory(captured))
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
@@ -644,17 +599,48 @@ async def test_spawn_subagent_is_built_with_the_activity_reporter(tmp_path, monk
 
 async def test_runtime_mcp_rebuild_keeps_the_activity_reporter(tmp_path, monkeypatch):
     """A runtime MCP add rebuilds spawn_subagent; dropping the observer there would silently stop
-    sub-agent display for the rest of the process."""
-    import kokua.core.build as build_mod
+    sub-agent display for the rest of the process.
+
+    The captures are cleared and counted rather than just read at [-1]: the boot build already handed the
+    reporter over, so a bare last-element check would hold even if the add rebuilt nothing at all."""
+    import kokua.toolsets.agents as agents_mod
 
     captured: list = []
-    monkeypatch.setattr(build_mod, "make_async_subagent_tool", _observer_capturing_factory(captured))
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _observer_capturing_factory(captured))
     monkeypatch.setattr(
         "kokua.mcp.servers.connect_mcp", lambda *a, **k: _await_value((_FakeMCP([_fake_mcp_tool("get_quote")]), "none"))
     )
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
     add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
+    captured.clear()
     await add_mcp(url="https://broker/mcp")
 
+    assert len(captured) == 1  # one rebuild, for the one live agent
     assert captured[-1] is assistant._subagent_reporter
+
+
+def test_wire_agent_uses_an_injected_client_as_is(tmp_path):
+    """The client injection seam that lets the whole suite run without a model: a caller-supplied
+    client is the client the agent ends up with, untouched. Rebuilding it, or assembling and applying a
+    fresh system message on top of it, would silently overwrite whatever the injecting caller built it
+    with (e.g. a mock's canned responses, or a model switch's already-restored messages).
+    """
+    from kokua.config.schema import AssistantConfig
+    from kokua.core.build import wire_agent
+    from kokua.toolsets.agents import build_registry
+
+    config = AssistantConfig(
+        data_dir=tmp_path,
+        agents={"assistant": AgentConfig(tools=["time"])},
+        entry_agent="assistant",
+        load_plugins=False,
+    )
+    state = LiveState(config=config, registry=build_registry(config))
+    client = MockAsyncModelClient([])
+    client._system_message = "Injected system message."
+
+    agent = wire_agent(config, state, "assistant", client=client)
+
+    assert agent.model_client is client
+    assert agent.model_client.system_message == "Injected system message."

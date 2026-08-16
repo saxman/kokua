@@ -5,7 +5,7 @@
               a TinyDBSessionStore persists conversations across restarts
               author_skill / add_skill_script let the assistant grow its own skills
               memory tools give it persistent facts + documents
-              tool-pack plugins contribute extra tools
+              plugin toolsets contribute extra capabilities an agent can declare
 
 Kept transport-agnostic (it takes a `Channel`), so the CLI and web front ends share it
 unchanged. The CLI/web entry points live in `kokua.cli` / `kokua.frontends`.
@@ -22,7 +22,6 @@ from typing import Callable, Optional
 from aimu import aio
 from aimu.aio import Channel, ModelConnectionError, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
-from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.sessions import Session, TinyDBSessionStore
 
 from kokua.config import table as runtime_settings
@@ -31,23 +30,21 @@ from kokua.channels.ui import ChannelUI
 from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.core.build import (
     ModelClientError,
-    build_memory,
     build_model_client,
+    entry_agent_system_message,
     make_agent_builder,
-    unreferenced_mcp_servers,
 )
 from kokua.config import AssistantConfig, ConfigError
 from kokua.core.conversations import ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
 from kokua.core.subagents import SubagentReporter
-from kokua.core.tools import make_conversation_tools
 from kokua.mcp.servers import ServerConnection, reconnect_mcp_servers
-from kokua.scheduling import make_scheduler_tools
 from kokua.core.settings_runtime import SettingsApplier
 from kokua.core.turn_gate import TurnGate
 from kokua.core.turns import TurnRunner
 from kokua.core.turn_registry import TurnInfo, TurnTracker
+from kokua.toolsets.context import LiveState
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +77,9 @@ class Assistant:
         # Live remote-MCP connections (startup + runtime-added) kept alive for their lifetime
         # and closed on shutdown. Assigned by create().
         self._mcp_servers: list[ServerConnection] = []
-        # Persistent memory stores (None when --no-memory). Assigned by create(); persistence is
-        # automatic (Chroma PersistentClient / DocumentStore disk writes), so no teardown needed.
-        self._memory_store: Optional[SemanticMemoryStore] = None
-        self._document_store: Optional[DocumentStore] = None
+        # Every toolset's shared live state (memory/document stores, connections, the registry, ...).
+        # Assigned by create(); the ``_memory_store`` / ``_document_store`` properties read through it.
+        self._state: Optional[LiveState] = None
         # The readers-writer gate: turns on different conversations run concurrently (each is its own
         # "reader", serialized per-conversation by the registry's per-conversation lock); a config
         # mutation is the exclusive "writer" that waits for in-flight turns to drain. Constructed with
@@ -120,6 +116,7 @@ class Assistant:
             agent_for=lambda conversation_id: self._registry.get(conversation_id),
             active_agent=lambda: self._book.agent,
             cancel_active_turn=self._cancel_current_turn,
+            state=lambda: self._state,
         )
         # Turn execution, reactive and proactive. Reaches the store and the agent cache through the
         # conversation book, which already owns both.
@@ -136,16 +133,26 @@ class Assistant:
     async def create(
         cls, config: AssistantConfig, channel: Channel, *, client=None, client_factory=None
     ) -> "Assistant":
-        # The assistant is always a lean supervisor, so its only route to a domain tool is a worker.
-        # With no roles it could not browse, read a file, or compute; refuse rather than start something
-        # that looks running and cannot work.
-        if not config.subagent_roles:
-            raise ConfigError(
-                "no sub-agent roles configured: the assistant delegates all specialized work, so it "
-                "needs at least one [subagents.roles.*] in config.toml. Run `kokua config init` to "
-                "write a config with the default roles."
-            )
-        memory_store, document_store, memory_tools = build_memory(config)
+        # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which
+        # pulls in kokua.core.tools -- a submodule of this package -- and importing it triggers
+        # kokua/core/__init__ to run, which imports this module. A top-level import here would close
+        # that cycle.
+        from kokua.toolsets.agents import build_registry, unreferenced_toolsets, validate_agents
+        from kokua.toolsets.registry import ToolsetError
+
+        # Two providers claiming one toolset name is a config mistake like any other (a duplicated
+        # [[mcp.server]].name, a plugin colliding with a built-in group), so it is presented as one:
+        # translated here rather than left as the registry's internal exception type, so a front end has a
+        # single ConfigError family to catch for everything wrong with config.toml.
+        try:
+            registry = build_registry(config)
+        except ToolsetError as error:
+            raise ConfigError(str(error)) from error
+        # Validated before anything else in this method, because everything else touches something: the
+        # next statements open a session store (which mints and persists an empty session) and connect to
+        # remote servers. An unknown toolset name, a missing entry agent, or a delegation cycle therefore
+        # fails naming the offending value, with nothing written and nothing connected.
+        validate_agents(config, registry)
 
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
@@ -165,8 +172,6 @@ class Assistant:
             if setting.mirror_on_channel:
                 assistant._ui.set_display_flag(setting.field, getattr(config, setting.field))
         assistant._mcp_servers = connections  # same list the MCP tools append to / remove from
-        assistant._memory_store = memory_store
-        assistant._document_store = document_store
 
         # Per-conversation model clients: an explicit factory wins; else the injected client backs the
         # initial conversation (single-conversation tests) and further conversations build their own;
@@ -176,25 +181,17 @@ class Assistant:
         elif client is not None:
 
             def raw_factory(conversation_id: str, _client=client, _initial=initial_id):
-                return _client if conversation_id == _initial else build_model_client(config)
+                if conversation_id == _initial:
+                    return _client
+                return build_model_client(config, entry_agent_system_message(config, state))
         else:
 
             def raw_factory(conversation_id: str):
-                return build_model_client(config)
+                return build_model_client(config, entry_agent_system_message(config, state))
 
         # Wrap the raw factory so every conversation's client carries the effective generation kwargs
         # the active agent has, not bare provider defaults.
         assistant._settings.layered_factory(raw_factory)
-        scheduler_tools, arm_tasks, task_controls = make_scheduler_tools(
-            scheduler, config.scheduled_tasks_path, assistant._proactive
-        )
-        assistant._tasks = task_controls
-
-        # Read-only visibility across conversations, bound to the live book. Built here rather than in
-        # build.py because the book is app state, not a config value, so no tool-pack could reach it.
-        # Safe this early: these tools read the store through the book and never touch the agent
-        # registry, which is bound below.
-        conversation_tools = make_conversation_tools(assistant._book, assistant.turn_running)
 
         # Fan a global tool mutation (MCP add/remove) out across every live conversation's agent. Reads
         # the registry lazily: it is set just below and only ever called at runtime (add/remove) or by the
@@ -203,38 +200,49 @@ class Assistant:
             for agent in assistant._registry.live_agents():
                 apply(agent)
 
+        # Every toolset's shared live state, built once here (the composition root) rather than threaded
+        # through build.py's functions by hand.
+        state = LiveState(
+            config=config,
+            notify=channel.send,
+            oauth_storage_dir=oauth_storage_dir,
+            connections=connections,
+            scheduler=scheduler,
+            proactive=assistant._proactive,
+            conversation_book=assistant._book,
+            turn_running=assistant.turn_running,
+            tool_approval=assistant._approve,
+            reapply_config=assistant._settings.apply_one,
+            observer=assistant._subagent_reporter,
+            registry=registry,
+        )
+        # Assigned after construction because it closes over assistant._registry, which is built below it.
+        state.for_each_agent = for_each_agent
+        assistant._state = state
+        assistant._tasks = state.task_controls
+
         assistant._registry = AgentRegistry(
             make_agent_builder(
                 config,
+                state,
                 client_factory=lambda cid: assistant._settings.client_factory(cid),
-                notify=channel.send,
-                oauth_storage_dir=oauth_storage_dir,
-                connections=connections,
-                memory_tools=memory_tools,
-                tool_approval=assistant._approve,
-                scheduler_tools=scheduler_tools,
-                conversation_tools=conversation_tools,
                 store=store,
                 images_path=config.images_path,
-                for_each_agent=for_each_agent,
-                reapply_config=assistant._settings.apply_one,
-                subagent_observer=assistant._subagent_reporter,
             ),
             cap=config.agent_cache_cap,
         )
         assistant._book.bind_registry(assistant._registry)
 
         # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when that
-        # agent is built: the supervisor's spawn_subagent snapshots `connections` at build time to give
+        # agent is built: the entry agent's spawn_subagent snapshots `connections` at build time to give
         # MCP-backed workers their tools. The fan-out is a no-op here (no agents are live yet); it just
         # fills `connections`.
         await reconnect_mcp_servers(
             for_each_agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
         )
-        for name in unreferenced_mcp_servers(config):
+        for name in unreferenced_toolsets(config, state.registry):
             logger.warning(
-                "MCP server %r is configured but no [subagents.roles.*] names it in `mcp_servers`; "
-                "the supervisor mounts no MCP tools itself, so this server reaches no agent.",
+                "Toolset %r is provisioned but no [agents.*] table names it in `tools`, so it reaches no agent.",
                 name,
             )
 
@@ -242,7 +250,7 @@ class Assistant:
         # snapshots the provider base for later re-layering).
         assistant._registry.get(assistant._active_id)
 
-        arm_tasks()
+        state.arm_tasks()
         return assistant
 
     @property
@@ -270,6 +278,22 @@ class Assistant:
         doesn't need to reach into `_tracker` directly (e.g. to decide whether to show a "working"
         indicator on switching into a conversation)."""
         return self._tracker.running(conversation_id)
+
+    @property
+    def _memory_store(self):
+        """The shared semantic memory store, or None when no agent declared the memory toolset.
+
+        Read through ``LiveState`` rather than cached here, so merely asking whether a store exists does
+        not force it into existence."""
+        return self._state.__dict__.get("memory_store") if self._state else None
+
+    @property
+    def _document_store(self):
+        """The shared document store, or None when no agent declared the documents toolset.
+
+        Read through ``LiveState`` rather than cached here, so merely asking whether a store exists does
+        not force it into existence."""
+        return self._state.__dict__.get("document_store") if self._state else None
 
     @property
     def history(self) -> list[dict]:

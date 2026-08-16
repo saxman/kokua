@@ -2,8 +2,9 @@
 
 Resolves an :class:`~kokua.config.AssistantConfig` from (in increasing precedence) built-in
 defaults, an optional TOML config file, and command-line flags, then runs the selected front end
-(default ``cli``; ``web`` and any installed plugin are also selectable). ``--list-frontends`` /
-``--list-tool-packs`` introspect the plugin registry.
+(default ``cli``; ``web`` and any installed plugin are also selectable). ``--list-frontends`` lists the
+front-end plugins; ``--list-toolsets`` lists the whole toolset registry, which is the discovery command
+for the single namespace an ``[agents.*]`` table's ``tools`` list draws on.
 
 Flag defaults are the ``None`` sentinel rather than the real default value, so an unspecified flag
 defers to the config file (and then the built-in default) instead of overriding it.
@@ -19,6 +20,7 @@ from . import plugins
 from .aimu_compat import AimuVersionError, require_aimu
 from kokua.config import file as settings
 from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
+from kokua.mcp.servers import disambiguate_name, name_from_url
 from .logging_setup import configure_logging
 
 
@@ -32,12 +34,16 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Front end to run: 'cli' (terminal), 'web' (browser), or any installed plugin. Default: cli.",
     )
     parser.add_argument("--list-frontends", action="store_true", help="List available front ends and exit.")
-    parser.add_argument("--list-tool-packs", action="store_true", help="List installed tool-pack plugins and exit.")
+    parser.add_argument(
+        "--list-toolsets",
+        action="store_true",
+        help="List every toolset name an [agents.<name>].tools list may use, grouped by provider, and exit.",
+    )
     parser.add_argument(
         "--plugins",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Discover tool-pack plugins via the 'kokua.tools' entry-point group. Default: on "
+        help="Discover toolset plugins via the 'kokua.toolsets' entry-point group. Default: on "
         "(use --no-plugins to disable for this run).",
     )
 
@@ -55,7 +61,13 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Model string (e.g. 'ollama:qwen3:8b'). Unset: AIMU_LANGUAGE_MODEL, else a running "
         "local model (never a cloud model); startup fails if none is found.",
     )
-    parser.add_argument("--system", default=None, help="Override the assistant's system message.")
+    parser.add_argument(
+        "--system",
+        default=None,
+        help="Override the entry agent's system message for this run (its [agents.<name>].system_message "
+        "or the [assistant].system_message fallback, whichever it would otherwise use). Does not affect "
+        "a delegated worker's own declared message.",
+    )
     parser.add_argument(
         "--show-thinking",
         action=argparse.BooleanOptionalAction,
@@ -69,14 +81,6 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Show tool calls as they happen. Default: on (use --no-show-tools to hide).",
     )
     parser.add_argument(
-        "--tools",
-        default=None,
-        help="Comma-separated AIMU built-in tool groups to expose: web, fs, compute, time, misc, image, "
-        "audio, speech, transcription (or 'all' / 'none'). Default: web,fs,compute,time,misc. The "
-        "generative groups (image/audio/speech/transcription) require their AIMU_*_MODEL env var. "
-        "Enabling 'time' also gives every sub-agent role the clock, whatever its own groups.",
-    )
-    parser.add_argument(
         "--mcp",
         action="append",
         default=None,
@@ -87,18 +91,12 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         "connect more servers mid-session via the add_mcp_server tool.",
     )
     parser.add_argument(
-        "--memory",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Persistent memory across conversations: facts about the user (semantic) plus "
-        "user-provided documents. Default: on (use --no-memory to disable).",
-    )
-    parser.add_argument(
         "--confirm-tools",
         default=None,
         metavar="NAMES",
         help="Comma-separated tool names that require interactive confirmation before each call. "
-        "Default: add_skill_script,add_mcp_server,execute_python. Pass an empty string to disable.",
+        "Default: add_skill_script,add_mcp_server,execute_python,update_config. Pass an empty string "
+        "to disable.",
     )
 
     # Web front-end binding (ignored by other front ends).
@@ -122,6 +120,24 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
     return parser
 
 
+def _mcp_servers_from_urls(urls: list[str]) -> list[MCPServerConfig]:
+    """One ``MCPServerConfig`` per ``--mcp`` URL, named by host and disambiguated against each other.
+
+    Two URLs on one host (a service exposing several MCP endpoints under one domain) derive the same
+    base name from ``name_from_url``; without disambiguating here, the second would collide with the
+    first in the registry at startup with no ``--mcp``-only way to rename either. Uses the same
+    ``disambiguate_name`` the ``add_mcp_server`` tool's config write applies against names already on
+    file, so a name derived from one URL never depends on which of the two disambiguation call sites ran.
+    """
+    servers: list[MCPServerConfig] = []
+    used: set[str] = set()
+    for url in urls:
+        name = disambiguate_name(name_from_url(url), used)
+        used.add(name)
+        servers.append(MCPServerConfig(url=url, name=name))
+    return servers
+
+
 def _cli_overrides(args: argparse.Namespace) -> dict:
     """Collect the flags the user actually passed (non-sentinel), keyed by AssistantConfig field."""
     overrides: dict = {}
@@ -131,12 +147,10 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
             overrides[field] = transform(value) if transform else value
 
     take("model", args.model)
-    take("system_message", args.system)
+    take("system_message_override", args.system)
     take("show_thinking", args.show_thinking)
     take("show_tools", args.show_tools)
-    take("tools", args.tools, lambda v: [group.strip() for group in v.split(",") if group.strip()])
-    take("mcp_servers", args.mcp, lambda urls: [MCPServerConfig(url=url) for url in urls])
-    take("memory", args.memory)
+    take("mcp_servers", args.mcp, _mcp_servers_from_urls)
     take("load_plugins", args.plugins)
     take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
     take("frontend", args.frontend)
@@ -162,6 +176,40 @@ def _init_config(args: argparse.Namespace) -> int:
     path.write_text(settings.example_text(), encoding="utf-8")
     print(f"wrote starter config: {path}")
     return 0
+
+
+def _print_toolsets(config: AssistantConfig) -> None:
+    """Print every name an ``[agents.*]`` table may put in ``tools``, grouped by what provides it.
+
+    Grouped by provider because the single namespace deliberately hides provenance from the agent: a
+    config says ``web``, not ``aimu:web``, so this command is the one place a user can learn that ``web``
+    comes from AIMU, ``scheduling`` from Kokua, ``pdf`` from an installed plugin, and their own server
+    from ``[[mcp.server]]``. Reads the whole registry rather than only the plugin entry points, because a
+    list that omitted the built-in groups would read as "those are unavailable to you".
+    """
+    # Imported here, not at module level: kokua.toolsets.agents reaches kokua.core, which imports the
+    # AIMU surface `preflight` exists to check, and this module must be importable before that check runs.
+    from kokua.toolsets.agents import build_registry
+    from kokua.toolsets.registry import ToolsetError
+
+    try:
+        registry = build_registry(config)
+    except ToolsetError as e:
+        # Same reason Assistant.create translates this: a name two providers claim is a config mistake,
+        # and this command is exactly where a user comes to diagnose one.
+        print(e, file=sys.stderr)
+        raise SystemExit(2) from None
+
+    by_provider: dict[str, list[str]] = {}
+    for name in registry:
+        by_provider.setdefault(registry.providers[name], []).append(name)
+
+    print("Toolsets available to this install. Name any of these in an [agents.<name>].tools list.\n")
+    for provider, names in by_provider.items():
+        print(f"{provider}:")
+        for name in sorted(names):
+            print(f"  {name}: {registry[name].description}")
+        print()
 
 
 def preflight() -> None:
@@ -193,15 +241,8 @@ def main() -> None:
         for name, frontend in sorted(plugins.discover_frontends().items()):
             print(f"{name}: {frontend.description}")
         return
-    if args.list_tool_packs:
-        packs = plugins.discover_tool_packs()
-        if not packs:
-            print("No tool-pack plugins installed.")
-        for name, pack in sorted(packs.items()):
-            print(f"{name}: {pack.description}")
-        return
 
-    # A ConfigError is a user mistake with a known fix (a missing config.toml, no sub-agent roles, a
+    # A ConfigError is a user mistake with a known fix (a missing config.toml, no [agents.*] tables, a
     # bad key), so it prints as an instruction. A traceback here would bury the one line that matters.
     try:
         config = resolve_config(args)
@@ -209,13 +250,19 @@ def main() -> None:
         print(e, file=sys.stderr)
         raise SystemExit(2) from None
 
+    # After resolve_config, not before it: the registry it lists depends on the file (load_plugins, and
+    # every [[mcp.server]] name), so this command cannot answer honestly without one.
+    if args.list_toolsets:
+        _print_toolsets(config)
+        return
+
     configure_logging(config)  # rotating file log + faulthandler, before the assistant starts
     frontend = plugins.get_frontend(config.frontend)
     try:
         asyncio.run(frontend.run(config, args))
     except KeyboardInterrupt:
         pass
-    except ConfigError as e:  # raised at boot, e.g. a config that defines no sub-agent roles
+    except ConfigError as e:  # raised at boot, e.g. a config defining no agents or an unknown toolset
         print(e, file=sys.stderr)
         raise SystemExit(2) from None
 

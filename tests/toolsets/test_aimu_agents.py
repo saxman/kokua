@@ -1,9 +1,10 @@
-"""Tests for the `aimu_agents` tool-pack: AIMU's prebuilt orchestrator agents mounted as tools.
+"""Tests for the `aimu_agents` toolset: AIMU's prebuilt orchestrator agents mounted as tools.
 
 The prebuilts each build one orchestrator client plus three worker clients and then talk to a model,
 so every test here stubs both the client factory and the prebuilt classes. What is actually under test
 is Kokua's wiring: that construction is deferred to call time, that a call gets a fresh agent, that the
-global tool policy still governs the workers, and that a bad model does not raise into the agent loop.
+research worker unconditionally receives web tools, and that a bad model does not raise into the agent
+loop.
 """
 
 from __future__ import annotations
@@ -16,12 +17,12 @@ import pytest
 from tests.channels import _config as _assistant_config
 from kokua import plugins
 from kokua.config import AssistantConfig
-from kokua.plugins import ToolPack
-from kokua.toolpacks import aimu_agents
+from kokua.plugins import Toolset
+from kokua.toolsets import LiveState, ToolsetContext, aimu_agents
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "model": "anthropic:claude-sonnet-4-6"}
+    base = {"data_dir": tmp_path, "model": "anthropic:claude-sonnet-4-6"}
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -59,22 +60,28 @@ def _tool(tools: list, name: str):
 
 
 def test_pack_is_discovered_and_contributes_three_tools():
-    packs = plugins.discover_tool_packs()
-    assert "aimu_agents" in packs
-    assert isinstance(packs["aimu_agents"], ToolPack)
-    names = {getattr(fn, "__name__", None) for fn in packs["aimu_agents"].build(AssistantConfig())}
+    toolsets = plugins.discover_toolsets()
+    assert "aimu_agents" in toolsets
+    assert isinstance(toolsets["aimu_agents"], Toolset)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    names = {getattr(fn, "__name__", None) for fn in toolsets["aimu_agents"].build(ctx)}
     assert {"code_review", "research_report", "create_content"} <= names
 
 
-def test_pack_tools_reach_a_role_that_names_the_pack(tmp_path):
-    """The documented wiring: a role with tool_packs = ["aimu_agents"] gets the three agents as tools."""
-    from kokua.core.build import _build_subagent_agent_types, _load_plugin_tools_by_pack
+def test_toolset_tools_reach_an_agent_that_names_the_toolset(tmp_path):
+    """The documented wiring: an agent with tools = ["aimu_agents"] gets the three agents as tools."""
+    from kokua.config.schema import AgentConfig
+    from kokua.toolsets.agents import build_agent_specs, build_registry
 
     cfg = _assistant_config(
-        tmp_path, subagent_roles={"reviewer": {"description": "Reviews.", "tool_packs": ["aimu_agents"]}}
+        tmp_path,
+        agents={
+            "assistant": AgentConfig(tools=["time"], delegates_to=["reviewer"]),
+            "reviewer": AgentConfig(description="Reviews.", tools=["aimu_agents"]),
+        },
     )
-    types = _build_subagent_agent_types(cfg, [], _load_plugin_tools_by_pack(cfg))
-    names = {fn.__name__ for fn in types["reviewer"]["tools"]}
+    state = LiveState(config=cfg, registry=build_registry(cfg))
+    names = {fn.__name__ for fn in build_agent_specs(cfg, state, "assistant")["reviewer"]["tools"]}
     assert {"code_review", "research_report", "create_content"} <= names
 
 
@@ -108,24 +115,14 @@ def test_the_model_is_read_at_call_time(tmp_path, stub_prebuilts):
     assert stub_prebuilts["models"] == ["anthropic:claude-opus-4-1"]
 
 
-def test_research_workers_get_web_tools_when_the_web_group_is_enabled(tmp_path, stub_prebuilts):
-    tools = aimu_agents.build(_config(tmp_path, tools=["web", "compute"]))
+def test_research_workers_always_get_web_tools(tmp_path, stub_prebuilts):
+    """There is no global tool policy left to gate this on: naming ``aimu_agents`` in an agent's
+    ``tools`` is itself the consent, so building the toolset must not raise and the research worker
+    must receive the web tools unconditionally."""
+    tools = aimu_agents.build(_config(tmp_path))
     _tool(tools, "research_report")("photosynthesis")
     worker_tools = stub_prebuilts["instances"][0].kwargs["worker_tools"]
     assert {fn.__name__ for fn in worker_tools} >= {"web_search", "get_webpage"}
-
-
-def test_research_workers_get_no_tools_when_the_web_group_is_disabled(tmp_path, stub_prebuilts):
-    """A role never exceeds [tools].groups; a pack-mounted agent's workers must not either."""
-    tools = aimu_agents.build(_config(tmp_path, tools=["none"]))
-    _tool(tools, "research_report")("photosynthesis")
-    assert stub_prebuilts["instances"][0].kwargs["worker_tools"] is None
-
-
-def test_tools_all_also_enables_the_research_workers_web_tools(tmp_path, stub_prebuilts):
-    tools = aimu_agents.build(_config(tmp_path, tools=["all"]))
-    _tool(tools, "research_report")("photosynthesis")
-    assert stub_prebuilts["instances"][0].kwargs["worker_tools"]
 
 
 def test_an_unresolvable_model_returns_a_message_instead_of_raising(tmp_path, monkeypatch):

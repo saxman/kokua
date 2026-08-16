@@ -7,7 +7,7 @@ from pathlib import Path
 from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
-from tests.channels import example_subagent_roles
+from tests.channels import example_agents
 from kokua.planning.reviewers import Verdict
 
 from aimu.aio.channels.base import Channel, ChannelMessage
@@ -60,7 +60,7 @@ class VerboseChannel(Channel):
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "memory": False, "subagent_roles": example_subagent_roles()}
+    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
     base.update(overrides)
     return AssistantConfig(**base)
 

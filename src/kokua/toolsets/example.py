@@ -1,8 +1,8 @@
-"""A tiny example tool-pack, the template for third-party tool modules.
+"""A tiny example toolset, the template for third-party tool modules.
 
 It contributes one trivial tool so the plugin path is real and testable end to end. Copy this
-shape into your own package, register it under the ``kokua.tools`` entry-point group, and
-``pip install`` it: Kokua will discover the pack and add its tools to the agent automatically.
+shape into your own package, register it under the ``kokua.toolsets`` entry-point group, and
+``pip install`` it: Kokua will discover the toolset and add its tools to the agent automatically.
 """
 
 from __future__ import annotations
@@ -12,11 +12,11 @@ import random
 from aimu.tools import tool
 
 from kokua.config import AssistantConfig
-from kokua.plugins import ToolPack
+from kokua.toolsets import Toolset
 
 
 def build(config: AssistantConfig) -> list:
-    """Return this pack's tools. Receives the config in case a pack needs to read it."""
+    """Return this toolset's tools. Receives the config in case a toolset needs to read it."""
 
     @tool
     def roll_dice(sides: int = 6) -> str:
@@ -32,8 +32,8 @@ def build(config: AssistantConfig) -> list:
     return [roll_dice]
 
 
-TOOL_PACK = ToolPack(
+TOOLSET = Toolset(
     name="example",
-    description="A demonstration tool-pack (a dice roller) showing how to add tools as a plugin.",
-    build=build,
+    description="A demonstration toolset (a dice roller) showing how to add tools as a plugin.",
+    build=lambda ctx: build(ctx.config),
 )

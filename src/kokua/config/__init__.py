@@ -5,8 +5,8 @@ it back with its comments intact (``store``), the dataclass it parses into (``sc
 declaration of which settings are changeable at runtime (``table``), and the assistant's own
 ``read_config``/``update_config`` tools (``tools``).
 
-``AssistantConfig`` is re-exported here because it is Kokua's most-imported name and part of the
-plugin contract: a ``ToolPack.build(config)`` receives one.
+``AssistantConfig`` is re-exported here because it is Kokua's most-imported name and reaches the
+plugin contract too: a ``Toolset.build(ctx)`` reads it as ``ctx.config``.
 """
 
 from .file import ConfigError, example_text, load, resolve_path

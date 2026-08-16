@@ -24,8 +24,8 @@ def _resolve(*argv):
 
 
 def test_missing_default_file_is_an_error_naming_the_fix():
-    """config.toml is required: sub-agent roles live only there and the assistant needs at least one,
-    so starting without a file is not a state Kokua can be in."""
+    """config.toml is required: the [agents.*] tables live only there and the assistant needs at least
+    one, so starting without a file is not a state Kokua can be in."""
     paths.config_path().unlink()
     with pytest.raises(settings.ConfigError, match="kokua config init"):
         settings.load()
@@ -36,10 +36,9 @@ def test_file_overrides_built_in_defaults():
         """
         [assistant]
         model = "anthropic:claude-sonnet-4-6"
+        concurrent_tools = false
         [display]
         show_thinking = false
-        [tools]
-        groups = ["fs", "misc"]
         [web]
         port = 9100
         """
@@ -47,7 +46,7 @@ def test_file_overrides_built_in_defaults():
     cfg = _resolve()
     assert cfg.model == "anthropic:claude-sonnet-4-6"
     assert cfg.show_thinking is False
-    assert cfg.tools == ["fs", "misc"]
+    assert cfg.concurrent_tools is False
     assert cfg.port == 9100
 
 
@@ -170,57 +169,17 @@ def test_config_init_custom_path(tmp_path):
     assert target.read_text(encoding="utf-8") == settings.example_text()
 
 
-def test_subagents_section_parses_concurrent_and_roles(tmp_path):
+def test_agent_tools_must_be_a_string_list(tmp_path):
     path = tmp_path / "config.toml"
-    path.write_text(
-        "[subagents]\n"
-        "concurrent = false\n\n"
-        "[subagents.roles.researcher]\n"
-        'groups = ["web"]\n'
-        'description = "Custom researcher."\n\n'
-        "[subagents.roles.dba]\n"
-        'groups = ["compute"]\n'
-        'description = "Database helper."\n'
-        'system_message = "You manage databases."\n',
-        encoding="utf-8",
-    )
-    overrides = settings.load(str(path))
-    assert overrides["subagents_concurrent"] is False
-    roles = overrides["subagent_roles"]
-    assert roles["researcher"] == {"groups": ["web"], "description": "Custom researcher."}
-    assert roles["dba"]["system_message"] == "You manage databases."
-
-
-def test_subagent_role_mcp_servers_and_tool_packs_parse(tmp_path):
-    path = tmp_path / "config.toml"
-    path.write_text(
-        "[subagents.roles.trader]\n"
-        'description = "Places trades."\n'
-        'groups = ["compute"]\n'
-        'mcp_servers = ["stocks"]\n'
-        'tool_packs = ["pdf", "email"]\n',
-        encoding="utf-8",
-    )
-    role = settings.load(str(path))["subagent_roles"]["trader"]
-    assert role["mcp_servers"] == ["stocks"]
-    assert role["tool_packs"] == ["pdf", "email"]
-    assert role["groups"] == ["compute"]
-
-
-def test_subagent_role_mcp_servers_must_be_string_list(tmp_path):
-    path = tmp_path / "config.toml"
-    path.write_text("[subagents.roles.bad]\nmcp_servers = [1, 2]\n", encoding="utf-8")
-    with pytest.raises(settings.ConfigError, match="mcp_servers"):
+    path.write_text("[agents.bad]\ntools = [1, 2]\n", encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match="tools"):
         settings.load(str(path))
 
 
-def test_subagents_unknown_role_key_raises(tmp_path):
+def test_agent_delegates_to_must_be_a_string_list(tmp_path):
     path = tmp_path / "config.toml"
-    path.write_text(
-        '[subagents.roles.bad]\ngroups = ["web"]\nbogus = 1\n',
-        encoding="utf-8",
-    )
-    with pytest.raises(settings.ConfigError, match="bogus"):
+    path.write_text("[agents.bad]\ndelegates_to = [1]\n", encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match="delegates_to"):
         settings.load(str(path))
 
 
@@ -236,9 +195,11 @@ def test_mcp_server_tables_parse(tmp_path):
     path.write_text(
         "[[mcp.server]]\n"
         'url = "https://api.githubcopilot.com/mcp/"\n'
+        'name = "github"\n'
         'token_env = "GITHUB_MCP_TOKEN"\n\n'
         "[[mcp.server]]\n"
-        'url = "https://plain/mcp"\n',
+        'url = "https://plain/mcp"\n'
+        'name = "plain"\n',
         encoding="utf-8",
     )
     servers = settings.load(str(path))["mcp_servers"]
@@ -267,7 +228,7 @@ def test_mcp_server_missing_url_raises(tmp_path):
 
 def test_mcp_server_unknown_key_raises(tmp_path):
     path = tmp_path / "config.toml"
-    path.write_text('[[mcp.server]]\nurl = "https://x/mcp"\nbearer = "nope"\n', encoding="utf-8")
+    path.write_text('[[mcp.server]]\nurl = "https://x/mcp"\nname = "x"\nbearer = "nope"\n', encoding="utf-8")
     with pytest.raises(settings.ConfigError, match="bearer"):
         settings.load(str(path))
 
@@ -296,7 +257,10 @@ def test_coerce_config_string_scalars():
 
 
 def test_coerce_config_string_list():
-    assert settings.coerce_config_string("tools", "groups", "web, fs, misc") == ["web", "fs", "misc"]
+    assert settings.coerce_config_string("security", "confirm_tools", "execute_python, update_config") == [
+        "execute_python",
+        "update_config",
+    ]
 
 
 def test_coerce_config_string_generation_range_checked():
@@ -338,9 +302,9 @@ def test_explicit_missing_file_is_also_an_error(tmp_path):
         settings.load(str(tmp_path / "nope.toml"))
 
 
-def test_a_config_defining_no_roles_still_parses(tmp_path):
-    """The file layer stays dumb about it: zero roles is a valid TOML config, and refusing to run on
+def test_a_config_defining_no_agents_still_parses(tmp_path):
+    """The file layer stays dumb about it: zero agents is a valid TOML config, and refusing to run on
     one is Assistant.create's call (see tests/core/test_build.py)."""
     path = tmp_path / "config.toml"
-    path.write_text("[subagents]\nconcurrent = true\n", encoding="utf-8")
-    assert settings.load(str(path)).get("subagent_roles") is None
+    path.write_text("[assistant]\nconcurrent_tools = true\n", encoding="utf-8")
+    assert settings.load(str(path)).get("agents") is None

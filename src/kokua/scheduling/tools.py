@@ -19,6 +19,8 @@ from typing import Awaitable, Callable, Literal, Optional
 
 from aimu.tools import tool
 
+from kokua.toolsets.registry import Toolset
+
 from .recurrence import next_fire
 from .registry import _record_target, add, find, load, remove
 
@@ -496,3 +498,11 @@ def make_scheduler_tools(
             run_now=_run_now,
         ),
     )
+
+
+TOOLSET = Toolset(
+    name="scheduling",
+    description="Schedule, list, edit, and cancel recurring or one-off proactive tasks.",
+    build=lambda ctx: ctx.state.scheduler_tools,
+    cross_cutting=True,
+)

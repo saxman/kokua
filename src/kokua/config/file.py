@@ -23,7 +23,7 @@ from typing import Any, Callable, Optional
 
 from kokua.config import paths as paths
 from kokua.config import table as runtime_settings
-from kokua.config.schema import MCPServerConfig
+from kokua.config.schema import AgentConfig, MCPServerConfig
 
 EXAMPLE_FILENAME = "config.example.toml"
 
@@ -59,42 +59,53 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
         if token_env is not None and not isinstance(token_env, str):
             raise ConfigError(f"[[mcp.server]].token_env must be a string (server {url})")
         name = entry.get("name")
-        if name is not None and not isinstance(name, str):
-            raise ConfigError(f"[[mcp.server]].name must be a string (server {url})")
+        if not isinstance(name, str) or not name:
+            raise ConfigError(
+                f"[[mcp.server]] requires a string 'name' (server {url}): a server is named so an "
+                "agent can declare it in its tools list."
+            )
         unknown = set(entry) - {"url", "token_env", "name"}
         if unknown:
             raise ConfigError(f"unknown key(s) in [[mcp.server]] (server {url}): {', '.join(sorted(unknown))}")
-        servers.append(MCPServerConfig(url=url, token_env=token_env, name=name))
+        servers.append(MCPServerConfig(url=url, name=name, token_env=token_env))
     return servers
 
 
-# String-list role keys (groups + the two tool-source references) share the _str_list validator.
-_SUBAGENT_ROLE_LIST_KEYS = {"groups", "mcp_servers", "tool_packs"}
-_SUBAGENT_ROLE_KEYS = {
+# String-list agent keys share the _str_list validator.
+_AGENT_LIST_KEYS = {"tools", "delegates_to"}
+_AGENT_KEYS = {
     "description": str,
-    "groups": list,
-    "mcp_servers": list,
-    "tool_packs": list,
     "system_message": str,
+    "tools": list,
+    "delegates_to": list,
 }
+# Per-agent keys the old [subagents.roles.*] vocabulary used, now folded into the single `tools` list:
+# a group, a tool-pack, and an MCP server reference all named a toolset by a different vocabulary word,
+# and the registry that replaced that vocabulary makes the distinction moot.
+_REMOVED_AGENT_KEYS = {"groups", "tool_packs", "mcp_servers"}
 
 
-def _parse_subagent_role(name: str, spec: Any) -> dict:
-    """Validate one [subagents.roles.<name>] table into a role dict."""
+def _parse_agent(name: str, spec: Any) -> AgentConfig:
+    """Validate one [agents.<name>] table into an ``AgentConfig``."""
     if not isinstance(spec, dict):
-        raise ConfigError(f"[subagents.roles.{name}] must be a table")
-    role: dict = {}
+        raise ConfigError(f"[agents.{name}] must be a table")
+    fields: dict = {}
     for key, value in spec.items():
-        expected = _SUBAGENT_ROLE_KEYS.get(key)
+        if key in _REMOVED_AGENT_KEYS:
+            raise ConfigError(
+                f"[agents.{name}].{key} is gone. List it in [agents.{name}].tools instead; every "
+                "toolset (AIMU group, plugin, or MCP server) is named the same way there now."
+            )
+        expected = _AGENT_KEYS.get(key)
         if expected is None:
-            raise ConfigError(f"unknown config key [subagents.roles.{name}].{key}")
-        if key in _SUBAGENT_ROLE_LIST_KEYS:
-            role[key] = _str_list(f"subagents.roles.{name}", key, value)
+            raise ConfigError(f"unknown config key [agents.{name}].{key}")
+        if key in _AGENT_LIST_KEYS:
+            fields[key] = _str_list(f"agents.{name}", key, value)
         elif not isinstance(value, expected):
-            raise ConfigError(f"[subagents.roles.{name}].{key} must be a {expected.__name__}")
+            raise ConfigError(f"[agents.{name}].{key} must be a {expected.__name__}")
         else:
-            role[key] = value
-    return role
+            fields[key] = value
+    return AgentConfig(**fields)
 
 
 # (section, key) -> (AssistantConfig field, accepted TOML types, human label, optional converter).
@@ -105,10 +116,10 @@ def _parse_subagent_role(name: str, spec: Any) -> dict:
 _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
     ("assistant", "system_message"): ("system_message", (str,), "a string", None),
     ("planning", "review_rounds"): ("review_rounds", (int,), "an integer", None),
-    ("assistant", "memory"): ("memory", (bool,), "a boolean", None),
+    ("assistant", "agent"): ("entry_agent", (str,), "a string", None),
+    ("assistant", "concurrent_tools"): ("concurrent_tools", (bool,), "a boolean", None),
     ("assistant", "load_plugins"): ("load_plugins", (bool,), "a boolean", None),
     ("assistant", "agent_cache_cap"): ("agent_cache_cap", (int,), "an integer", None),
-    ("tools", "groups"): ("tools", (list,), "a list of strings", _str_list),
     # [email]: SMTP send settings. No `password` key on purpose -- the password comes from the
     # KOKUA_EMAIL_PASSWORD env var, so putting it here is a hard "unknown config key" error.
     ("email", "host"): ("email_host", (str,), "a string", None),
@@ -181,7 +192,7 @@ def coerce_config_string(section: str, key: str, raw: str) -> Any:
         if key not in cleaned:
             raise ConfigError(f"[generation].{key} is out of the allowed range")
         return cleaned[key]
-    if section in ("subagents", "mcp"):
+    if section in ("subagents", "agents", "mcp"):
         raise ConfigError(f"[{section}] has no scalar keys editable with update_config")
     spec = _SCHEMA.get((section, key))
     if spec is None:
@@ -189,6 +200,19 @@ def coerce_config_string(section: str, key: str, raw: str) -> Any:
     _, types, _, convert = spec
     value = _parse_scalar(section, key, raw, types)
     return convert(section, key, value) if convert else value
+
+
+# Keys this release removed, mapped to the message naming their replacement. Checked before the schema
+# so an old config gets a targeted error instead of a generic unknown-key one. A `None` key matches the
+# whole section, for a table that no longer exists at all regardless of which key inside it is set.
+_REMOVED_KEYS = {
+    ("tools", None): "[tools] is gone. Each agent now lists what it holds in [agents.<name>].tools.",
+    ("subagents", "concurrent"): "[subagents].concurrent is now [assistant].concurrent_tools.",
+    ("assistant", "memory"): (
+        "[assistant].memory is gone. Declare the 'memory' and 'documents' toolsets in an agent's "
+        "tools list instead; declaring a toolset is the only switch."
+    ),
+}
 
 
 def resolve_path(explicit: Optional[str]) -> tuple[Path, bool]:
@@ -204,9 +228,9 @@ def resolve_path(explicit: Optional[str]) -> tuple[Path, bool]:
 def load(explicit: Optional[str] = None) -> dict[str, Any]:
     """Parse the config file into a dict of ``AssistantConfig`` field overrides.
 
-    The file is required, not optional. Sub-agent roles live only in it and the assistant cannot run
-    without at least one, so "no config" is not a state Kokua can start in; failing here with the
-    command that fixes it beats starting something that cannot work.
+    The file is required, not optional. Agents live only in it and the assistant cannot run without
+    at least one, so "no config" is not a state Kokua can start in; failing here with the command that
+    fixes it beats starting something that cannot work.
     """
     path, _ = resolve_path(explicit)
     if not path.exists():
@@ -219,6 +243,8 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
     for section, entries in data.items():
         if not isinstance(entries, dict):
             raise ConfigError(f"top-level config key {section!r} is not a [section] table")
+        if (section, None) in _REMOVED_KEYS:
+            raise ConfigError(_REMOVED_KEYS[(section, None)])
         # The [generation] table maps to the single `generation` dict field (one key per generation
         # kwarg) rather than the usual one-key-one-field _SCHEMA entries, so handle it separately.
         # Types are checked loudly here; range validation is left to runtime_settings.sanitize.
@@ -230,22 +256,20 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
                     raise ConfigError(f"[generation].{key} must be a number, got {type(value).__name__}")
                 overrides.setdefault("generation", {})[key] = value
             continue
-        # The [subagents] table maps to two fields: `concurrent` (bool) and a nested `roles` table of
-        # role definitions, so it is handled specially like [generation] rather than via _SCHEMA.
+        # [subagents] no longer holds anything live: `concurrent` moved to [assistant].concurrent_tools,
+        # and `roles` moved to [agents.<name>], so both keys are checked against the removed-key table.
         if section == "subagents":
             for key, value in entries.items():
-                if key == "concurrent":
-                    if not isinstance(value, bool):
-                        raise ConfigError(f"[subagents].concurrent must be a boolean, got {type(value).__name__}")
-                    overrides["subagents_concurrent"] = value
-                elif key == "roles":
-                    if not isinstance(value, dict):
-                        raise ConfigError("[subagents.roles] must be a table of role definitions")
-                    overrides["subagent_roles"] = {
-                        name: _parse_subagent_role(name, spec) for name, spec in value.items()
-                    }
-                else:
-                    raise ConfigError(f"unknown config key [subagents].{key}")
+                if (section, key) in _REMOVED_KEYS:
+                    raise ConfigError(_REMOVED_KEYS[(section, key)])
+                if key == "roles":
+                    raise ConfigError("[subagents.roles.<name>] is gone. Declare each agent whole in [agents.<name>].")
+                raise ConfigError(f"unknown config key [subagents].{key}")
+            continue
+        # The [agents] table holds one sub-table per agent, each parsed into an AgentConfig, so it is
+        # handled specially like [generation]/[mcp] rather than via _SCHEMA's flat one-key-one-field map.
+        if section == "agents":
+            overrides["agents"] = {name: _parse_agent(name, spec) for name, spec in entries.items()}
             continue
         # The [mcp] table holds a [[mcp.server]] array of tables (each url + optional token_env),
         # not flat scalar keys, so it is handled specially like [subagents]/[generation].
@@ -256,6 +280,8 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
                 overrides["mcp_servers"] = _parse_mcp_servers(value)
             continue
         for key, value in entries.items():
+            if (section, key) in _REMOVED_KEYS:
+                raise ConfigError(_REMOVED_KEYS[(section, key)])
             field, coerced = _coerce_flat(section, key, value)
             overrides[field] = coerced
     return overrides

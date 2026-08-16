@@ -1,4 +1,4 @@
-"""A built-in tool-pack that lets the assistant email information to the user.
+"""A built-in toolset that lets the assistant email information to the user.
 
 Contributes one tool, ``send_email``, that sends an email over SMTP (Python's stdlib ``smtplib`` +
 ``email.message.EmailMessage``, no extra dependency). The body is authored as Markdown and delivered as
@@ -12,7 +12,7 @@ Two deliberate design constraints, both security-relevant:
 - The SMTP password is read from the ``KOKUA_EMAIL_PASSWORD`` environment variable, never from the TOML
   config (``settings.py`` has no ``[email].password`` key, so putting it there is a hard error).
 
-Like ``image.py``, the pack self-gates: ``build`` returns no tool unless host + recipient + password are
+Like ``image.py``, the toolset self-gates: ``build`` returns no tool unless host + recipient + password are
 all configured, so a default install never advertises an email tool it cannot fulfill. Sending is left
 ungated (not in ``confirm_tools``) on purpose, so scheduled/proactive turns can send (e.g. a daily
 digest); proactive turns auto-deny gated tools, which would otherwise block that use case.
@@ -30,7 +30,7 @@ from typing import Optional
 from aimu.tools import tool
 
 from kokua.config import AssistantConfig
-from kokua.plugins import ToolPack
+from kokua.toolsets import Toolset
 
 # The SMTP password lives only in the environment, never in the config file. See module docstring.
 _PASSWORD_ENV = "KOKUA_EMAIL_PASSWORD"
@@ -127,8 +127,8 @@ def build(config: AssistantConfig) -> list:
     return [send_email]
 
 
-TOOL_PACK = ToolPack(
+TOOLSET = Toolset(
     name="email",
     description="Email yourself information (Markdown -> HTML) via SMTP; needs [email] config and KOKUA_EMAIL_PASSWORD.",
-    build=build,
+    build=lambda ctx: build(ctx.config),
 )
