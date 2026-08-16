@@ -15,6 +15,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from pathlib import Path
+from typing import Optional
 
 from . import plugins
 from .aimu_compat import AimuVersionError, require_aimu
@@ -117,6 +119,21 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Write here instead of the default ($KOKUA_CONFIG or $KOKUA_HOME/config.toml).",
     )
     init_parser.add_argument("--force", action="store_true", help="Overwrite an existing config file.")
+
+    skills_parser = subparsers.add_parser("skills", help="List or install the skills this repository ships.")
+    skills_sub = skills_parser.add_subparsers(dest="skills_command")
+    skills_sub.add_parser("list", help="List the skills bundled in this repository's skills/ directory.")
+    install_parser = skills_sub.add_parser(
+        "install", help="Copy bundled skills into the skills folder, where the assistant discovers them."
+    )
+    install_parser.add_argument(
+        "name",
+        nargs="*",
+        help="Skills to install. Installs every bundled skill when omitted.",
+    )
+    install_parser.add_argument(
+        "--force", action="store_true", help="Overwrite a skill of the same name that is already installed."
+    )
     return parser
 
 
@@ -178,6 +195,94 @@ def _init_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bundled_skills_dir() -> Optional[Path]:
+    """This repository's ``skills/`` directory, or None when Kokua was not installed from a checkout.
+
+    Deliberately outside the package and therefore outside the wheel: these skills are content, not
+    Python, and shipping them inside ``src/kokua`` would put them back in the source tree they were
+    moved out of. The cost is that an installed-from-PyPI Kokua has no copy, which is why the caller
+    says where to get one rather than failing with a bare path.
+    """
+    candidate = Path(__file__).resolve().parents[2] / "skills"
+    return candidate if candidate.is_dir() else None
+
+
+def _bundled_skill_names(bundled: Path) -> list[str]:
+    return sorted(d.name for d in bundled.iterdir() if (d / "SKILL.md").is_file())
+
+
+def _no_bundled_skills_message() -> str:
+    return (
+        "no bundled skills found: this Kokua was not installed from a source checkout, and the skills/ "
+        "directory ships with the repository rather than the package. Clone or download "
+        "https://github.com/saxman/kokua and run this from there, or copy skills/<name> into your skills "
+        "folder yourself."
+    )
+
+
+def _list_skills() -> int:
+    """Print the skills this repository bundles, with the description each declares."""
+    bundled = _bundled_skills_dir()
+    if bundled is None:
+        print(_no_bundled_skills_message())
+        return 1
+    names = _bundled_skill_names(bundled)
+    if not names:
+        print(f"no skills in {bundled}")
+        return 1
+    print(f"Skills bundled in {bundled}. Install with `kokua skills install <name>`.\n")
+    for name in names:
+        # Read the description straight out of the frontmatter rather than parsing the whole file with
+        # AIMU's loader: this runs before the preflight, so it must not import the AIMU surface.
+        description = ""
+        for line in (bundled / name / "SKILL.md").read_text(encoding="utf-8").splitlines():
+            if line.startswith("description:"):
+                description = line.partition(":")[2].strip()
+                break
+        print(f"  {name}: {description}")
+    return 0
+
+
+def _install_skills(args: argparse.Namespace) -> int:
+    """Copy bundled skills into the configured skills folder. Refuses to clobber without --force."""
+    import shutil
+
+    bundled = _bundled_skills_dir()
+    if bundled is None:
+        print(_no_bundled_skills_message())
+        return 1
+
+    available = _bundled_skill_names(bundled)
+    wanted = args.name or available
+    unknown = [name for name in wanted if name not in available]
+    if unknown:
+        print(f"unknown skill(s): {', '.join(unknown)}. Available: {', '.join(available) or '(none)'}")
+        return 1
+
+    # The destination comes from the resolved config, so [paths].data_dir and $KOKUA_HOME are honoured
+    # the same way the running assistant honours them, rather than being guessed at here.
+    target = resolve_config(args).skills_dir
+    target.mkdir(parents=True, exist_ok=True)
+
+    installed, skipped = [], []
+    for name in wanted:
+        destination = target / name
+        if destination.exists() and not args.force:
+            skipped.append(name)
+            continue
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(bundled / name, destination)
+        installed.append(name)
+
+    if installed:
+        print(f"installed into {target}: {', '.join(installed)}")
+    if skipped:
+        print(f"already installed (use --force to overwrite): {', '.join(skipped)}")
+    print("\nDeclare a skill by name in an [agents.<name>].tools list to give that agent access to it.")
+    return 0
+
+
 def _print_toolsets(config: AssistantConfig) -> None:
     """Print every name an ``[agents.*]`` table may put in ``tools``, grouped by what provides it.
 
@@ -233,6 +338,16 @@ def main() -> None:
         if args.config_command == "init":
             raise SystemExit(_init_config(args))
         parser.parse_args(["config", "--help"])  # no/unknown subcommand: show config usage and exit.
+        return
+
+    # Before the preflight, like `config`: installing a skill copies files and needs no AIMU surface, so
+    # it should work even when the sibling checkout is out of date.
+    if args.command == "skills":
+        if args.skills_command == "list":
+            raise SystemExit(_list_skills())
+        if args.skills_command == "install":
+            raise SystemExit(_install_skills(args))
+        parser.parse_args(["skills", "--help"])  # no/unknown subcommand: show usage and exit.
         return
 
     preflight()

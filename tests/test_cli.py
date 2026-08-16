@@ -107,11 +107,17 @@ def test_cli_frontend_reports_model_client_error(tmp_path, monkeypatch, capsys):
 # --- main() dispatch --------------------------------------------------------------------------
 
 
-def _run_main(monkeypatch, argv: list[str]):
+def _run_main(monkeypatch, argv: list[str], expect_exit: int | None = None):
+    """Run `main()` with argv. Pass ``expect_exit`` for a subcommand that exits with a status code."""
     monkeypatch.setattr("sys.argv", ["kokua", *argv])
     from kokua.cli import main
 
-    return main()
+    if expect_exit is None:
+        return main()
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+    assert excinfo.value.code == expect_exit
+    return None
 
 
 def test_main_lists_frontends(monkeypatch, capsys):
@@ -201,3 +207,93 @@ def test_main_reports_a_config_with_no_agents_without_a_traceback(monkeypatch, c
     assert caught.value.code != 0
     err = capsys.readouterr().err
     assert "[agents." in err and "Traceback" not in err
+
+
+# ---------------------------------------------------------------------------
+# kokua skills
+#
+# The bundled skills ship with the repository rather than the package, so both commands work from a
+# checkout and say where to get one otherwise. Both run before the preflight: copying files needs no
+# AIMU surface, so an out-of-date sibling should not block installing a skill.
+# ---------------------------------------------------------------------------
+
+
+def test_skills_list_names_every_bundled_skill_with_its_description(monkeypatch, capsys):
+    _run_main(monkeypatch, ["skills", "list"], expect_exit=0)
+    out = capsys.readouterr().out
+    for name in ("dice-roller", "email-report", "markdown-to-pdf"):
+        assert name in out
+    assert "Render Markdown to a PDF" in out  # the description, read from the frontmatter
+
+
+def test_skills_install_copies_into_the_configured_skills_folder(monkeypatch, tmp_path, capsys):
+    from kokua.config import file as settings
+
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(settings.example_text(), encoding="utf-8")
+
+    _run_main(monkeypatch, ["skills", "install", "dice-roller"], expect_exit=0)
+
+    installed = tmp_path / "data" / "skills" / "dice-roller"
+    assert (installed / "SKILL.md").is_file()
+    assert (installed / "scripts" / "roll.py").is_file()
+    assert "dice-roller" in capsys.readouterr().out
+
+
+def test_skills_install_refuses_to_overwrite_without_force(monkeypatch, tmp_path, capsys):
+    from kokua.config import file as settings
+
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(settings.example_text(), encoding="utf-8")
+    _run_main(monkeypatch, ["skills", "install", "dice-roller"], expect_exit=0)
+    marker = tmp_path / "data" / "skills" / "dice-roller" / "EDITED"
+    marker.write_text("a local edit", encoding="utf-8")
+    capsys.readouterr()
+
+    _run_main(monkeypatch, ["skills", "install", "dice-roller"], expect_exit=0)
+
+    assert marker.is_file()  # a local edit survives, because nothing was overwritten
+    assert "already installed" in capsys.readouterr().out
+
+
+def test_skills_install_overwrites_with_force(monkeypatch, tmp_path):
+    from kokua.config import file as settings
+
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(settings.example_text(), encoding="utf-8")
+    _run_main(monkeypatch, ["skills", "install", "dice-roller"], expect_exit=0)
+    marker = tmp_path / "data" / "skills" / "dice-roller" / "EDITED"
+    marker.write_text("a local edit", encoding="utf-8")
+
+    _run_main(monkeypatch, ["skills", "install", "dice-roller", "--force"], expect_exit=0)
+
+    assert not marker.exists()  # replaced wholesale, so a stale file cannot linger
+
+
+def test_skills_install_names_the_available_skills_on_a_typo(monkeypatch, tmp_path, capsys):
+    from kokua.config import file as settings
+
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(settings.example_text(), encoding="utf-8")
+
+    _run_main(monkeypatch, ["skills", "install", "dice-rollr"], expect_exit=1)
+
+    out = capsys.readouterr().out
+    assert "dice-rollr" in out
+    assert "dice-roller" in out  # so the fix is in the same message as the mistake
+
+
+def test_an_installed_skill_is_discoverable_in_the_namespace(monkeypatch, tmp_path, capsys):
+    """Installing is only useful if the registry then sees it, which is what makes it declarable."""
+    from kokua.config import file as settings
+
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(settings.example_text(), encoding="utf-8")
+    _run_main(monkeypatch, ["skills", "install", "dice-roller"], expect_exit=0)
+    capsys.readouterr()
+
+    _run_main(monkeypatch, ["--list-toolsets"])
+
+    out = capsys.readouterr().out
+    assert "skill:" in out
+    assert "dice-roller" in out

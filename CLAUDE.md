@@ -12,6 +12,8 @@ uv run pytest -m e2e                      # opt-in browser UI tests (needs `play
 uv run ruff check . && uv run ruff format --check .      # lint (format with `ruff format .`)
 uv run kokua --frontend web              # run the web UI (or `kokua-web`); `kokua` alone is the CLI
 uv run kokua config init                 # scaffold $KOKUA_HOME/config.toml from the documented example
+uv run kokua skills list                 # skills bundled in ./skills (outside the package, not in the wheel)
+uv run kokua skills install [name...]    # copy them into $KOKUA_HOME/data/skills
 uv run --with build python -m build      # build sdist + wheel (what CI's `package` job verifies)
 ```
 
@@ -20,7 +22,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.14.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.14.1`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -29,7 +31,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.14.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.14.1` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -59,7 +61,7 @@ each claim, is in [docs/explanation/design-principles.md](docs/explanation/desig
    `isinstance(channel, WebChannel)` in `core/` or `planning/`.
 2. **Grow by plugin, not by core change.** Capability arrives as a `FrontEnd` or a `Toolset`. A third
    party's arrives through the `kokua.frontends` / `kokua.toolsets` entry-point groups, and Kokua's own
-   front ends and its five plugin toolsets register there identically. Kokua's *core* capabilities
+   front ends and its two plugin toolsets (`aimu_agents`, `image`) register there identically. Kokua's *core* capabilities
    (`config`, `conversations`, `mcp-admin`, `scheduling`, and the AIMU wrappers `memory` / `documents` /
    `skills`) are the same kind of object, resolved through the same registry and named in the same
    namespace -- but they do not arrive by the same route: `build_registry` adds them as their own

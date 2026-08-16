@@ -8,25 +8,46 @@ callable tool.
 Skills are the one capability the assistant keeps for itself rather than delegating, so this guide is
 shorter than it looks: there is one directory, and three ways to put something in it.
 
-## One toolset, entry agent only
+## Two things named `skills`, and one named per skill
 
-Skill authoring is a single toolset named `skills`, covering the whole skill directory. An agent gets it
-by declaring it like anything else:
+**`skills` is the authoring toolset.** It carries `author_skill` and `add_skill_script`, and only the
+**entry agent** (the one `[assistant].agent` names) can hold it:
 
 ```toml
 [agents.assistant]
 tools = ["skills", "memory", "time"]      # `kokua config init` writes this and more
 ```
 
-Only the **entry agent** (the one `[assistant].agent` names) can hold it. Declaring `skills` on any other
-agent is a startup error, because a spawned worker is a plain AIMU `Agent` rather than a `SkillAgent`, so
-there is nothing for skill injection to hook. The registry marks the toolset `entry_point_only` so you
-find that out at startup rather than through a worker that quietly has no skills.
+Declaring `skills` on any other agent is a startup error, because a spawned worker is a plain AIMU
+`Agent` rather than a `SkillAgent`, so there is nothing for skill injection to hook. The registry marks
+the toolset `entry_point_only`, so you find that out at startup rather than through a worker that quietly
+has no skills.
 
-Drop `skills` from the entry agent's `tools` and the assistant loses `author_skill` and
-`add_skill_script`, so it can no longer write skills or attach scripts. It can still *use* the skills
-already in the directory: the entry agent is a `SkillAgent` either way, so the catalogue and
-`activate_skill` come from AIMU rather than from this toolset.
+Drop `skills` and the assistant can no longer *write* skills, but it can still use the ones already in
+the directory: the entry agent is a `SkillAgent` either way, so the catalogue and `activate_skill` come
+from AIMU rather than from this toolset.
+
+**Each individual skill is also a name in the toolset namespace**, so you can give one skill to one
+agent:
+
+```toml
+[agents.reporter]
+description = "Builds and mails reports."
+tools = ["markdown-to-pdf", "email-report", "fs", "compute", "time"]
+```
+
+A skill name sits beside `web` and an MCP server's name and does not say which kind it is. `kokua
+--list-toolsets` shows every skill on disk under a `skill:` group, and a name that is not there fails at
+startup listing the ones that are.
+
+**Give a script-carrying skill an agent that can run scripts.** A worker declaring a skill gets that
+skill's `{skill}__{stem}` script tools and `activate_skill` through the registry, and the skill's own
+instructions usually tell it to run something -- so `fs` and `compute` belong in the same `tools` list.
+
+**One rule worth knowing:** an agent holding the `skills` authoring toolset sees *every* skill on disk,
+not just the ones it declares. Scoping an author's catalogue would hide the skill it just wrote, and
+`add_skill_script` promises the script is callable in the same turn. A non-authoring agent's catalogue is
+scoped to its declaration.
 
 ## Where Kokua looks
 
@@ -63,7 +84,24 @@ skipped silently, so a typo fails loudly at startup. See AIMU's
 catalogue, so it is the whole basis on which the model decides whether to load the skill at all. Write
 it as a trigger ("when you need to ..."), not a title.
 
-## Three ways to add one
+## Four ways to add one
+
+### Install one Kokua ships
+
+The repository carries a few skills in its own `skills/` directory, outside the package:
+
+```bash
+kokua skills list                          # what is bundled, with each description
+kokua skills install markdown-to-pdf       # copy it into your skills folder
+kokua skills install                       # all of them
+```
+
+They land in the skills folder your config resolves, so `[paths].data_dir` and `$KOKUA_HOME` are
+honoured. An existing skill of the same name is left alone unless you pass `--force`, so a local edit
+survives a reinstall. `dice-roller` is the smallest complete example: copy it as a starting point.
+
+These ship with the repository rather than the wheel, so a `pip install kokua` has no copy of them and
+the command says where to get one.
 
 ### Write the directory by hand
 
@@ -119,8 +157,9 @@ loading the skill's instructions first.
 
 ## Who gets skills, and who does not
 
-The entry agent is an AIMU `SkillAgent`; every agent it spawns is a plain `Agent`. Workers get no skill
-catalogue, no `activate_skill`, and no script tools, which is why `skills` cannot be declared on one. This
+The entry agent is an AIMU `SkillAgent`; every agent it spawns is a plain `Agent`, which is why the
+`skills` *authoring* toolset cannot be declared on one. A worker can still hold an individual skill: its
+script tools and `activate_skill` arrive through the registry rather than from `SkillAgent`. This
 has a practical consequence for how you write a skill:
 
 Write the procedure from the entry agent's point of view, as a plan it carries out with the tools it

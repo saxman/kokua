@@ -43,8 +43,8 @@ def test_a_missing_aimu_is_reported_as_such(monkeypatch):
 
 def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
     """The floor moves with the capabilities Kokua uses, so the previous release must fail."""
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.13.2")
-    with pytest.raises(AimuVersionError, match="0.13.2"):
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.0")
+    with pytest.raises(AimuVersionError, match="0.14.0"):
         require_aimu()
 
 
@@ -60,7 +60,7 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
         def __init__(self, skill_dirs=None):
             pass
 
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.0")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.1")
     monkeypatch.setattr(
         aimu_compat.importlib,
         "import_module",
@@ -73,7 +73,7 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
 
 
 def test_an_aimu_missing_the_probed_symbol_entirely_is_caught(monkeypatch):
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.0")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.1")
     monkeypatch.setattr(
         aimu_compat.importlib,
         "import_module",
@@ -87,7 +87,7 @@ def test_an_unimportable_aimu_carries_the_import_error(monkeypatch):
     def broken(name):
         raise ImportError("no module named aimu.skills")
 
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.0")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.1")
     monkeypatch.setattr(aimu_compat.importlib, "import_module", broken)
     with pytest.raises(AimuVersionError, match="no module named aimu.skills"):
         require_aimu()

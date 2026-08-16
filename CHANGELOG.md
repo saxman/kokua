@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.14.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.14.1 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -16,7 +16,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.14.0 or newer
   both run the AIMU preflight described under [Diagnostics](#diagnostics-and-error-reporting).
 - **Plugin system** (`kokua.plugins`). Front ends and toolsets are discovered through the
   `kokua.frontends` and `kokua.toolsets` entry-point groups. The built-in `cli` / `web` front ends and
-  the five built-in toolsets register exactly as a third party's package would, so if the built-in path
+  the built-in toolsets register exactly as a third party's package would, so if the built-in path
   and the plugin path ever diverge, the plugin path is the broken one. Inspect with `--list-frontends`
   and `--list-toolsets`; disable discovery with `--no-plugins`.
 - The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
@@ -218,25 +218,51 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.14.0 or newer
   (`documents`), shared by every agent that declares them. Concurrent-turn safety lives inside AIMU's
   stores (a re-entrant per-store lock) rather than a Kokua-side wrapper.
 
+### Bundled skills
+
+Kokua ships three Agent Skills in a repository-level `skills/` directory, deliberately outside the
+package and therefore outside the wheel: these are content, not Python, and keeping them in `src/` would
+put them back in the source tree. `kokua skills list` shows what is bundled with each declared
+description; `kokua skills install [name...]` copies them into the skills folder your config resolves,
+honouring `[paths].data_dir` and `$KOKUA_HOME`, and leaves an already-installed skill of the same name
+alone unless you pass `--force`, so a local edit survives a reinstall. Both commands run before the AIMU
+preflight, since copying files needs no AIMU surface. An installed-from-PyPI Kokua has no copy and the
+command says where to get one.
+
+- **`markdown-to-pdf`** renders Markdown to a PDF in `data/downloads/`, which the web front end serves
+  at `GET /download/<name>`, and reports that link. **This was the `pdf` toolset.** Its script declares
+  `fpdf2` and `markdown` inline with [PEP 723](https://peps.python.org/pep-0723/) and `uv` resolves them
+  per run, so **both left Kokua's dependencies entirely**. Path traversal in the output name is stripped
+  to a bare filename, and fpdf2's Latin-1 core fonts mean smart quotes, dashes and arrows fold to ASCII
+  (lossy, and expected).
+- **`email-report`** mails a Markdown body to you as HTML with a plain-text fallback, optionally
+  attaching a file already in `data/downloads/` or `data/images/`. **This was the `email` toolset**, and
+  it keeps both properties that one had by construction: there is no recipient flag at all, so it can
+  only ever mail the configured address; and every attachment resolves before connecting, so a bad name
+  sends nothing rather than an email the caller believes carried the file. On failure it reports only the
+  exception type, because SMTP errors can echo credentials.
+- **`dice-roller`** rolls standard dice notation and prints JSON. **This was the `example` toolset**, and
+  it stays the worked example: no dependencies, so no `uv run` needed, and nothing host-specific to copy
+  around.
+
+A script cannot discover where Kokua serves downloads from or which address it may mail, so
+`LiveState._script_env` passes the downloads and images folders and the `[email]` settings into each
+script's environment (AIMU 0.14.1 threads them to the subprocess). Deriving them in a script would mean
+re-implementing `config/paths.py` and drifting from it. `KOKUA_EMAIL_PASSWORD` is deliberately not
+passed: a subprocess already inherits it, so copying it would duplicate a secret for nothing.
+
+A skill carrying scripts belongs on an agent that also declares `fs` and `compute`, since running the
+script is how the skill does its work.
+
 ### Built-in plugin toolsets
 
-These five register through the `kokua.toolsets` entry-point group exactly as a third party's package
-would, so they appear in `--list-toolsets` alongside anything you install -- grouped under their own
+These register through the `kokua.toolsets` entry-point group exactly as a third party's package would,
+so they appear in `--list-toolsets` alongside anything you install -- grouped under their own
 `built-in toolset` provider rather than `plugin`, which is what keeps the unreferenced-toolset warning
-(below) from firing on all five of them by default, since the shipped `config.example.toml` names none.
+(below) from firing on them by default, since the shipped `config.example.toml` names none.
 
-- **`pdf`**: `markdown_to_pdf` renders Markdown to a PDF (`fpdf2` + `markdown`, both pure-Python, no
-  system libraries) in `data/downloads/`. The web front end serves that folder at
-  `GET /download/<name>`, so the assistant can hand back a link; the tool also returns the absolute
-  path for the CLI.
 - **`image`**: `generate_image`, offered only when `AIMU_IMAGE_MODEL` is set (e.g. `gemini:nano-banana`
   or an `hf:<repo>` diffusers model).
-- **`email`**: `send_email` over SMTP (stdlib `smtplib`). The recipient is locked to the configured
-  `[email] to` address, so the tool takes no recipient and can only ever email you. The body is written
-  in Markdown and delivered as HTML with a plain-text fallback; attachments are limited to files already
-  in `data/downloads/` or `data/images/` (traversal-safe). Offered only when `[email] host` and `to` are
-  set and `KOKUA_EMAIL_PASSWORD` is present -- the password is never read from the config file. Sending
-  is ungated, so a scheduled digest can send.
 - **`aimu_agents`**: mounts AIMU's prebuilt `CodeReviewAgent`, `ResearchReportAgent`, and
   `ContentCreationAgent` as the tools `code_review`, `research_report`, and `create_content`. It exists
   mainly as the worked example of wiring an AIMU-built agent into Kokua: every `Runner` exposes
@@ -397,7 +423,7 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   docstring tells the assistant to relay that, ask for a token, and retry with `bearer_token`.
 - **Startup warns about a provisioned toolset no agent names**, which covers a configured server as well
   as a third-party plugin: it connects, spends its token on the handshake, and is then reachable by
-  nobody. Built-in AIMU and core toolsets, and the five built-in plugin toolsets above, are excluded from
+  nobody. Built-in AIMU and core toolsets, and Kokua's own built-in plugin toolsets, are excluded from
   the warning (told apart from a third party's by which distribution registered the entry point), since
   they ship whether or not anything declares them.
 

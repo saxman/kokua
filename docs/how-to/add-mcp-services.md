@@ -139,7 +139,7 @@ That warning goes to `$KOKUA_HOME/data/logs/kokua.log`. There is no console log 
 appear in your terminal**; check the file, or ask the assistant to delegate to the agent and list its
 tools. The server still connects and still spends a handshake either way. The check lives in
 [`unreferenced_toolsets`](../../src/kokua/toolsets/agents.py), and it reports an installed third-party
-plugin in the same position for the same reason -- Kokua's own five built-in toolsets are exempt, since
+plugin in the same position for the same reason -- Kokua's own built-in toolsets are exempt, since
 they ship whether or not anything declares them.
 
 ## The `--mcp` flag

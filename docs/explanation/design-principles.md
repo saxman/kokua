@@ -33,12 +33,12 @@ Kokua's own front ends and toolsets register exactly the way a third party's wou
 path and the plugin path ever diverge, the plugin path is the broken one.
 
 *How this cashes out:* `pyproject.toml`'s `kokua.frontends` and `kokua.toolsets` groups list
-`kokua.frontends.web:FRONTEND` and `kokua.toolsets.pdf:TOOLSET` in the same table a third party's
+`kokua.frontends.web:FRONTEND` and `kokua.toolsets.image:TOOLSET` in the same table a third party's
 entry would go in. [`plugins.py`](../../src/kokua/plugins.py) is the only loader. A plugin toolset that
 raises in `build()` is logged and skipped, so one bad plugin cannot stop startup. `plugins` imports the
 built-in front ends lazily, and `kokua/__init__.py` exposes `Assistant` through PEP 562, so
 `import kokua` never pulls in `aimu.aio` or starlette for a caller that only wanted to list plugins.
-[`toolsets/example.py`](../../src/kokua/toolsets/example.py) exists as the template.
+[`toolsets/image.py`](../../src/kokua/toolsets/image.py) exists as the template.
 
 This now reaches Kokua's *own* capabilities, not just third-party ones. `config`, `conversations`,
 `mcp-admin`, and `scheduling` are each a `Toolset` declared in the subsystem `tools.py` whose live state
@@ -47,7 +47,8 @@ skills are toolsets wrapping AIMU's own factories in
 [`toolsets/builtin.py`](../../src/kokua/toolsets/builtin.py). All of them land in the same registry
 namespace a plugin does. `kokua --list-toolsets` prints that namespace grouped by provider, and the
 grouping is the only way to tell a built-in from a plugin from the outside: an agent's `tools` list names
-`"scheduling"` and `"pdf"` identically, so a capability can change provider without touching an agent.
+`"scheduling"`, `"image"` and a skill's own name identically, so a capability can change provider without
+touching an agent.
 Inside, one asymmetry remains and is deliberate: a plugin's `build` is wrapped so a raised exception is
 logged and yields no tools, while a core or AIMU toolset failing to build is a bug in this repository and
 must be loud.

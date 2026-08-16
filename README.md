@@ -104,9 +104,9 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 ### Files and media
 
 - **[Images in and out](src/kokua/images.py).** Attach an image and the assistant reads it (needs a [vision-capable model](https://saxman.info/aimu/reference/model-matrix/)): the composer's paperclip or a paste in the web UI, `/attach <path>` in the CLI. It can also [generate images](https://saxman.info/aimu/how-to/generate-images/) when [`$AIMU_IMAGE_MODEL`](https://saxman.info/aimu/reference/env-vars/) is set (e.g. `gemini:nano-banana`, or a HuggingFace diffusers `hf:<repo>`); without it, no generation tool is offered at all. Images live in `data/images/` and are served at `/images/<name>`; a conversation stores only a short reference, so `sessions.json` stays compact.
-- **[PDFs](src/kokua/toolsets/pdf.py).** The built-in `pdf` toolset adds `markdown_to_pdf`: ask for something as a PDF and it writes to `data/downloads/`, handing back a download link in the web UI or a path from the CLI.
+- **[PDFs](skills/markdown-to-pdf/).** The `markdown-to-pdf` skill renders Markdown to a PDF in `data/downloads/`, handing back the `/download/<name>` link the web UI serves. Install it with `kokua skills install markdown-to-pdf` and name it in an agent's `tools`. It ships as a skill rather than a toolset because its script declares `fpdf2` and `markdown` inline (PEP 723) and `uv` resolves them per run, so neither is a Kokua dependency. Give it to an agent that also has `fs` and `compute`, which is what runs the script.
 - **[AIMU agents](src/kokua/toolsets/aimu_agents.py).** The `aimu_agents` toolset mounts AIMU's prebuilt orchestrators -- `code_review`, `research_report`, `create_content` -- and is the worked example of wiring an agent built with AIMU into Kokua: any `Runner` exposes `.run(task) -> str`, so a toolset is the whole bridge and the core learns nothing new. Nothing is mounted until you ask for it: name it in an agent's `tools` in `config.toml`. They are synchronous, so a nested run gets no sub-agent card, no `/stop`, and no approval gate on its workers; and an agent declaring `fs` + `compute` is a stronger reviewer than the tool-less `CodeReviewAgent`. Copy the shape, not necessarily the agents.
-- **[Email](src/kokua/toolsets/email.py).** The `email` toolset lets the assistant mail information to you -- digests, summaries, reports -- written in Markdown and delivered as formatted HTML with a plain-text fallback, optionally attaching files already in `data/downloads/` or `data/images/`. It can only email **you**: the recipient is fixed to `[email] to`, so the tool takes no recipient argument. Configure `[email]` (`host`, `port`, `from`, `to`, `use_ssl`) and put the password in `$KOKUA_EMAIL_PASSWORD`, never in the config file (for Gmail, an App Password). The toolset offers the tool only once host, `to`, and the password are all present, and only to an agent that names `email`. Sending is ungated, so a daily digest can send itself.
+- **[Email](skills/email-report/).** The `email-report` skill mails information to you -- digests, summaries, reports -- written in Markdown and delivered as formatted HTML with a plain-text fallback, optionally attaching files already in `data/downloads/` or `data/images/`. It can only email **you**: the address comes from the host's configuration and the script has no recipient flag at all. Configure `[email]` (`host`, `port`, `from`, `to`, `use_ssl`) and put the password in `$KOKUA_EMAIL_PASSWORD`, never in the config file (for Gmail, an App Password). Kokua passes those settings to the script's environment, so the script never re-derives your config. Without host, `to`, and the password it sends nothing and says so. Install with `kokua skills install email-report`, name it in an agent's `tools`, and give that agent `fs` and `compute` so it can run the script.
 
 ## Configuration
 
@@ -161,7 +161,7 @@ Kokua discovers two kinds of plugin at runtime through Python entry points, so a
 - **Front ends** (`kokua.frontends` group): how the assistant runs -- terminal, web, a future Telegram or Slack. A front end is a `kokua.plugins.FrontEnd` whose `run(config, args)` drives the assistant.
 - **Toolsets** (`kokua.toolsets` group): one named capability an agent can declare. A toolset is a `kokua.plugins.Toolset` whose `build(ctx)` returns [`@aimu.tool`](https://saxman.info/aimu/how-to/add-custom-tool/) callables, plus an optional `guidance` string appended to the prompt of any agent holding it. Installing it puts the name in the namespace; an agent still has to declare it.
 
-The built-in `cli` / `web` front ends and the five built-in toolsets are registered exactly this way in Kokua's own `pyproject.toml` -- if the built-in path and the plugin path ever diverge, the plugin path is the broken one. To add your own from another package:
+The built-in `cli` / `web` front ends and Kokua's two built-in toolsets are registered exactly this way in Kokua's own `pyproject.toml` -- if the built-in path and the plugin path ever diverge, the plugin path is the broken one. To add your own from another package:
 
 ```toml
 # in your package's pyproject.toml
@@ -169,7 +169,7 @@ The built-in `cli` / `web` front ends and the five built-in toolsets are registe
 weather = "my_weather_pack:TOOLSET"
 ```
 
-`pip install` it, and `kokua --list-toolsets` shows it. Its tools do **not** appear automatically: name it in an agent's `tools` list in `config.toml`, since a capability is declared and never defaulted. See [`toolsets/example.py`](src/kokua/toolsets/example.py) for the template, and [`toolsets/aimu_agents.py`](src/kokua/toolsets/aimu_agents.py) for the same shape carrying a whole AIMU agent rather than a plain function. [Set up a toolset](docs/how-to/set-up-toolsets.md) is the full walkthrough: what is in the namespace, how an agent declares its `tools` and `delegates_to`, and exactly which mistakes fail at startup.
+`pip install` it, and `kokua --list-toolsets` shows it. Its tools do **not** appear automatically: name it in an agent's `tools` list in `config.toml`, since a capability is declared and never defaulted. See [`toolsets/image.py`](src/kokua/toolsets/image.py) for the template (one tool, and a `build` that returns nothing when its prerequisite is missing), and [`toolsets/aimu_agents.py`](src/kokua/toolsets/aimu_agents.py) for the same shape carrying a whole AIMU agent rather than a plain function. For something simpler than a toolset, [add a skill](docs/how-to/add-skills.md) instead: a directory with a script needs no packaging at all. [Set up a toolset](docs/how-to/set-up-toolsets.md) is the full walkthrough: what is in the namespace, how an agent declares its `tools` and `delegates_to`, and exactly which mistakes fail at startup.
 
 ## Security
 
@@ -206,8 +206,11 @@ mcp/          remote MCP servers and their OAuth
 scheduling/   recurrence math, the durable task registry, the agent-facing tools
 channels/     ChannelUI plus the concrete channels
 frontends/    cli, web        -- registered as plugins, exactly like a third party's would be
-toolsets/     example, aimu_agents, pdf, image, email
+toolsets/     aimu_agents, image
 ```
+
+Outside `src/`, the repository also carries `skills/`: Agent Skills Kokua ships as content rather than as
+Python, so they are not in the wheel. `kokua skills install` copies them into your skills folder.
 
 The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`, `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
 
@@ -219,7 +222,8 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 - 💡 [Design principles](docs/explanation/design-principles.md): the six that decide what belongs in the core, each with the code that backs it and the patterns it excludes.
 - 🏗️ [Architecture](docs/explanation/architecture.md): module layout, control flow, and the concurrency model.
 - ⚙️ [`config.example.toml`](src/kokua/config.example.toml): every setting, documented at its default.
-- 🧩 [`toolsets/example.py`](src/kokua/toolsets/example.py): the toolset template.
+- 🧩 [`toolsets/image.py`](src/kokua/toolsets/image.py): the toolset template.
+- 🧩 [`skills/dice-roller/`](skills/dice-roller/): the skill template, for capability that needs no packaging.
 - 📋 [CHANGELOG](CHANGELOG.md) · [TODO](TODO.md): what changed, and what's known but not yet scheduled.
 
 ### AIMU

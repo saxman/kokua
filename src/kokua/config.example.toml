@@ -50,7 +50,8 @@ show_tools = true
 # There is one namespace for every capability, so a name in `tools` may be an AIMU built-in tool group
 # ("web", "fs", "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own
 # ("memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations"), an installed
-# plugin toolset ("pdf", "email", ...), or an MCP server configured under [[mcp.server]] below, named by
+# plugin toolset ("aimu_agents", "image"), a skill in your skills folder named by its own name, or an MCP
+# server configured under [[mcp.server]] below, named by
 # its `name`. The agent does not say which; run `kokua --list-toolsets` for every name this install
 # accepts here, grouped by what provides it. An unknown name is a startup error that lists the valid ones,
 # so a typo can never quietly leave an agent with a smaller toolset than you wrote.
@@ -107,7 +108,7 @@ single, complete answer."""
 # tools = ["stocks", "compute", "time"]   # "stocks" matches [[mcp.server]].name below
 # [agents.report-writer]
 # description = "Builds and emails PDF reports."
-# tools = ["pdf", "email", "time"]
+# tools = ["markdown-to-pdf", "email-report", "time"]
 # [agents.reviewer]
 # description = "Reviews code for security, performance, and readability."
 # tools = ["aimu_agents", "time"]
@@ -169,11 +170,13 @@ port = 8000
 level = "INFO"
 
 [email]
-# Let the assistant email information to you (digests, summaries, reports) via SMTP, through the `email`
-# toolset an agent has to name in its `tools` above. The assistant can ONLY email `to` below; the
-# send_email tool takes no recipient, so it can never mail arbitrary people. Sending is UNGATED (no
-# per-send confirmation) so scheduled/proactive turns can send. The toolset offers a tool only when
-# `host` and `to` are set AND the KOKUA_EMAIL_PASSWORD environment variable is present.
+# Let the assistant email information to you (digests, summaries, reports) via SMTP, through the
+# `email-report` skill (`kokua skills install email-report`, then name it in an agent's `tools` above,
+# alongside `fs` and `compute` so that agent can run its script). The assistant can ONLY email `to`
+# below: Kokua passes these settings to the script's environment and the script has no recipient flag,
+# so it can never mail arbitrary people. Sending is UNGATED (no per-send confirmation) so
+# scheduled/proactive turns can send. The script sends nothing, and says so, unless `host` and `to` are
+# set AND the KOKUA_EMAIL_PASSWORD environment variable is present.
 #
 # The password is read from KOKUA_EMAIL_PASSWORD, NEVER from this file (adding it here is a config error).
 # For Gmail / Google Workspace, use an App Password. Leave everything unset to disable email.

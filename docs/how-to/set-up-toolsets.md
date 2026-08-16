@@ -37,7 +37,8 @@ from (`"stocks"`, not `"mcp:stocks"`), so this command is the one place provenan
 | --- | --- |
 | **AIMU capability** | the built-in tool groups (`web`, `fs`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`), plus `memory` and `documents` over AIMU's two stores and `skills` for skill authoring |
 | **core subsystem** | Kokua's own: `config`, `conversations`, `mcp-admin`, `scheduling` |
-| **built-in toolset** | the five `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group: `example`, `aimu_agents`, `pdf`, `image`, `email` |
+| **built-in toolset** | the two `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group: `aimu_agents`, `image` |
+| **skill** | one entry per skill in your skills folder, so an individual skill is declarable by name (see [add skills](add-skills.md)) |
 | **plugin** | every other `Toolset` installed under the `kokua.toolsets` entry-point group -- i.e. one a third party's package registered |
 | **MCP server** | one per `[[mcp.server]]` table, named by its required `name` |
 
@@ -91,7 +92,7 @@ against sources rather than memory, and return a concise findings summary that n
 
 [agents.report-writer]
 description = "Builds and emails PDF reports."
-tools = ["pdf", "email", "time"]
+tools = ["markdown-to-pdf", "email-report", "time"]
 ```
 
 - **`tools`** is the whole capability declaration, in one flat list over the one namespace. A built-in
@@ -155,7 +156,7 @@ session store or connects to anything, so a bad config fails with nothing writte
 | A delegation cycle | **Startup fails**, printing the cycle as a path. |
 | No `[agents.*]` tables at all | **Startup fails**, pointing at `config.example.toml` to copy from, or `kokua config init --force` to overwrite this file with it. |
 | Two providers claiming one toolset name | **Startup fails**, naming both providers and their descriptions. |
-| A third-party plugin toolset or MCP server no agent names | Starts fine. One warning line in the log: it reaches no agent. Kokua's own five built-in toolsets are exempt: they ship regardless of what any agent declares. |
+| A third-party plugin toolset or MCP server no agent names | Starts fine. One warning line in the log: it reaches no agent. Kokua's own built-in toolsets and your installed skills are exempt: they ship, or sit on disk, regardless of what any agent declares. |
 | A plugin toolset whose `build` raises | Logged and skipped; the agent starts without those tools. A core or AIMU toolset failing this way is a bug and is *not* tolerated. |
 | Two declared toolsets sharing a tool name | The one declared first wins. |
 
@@ -226,13 +227,16 @@ Four things to know about `build`:
 - **`guidance` is optional and appended to every agent that declares you**, so write it as instructions
   that make sense wherever the toolset lands, not as a description of one agent's job.
 
-Kokua's own five toolsets register exactly this way in its
+Kokua's own two toolsets register exactly this way in its
 [`pyproject.toml`](../../pyproject.toml). If the built-in path and the plugin path ever diverge, the
 plugin path is the broken one.
 
-- [`toolsets/example.py`](../../src/kokua/toolsets/example.py) is the minimal template.
-- [`toolsets/email.py`](../../src/kokua/toolsets/email.py) offers its tool only when the config and the
-  environment are complete, which is how a toolset self-gates rather than failing at call time.
+- [`toolsets/image.py`](../../src/kokua/toolsets/image.py) is the minimal template, and also shows a
+  `build` that returns no tools when its prerequisite is absent, so the model never sees a tool it cannot
+  satisfy.
+- [`skills/dice-roller/`](../../skills/dice-roller/) is the equivalent template for a skill, which is the
+  lighter path when your capability does not need live process state. Kokua's own `markdown-to-pdf` and
+  `email-report` ship that way. See [add skills](add-skills.md).
 - [`toolsets/aimu_agents.py`](../../src/kokua/toolsets/aimu_agents.py) carries a whole AIMU agent instead
   of a plain function: any `Runner` exposes `.run(task) -> str`, so a toolset is the entire bridge and
   the core learns nothing new.

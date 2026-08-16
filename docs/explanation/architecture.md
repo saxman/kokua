@@ -59,7 +59,7 @@ src/kokua/
     agents.py      builds the registry from every provider; resolves and validates one agent
     builtin.py     AIMU's tool groups, its two stores, and skills, wrapped as toolsets
     core.py        an index over the four TOOLSET constants in Kokua's subsystem tools.py files
-    example.py, aimu_agents.py, pdf.py, image.py, email.py -- plugins, like a third party's
+    aimu_agents.py, image.py -- plugins, like a third party's
 ```
 
 `tests/` mirrors this layout.
@@ -253,11 +253,11 @@ is the seam it would land behind.
 ## Plugins
 
 Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`) and `kokua.toolsets`
-(a `Toolset` with `build(ctx)`). The built-in `cli`/`web` front ends and the five plugin toolsets are
+(a `Toolset` with `build(ctx)`). The built-in `cli`/`web` front ends and the two plugin toolsets are
 registered in Kokua's own `pyproject.toml` exactly as a third party would register theirs;
 `plugins.py` discovers them at runtime, and `kokua.plugins` re-exports `Toolset` and `ToolsetContext`
 as the public surface a third party imports. Add a transport or new tools as a plugin, not by editing
-the core -- see [toolsets/example.py](../../src/kokua/toolsets/example.py).
+the core -- see [toolsets/image.py](../../src/kokua/toolsets/image.py).
 
 A plugin toolset is only distinguished from a built-in one by its provider label in `--list-toolsets`
 and by one thing: a plugin's `build` is wrapped so a raised exception is logged and yields no tools,
