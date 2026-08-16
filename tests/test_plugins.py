@@ -48,13 +48,13 @@ def test_builtin_frontends_available_without_entry_points(monkeypatch):
 # --- Toolset discovery ------------------------------------------------------------------------
 
 
-def test_example_toolset_discovered():
+def test_a_built_in_toolset_is_discovered():
     toolsets = plugins.discover_toolsets()
-    assert "example" in toolsets
-    assert isinstance(toolsets["example"], Toolset)
+    assert "aimu_agents" in toolsets
+    assert isinstance(toolsets["aimu_agents"], Toolset)
     ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
-    built = toolsets["example"].build(ctx)
-    assert any(getattr(fn, "__name__", None) == "roll_dice" for fn in built)
+    built = toolsets["aimu_agents"].build(ctx)
+    assert any(getattr(fn, "__name__", None) == "code_review" for fn in built)
 
 
 def _worker_specs(cfg) -> dict[str, dict]:
@@ -65,14 +65,14 @@ def _worker_specs(cfg) -> dict[str, dict]:
 
 
 def _two_workers(tmp_path):
-    """One worker declaring the `example` plugin toolset and one declaring only a built-in group."""
+    """One worker declaring a plugin toolset and one declaring only a built-in group."""
     from kokua.config.schema import AgentConfig
 
     return _config(
         tmp_path,
         agents={
             "assistant": AgentConfig(tools=["time"], delegates_to=["roller", "plain"]),
-            "roller": AgentConfig(description="Rolls.", tools=["example"]),
+            "roller": AgentConfig(description="Reviews.", tools=["aimu_agents"]),
             "plain": AgentConfig(description="Plain.", tools=["compute"]),
         },
     )
@@ -81,23 +81,23 @@ def _two_workers(tmp_path):
 def test_plugin_tools_reach_an_agent_that_names_the_toolset(tmp_path):
     """A plugin's tools reach an agent by one route only: that agent naming the toolset in `tools`."""
     specs = _worker_specs(_two_workers(tmp_path))
-    assert "roll_dice" in {fn.__name__ for fn in specs["roller"]["tools"]}
+    assert "code_review" in {fn.__name__ for fn in specs["roller"]["tools"]}
 
 
 def test_an_agent_that_names_no_plugin_gets_no_plugin_tools(tmp_path):
     specs = _worker_specs(_two_workers(tmp_path))
-    assert "roll_dice" not in {fn.__name__ for fn in specs["plain"]["tools"]}
+    assert "code_review" not in {fn.__name__ for fn in specs["plain"]["tools"]}
 
 
 async def test_no_plugins_flag_omits_plugin_toolsets(tmp_path):
     from kokua.toolsets.agents import build_registry
 
-    assert "example" not in build_registry(_config(tmp_path, load_plugins=False))
+    assert "aimu_agents" not in build_registry(_config(tmp_path, load_plugins=False))
     assistant = await Assistant.create(
         _config(tmp_path, load_plugins=False), FakeChannelStub(), client=MockAsyncModelClient([])
     )
     names = {fn.__name__ for fn in assistant._agent.tools}
-    assert "roll_dice" not in names
+    assert "code_review" not in names
 
 
 class FakeChannelStub:

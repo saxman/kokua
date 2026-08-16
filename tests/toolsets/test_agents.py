@@ -20,8 +20,8 @@ def test_registry_contains_every_provider():
         "mcp-admin",
         "scheduling",
         "conversations",
-        "pdf",
-        "email",
+        "aimu_agents",
+        "image",
     ):
         assert name in registry, name
 
@@ -29,15 +29,15 @@ def test_registry_contains_every_provider():
 def test_plugins_are_absent_when_load_plugins_is_off():
     registry = build_registry(AssistantConfig(load_plugins=False))
     assert "web" in registry
-    assert "pdf" not in registry
+    assert "aimu_agents" not in registry
 
 
-def test_kokuas_own_five_plugins_are_labeled_built_in_not_plugin():
-    """The five toolsets Kokua's own distribution registers under `kokua.toolsets` are told apart from a
+def test_kokuas_own_plugins_are_labeled_built_in_not_plugin():
+    """The toolsets Kokua's own distribution registers under `kokua.toolsets` are told apart from a
     third party's by provenance (which distribution registered the entry point), not a hand-maintained
     name list, so unreferenced_toolsets can exempt them without knowing their names in advance."""
     registry = build_registry(AssistantConfig(load_plugins=True))
-    for name in ("example", "aimu_agents", "pdf", "image", "email"):
+    for name in ("aimu_agents", "image"):
         assert registry.providers[name] == "built-in toolset", name
 
 
@@ -190,8 +190,8 @@ def test_unreferenced_toolsets_ignores_unnamed_builtin_and_core_groups():
 
 
 def test_unreferenced_toolsets_is_silent_on_the_real_shipped_config():
-    """The regression this guards: Kokua's own five built-in toolsets (example, aimu_agents, pdf, image,
-    email) register under the real `kokua.toolsets` entry-point group -- neither `load_plugins=False` nor
+    """The regression this guards: Kokua's own built-in toolsets (aimu_agents, image) register under the
+    real `kokua.toolsets` entry-point group -- neither `load_plugins=False` nor
     a monkeypatched `discover_toolsets` (both used above) exercises that path -- and the shipped
     config.example.toml deliberately declares none of them. Without excluding Kokua's own distribution
     from the warning, every default install would log five warnings about toolsets nobody chose to skip."""

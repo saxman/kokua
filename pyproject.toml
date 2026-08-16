@@ -25,9 +25,6 @@ classifiers = [
 # [tool.uv.sources] below separately redirects development installs to the sibling checkout.
 dependencies = [
     "aimu[ollama,openai_compat]>=0.14.0",
-    # Markdown -> PDF for the built-in `pdf` toolset (both pure-Python, no system libraries).
-    "fpdf2>=2.7",
-    "markdown>=3.5",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
     # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
     "tomlkit>=0.13",
@@ -72,11 +69,8 @@ cli = "kokua.frontends.cli:FRONTEND"
 web = "kokua.frontends.web:FRONTEND"
 
 [project.entry-points."kokua.toolsets"]
-example = "kokua.toolsets.example:TOOLSET"
 aimu_agents = "kokua.toolsets.aimu_agents:TOOLSET"
-pdf = "kokua.toolsets.pdf:TOOLSET"
 image = "kokua.toolsets.image:TOOLSET"
-email = "kokua.toolsets.email:TOOLSET"
 
 # Kokua and AIMU are developed together, so a `uv sync` here installs the sibling checkout
 # editable: architectural changes can move code across the boundary and be exercised

@@ -135,7 +135,7 @@ def test_main_lists_every_provider_kind_of_toolset(monkeypatch, capsys):
 
     assert "web:" in out  # an AIMU built-in group
     assert "scheduling:" in out  # a Kokua core capability
-    assert "example:" in out  # one of Kokua's own five built-in plugin toolsets
+    assert "aimu_agents:" in out  # one of Kokua's own built-in plugin toolsets
     assert "stocks:" in out  # a server configured in [[mcp.server]]
     # Grouped, because a flat list of names would not tell a user where any of them comes from. No
     # third-party plugin is installed in this test environment, so "plugin:" itself is not asserted here;

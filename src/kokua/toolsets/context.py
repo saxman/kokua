@@ -148,13 +148,40 @@ class LiveState:
         # Held until close(): the callables close over this client, and it owns a blocking portal that
         # must be released explicitly. Left to garbage collection it is released during interpreter
         # finalization, where stopping the portal cannot complete and blocks the process from exiting.
-        self._skills_mcp_client = MCPClient(server=build_skills_server(manager))
+        self._skills_mcp_client = MCPClient(server=build_skills_server(manager, env=self._script_env()))
         by_name = {fn.__name__: fn for fn in self._skills_mcp_client.as_tools()}
         activate = [by_name["activate_skill"]] if "activate_skill" in by_name else []
         return {
             skill.name: activate + [by_name[tool] for tool in skill.script_tool_names() if tool in by_name]
             for skill in manager.skills.values()
         }
+
+    def _script_env(self) -> dict[str, str]:
+        """The host context every skill script gets, from this config.
+
+        A script cannot discover where Kokua serves downloads from or which address it may mail, and
+        deriving it would mean re-implementing the config and path resolution in ``config/paths.py``
+        and drifting from it. Passing it means one source of truth stays one.
+
+        ``KOKUA_EMAIL_PASSWORD`` is deliberately absent: it is already in this process's environment,
+        which a subprocess inherits, so copying it here would duplicate a secret for no gain. Only
+        settings that come from ``config.toml`` are passed.
+        """
+        env = {
+            "KOKUA_DOWNLOADS_DIR": str(self.config.downloads_path),
+            "KOKUA_IMAGES_DIR": str(self.config.images_path),
+            "KOKUA_EMAIL_PORT": str(self.config.email_port),
+            "KOKUA_EMAIL_USE_SSL": "1" if self.config.email_use_ssl else "0",
+        }
+        for key, value in (
+            ("KOKUA_EMAIL_HOST", self.config.email_host),
+            ("KOKUA_EMAIL_TO", self.config.email_to),
+            ("KOKUA_EMAIL_USERNAME", self.config.email_username),
+            ("KOKUA_EMAIL_FROM", self.config.email_from),
+        ):
+            if value:
+                env[key] = value
+        return env
 
     def close(self) -> None:
         """Release what this state owns that outlives garbage collection. Idempotent.
