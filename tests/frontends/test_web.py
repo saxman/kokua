@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from tests.helpers import MockAsyncModelClient
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME, WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
@@ -1054,6 +1056,78 @@ def test_ws_reports_model_client_error_and_releases_busy(tmp_path, monkeypatch):
         text = first_message(ws)
     assert "busy in another tab" not in text
     assert "no default could be resolved" in text
+
+
+def test_ws_reports_config_error_and_releases_busy(tmp_path, monkeypatch):
+    """A config.toml that stopped resolving (a toolset renamed out from under an [agents.*] table)
+    reaches the browser as its own message.
+
+    Only ModelClientError used to be caught here, so a ConfigError escaped into Starlette: the socket
+    closed with no frame, leaving the page able to say nothing but "Disconnected.", and the busy guard
+    it left set made every reload afterwards claim the assistant was busy in another tab.
+    """
+    import kokua.frontends.web as web_mod
+    from starlette.testclient import TestClient
+
+    from kokua.config import ConfigError
+
+    async def boom(*args, **kwargs):
+        raise ConfigError("agent 'report-writer' declares unknown toolset 'pdf'.")
+
+    monkeypatch.setattr(web_mod.Assistant, "create", boom)
+    app = build_app(_config(tmp_path))
+
+    def first_message(ws):
+        while True:
+            frame = ws.receive_json()
+            if frame["type"] == "message":
+                return frame["text"]
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        text = first_message(ws)
+    assert "unknown toolset 'pdf'" in text
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        text = first_message(ws)
+    assert "busy in another tab" not in text
+    assert "unknown toolset 'pdf'" in text
+
+
+def test_ws_releases_busy_when_the_build_fails_unexpectedly(tmp_path, monkeypatch):
+    """Any failure before the serve loop releases the guard, not just the two it can name.
+
+    The guard is set before the assistant is built but was released only by the serve loop's own
+    `finally`, so an exception in between leaked it and every later connection was refused as busy --
+    a wrong diagnosis of a fault that had nothing to do with another tab.
+    """
+    import kokua.frontends.web as web_mod
+    from starlette.testclient import TestClient
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("something unforeseen")
+
+    monkeypatch.setattr(web_mod.Assistant, "create", boom)
+    app = build_app(_config(tmp_path))
+    client = TestClient(app)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            with client.websocket_connect("/ws"):
+                pass
+
+
+def test_build_app_rejects_agents_that_cannot_resolve(tmp_path):
+    """The web front end builds its assistant per connection, so a broken [agents.*] table would
+    otherwise be reported only by a WebSocket that closes: `kokua --frontend web` would sit there
+    serving a page and refusing every connection it made. Validating the agents while building the app
+    puts the message on the terminal at startup, which is where the CLI front end already reports it.
+    """
+    from kokua.config import ConfigError
+
+    agents = example_agents()
+    agents["assistant"].tools = ["memory", "pdf"]
+    with pytest.raises(ConfigError, match="pdf"):
+        build_app(_config(tmp_path, agents=agents))
 
 
 def test_ws_new_conversation_reports_model_client_error_without_dropping_connection(tmp_path):

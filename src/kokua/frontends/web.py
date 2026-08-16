@@ -24,8 +24,9 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from kokua import images
 from kokua.core.assistant import Assistant, ModelClientError
 from kokua.channels.web import WebChannel
-from kokua.config import AssistantConfig
+from kokua.config import AssistantConfig, ConfigError
 from kokua.plugins import FrontEnd
+from kokua.toolsets.agents import validated_registry
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,16 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
     ``client`` injects a single model client (single-conversation tests pass a mock);
     ``client_factory`` injects a per-conversation client factory (multi-conversation tests);
     production leaves both None so each conversation builds its own via ``Assistant.create``.
+
+    Raises ``ConfigError`` if the agents in ``config.toml`` cannot resolve. This front end builds its
+    assistant per connection, so without a check here the only report of a broken ``[agents.*]`` table
+    would be a WebSocket that closes: the server would come up, serve the page, and refuse every
+    connection it made. Failing while the app is built puts the message on the terminal, which is where
+    the CLI front end already reports the same mistake. The registry is discarded because each
+    connection's ``Assistant.create`` builds its own; this call is for its error.
     """
+    validated_registry(config)
+
     busy = {"active": False}  # one-active-connection guard (single user, single process)
 
     async def index(request):
@@ -174,14 +184,24 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
         busy["active"] = True
         channel = WebChannel(websocket, show_thinking=config.show_thinking, show_tools=config.show_tools)
         try:
+            await serve_connection(websocket, channel)
+        finally:
+            # Released on every exit, not only the serve loop's. The guard is taken before the assistant
+            # exists, so a failure in between leaks it and refuses every later connection as "busy in
+            # another tab" -- a confident wrong diagnosis of a fault no other tab had anything to do with.
+            busy["active"] = False
+            await channel.aclose()
+
+    async def serve_connection(websocket: WebSocket, channel: WebChannel) -> None:
+        try:
             assistant = await Assistant.create(config, channel, client=client, client_factory=client_factory)
-        except ModelClientError as e:
-            # Building the model client failed (no model resolved, or a bad model string). Show the
-            # actionable message in the browser and release the busy guard so a later connection (after
-            # the user fixes their config) is not refused as "busy in another tab".
+        except (ModelClientError, ConfigError) as e:
+            # Either the model client could not be built (no model resolved, or a bad model string) or
+            # config.toml no longer resolves (an [agents.*] table naming a toolset since renamed, or moved
+            # out to a skill). Both are user mistakes whose message states the fix, so it goes to the
+            # browser: closing the socket on its own leaves the page able to say only "Disconnected."
             await channel.send(str(e))
             await websocket.close()
-            busy["active"] = False
             return
         # Show the conversation list, the active conversation's history, the current settings, and the
         # scheduled tasks on (re)connect, so the sidebar, chat, and settings panel are all populated.
@@ -269,13 +289,9 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             finally:
                 await channel.feed(None)
 
-        try:
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(pump())
-                tg.create_task(assistant.run())
-        finally:
-            busy["active"] = False
-            await channel.aclose()
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(pump())
+            tg.create_task(assistant.run())
 
     return Starlette(
         routes=[

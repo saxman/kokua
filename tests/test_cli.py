@@ -297,3 +297,25 @@ def test_an_installed_skill_is_discoverable_in_the_namespace(monkeypatch, tmp_pa
     out = capsys.readouterr().out
     assert "skill:" in out
     assert "dice-roller" in out
+
+
+def test_main_web_reports_a_broken_agents_table_as_an_instruction(monkeypatch, tmp_path, capsys):
+    """`kokua-web` reports an unresolvable [agents.*] table the way `kokua` does.
+
+    The two console scripts reach the web front end by different routes, so the ConfigError that
+    `main` prints as one line used to leave `main_web` dumping a traceback for the same mistake.
+    """
+    from kokua.config import file as settings
+
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    text = settings.example_text().replace('tools = ["fs", "compute", "time"]', 'tools = ["fs", "nope", "time"]')
+    (tmp_path / "config.toml").write_text(text, encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["kokua-web"])
+
+    from kokua.cli import main_web
+
+    with pytest.raises(SystemExit) as excinfo:
+        main_web()
+
+    assert excinfo.value.code == 2
+    assert "nope" in capsys.readouterr().err

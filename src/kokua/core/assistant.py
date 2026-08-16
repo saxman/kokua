@@ -34,7 +34,7 @@ from kokua.core.build import (
     entry_agent_system_message,
     make_agent_builder,
 )
-from kokua.config import AssistantConfig, ConfigError
+from kokua.config import AssistantConfig
 from kokua.core.conversations import ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
@@ -137,22 +137,13 @@ class Assistant:
         # pulls in kokua.core.tools -- a submodule of this package -- and importing it triggers
         # kokua/core/__init__ to run, which imports this module. A top-level import here would close
         # that cycle.
-        from kokua.toolsets.agents import build_registry, unreferenced_toolsets, validate_agents
-        from kokua.toolsets.registry import ToolsetError
+        from kokua.toolsets.agents import unreferenced_toolsets, validated_registry
 
-        # Two providers claiming one toolset name is a config mistake like any other (a duplicated
-        # [[mcp.server]].name, a plugin colliding with a built-in group), so it is presented as one:
-        # translated here rather than left as the registry's internal exception type, so a front end has a
-        # single ConfigError family to catch for everything wrong with config.toml.
-        try:
-            registry = build_registry(config)
-        except ToolsetError as error:
-            raise ConfigError(str(error)) from error
-        # Validated before anything else in this method, because everything else touches something: the
-        # next statements open a session store (which mints and persists an empty session) and connect to
-        # remote servers. An unknown toolset name, a missing entry agent, or a delegation cycle therefore
-        # fails naming the offending value, with nothing written and nothing connected.
-        validate_agents(config, registry)
+        # Built and validated before anything else in this method, because everything else touches
+        # something: the next statements open a session store (which mints and persists an empty session)
+        # and connect to remote servers. An unknown toolset name, a missing entry agent, or a delegation
+        # cycle therefore fails naming the offending value, with nothing written and nothing connected.
+        registry = validated_registry(config)
 
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"

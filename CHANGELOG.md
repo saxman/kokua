@@ -481,8 +481,18 @@ notice on startup.
   invalid, `Assistant.create` raises a `ModelClientError` carrying AIMU's actionable message: the CLI
   prints it and exits non-zero, the web UI shows it in the chat. Because agents are built lazily, the
   web UI's new / select / delete controls can hit the same error, and report it in the chat rather than
-  tearing down the WebSocket. A web build failure also releases the single-connection guard, so a later
-  connection is not wrongly refused as "busy in another tab".
+  tearing down the WebSocket. Any failure between taking the web front end's single-connection guard and
+  finishing with it releases that guard, so a later connection is not wrongly refused as "busy in another
+  tab" -- a diagnosis that would name the one thing that was not wrong.
+- **An `[agents.*]` table that no longer resolves stops the web front end at startup.** The web front
+  end builds its assistant per connection, so an unknown toolset name (a toolset renamed, or moved out
+  to a skill that is not installed) used to surface only as a WebSocket that closed: the server came up,
+  served the page, and refused every connection, leaving the browser able to say nothing but
+  "Disconnected." `build_app` now validates the agent tables while building the app, so `kokua
+  --frontend web` and `kokua-web` both print the offending name and exit 2, which is what the CLI front
+  end already did. A `ConfigError` reaching a connection anyway -- the registry is rebuilt per
+  connection, so a skill deleted from disk under a running server is one -- is shown in the chat, like a
+  model-client failure.
 - **Hang observability.** `/diag` reports the in-flight turn, elapsed time, whether the turn gate is
   held, and dumps a wedged turn's async stack. It is handled in the serve loop without taking the gate,
   so it answers even when a hung turn holds it. Diagnostic logs go to a rotating

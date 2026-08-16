@@ -190,6 +190,24 @@ def validate_agents(config: AssistantConfig, registry: Mapping[str, Toolset]) ->
     _reject_cycles(config)
 
 
+def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
+    """The registry ``config`` resolves against, with its agents already checked against it.
+
+    The two halves ship as one call because a registry nothing was validated against only defers the
+    error to a worse moment. A front end that builds its assistant lazily (the web one builds per
+    connection) calls this at startup to report a broken ``[agents.*]`` table where the user is looking.
+
+    A ``ToolsetError`` is translated on the way out, so a front end has one ``ConfigError`` family to
+    catch for everything wrong with config.toml rather than the registry's internal exception type.
+    """
+    try:
+        registry = build_registry(config)
+    except ToolsetError as error:
+        raise ConfigError(str(error)) from error
+    validate_agents(config, registry)
+    return registry
+
+
 def _reject_cycles(config: AssistantConfig) -> None:
     """Depth-first search over ``delegates_to``, reporting the first cycle as the path that closes it."""
     path: list[str] = []

@@ -392,7 +392,14 @@ def main_web() -> None:
     preflight()
     from .frontends.web import main as web_main
 
-    web_main()
+    # The same one-line report `main` gives a ConfigError, because the mistake and its fix do not depend
+    # on which of the two console scripts the user typed. This route reaches the front end without
+    # passing through `main`, so it needs its own handler rather than inheriting that one.
+    try:
+        web_main()
+    except ConfigError as e:
+        print(e, file=sys.stderr)
+        raise SystemExit(2) from None
 
 
 if __name__ == "__main__":
