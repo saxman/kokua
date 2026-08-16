@@ -74,11 +74,27 @@ The shipped entry agent declares the `mcp-admin` toolset, so it carries `add_mcp
 > "Connect to https://broker.example.com/mcp and use it to check my positions."
 
 `add_mcp_server(url, bearer_token=None)` connects, reports the tool names it found, and rebuilds every
-live agent's `spawn_subagent`, so a **worker** that already names the server has its tools in the same
-turn. The agent you are talking to is the exception: it resolved its own tools when it was built, so if
-that agent is the one declaring the server, it picks the tools up the next time it is built (a new
-conversation, or a restart). `add_mcp_server` is gated by `[security] confirm_tools`, so it waits for your
-approval first.
+live agent's `spawn_subagent`. It is gated by `[security] confirm_tools`, so it waits for your approval
+first.
+
+**What that connection can actually reach depends on whether the server was already in `config.toml` at
+startup, and the difference is the whole story of this section:**
+
+- **A server already declared in `[[mcp.server]]`** (even one that was unreachable at startup, or that
+  you disconnected earlier in the session) already has a name in the toolset namespace, so an agent's
+  `tools` may already reference it. Connecting it reaches the next **worker** spawned by such an agent, in
+  the same turn. The agent you are talking to is the exception even here: it resolved its own tools when
+  it was built, so if *it* declares the server, it picks them up only the next time it is built (a new
+  conversation, or a restart).
+- **A server new to this session reaches nothing at all until you restart.** The toolset namespace is
+  built once, at startup, from the `[[mcp.server]]` tables as they were then, and `config.toml` is not
+  reread mid-process. So a newly connected server's name is not in the namespace, no `[agents.*]` table
+  can reference it yet, and editing that file while Kokua runs changes nothing until the next start.
+  `add_mcp_server` has recorded the server for you; the remaining two steps are yours.
+
+This is why the tool's own reply tells the model it cannot use the new tools itself, and it is worth
+knowing before you ask the assistant to "connect to X and use it": for a genuinely new X, it can do the
+first half and not the second.
 
 What persists differs by auth mode, and this is the one asymmetry to remember:
 
@@ -93,14 +109,22 @@ table with `token_env` by hand.
 
 Two consequences of the runtime path being real:
 
-- **A runtime add reaches no agent until you say so.** Since every server needs a name, the write derives
-  one from the server's host (`broker.example.com` becomes `broker-example-com`, with a numeric suffix if
-  that name is already taken), so the config it leaves behind always loads. But `[agents.*]` is
-  **hand-edit only**: `update_config` refuses the whole section, precisely so the assistant cannot grant
-  itself the capability it just connected. Add the derived name to an agent's `tools` yourself, or rename
-  it to something friendlier at the same time. Until then the server connects and startup warns that
-  nothing names it.
-- `remove_mcp_server` disconnects, drops the entry, and fans the rebuild out to every live agent.
+- **Finishing a runtime add takes an edit and a restart.** Since every server needs a name, the write
+  derives one from the server's host (`broker.example.com` becomes `broker-example-com`, with a numeric
+  suffix if that name is already taken), so the config it leaves behind always loads. Then:
+  1. add that name (or rename it to something friendlier) to an agent's `tools` by hand. `[agents.*]` is
+     hand-edit only: `update_config` refuses the whole section, precisely so the assistant cannot grant
+     itself the capability it just connected;
+  2. **restart Kokua**, because the namespace and the agent tables are both read only at startup.
+
+  Until you do, the server connects, reconnects on each start, and startup warns that nothing names it.
+- `remove_mcp_server` disconnects, drops the entry, and fans the rebuild out to every live agent. A worker
+  spawned after it will not have the server's tools.
+
+If you want a server the assistant can connect *and use* within one session, declare it in
+`[[mcp.server]]` and name it in an agent up front. It does not have to be reachable at startup: an
+unconnected server contributes no tools rather than failing the build, so a later `add_mcp_server` for the
+same URL reaches that agent's next worker immediately.
 
 ## Check that it reached an agent
 

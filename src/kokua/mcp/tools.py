@@ -44,13 +44,25 @@ def make_mcp_tools(
     on the next restart; bearer-token servers are session-only (their secret is not written to disk).
     ``connections`` is the live list shared with the boot path and teardown.
 
-    Neither tool mounts anything on a live agent, and that bounds when a change takes effect. An agent's
-    own tool list is built once, in ``wire_agent``; ``refresh_workers`` (applied to every live agent)
-    replaces only that agent's ``spawn_subagent``. So a connect or disconnect reaches the *next*
-    sub-agent spawned by an agent whose ``[agents.*].tools`` names the server, and reaches a live agent's
-    own list only when that agent is rebuilt (a new conversation, an LRU eviction, or a restart). Note the
-    consequence for a config where a live agent declares the server directly: it holds callables from the
-    connection it was built with, so a disconnect leaves that agent with stale ones until it is rebuilt.
+    Neither tool mounts anything on a live agent, and two separate things bound when a change takes
+    effect. Distinguish the cases, because only one of them is reachable in-process:
+
+    * **A server already declared in ``[[mcp.server]]`` at startup** (possibly unreachable then, or
+      removed earlier this session) has a name in the toolset registry, so an agent's ``tools`` may
+      already reference it. Connecting or disconnecting it reaches the *next* sub-agent spawned by such an
+      agent, because ``refresh_workers`` rebuilds that agent's ``spawn_subagent`` and the specs re-resolve
+      against ``connections``. It does not reach a live agent's *own* tool list, which ``wire_agent``
+      built once; that waits for the agent to be rebuilt (a new conversation, an LRU eviction, a restart).
+    * **A genuinely new server reaches nothing at all until a restart.** ``build_registry`` runs once, in
+      ``Assistant.create``, over ``config.mcp_servers`` as loaded at startup, and nothing mutates the
+      registry afterwards, so a new server's name is not a key in it. No ``[agents.*]`` edit can reference
+      that name either, since ``config.toml`` is not reread mid-process. ``add_mcp_server`` therefore
+      persists the server for the *next* start and connects it for nothing else. This is the dominant
+      flow, and both tool results say so.
+
+    One consequence worth knowing for a config where a live agent declares a server directly: it holds
+    callables from the connection it was built with, so a disconnect leaves that agent with stale ones
+    until it is rebuilt.
     """
 
     @tool
@@ -60,7 +72,9 @@ def make_mcp_tools(
         An unauthenticated or OAuth connection is remembered and restored the next time the assistant
         starts; a bearer-token one lasts only this session, since its secret is never written to disk.
         Returns the tool names the server exposes and the rule for which agent can call them. You cannot
-        call them yourself: delegate to a sub-agent whose configured tools name this server.
+        call them yourself. A sub-agent can, but only if this server was already declared in config.toml
+        at startup and named in that agent's tools; a server new to this session is usable only after the
+        user edits config.toml and restarts, so do not promise to use it in this conversation.
 
         Authentication is handled for you: just pass the URL. If the server is unprotected it
         connects directly. If it requires OAuth, you post an authorization link into the chat and
@@ -74,9 +88,9 @@ def make_mcp_tools(
         token, then call this tool again with that bearer_token.
 
         When a server is recorded, its name is derived from the URL, but that name reaches no agent
-        until a human adds it to that agent's tools list in config.toml's [agents.*] section: that
-        section is hand-edit only, so this tool cannot grant itself (or any agent) the new capability
-        it just connected.
+        until a human adds it to that agent's tools list in config.toml's [agents.*] section AND
+        restarts Kokua: that section is hand-edit only and is read only at startup, so this tool
+        cannot grant itself (or any agent) the capability it just connected.
         """
         if any(conn.url == url for conn in connections):
             return f"Already connected to {url}. Use remove_mcp_server first if you need to reconnect it."
@@ -100,13 +114,15 @@ def make_mcp_tools(
         else:
             note = " (session only; add it to config.toml [mcp] to keep a bearer-token server across restarts)"
         names = ", ".join(added) if added else "(no new tools)"
-        # A tool result, so it says what the model can do next rather than why. Both halves are load
-        # bearing: a live agent's own tool list is fixed at wire_agent time and this rebuild only
-        # replaces `spawn_subagent`, so the caller genuinely cannot call these itself, and only a
-        # sub-agent spawned after this point resolves its tools against the new connection.
+        # A tool result, so it says what the model can do next, not why. The "at startup" qualifier is
+        # the load-bearing part and is easy to lose: the toolset registry is built once in
+        # Assistant.create from the config as loaded then, so a server that was not already a
+        # [[mcp.server]] entry at startup has no name in it, and no [agents.*] edit can reference one
+        # (config.toml is not reread mid-process either). Only a restart makes a new server referable.
         reach = (
-            "You cannot call these yourself. They reach a sub-agent you spawn from now on, if its "
-            "[agents.*] tools list in config.toml names this server; only the user can add that name."
+            "You cannot call these yourself. A sub-agent you spawn can, but only if config.toml already "
+            "declared this server at startup and names it in that agent's tools; otherwise the user must "
+            "add both and restart Kokua, and nothing you do in this session will make them usable."
         )
         return f"Connected to {url}. Its tools: {names}. {reach}{note}"
 

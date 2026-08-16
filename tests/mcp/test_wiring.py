@@ -58,6 +58,13 @@ def _worker_tools(assistant) -> set[str]:
     Resolved against one worker declaring every connected server, rather than making each test declare
     one: these tests are about connection plumbing (connect, retry, persist, reconnect, remove), and
     which agent declares which server is covered in ``tests/core/test_build.py``.
+
+    Read what this does and does not show. It builds a FRESH config and ``ToolsetRegistry`` naming every
+    connection, so it answers "is this server connected and exposing callables a worker could resolve",
+    which is what a plumbing test wants. It is not evidence of live reachability: the running assistant's
+    own ``state.registry`` is built once in ``Assistant.create`` and never gains an entry, so a server
+    absent from ``config.mcp_servers`` at startup is referable by no agent until a restart. See
+    ``test_a_new_server_is_persisted_but_reaches_no_agent_this_process``, which pins that.
     """
     from dataclasses import replace
 
@@ -111,7 +118,15 @@ async def test_startup_mcp_connect_failure_does_not_crash(tmp_path, monkeypatch)
     assert assistant._mcp_servers == []
 
 
-async def test_add_mcp_server_tool_adds_tools_at_runtime(tmp_path, monkeypatch):
+async def test_add_mcp_server_connects_once_and_exposes_its_callables(tmp_path, monkeypatch):
+    """The tool connects, reports the server's tool names, and refuses a second connect to the same URL.
+
+    Scope, because the name of this test used to promise more: what is asserted is connection plumbing,
+    via ``_worker_tools``, which resolves against a registry rebuilt from the current connections rather
+    than the assistant's live one (see that helper). It does NOT show that any agent in this process can
+    reach the server, which for a server new to the session is false; the two tests below cover the case
+    that does reach a worker and the limitation that stops this one from doing so.
+    """
     from aimu import aio
 
     async def fake_connect(*, url=None, auth=None, **kw):
@@ -132,6 +147,44 @@ async def test_add_mcp_server_tool_adds_tools_at_runtime(tmp_path, monkeypatch):
     assert "Already connected" in msg2
     assert len(assistant._mcp_servers) == 1
     assert sorted(_worker_tools(assistant)).count("remote_search") == 1
+
+
+async def test_a_new_server_is_persisted_but_reaches_no_agent_this_process(tmp_path, monkeypatch, delegates):
+    """A server absent from config.toml at startup is recorded for the next start and reaches nothing now.
+
+    This pins the limitation the tool results and the how-to describe. ``build_registry`` runs once, in
+    ``Assistant.create``, over ``config.mcp_servers`` as loaded at startup, and nothing mutates the
+    registry afterwards, so the derived name is not a key in it. No ``[agents.*]`` table could reference
+    that name either (one naming an unknown toolset fails startup, and config.toml is not reread), so the
+    delegate rebuild has nothing to hand a worker. Only a restart closes the loop, which is what makes the
+    persisted entry the useful half of this call.
+    """
+    from aimu import aio
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        return _FakeMCP([_fake_mcp_tool("get_quote")])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+
+    agents = {
+        "assistant": AgentConfig(tools=["mcp-admin", "time"], delegates_to=["remote"]),
+        "remote": AgentConfig(description="A worker that declares no server.", tools=["time"]),
+    }
+    cfg = _config(tmp_path, agents=agents)  # no [[mcp.server]] at startup
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    add_mcp = next(t for t in assistant._agent.tools if t.__name__ == "add_mcp_server")
+    await add_mcp(url="https://new.example.com/mcp")
+
+    (persisted,) = _persisted_servers(cfg)
+    assert persisted.url == "https://new.example.com/mcp"  # recorded, so the next start can use it
+    # The pin: the name written to config.toml is not a key in the live registry, so no agent can name
+    # it. This is what breaks if the registry ever gains entries at runtime.
+    assert persisted.name not in assistant._state.registry
+    # Corroboration rather than the pin, since no agent here could have declared that name anyway (a
+    # config naming an unknown toolset fails startup): the rebuild the connect triggered carried nothing.
+    assert "get_quote" not in delegates[-1]
+    assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}
 
 
 async def test_add_mcp_server_tool_reports_connect_failure(tmp_path, monkeypatch):
@@ -320,13 +373,19 @@ async def test_remove_mcp_server_drops_tools_and_forgets(tmp_path, monkeypatch):
     assert "remote_search" not in _worker_tools(a2)
 
 
-async def test_runtime_added_server_reaches_workers_in_the_same_turn(tmp_path, monkeypatch, delegates):
-    """A server connected mid-turn is usable by a worker spawned later in that same turn.
+async def test_connecting_a_startup_declared_server_reaches_workers_in_the_same_turn(tmp_path, monkeypatch, delegates):
+    """A server declared at startup but offline then is usable by a worker spawned later in the same turn.
+
+    Note what ``_using`` sets up, because it is what makes this reachable: the server is a
+    ``[[mcp.server]]`` entry at startup (so its name is in the registry) and the ``remote`` agent already
+    names it, while ``_offline_until_connected`` keeps it from connecting until ``add_mcp_server`` runs.
+    That is the reconnect case. A server absent from config at startup cannot reach an agent at all this
+    process, which ``test_a_new_server_is_persisted_but_reaches_no_agent_this_process`` pins.
 
     An agent that does not declare the server never carries its callables, so what has to happen
     immediately is a delegate REBUILD: add_mcp_server re-resolves every agent against the new connection
-    and swaps spawn_subagent, and remove_mcp_server does the reverse. Without that, a runtime-connected
-    server would only reach workers after the conversation's agent was rebuilt.
+    and swaps spawn_subagent, and remove_mcp_server does the reverse. Without that, the connection would
+    only reach workers after the conversation's agent was rebuilt.
     """
     _offline_until_connected(monkeypatch, "get_portfolio")
     assistant = await Assistant.create(
