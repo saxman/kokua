@@ -119,7 +119,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
   `config.example.toml`, which is what `kokua config init` writes, and are edited, deleted, or added to
   like any other setting. Nothing about an agent is defaulted in code, so **Kokua refuses to start
   without a config file, with one that defines no agents, or with one whose `[assistant].agent` names no
-  table**, naming `kokua config init` or the configured agents in the error rather than running
+  table**, naming a remedy that works from that state -- a config file that exists but declares no
+  agents is told to add an `[agents.<name>]` table by hand or overwrite it with `kokua config init
+  --force`, since plain `kokua config init` refuses a file that is already there -- rather than running
   something that looks alive and cannot work.
 - **One namespace of named toolsets.** A *toolset* is one named capability an agent can declare: a name,
   a description, a `build(ctx)` returning tool callables, and optional `guidance`. Every provider lands
@@ -153,6 +155,10 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
   and nothing else: it is **not** an authorization boundary, and an agent declaring `config` really does
   get `update_config`. The boundaries are that `[agents.*]` is hand-edit only and that `confirm_tools`
   gates by tool name whoever calls it.
+- **`--system` overrides the entry agent's opener for that run**, winning outright over its declared
+  `system_message` (and over the `[assistant].system_message` fallback), since the message a person is
+  talking to is a prompt, not the capability `[agents.*]` is the single source of. A worker's own
+  declared opener is untouched: the flag only ever reaches the agent the user is talking to.
 - **The shipped config, not the code, is what makes the assistant lean.** `[agents.assistant]` declares
   the cross-cutting toolsets and no domain tools, delegating web, file, and compute work, which keeps the
   always-on agent's tool context small; give it `"compute"` and it runs Python itself. The one structural
@@ -203,7 +209,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
 ### Built-in plugin toolsets
 
 These five register through the `kokua.toolsets` entry-point group exactly as a third party's package
-would, so they appear in `--list-toolsets` under the `plugin` provider alongside anything you install.
+would, so they appear in `--list-toolsets` alongside anything you install -- grouped under their own
+`built-in toolset` provider rather than `plugin`, which is what keeps the unreferenced-toolset warning
+(below) from firing on all five of them by default, since the shipped `config.example.toml` names none.
 
 - **`pdf`**: `markdown_to_pdf` renders Markdown to a PDF (`fpdf2` + `markdown`, both pure-Python, no
   system libraries) in `data/downloads/`. The web front end serves that folder at
@@ -227,8 +235,9 @@ would, so they appear in `--list-toolsets` under the `plugin` provider alongside
 - **`example`**: the template for writing your own.
 
 Nothing a toolset contributes reaches an agent until that agent's `tools` list names it, and startup logs
-a warning for an installed toolset (or a configured MCP server) nothing names, since it was provisioned
-specifically to be reachable.
+a warning for a third-party plugin toolset (or a configured MCP server) nothing names, since it was
+provisioned specifically to be reachable -- these five ship regardless of what any agent declares, so an
+unnamed one among them is not that kind of news; see "Startup warns about a provisioned toolset" below.
 
 ### Proactive work: scheduled tasks
 
@@ -359,11 +368,12 @@ specifically to be reachable.
   immediately.
 - **Each configured server is a toolset, named by its `name`.** `name` is required: it is how the server
   enters the one namespace an agent declares against, so a server nothing can name reaches nothing. A
-  runtime `add_mcp_server` therefore derives a name from the server's host and disambiguates it against
-  the names already on file, so a successful add can never leave a config the registry's collision check
-  would reject at the next boot. That derived name still reaches no agent until a human puts it in an
-  `[agents.*]` table, since that section is hand-edit only: the tool can connect a server but cannot grant
-  itself the capability.
+  runtime `add_mcp_server`, and the startup `--mcp <url>` flag, both derive a name from the server's host
+  and disambiguate it (shared logic) against every other name already claimed -- on file for
+  `add_mcp_server`, across the flag's own URLs for `--mcp` -- so neither can produce a config, or a set of
+  servers in one run, the registry's collision check would reject. That derived name still reaches no
+  agent until a human puts it in an `[agents.*]` table, since that section is hand-edit only: neither can
+  grant itself the capability.
 - **Per-server bearer tokens via environment variables.** Each `[[mcp.server]]` takes a required `url`, a
   required `name`, and an optional `token_env` naming the variable holding that server's token, read
   at startup so the secret stays out of `config.toml`. A `token_env` whose variable is unset logs a
@@ -374,9 +384,10 @@ specifically to be reachable.
   a bearer token and add the server again" message instead of a raw `OAuthRegistrationError`, and its
   docstring tells the assistant to relay that, ask for a token, and retry with `bearer_token`.
 - **Startup warns about a provisioned toolset no agent names**, which covers a configured server as well
-  as an installed plugin: it connects, spends its token on the handshake, and is then reachable by nobody.
-  Built-in AIMU and core toolsets are excluded from the warning, since they ship whether or not anything
-  declares them.
+  as a third-party plugin: it connects, spends its token on the handshake, and is then reachable by
+  nobody. Built-in AIMU and core toolsets, and the five built-in plugin toolsets above, are excluded from
+  the warning (told apart from a third party's by which distribution registered the entry point), since
+  they ship whether or not anything declares them.
 
 ### Images
 

@@ -181,11 +181,12 @@ anything; the last two run once per agent, whenever one is built:
    half, and not by accident: every agent is a `SkillAgent` and so takes the manager regardless, and
    `arm_tasks` has to fire a persisted scheduled task whether or not any agent can talk about scheduling.
 
-The prompt is assembled from the same selected list, in `agents.assemble_system_message`: the agent's own
-`system_message` (falling back to `[assistant].system_message`, which `--system` also sets, then the
-built-in default), then each toolset's `guidance` in declared order, then `DELEGATION_GUIDANCE` if
-`delegates_to` is non-empty, then `LEAN_DELEGATION_GUIDANCE` if every selected toolset is
-`cross_cutting`. Guidance travelling with the capability is the point: installing a toolset brings the
+The prompt is assembled from the same selected list, in `agents.assemble_system_message`. For the entry
+agent, a `--system` flag wins outright over its declared opener; a worker's declared opener is never
+touched by the flag. Absent an override, it is the agent's own `system_message` (falling back to
+`[assistant].system_message`, then the built-in default), then each toolset's `guidance` in declared
+order, then `DELEGATION_GUIDANCE` if `delegates_to` is non-empty, then `LEAN_DELEGATION_GUIDANCE` if every
+selected toolset is `cross_cutting`. Guidance travelling with the capability is the point: installing a toolset brings the
 instructions that make the model use it, and removing one takes them away, with no prompt constant to
 keep in step by hand. `wire_agent` selects once and passes the same list to both the message and the
 tools, so the two cannot resolve different toolsets for the same names.

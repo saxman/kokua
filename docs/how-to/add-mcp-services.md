@@ -138,8 +138,9 @@ Toolset 'stocks' is provisioned but no [agents.*] table names it in `tools`, so 
 That warning goes to `$KOKUA_HOME/data/logs/kokua.log`. There is no console log handler, so **it does not
 appear in your terminal**; check the file, or ask the assistant to delegate to the agent and list its
 tools. The server still connects and still spends a handshake either way. The check lives in
-[`unreferenced_toolsets`](../../src/kokua/toolsets/agents.py), and it reports installed plugins in the
-same position for the same reason.
+[`unreferenced_toolsets`](../../src/kokua/toolsets/agents.py), and it reports an installed third-party
+plugin in the same position for the same reason -- Kokua's own five built-in toolsets are exempt, since
+they ship whether or not anything declares them.
 
 ## The `--mcp` flag
 
@@ -154,7 +155,10 @@ Two caveats, both from the flag-over-file precedence rule:
   unknown-toolset error.
 - Flag-supplied servers get a name derived from their host and no `token_env`. That name is what an agent
   must already declare for the server to reach anything, and a server needing a static bearer token needs
-  the config file instead.
+  the config file instead. Two `--mcp` URLs on one host (a service exposing several MCP endpoints under
+  one domain) would derive the same base name; the flag disambiguates them against each other the same
+  way `add_mcp_server` disambiguates against names already on file, so the second gets a numeric suffix
+  rather than colliding with the first.
 
 ## Security
 

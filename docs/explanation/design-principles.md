@@ -76,6 +76,14 @@ boundary is elsewhere, and it is two things: `[agents.*]` can only be changed by
 dangerous calls at call time no matter which agent makes them (a worker's gated call is routed to the
 user for approval, and an unattended turn auto-denies).
 
+`update_config` refusing to touch `[agents.*]` is not the only thing standing between it and being
+rewritten by the assistant itself: the entry agent's `add_skill_script` and a `compute` worker's
+`execute_python` both have the machine access to overwrite `config.toml` directly, bypassing
+`update_config`'s refusal entirely. `confirm_tools` gating both by default is what makes "hand-edit only"
+hold in practice rather than only in `update_config`'s own code, and it is why `[security] confirm_tools`
+is itself one of the hand-edit-only keys. `config.example.toml` documents `confirm_tools = []` as the way
+to turn approval off, so this backstop is a default a user can remove, not a wall.
+
 ## 3. `config.toml` is the single source of settings, and the app writes it
 
 One settings file, hand-authorable and app-writable, with its comments preserved across the app's own
