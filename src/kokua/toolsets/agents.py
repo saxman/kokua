@@ -53,11 +53,14 @@ _CORE_PROVIDER = "core subsystem"
 _BUILTIN_PLUGIN_PROVIDER = "built-in toolset"
 _PLUGIN_PROVIDER = "plugin"
 _MCP_PROVIDER = "MCP server"
+_SKILL_PROVIDER = "skill"
 
 # Providers whose toolsets ship regardless of what any agent declares, so a name from one of these being
 # unreferenced is not news -- unlike a third-party plugin the user installed, or a server the user
-# configured, which earn a spot in the [agents.*] tables specifically so they can be reached.
-_UNPROVISIONED_PROVIDERS = {_AIMU_PROVIDER, _CORE_PROVIDER, _BUILTIN_PLUGIN_PROVIDER}
+# configured, which earn a spot in the [agents.*] tables specifically so they can be reached. Skills
+# belong here too, for a different reason: an entry agent holding the authoring toolset reaches every
+# skill through its own catalogue, so a skill no [agents.*] table names is still usable.
+_UNPROVISIONED_PROVIDERS = {_AIMU_PROVIDER, _CORE_PROVIDER, _BUILTIN_PLUGIN_PROVIDER, _SKILL_PROVIDER}
 
 
 def _server_tools(url: str, state: LiveState) -> list:
@@ -84,6 +87,46 @@ def mcp_toolsets(config: AssistantConfig) -> list[Toolset]:
     ]
 
 
+def skill_toolsets(config: AssistantConfig) -> list[Toolset]:
+    """One toolset per skill on disk, so a skill name is an entry in the same namespace as everything else.
+
+    An agent declares ``"citation-check"`` beside ``"web"`` and does not say which kind each is, which is
+    the point of the single namespace. ``build`` reads the live per-skill tool map rather than closing over
+    tools here, keeping the registry a pure function of config the way the MCP source does; ``guidance``
+    carries the skill's catalogue entry, so declaring a skill tells the holder it exists and how to load
+    its instructions.
+
+    Discovery runs its own ``SkillManager`` because the registry is built before ``LiveState`` exists (the
+    registry is an argument to it). That is a second filesystem scan of one directory, which is cheaper
+    than threading state into a function whose purity is load-bearing.
+    """
+    from aimu.skills import SkillManager
+
+    skills = SkillManager(skill_dirs=[str(config.skills_dir)]).skills
+    return [
+        Toolset(
+            name=skill.name,
+            description=skill.description,
+            build=lambda ctx, _name=skill.name: list(ctx.state.skill_tools.get(_name, [])),
+            guidance=(
+                f" The {skill.name!r} skill is available: {skill.description} "
+                f"Call `activate_skill('{skill.name}')` to load its full instructions before acting on it."
+            ),
+        )
+        for skill in skills.values()
+    ]
+
+
+def without_skill_names(names: Sequence[str], registry: ToolsetRegistry) -> list[str]:
+    """``names`` with the skills removed, in order.
+
+    For an agent that is a ``SkillAgent``: AIMU already gives it the catalogue and script tools of every
+    skill in its manager, so resolving those names as toolsets as well would duplicate the catalogue in
+    its prompt. A plain agent has no such machinery and resolves them normally.
+    """
+    return [name for name in names if registry.providers.get(name) != _SKILL_PROVIDER]
+
+
 def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     """Every toolset an agent may name, by name.
 
@@ -103,6 +146,7 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
         (_AIMU_PROVIDER, list(BUILTIN_TOOLSETS)),
         (_CORE_PROVIDER, list(CORE_TOOLSETS)),
         (_MCP_PROVIDER, mcp_toolsets(config)),
+        (_SKILL_PROVIDER, skill_toolsets(config)),
     ]
     if config.load_plugins:
         sources.append(

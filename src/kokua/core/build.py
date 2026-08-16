@@ -85,8 +85,20 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
     model straight from ``config``. Only that second path assembles and applies a system message: an
     injected client already carries whatever system its own caller built it with, so computing one here
     and overwriting it would defeat the injection.
+
+    Declared *skill* names are held back from toolset resolution here, because this agent is a
+    ``SkillAgent`` and AIMU already gives it their catalogue and script tools from
+    ``state.skill_manager``. Resolving them as toolsets too would append the same script tools (harmless,
+    deduplicated by name) and the same catalogue entries a second time in the prompt (not harmless). A
+    spawned worker is a plain agent with no such machinery, so for it the registry is the only route and
+    ``build_agent_specs`` resolves skill names like any other name.
     """
-    toolsets = select(config.agents[agent_name].tools, state.registry, agent=agent_name, entry_point=config.entry_agent)
+    # Imported here, not at module level: see the comment in resolve_system_message -- the same cycle
+    # runs through kokua.toolsets.agents.
+    from kokua.toolsets.agents import without_skill_names
+
+    resolvable = without_skill_names(config.agents[agent_name].tools, state.registry)
+    toolsets = select(resolvable, state.registry, agent=agent_name, entry_point=config.entry_agent)
     resolved_client = client
     if resolved_client is None:
         resolved_client = build_model_client(config, resolve_system_message(config, agent_name, toolsets))

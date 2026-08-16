@@ -23,6 +23,10 @@ from aimu.skills import SkillManager
 
 from kokua.config.schema import AssistantConfig
 
+# The toolset that grants author_skill / add_skill_script. Declaring it opts an agent out of catalogue
+# scoping, since an author has to see the skill it just wrote (see `skill_manager`).
+_AUTHORING_TOOLSET = "skills"
+
 if TYPE_CHECKING:
     # Not imported for real here, deliberately: aimu.aio.tools.builtin is the AIMU surface
     # aimu_compat.require_aimu probes for, and this module is reached from kokua.plugins (hence loaded at
@@ -75,13 +79,31 @@ class LiveState:
         return DocumentStore(persist_path=str(self.config.documents_path))
 
     @cached_property
+    def all_skills(self) -> SkillManager:
+        """Every skill on disk, unscoped: the discovery authority the other two accessors build on.
+
+        Separate from ``skill_manager`` because that one may be narrowed to what the entry agent
+        declares, while a worker can declare any skill and so needs the full set resolvable.
+        """
+        return SkillManager(skill_dirs=[str(self.config.skills_dir)])
+
+    @cached_property
     def skill_manager(self) -> SkillManager:
-        """One SkillManager shared by every conversation's agent -- deliberately, the same reasoning
+        """The SkillManager the entry agent's ``SkillAgent`` reads, scoped to what that agent declares.
+
+        One instance shared by every conversation's agent -- deliberately, the same reasoning
         ``memory_store`` and ``document_store`` apply above. Skills are files in one user-owned
         directory, and a skill the user teaches in one conversation should be usable in every other one,
         not just the conversation that happened to author it. A manager per agent was the accident this
         replaces: it gave each conversation its own catalog cache, so a skill authored in one was
-        invisible to another until that one happened to refresh on its own.
+        invisible to another until that one happened to refresh on its own. Every conversation's agent is
+        the entry agent, so one scope fits them all.
+
+        **An agent that can author skills sees all of them.** Narrowing an author's catalogue would hide
+        the skill it just wrote: ``add_skill_script`` tells the model its script is callable in the same
+        turn, which cannot be true if the new skill falls outside an ``include`` set fixed at startup.
+        So holding the authoring toolset opts out of scoping entirely, and only a non-authoring entry
+        agent gets a catalogue limited to its declaration.
 
         Turns on different conversations run concurrently, and both ``author_skill`` and
         ``add_skill_script`` call ``manager.refresh()`` on this one shared instance. That is safe without
@@ -89,7 +111,62 @@ class LiveState:
         re-scanning the skills directory on disk, which is idempotent. Two concurrent refreshes therefore
         race at worst to assign an equivalent map, never a torn or corrupt one.
         """
-        return SkillManager(skill_dirs=[str(self.config.skills_dir)])
+        entry = self.config.agents.get(self.config.entry_agent)
+        if entry is None:
+            # Nothing to scope by. A real run cannot reach here: `validate_agents` rejects a config
+            # whose [assistant].agent names no table, and owns that error. This keeps a LiveState
+            # usable on its own, which is how the unit tests exercise the accessors above.
+            return self.all_skills
+        declared = entry.tools
+        if _AUTHORING_TOOLSET in declared:
+            return self.all_skills
+        known = self.all_skills.skills
+        return SkillManager(
+            skill_dirs=[str(self.config.skills_dir)],
+            include=[name for name in declared if name in known],
+        )
+
+    @cached_property
+    def skill_tools(self) -> dict[str, list]:
+        """Each skill's callable tools by skill name: its own scripts plus the shared ``activate_skill``.
+
+        This is how a skill reaches an agent that is not a ``SkillAgent``. A spawned worker is a plain
+        AIMU ``Agent``, so it has no skill machinery to hook, and the registry is its only route: a
+        skill's toolset returns that skill's entry from this map.
+
+        Built once, from the unscoped manager, so every declarable skill is present regardless of which
+        agent asks. The sync ``MCPClient`` runs its in-process server through an anyio blocking portal on
+        a background thread, so building this from the event-loop thread is safe; it is one in-process
+        ``list_tools`` round-trip, paid on first access rather than per agent.
+        """
+        from aimu.skills import build_skills_server
+        from aimu.tools import MCPClient
+
+        manager = self.all_skills
+        # Held for the lifetime of this state: the callables close over the client, and dropping the
+        # last reference would close the portal underneath them.
+        # Held until close(): the callables close over this client, and it owns a blocking portal that
+        # must be released explicitly. Left to garbage collection it is released during interpreter
+        # finalization, where stopping the portal cannot complete and blocks the process from exiting.
+        self._skills_mcp_client = MCPClient(server=build_skills_server(manager))
+        by_name = {fn.__name__: fn for fn in self._skills_mcp_client.as_tools()}
+        activate = [by_name["activate_skill"]] if "activate_skill" in by_name else []
+        return {
+            skill.name: activate + [by_name[tool] for tool in skill.script_tool_names() if tool in by_name]
+            for skill in manager.skills.values()
+        }
+
+    def close(self) -> None:
+        """Release what this state owns that outlives garbage collection. Idempotent.
+
+        Only the skills MCP client needs it: it owns a blocking portal on a background thread, and a
+        portal released during interpreter finalization cannot be stopped, so the process never exits.
+        Everything else here is either a plain object or holds no OS resource of its own.
+        """
+        client = getattr(self, "_skills_mcp_client", None)
+        if client is not None:
+            self._skills_mcp_client = None
+            client.close()
 
     @cached_property
     def _scheduling(self) -> tuple[list, Callable[[], None], Any]:

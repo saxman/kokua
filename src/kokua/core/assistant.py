@@ -397,6 +397,8 @@ class Assistant:
                     await conn.client.aclose()
                 except Exception:
                     logger.debug("Error closing MCP client", exc_info=True)
+            if self._state is not None:
+                self._state.close()
             self._store.close()
 
     async def _serve_channel(self) -> None:

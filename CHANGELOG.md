@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.14.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -112,6 +112,18 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer
 
 ### Agents and tools
 
+- **An individual skill is a name in the same namespace as everything else.** A `[agents.*]` table lists
+  `"citation-check"` beside `"web"` and `"stocks"` without saying which kind each is, and `--list-toolsets`
+  shows every skill on disk under a `skill:` group. Two paths deliver one declaration, split on who
+  authors: the **entry agent** stays an AIMU `SkillAgent`, and its catalogue is scoped with
+  `SkillManager(include=...)` to the skills it declares; a **worker**, which is a plain agent with no skill
+  machinery, gets a declared skill's script tools and `activate_skill` through the registry like any other
+  toolset, and the skill's description reaches its prompt as that toolset's guidance. **Declaring the
+  `skills` authoring toolset opts an agent out of scoping**, because narrowing an author's catalogue would
+  hide the skill it just wrote and make `add_skill_script`'s "callable in the same turn" promise false. A
+  skill whose name collides with a toolset or an MCP server is a startup error, like any other collision,
+  and a skill on disk that no table names is never reported as unreferenced, since an authoring entry agent
+  reaches it through its catalogue anyway.
 - **Every agent is declared whole in `config.toml`.** One `[agents.<name>]` table per agent, carrying a
   `description` (the label a delegator sees), a `system_message`, a `tools` list of toolset names, and a
   `delegates_to` list. `[assistant].agent` names the **entry agent**, the one you talk to and the root of
