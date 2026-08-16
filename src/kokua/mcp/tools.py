@@ -44,18 +44,17 @@ def make_mcp_tools(
     on the next restart; bearer-token servers are session-only (their secret is not written to disk).
     ``connections`` is the live list shared with the boot path and teardown.
 
-    A server's raw tools are never mounted on an agent. ``refresh_workers``, applied to every live
-    agent, rebuilds each one's ``spawn_subagent`` so the worker roles that name the server pick up (or,
-    on removal, drop) its tools.
+    A server's raw tools are never mounted on the agent that connected it. ``refresh_workers``, applied
+    to every live agent, rebuilds each one's ``spawn_subagent`` so the agents whose ``[agents.*].tools``
+    name the server pick up (or, on removal, drop) its tools.
     """
 
     @tool
     async def add_mcp_server(url: str, bearer_token: Optional[str] = None) -> str:
-        """Connect to a remote MCP server by URL and add its tools to this assistant.
+        """Connect to a remote MCP server by URL so its tools can be used.
 
-        The server's tools become callable immediately, even in this same turn, and the connection
-        is remembered so it is restored automatically the next time the assistant starts. Returns
-        the names of the newly available tools.
+        The connection is remembered, so it is restored automatically the next time the assistant
+        starts. Returns the tool names the server exposes and the rule for which agent can call them.
 
         Authentication is handled for you: just pass the URL. If the server is unprotected it
         connects directly. If it requires OAuth, you post an authorization link into the chat and
@@ -79,14 +78,15 @@ def make_mcp_tools(
             client, auth_mode = await servers.connect_mcp(
                 url, bearer_token=bearer_token, notify=notify, oauth_storage_dir=oauth_storage_dir
             )
-            # Lean mode: don't mount the raw tools on the entry agent; they reach workers via refresh below.
+            # The raw tools are not mounted on this agent; they reach the agents that declare the
+            # server through the rebuild below.
             added = await servers.attach_server(connections, url, client, auth_mode)
         except BearerTokenRequired as exc:
             return str(exc)
         except Exception as exc:
             return f"Failed to connect to MCP server {url!r}: {exc}"
         if refresh_workers is not None:
-            for_each_agent(refresh_workers)  # rebuild spawn_subagent so worker roles pick up this server
+            for_each_agent(refresh_workers)  # rebuild spawn_subagent so the agents declaring it pick it up
         # Persist reconnectable servers (no secret on disk); a bearer server stays session-only.
         if auth_mode in RECONNECTABLE:
             config_store.add_mcp_server(config_path, url)
@@ -94,8 +94,13 @@ def make_mcp_tools(
         else:
             note = " (session only; add it to config.toml [mcp] to keep a bearer-token server across restarts)"
         names = ", ".join(added) if added else "(no new tools)"
-        where = "available to the worker agents whose roles use them"
-        return f"Connected to {url}. Tools {where}: {names}.{note}"
+        # A tool result, so it states the reachability rule the model cannot infer from a success
+        # message: connecting a server is not granting it. Kept to one sentence for that reason.
+        reach = (
+            "They reach only an agent whose tools list in config.toml's [agents.*] names this server: "
+            "one that already names it can use them now, otherwise the user must add it by hand."
+        )
+        return f"Connected to {url}. Its tools: {names}. {reach}{note}"
 
     @tool
     async def remove_mcp_server(url: str) -> str:
@@ -111,12 +116,12 @@ def make_mcp_tools(
         # `entry.tools` lists every tool name this server exposes, but a same-named tool from another
         # still-connected server was never separately recorded; only report names this removal actually
         # frees up. Nothing has to be stripped from an agent: the raw tools were never mounted on one.
-        # The worker refresh below is what drops them, from the roles that named this server.
+        # The rebuild below is what drops them, from the agents whose tools list named this server.
         still_owned = {name for conn in connections if conn is not entry for name in conn.tools}
         removed = set(entry.tools) - still_owned
         connections.remove(entry)
         if refresh_workers is not None:
-            for_each_agent(refresh_workers)  # rebuild spawn_subagent so worker roles drop this server
+            for_each_agent(refresh_workers)  # rebuild spawn_subagent so the agents declaring it drop it
         try:
             await entry.client.aclose()
         except Exception:

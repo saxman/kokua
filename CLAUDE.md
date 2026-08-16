@@ -55,10 +55,21 @@ each claim, is in [docs/explanation/design-principles.md](docs/explanation/desig
 1. **A small, transport-agnostic core.** The assistant knows a `Channel`, not a terminal or a socket.
    Every optional rich frame degrades once, in `ChannelUI`, to a documented fallback. No
    `isinstance(channel, WebChannel)` in `core/` or `planning/`.
-2. **Grow by plugin, not by core change.** Capability arrives as an entry-point-registered `FrontEnd`
-   or `Toolset`. Kokua's own register exactly as a third party's would, core capabilities included.
-   Its corollary: **a capability is declared, never defaulted.** An agent holds exactly what its
-   `[agents.<name>].tools` list names; no code path adds a tool an agent did not declare.
+2. **Grow by plugin, not by core change.** Capability arrives as a `FrontEnd` or a `Toolset`. A third
+   party's arrives through the `kokua.frontends` / `kokua.toolsets` entry-point groups, and Kokua's own
+   front ends and its five plugin toolsets register there identically. Kokua's *core* capabilities
+   (`config`, `conversations`, `mcp-admin`, `scheduling`, and the AIMU wrappers `memory` / `documents` /
+   `skills`) are the same kind of object, resolved through the same registry and named in the same
+   namespace -- but they do not arrive by the same route: `build_registry` adds them as their own
+   provider sources and never calls `discover_toolsets()`, so do not go looking for them in
+   `pyproject.toml`'s entry points.
+   Its corollary: **a capability is declared, never defaulted.** An agent holds exactly the toolsets its
+   `[agents.<name>].tools` names, plus the delegate a non-empty `delegates_to` earns it; no code path
+   grants a capability the table did not declare, and no flag can disagree with one. (One exception worth
+   knowing: the entry agent is an `aio.SkillAgent`, so AIMU gives it the skill catalogue,
+   `activate_skill`, and each `{skill}__{stem}` script tool whether or not it declares the `skills`
+   toolset, which only adds `author_skill` / `add_skill_script`. A spawned worker is a plain `aio.Agent`
+   and gets none of it.)
 3. **`config.toml` is the single source of settings, and the app writes it.** No parallel store. A
    runtime-mutable setting is one entry in `config/table.py`'s `RUNTIME_SETTINGS`, which drives the
    schema, the sanitizer, the hot-apply set, the live-apply loop, and the persist path at once.
