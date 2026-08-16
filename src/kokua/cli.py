@@ -20,7 +20,7 @@ from . import plugins
 from .aimu_compat import AimuVersionError, require_aimu
 from kokua.config import file as settings
 from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
-from kokua.mcp.servers import name_from_url
+from kokua.mcp.servers import disambiguate_name, name_from_url
 from .logging_setup import configure_logging
 
 
@@ -61,7 +61,13 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         help="Model string (e.g. 'ollama:qwen3:8b'). Unset: AIMU_LANGUAGE_MODEL, else a running "
         "local model (never a cloud model); startup fails if none is found.",
     )
-    parser.add_argument("--system", default=None, help="Override the assistant's system message.")
+    parser.add_argument(
+        "--system",
+        default=None,
+        help="Override the entry agent's system message for this run (its [agents.<name>].system_message "
+        "or the [assistant].system_message fallback, whichever it would otherwise use). Does not affect "
+        "a delegated worker's own declared message.",
+    )
     parser.add_argument(
         "--show-thinking",
         action=argparse.BooleanOptionalAction,
@@ -114,6 +120,24 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
     return parser
 
 
+def _mcp_servers_from_urls(urls: list[str]) -> list[MCPServerConfig]:
+    """One ``MCPServerConfig`` per ``--mcp`` URL, named by host and disambiguated against each other.
+
+    Two URLs on one host (a service exposing several MCP endpoints under one domain) derive the same
+    base name from ``name_from_url``; without disambiguating here, the second would collide with the
+    first in the registry at startup with no ``--mcp``-only way to rename either. Uses the same
+    ``disambiguate_name`` the ``add_mcp_server`` tool's config write applies against names already on
+    file, so a name derived from one URL never depends on which of the two disambiguation call sites ran.
+    """
+    servers: list[MCPServerConfig] = []
+    used: set[str] = set()
+    for url in urls:
+        name = disambiguate_name(name_from_url(url), used)
+        used.add(name)
+        servers.append(MCPServerConfig(url=url, name=name))
+    return servers
+
+
 def _cli_overrides(args: argparse.Namespace) -> dict:
     """Collect the flags the user actually passed (non-sentinel), keyed by AssistantConfig field."""
     overrides: dict = {}
@@ -123,10 +147,10 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
             overrides[field] = transform(value) if transform else value
 
     take("model", args.model)
-    take("system_message", args.system)
+    take("system_message_override", args.system)
     take("show_thinking", args.show_thinking)
     take("show_tools", args.show_tools)
-    take("mcp_servers", args.mcp, lambda urls: [MCPServerConfig(url=url, name=name_from_url(url)) for url in urls])
+    take("mcp_servers", args.mcp, _mcp_servers_from_urls)
     take("load_plugins", args.plugins)
     take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
     take("frontend", args.frontend)

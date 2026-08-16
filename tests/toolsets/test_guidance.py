@@ -18,8 +18,8 @@ def test_the_declared_message_comes_first():
 
 
 def test_an_agent_with_no_message_of_its_own_falls_back_to_the_global_one():
-    """[assistant].system_message (which --system also sets) is the opener for an agent that declares
-    none of its own, so setting it is not silently ignored."""
+    """[assistant].system_message is the opener for an agent that declares none of its own, so setting it
+    is not silently ignored."""
     agents = {"assistant": AgentConfig(tools=["time"])}
     assert _assemble(agents, system_message="Global opener.").startswith("Global opener.")
 
@@ -27,6 +27,42 @@ def test_an_agent_with_no_message_of_its_own_falls_back_to_the_global_one():
 def test_an_agents_own_message_wins_over_the_global_one():
     agents = {"assistant": AgentConfig(system_message="Mine.", tools=["time"])}
     assert _assemble(agents, system_message="Global opener.").startswith("Mine.")
+
+
+def test_system_override_wins_over_the_entry_agents_declared_opener():
+    """--system (system_message_override) beats even a declared system_message for the entry agent. That
+    is the exact case config.example.toml's shipped [agents.assistant] puts every default install in,
+    which is what made --system a silent no-op before this."""
+    agents = {"assistant": AgentConfig(system_message="Declared opener.", tools=["time"])}
+    assert _assemble(agents, system_message_override="Be terse.").startswith("Be terse.")
+
+
+def test_system_override_beats_the_global_fallback_too():
+    agents = {"assistant": AgentConfig(tools=["time"])}
+    message = _assemble(agents, system_message="Global opener.", system_message_override="Be terse.")
+    assert message.startswith("Be terse.")
+    assert "Global opener." not in message
+
+
+def test_an_unset_system_override_leaves_the_declaration_in_charge():
+    """The default (None) must not outrank a declared opener: system_message_override is None exactly
+    when --system was never passed, which is a different question from system_message merely sitting at
+    its own built-in default -- confusing the two is the bug this field exists to avoid repeating."""
+    agents = {"assistant": AgentConfig(system_message="Declared opener.", tools=["time"])}
+    assert _assemble(agents).startswith("Declared opener.")
+    assert _assemble(agents, system_message_override=None).startswith("Declared opener.")
+
+
+def test_system_override_does_not_reach_a_worker():
+    """The flag documents itself as overriding the entry agent's message, the one the user is talking to,
+    not every agent Kokua builds; a worker's own declared opener must survive it untouched."""
+    agents = {
+        "assistant": AgentConfig(tools=["time"], delegates_to=["researcher"]),
+        "researcher": AgentConfig(system_message="Researcher opener.", tools=["web"]),
+    }
+    message = _assemble(agents, name="researcher", system_message_override="Be terse.")
+    assert message.startswith("Researcher opener.")
+    assert "Be terse." not in message
 
 
 def test_a_toolsets_guidance_is_appended():

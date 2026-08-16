@@ -15,12 +15,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from aimu.aio import Scheduler
 from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.skills import SkillManager
 
 from kokua.config.schema import AssistantConfig
+
+if TYPE_CHECKING:
+    # Not imported for real here, deliberately: aimu.aio.tools.builtin is the AIMU surface
+    # aimu_compat.require_aimu probes for, and this module is reached from kokua.plugins (hence loaded at
+    # `import kokua.cli` time, on every invocation including --help and `config init`) well before that
+    # preflight ever runs. A real import here would turn an AIMU missing the newest surface into a bare
+    # ImportError on those, defeating the preflight it would otherwise go through. toolsets/agents.py
+    # holds the real unconditional import that keeps this annotation honest -- it is only ever imported
+    # lazily, after preflight has already run.
+    from aimu.aio.tools.builtin import SubagentObserver
 
 
 @dataclass
@@ -39,12 +50,16 @@ class LiveState:
     connections: list = field(default_factory=list)
     for_each_agent: Optional[Callable[[Callable], None]] = None
     reapply_config: Optional[Callable] = None
-    scheduler: Optional[Any] = None
+    scheduler: Optional[Scheduler] = None
     proactive: Optional[Callable] = None
+    # Typed Any rather than kokua.core.conversations.ConversationBook: that class lives under kokua.core,
+    # and importing it here would import kokua/core/__init__.py, which imports core/build.py, which
+    # imports this module -- the same cycle resolve_system_message's docstring works around by importing
+    # kokua.toolsets.agents late. Left honestly untyped rather than worked around, unlike observer below.
     conversation_book: Optional[Any] = None
     turn_running: Optional[Callable[[str], bool]] = None
     tool_approval: Optional[Callable] = None
-    observer: Optional[Any] = None
+    observer: Optional[SubagentObserver] = None
     registry: dict = field(default_factory=dict)
     # Rebuilds one agent's delegate after a runtime MCP change. Assigned by the composition root rather
     # than imported by the toolsets that need it, since it lives in core.build and core.build imports

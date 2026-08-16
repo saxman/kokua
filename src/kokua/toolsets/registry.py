@@ -82,9 +82,15 @@ def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistr
         for toolset in toolsets:
             if toolset.name in registry:
                 existing = registry[toolset.name]
+                # Each side's description may already end in its own period (every MCP toolset's does:
+                # "Tools from the MCP server at {url}."), so interpolating it straight into this sentence
+                # and then ending the sentence too would render "...mcp.).". Stripped here rather than
+                # asking every Toolset author to leave theirs off.
+                existing_desc = existing.description.rstrip(".")
+                new_desc = toolset.description.rstrip(".")
                 raise ToolsetError(
                     f"toolset name {toolset.name!r} is claimed by two providers: "
-                    f"{provider[toolset.name]} ({existing.description}) and {label} ({toolset.description}). "
+                    f"{provider[toolset.name]} ({existing_desc}) and {label} ({new_desc}). "
                     "Rename one, or drop it: an agent names a toolset without saying what provides it, so "
                     "the name has to be unique."
                 )

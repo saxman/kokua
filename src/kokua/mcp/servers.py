@@ -35,6 +35,22 @@ def name_from_url(url: str) -> str:
     return host.replace(".", "-")
 
 
+def disambiguate_name(base: str, used: set[str]) -> str:
+    """``base``, or ``base-2``, ``base-3``, ... -- the first not already in ``used``.
+
+    Two servers on one host (a service exposing several MCP endpoints under one domain) derive the same
+    ``name_from_url`` base; shared by every caller that turns a URL into a registry name (the
+    ``add_mcp_server`` config write and the ``--mcp`` CLI flag), so a config that names two collides the
+    same way regardless of which of them derived the name.
+    """
+    if base not in used:
+        return base
+    suffix = 2
+    while f"{base}-{suffix}" in used:
+        suffix += 1
+    return f"{base}-{suffix}"
+
+
 # Auth modes a server can be reconnected in at boot without a stored secret: unauthenticated, or the
 # persisted-token OAuth flow. A bearer-token server is session-only (its secret is never written to
 # config.toml); persist that via a hand-authored [[mcp.server]] with a token_env instead.

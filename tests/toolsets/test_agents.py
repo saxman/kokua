@@ -32,6 +32,25 @@ def test_plugins_are_absent_when_load_plugins_is_off():
     assert "pdf" not in registry
 
 
+def test_kokuas_own_five_plugins_are_labeled_built_in_not_plugin():
+    """The five toolsets Kokua's own distribution registers under `kokua.toolsets` are told apart from a
+    third party's by provenance (which distribution registered the entry point), not a hand-maintained
+    name list, so unreferenced_toolsets can exempt them without knowing their names in advance."""
+    registry = build_registry(AssistantConfig(load_plugins=True))
+    for name in ("example", "aimu_agents", "pdf", "image", "email"):
+        assert registry.providers[name] == "built-in toolset", name
+
+
+def test_a_third_party_plugin_is_still_labeled_plugin(monkeypatch):
+    from kokua.toolsets import agents
+    from kokua.toolsets.registry import Toolset
+
+    weather = Toolset(name="weather", description="Forecasts.", build=lambda ctx: [])
+    monkeypatch.setattr(agents, "discover_toolsets", lambda: {"weather": weather})
+    registry = build_registry(AssistantConfig(load_plugins=True))
+    assert registry.providers["weather"] == "plugin"
+
+
 def test_a_plugin_shadowing_a_core_name_is_rejected(monkeypatch):
     from kokua.toolsets import agents
     from kokua.toolsets.registry import Toolset
@@ -97,9 +116,15 @@ def test_a_valid_graph_passes():
 
 
 def test_no_agents_at_all_is_rejected():
+    """Reachable only when config.toml already exists (config/file.py's own missing-file error fires
+    first otherwise), so plain `kokua config init` would refuse to overwrite it -- the message must name
+    a remedy that actually works from that state, not the one that requires no file to be there yet."""
     config = _config({})
-    with pytest.raises(ConfigError, match="at least one"):
+    with pytest.raises(ConfigError, match="at least one") as excinfo:
         validate_agents(config, build_registry(config))
+    message = str(excinfo.value)
+    assert "config.example.toml" in message
+    assert "kokua config init --force" in message
 
 
 def test_a_missing_entry_agent_is_rejected():
@@ -160,6 +185,19 @@ def test_unreferenced_toolsets_ignores_unnamed_builtin_and_core_groups():
     """A built-in AIMU group or a core subsystem toolset ships whether or not any agent names it, so an
     unnamed one is not a startup warning -- only a name the user provisioned earns one."""
     config = _config({"assistant": AgentConfig(tools=["time"])})
+    registry = build_registry(config)
+    assert unreferenced_toolsets(config, registry) == []
+
+
+def test_unreferenced_toolsets_is_silent_on_the_real_shipped_config():
+    """The regression this guards: Kokua's own five built-in toolsets (example, aimu_agents, pdf, image,
+    email) register under the real `kokua.toolsets` entry-point group -- neither `load_plugins=False` nor
+    a monkeypatched `discover_toolsets` (both used above) exercises that path -- and the shipped
+    config.example.toml deliberately declares none of them. Without excluding Kokua's own distribution
+    from the warning, every default install would log five warnings about toolsets nobody chose to skip."""
+    from tests.channels import example_agents
+
+    config = AssistantConfig(agents=example_agents(), entry_agent="assistant", load_plugins=True)
     registry = build_registry(config)
     assert unreferenced_toolsets(config, registry) == []
 

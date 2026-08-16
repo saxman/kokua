@@ -5,7 +5,12 @@ from aimu import aio
 
 from kokua.mcp import servers as mcp
 from kokua.config import MCPServerConfig
-from kokua.mcp.servers import _looks_like_auth_required, _looks_like_registration_unsupported, name_from_url
+from kokua.mcp.servers import (
+    _looks_like_auth_required,
+    _looks_like_registration_unsupported,
+    disambiguate_name,
+    name_from_url,
+)
 
 
 def test_name_from_url_replaces_dots_in_the_host_with_hyphens():
@@ -14,6 +19,15 @@ def test_name_from_url_replaces_dots_in_the_host_with_hyphens():
 
 def test_name_from_url_falls_back_to_mcp_when_there_is_no_host():
     assert name_from_url("not-a-url") == "mcp"
+
+
+def test_disambiguate_name_returns_the_base_when_free():
+    assert disambiguate_name("stocks", set()) == "stocks"
+
+
+def test_disambiguate_name_appends_a_numeric_suffix_on_collision():
+    assert disambiguate_name("stocks", {"stocks"}) == "stocks-2"
+    assert disambiguate_name("stocks", {"stocks", "stocks-2"}) == "stocks-3"
 
 
 @pytest.mark.parametrize(

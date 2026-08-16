@@ -22,7 +22,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 MINIMUM_AIMU = (0, 13, 1)
 
-# One symbol from AIMU's newest surface that Kokua imports unconditionally (see `core/build.py`).
+# One symbol from AIMU's newest surface that Kokua imports unconditionally (see `toolsets/agents.py`).
 # Probed by name rather than imported, so a miss is a clean False instead of an ImportError here.
 _PROBE_MODULE = "aimu.aio.tools.builtin"
 _PROBE_SYMBOL = "SubagentObserver"

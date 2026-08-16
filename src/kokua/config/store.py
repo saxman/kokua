@@ -20,11 +20,18 @@ import tomlkit
 from tomlkit import TOMLDocument
 
 from kokua.config import file as settings
-from kokua.mcp.servers import name_from_url
+from kokua.mcp.servers import disambiguate_name, name_from_url
 
 
 def _load(path: Path) -> TOMLDocument:
-    """Parse the file for editing, seeding from the shipped example if it does not exist yet."""
+    """Parse the file for editing, seeding from the shipped example if it does not exist yet.
+
+    That seed includes the shipped example's ``[agents.*]`` tables: if the file is deleted mid-session,
+    the next write here (from ``update_config`` or ``add_mcp_server``) recreates it, default agents and
+    all. The content is exactly what ``kokua config init`` would write, so this is not a way to grant a
+    capability beyond what a hand-edit already could -- but it is a path by which ``[agents.*]`` reappears
+    on disk without a human typing it.
+    """
     if path.exists():
         return tomlkit.parse(path.read_text(encoding="utf-8"))
     return tomlkit.parse(settings.example_text())
@@ -71,19 +78,12 @@ def _server_array(doc: TOMLDocument):
 def _unique_name(servers, url: str) -> str:
     """A name derived from ``url``, disambiguated against every name already in ``servers``.
 
-    Two servers on one host (a service exposing several MCP endpoints under one domain) derive the same
-    base name; appending a numeric suffix until the name is free keeps a successful ``add_mcp_server``
-    call from producing a config the registry's collision check would later reject at boot, deferred
-    past the point where the tool could still report the problem usefully.
+    Appending a numeric suffix until the name is free (see ``disambiguate_name``) keeps a successful
+    ``add_mcp_server`` call from producing a config the registry's collision check would later reject at
+    boot, deferred past the point where the tool could still report the problem usefully.
     """
-    base = name_from_url(url)
     used = {entry.get("name") for entry in servers}
-    if base not in used:
-        return base
-    suffix = 2
-    while f"{base}-{suffix}" in used:
-        suffix += 1
-    return f"{base}-{suffix}"
+    return disambiguate_name(name_from_url(url), used)
 
 
 def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:

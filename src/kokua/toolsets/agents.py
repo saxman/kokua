@@ -10,11 +10,11 @@ import logging
 from dataclasses import replace
 from typing import Callable, Mapping, Optional, Sequence
 
-from aimu.aio.tools.builtin import make_async_subagent_tool
+from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
 
 from kokua.config.file import ConfigError
 from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
-from kokua.plugins import discover_toolsets
+from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.toolsets.builtin import BUILTIN_TOOLSETS
 from kokua.toolsets.context import LiveState, ToolsetContext
 from kokua.toolsets.core import CORE_TOOLSETS
@@ -45,17 +45,19 @@ def _tolerate_build_failures(toolset: Toolset) -> Toolset:
 
 
 # Provider labels `build_registry` hands to `register`. Named once here so `unreferenced_toolsets` can
-# tell a name nobody provisioned (a built-in AIMU group, a core subsystem) from a name the user actually
-# provisioned (a plugin, or a configured MCP server) without duplicating the strings.
+# tell a name nobody provisioned (a built-in AIMU group, a core subsystem, one of Kokua's own shipped
+# plugin toolsets) from a name the user actually provisioned (a third-party plugin, or a configured MCP
+# server) without duplicating the strings.
 _AIMU_PROVIDER = "AIMU capability"
 _CORE_PROVIDER = "core subsystem"
+_BUILTIN_PLUGIN_PROVIDER = "built-in toolset"
 _PLUGIN_PROVIDER = "plugin"
 _MCP_PROVIDER = "MCP server"
 
 # Providers whose toolsets ship regardless of what any agent declares, so a name from one of these being
-# unreferenced is not news -- unlike a plugin the user installed, or a server the user configured, which
-# earn a spot in the [agents.*] tables specifically so they can be reached.
-_UNPROVISIONED_PROVIDERS = {_AIMU_PROVIDER, _CORE_PROVIDER}
+# unreferenced is not news -- unlike a third-party plugin the user installed, or a server the user
+# configured, which earn a spot in the [agents.*] tables specifically so they can be reached.
+_UNPROVISIONED_PROVIDERS = {_AIMU_PROVIDER, _CORE_PROVIDER, _BUILTIN_PLUGIN_PROVIDER}
 
 
 def _server_tools(url: str, state: LiveState) -> list:
@@ -88,14 +90,27 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     Plugin discovery is gated on ``config.load_plugins``, which is a "do not execute third-party code"
     switch rather than a naming switch: with it off, a config naming a plugin toolset fails at startup
     with the unknown-name error rather than starting an agent quietly missing a capability.
+
+    Discovered plugins are split by which distribution registered them: Kokua's own five (example,
+    aimu_agents, pdf, image, email) get ``_BUILTIN_PLUGIN_PROVIDER`` rather than ``_PLUGIN_PROVIDER``, so
+    ``unreferenced_toolsets`` does not warn about ships-in-the-box toolsets the shipped config simply
+    never named. Both groups are still built with the same failure tolerance: the split is about what
+    counts as news when unreferenced, not about how much this codebase trusts its own plugin code.
     """
+    discovered = discover_toolsets()
+    own_names = own_distribution_toolset_names()
     sources: list[tuple[str, list[Toolset]]] = [
         (_AIMU_PROVIDER, list(BUILTIN_TOOLSETS)),
         (_CORE_PROVIDER, list(CORE_TOOLSETS)),
         (_MCP_PROVIDER, mcp_toolsets(config)),
     ]
     if config.load_plugins:
-        sources.append((_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for t in discover_toolsets().values()]))
+        sources.append(
+            (_BUILTIN_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for n, t in discovered.items() if n in own_names])
+        )
+        sources.append(
+            (_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for n, t in discovered.items() if n not in own_names])
+        )
     return register(sources)
 
 
@@ -109,8 +124,9 @@ def validate_agents(config: AssistantConfig, registry: Mapping[str, Toolset]) ->
     """
     if not config.agents:
         raise ConfigError(
-            "no agents configured: config.toml needs at least one [agents.<name>] table. Run "
-            "`kokua config init` to write a config with the default agents."
+            "no agents configured: config.toml needs at least one [agents.<name>] table. Add one by "
+            "hand -- config.example.toml, shipped with this install, has four to copy from -- or run "
+            "`kokua config init --force` to overwrite this file with that shipped example."
         )
     if config.entry_agent not in config.agents:
         known = ", ".join(sorted(config.agents))
@@ -186,18 +202,25 @@ LEAN_DELEGATION_GUIDANCE = (
 
 
 def assemble_system_message(config: AssistantConfig, agent_name: str, toolsets: Sequence[Toolset]) -> str:
-    """One agent's full system message: its declared opener plus the guidance it earned.
+    """One agent's full system message: its opener plus the guidance it earned.
 
     Guidance travels with the capability that needs it, so installing a toolset brings the instructions
     that make the model use it and removing one takes them away. Nothing here is conditional on a
-    setting; it is conditional only on what the agent declares.
+    setting except the opener itself; the guidance is conditional only on what the agent declares.
 
-    An agent's own ``system_message`` wins, falling back to ``[assistant].system_message`` (which
-    ``--system`` also sets) so that key keeps meaning what it always did: the opener for an agent that
-    declares none of its own.
+    The opener is the entry agent's own business only: ``--system`` (``config.system_message_override``)
+    wins there over its declared ``system_message``, since a prompt is not the capability this design
+    made ``[agents.*]`` the single source of. It never touches a worker's own declared opener, since the
+    flag overrides the message of the agent the user is talking to, not every agent Kokua builds. Absent
+    an override, an agent's own ``system_message`` wins, falling back to ``[assistant].system_message`` so
+    that key keeps meaning what it always did: the opener for an agent that declares none of its own.
     """
     agent = config.agents[agent_name]
-    parts = [agent.system_message or config.system_message or DEFAULT_SYSTEM_MESSAGE]
+    if agent_name == config.entry_agent and config.system_message_override is not None:
+        opener = config.system_message_override
+    else:
+        opener = agent.system_message or config.system_message or DEFAULT_SYSTEM_MESSAGE
+    parts = [opener]
     parts.extend(toolset.guidance for toolset in toolsets if toolset.guidance)
     if agent.delegates_to:
         parts.append(DELEGATION_GUIDANCE)
@@ -240,11 +263,12 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
 
 def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Callable:
     """The ``spawn_subagent`` delegate for one agent, over that agent's own targets."""
+    observer: Optional[SubagentObserver] = state.observer
     return make_async_subagent_tool(
         config.model,
         agent_types=build_agent_specs(config, state, delegator),
         tool_approval=state.tool_approval,
-        observer=state.observer,
+        observer=observer,
     )
 
 
@@ -257,11 +281,12 @@ def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Op
     name = getattr(agent, "name", config.entry_agent)
     if not config.agents[name].delegates_to:
         return None
+    observer: Optional[SubagentObserver] = state.observer
     return make_async_subagent_tool(
         agent.model_client.model,
         agent_types=build_agent_specs(config, state, name),
         tool_approval=state.tool_approval,
-        observer=state.observer,
+        observer=observer,
     )
 
 

@@ -33,6 +33,12 @@ from kokua.toolsets import Toolset, ToolsetContext
 FRONTEND_GROUP = "kokua.frontends"
 TOOLSET_GROUP = "kokua.toolsets"
 
+# This project's own distribution name (see kokua/__init__.py's version("kokua")). Kokua's five built-in
+# toolsets (example, aimu_agents, pdf, image, email) register under TOOLSET_GROUP exactly as a
+# third-party plugin would; own_distribution_toolset_names tells those apart from a real third party's by
+# checking which distribution registered the entry point, so a sixth one added later needs no update here.
+_OWN_DISTRIBUTION = "kokua"
+
 __all__ = [
     "FRONTEND_GROUP",
     "TOOLSET_GROUP",
@@ -42,6 +48,7 @@ __all__ = [
     "discover_frontends",
     "discover_toolsets",
     "get_frontend",
+    "own_distribution_toolset_names",
 ]
 
 
@@ -96,3 +103,17 @@ def get_frontend(name: str) -> FrontEnd:
 def discover_toolsets() -> dict[str, Toolset]:
     """Every installed toolset by name, from the ``kokua.toolsets`` entry-point group."""
     return {name: obj for name, obj in _load_group(TOOLSET_GROUP).items() if isinstance(obj, Toolset)}
+
+
+def own_distribution_toolset_names() -> set[str]:
+    """Names in the ``kokua.toolsets`` group that Kokua's own distribution registered, not a third party's.
+
+    A name here ships in the box regardless of what any config declares, so an agent not naming it is not
+    news the way an unreferenced third-party plugin or a configured MCP server would be -- see
+    ``toolsets.agents.unreferenced_toolsets``. Queried independently of ``discover_toolsets`` (a second
+    ``entry_points`` call) rather than folded into it, since provenance is a distinct question from "what
+    is installed" and callers of ``discover_toolsets`` should not have to care about it.
+    """
+    return {
+        ep.name for ep in entry_points(group=TOOLSET_GROUP) if ep.dist is not None and ep.dist.name == _OWN_DISTRIBUTION
+    }

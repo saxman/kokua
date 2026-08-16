@@ -53,6 +53,12 @@ class MCPServerConfig:
 class AssistantConfig:
     model: Optional[str] = None
     system_message: str = DEFAULT_SYSTEM_MESSAGE
+    # Set only by `--system` (never by config.toml, which has no key for it). `system_message` above
+    # already has a value whether or not anyone set it -- its own default -- so "was --system passed"
+    # cannot be answered by looking at that field; this one is None exactly when it wasn't. Wins over the
+    # entry agent's declared `system_message` in assemble_system_message, since a prompt is not the
+    # capability this design made [agents.*] the single source of; a worker's declared opener is untouched.
+    system_message_override: Optional[str] = None
     # Surface the model's reasoning and tool calls in the channel, not just the final answer.
     show_thinking: bool = True
     show_tools: bool = True

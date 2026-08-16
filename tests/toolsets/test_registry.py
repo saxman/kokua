@@ -23,6 +23,30 @@ def test_register_rejects_a_name_claimed_twice_and_names_both_providers():
     assert "MCP server" in message
 
 
+def test_register_collision_message_reads_cleanly_when_a_description_ends_in_a_period():
+    """Every MCP toolset's description already ends in a period ("Tools from the MCP server at {url}.");
+    interpolating it straight into the template's own closing sentence used to render "...mcp.)." --
+    a closing paren immediately followed by the template's period. Covers both a same-provider collision
+    (two MCP servers deriving one name) and a different-provider one, since either could double up."""
+    mcp_one = Toolset(
+        name="stocks", description="Tools from the MCP server at https://broker/quotes.", build=lambda ctx: []
+    )
+    mcp_two = Toolset(
+        name="stocks", description="Tools from the MCP server at https://broker/orders.", build=lambda ctx: []
+    )
+    with pytest.raises(ToolsetError) as excinfo:
+        register([("MCP server", [mcp_one]), ("MCP server", [mcp_two])])
+    message = str(excinfo.value)
+    assert ").)" not in message
+    assert ".)." not in message
+
+    with pytest.raises(ToolsetError) as excinfo:
+        register([("core subsystem", [_toolset("stocks")]), ("MCP server", [mcp_one])])
+    message = str(excinfo.value)
+    assert ").)" not in message
+    assert ".)." not in message
+
+
 def test_select_returns_toolsets_in_declared_order():
     registry = register([("core subsystem", [_toolset("a"), _toolset("b")])])
     selected = select(["b", "a"], registry, agent="assistant", entry_point="assistant")

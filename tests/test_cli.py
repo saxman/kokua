@@ -45,10 +45,39 @@ def test_arg_parser_overrides():
     assert cfg.port == 9000
 
 
-def test_system_flag_sets_the_global_system_message():
-    """--system writes [assistant].system_message, the opener any agent declaring none of its own falls
-    back to (tests/toolsets/test_guidance.py covers the other half of that hop)."""
-    assert resolve_config(build_arg_parser().parse_args(["--system", "Be terse."])).system_message == "Be terse."
+def test_system_flag_sets_the_override_not_the_fallback():
+    """--system lands in system_message_override, distinct from system_message (the [assistant].
+    system_message fallback), so an override can be told apart from that field merely being at its
+    default. tests/toolsets/test_guidance.py covers the assembly-time half of that hop."""
+    cfg = resolve_config(build_arg_parser().parse_args(["--system", "Be terse."]))
+    assert cfg.system_message_override == "Be terse."
+
+
+def test_system_flag_unset_leaves_no_override():
+    assert resolve_config(build_arg_parser().parse_args([])).system_message_override is None
+
+
+def test_two_mcp_urls_on_one_host_get_distinct_names():
+    """Two endpoints on one host derive the same base name (see mcp.servers.name_from_url); the flag has
+    to disambiguate them itself, since there is no way to name a --mcp-derived server explicitly."""
+    args = build_arg_parser().parse_args(
+        ["--mcp", "https://broker.example.com/mcp/quotes", "--mcp", "https://broker.example.com/mcp/orders"]
+    )
+    servers = resolve_config(args).mcp_servers
+    names = [s.name for s in servers]
+    assert names == ["broker-example-com", "broker-example-com-2"]
+
+    from kokua.config.schema import AgentConfig, AssistantConfig
+    from kokua.toolsets.agents import build_registry
+
+    config = AssistantConfig(
+        agents={"assistant": AgentConfig(tools=names)},
+        entry_agent="assistant",
+        load_plugins=False,
+        mcp_servers=servers,
+    )
+    registry = build_registry(config)  # must not raise a collision
+    assert set(names) <= set(registry)
 
 
 def test_confirm_tools_flag_parses():
@@ -106,10 +135,12 @@ def test_main_lists_every_provider_kind_of_toolset(monkeypatch, capsys):
 
     assert "web:" in out  # an AIMU built-in group
     assert "scheduling:" in out  # a Kokua core capability
-    assert "example:" in out  # an installed plugin toolset
+    assert "example:" in out  # one of Kokua's own five built-in plugin toolsets
     assert "stocks:" in out  # a server configured in [[mcp.server]]
-    # Grouped, because a flat list of names would not tell a user where any of them comes from.
-    for provider in ("AIMU capability:", "core subsystem:", "plugin:", "MCP server:"):
+    # Grouped, because a flat list of names would not tell a user where any of them comes from. No
+    # third-party plugin is installed in this test environment, so "plugin:" itself is not asserted here;
+    # test_agents.py's collision tests cover that label with a synthetic third-party toolset instead.
+    for provider in ("AIMU capability:", "core subsystem:", "built-in toolset:", "MCP server:"):
         assert provider in out, provider
 
 
