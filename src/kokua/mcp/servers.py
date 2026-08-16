@@ -138,10 +138,10 @@ async def connect_mcp(
 async def attach_server(connections: list, url: str, client: Any, auth_mode: str) -> list[str]:
     """Record a connected server and return the names of the tools it makes usable.
 
-    The server's tools are NOT mounted on any agent: the entry agent carries no MCP callables, and a
-    server reaches a worker only through a role that names it, via the rebuilt ``spawn_subagent``. The
-    connection stores the tool callables so a lazily-built agent can resolve its roles against them
-    without re-fetching. The full tool-name list is returned for the caller's message.
+    This mounts nothing on any agent; it only records the connection. An agent reaches the server by
+    naming it in its ``[agents.*].tools``, which is resolved when that agent (or a sub-agent's spec) is
+    built, so recording the callables here is what lets a later build resolve against them without
+    re-fetching. The full tool-name list is returned for the caller's message.
     """
     new_tools = await client.as_tools()
     added_names = [fn.__name__ for fn in new_tools]
@@ -190,9 +190,10 @@ async def reconnect_mcp_servers(
     All servers now live in config.toml ``[[mcp.server]]`` (both hand-authored bearer-token servers and
     runtime-added ones the tool recorded there), so this is a single pass over ``config.mcp_servers``. A
     connect failure logs and continues so one unreachable server can't stop the assistant from starting.
-    Each connection is recorded in ``connections`` (so a worker role naming it resolves against it for
-    conversations built later) and fanned out to whatever agents are live at boot (initially just the
-    active one).
+    Each connection is recorded in ``connections`` (so an agent naming it resolves against it when built,
+    including conversations built later) and fanned out to whatever agents are live at boot (initially just
+    the active one). Boot connects before the first agent is built, which is what lets a config-declared
+    server reach an agent's own tool list at all, rather than only its next spawned sub-agent.
     """
     for server in config.mcp_servers:
         try:
