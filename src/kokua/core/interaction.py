@@ -1,8 +1,9 @@
-"""Human-in-the-loop decisions: tool approval and plan review.
+"""Human-in-the-loop decisions: tool approval, and whatever a workflow needs to ask.
 
 Both are the same shape -- a turn stops, asks the user something over the channel, and waits; the
 serve loop reads the next inbound message and resolves the wait. ``PendingRequest`` is that shape,
-once, and the two concrete requests differ only in their reply vocabulary and their default answer.
+once. Tool approval fixes its own vocabulary (y/n) because the core owns it; a workflow's decision
+brings its own parser, so no one workflow's reply words live here.
 
 **Every pending request is single-slot and lock-guarded.** Concurrent turns (or concurrent tool
 calls within one turn) would otherwise both write the slot the serve loop resolves, and the first
@@ -22,9 +23,9 @@ class PendingRequest(Generic[T]):
     """One outstanding human decision.
 
     ``default`` is the answer used when the request is abandoned (the user navigated away from the
-    turn that raised it) -- deny for approval, reject for plan review. Abandoning rather than leaving
-    it pending is what keeps a backgrounded turn from waiting forever, and keeps the next message the
-    user types from being misrouted into it.
+    turn that raised it) -- deny for approval, or whichever safe answer the current asker chose for a
+    workflow decision. Abandoning rather than leaving it pending is what keeps a backgrounded turn
+    from waiting forever, and keeps the next message the user types from being misrouted into it.
     """
 
     def __init__(self, default: T):
@@ -32,6 +33,7 @@ class PendingRequest(Generic[T]):
         self._lock = asyncio.Lock()
         self._future: Optional[asyncio.Future] = None
         self._context: Any = None
+        self._parse: Optional[Callable[[str, str], T]] = None
 
     @property
     def pending(self) -> bool:
@@ -42,21 +44,30 @@ class PendingRequest(Generic[T]):
         """Whatever the asker attached for the resolver to read (the plan text under review)."""
         return self._context
 
-    async def ask(self, prompt: Callable[[], Awaitable[None]], *, context: Any = None) -> T:
+    async def ask(
+        self,
+        prompt: Callable[[], Awaitable[None]],
+        *,
+        context: Any = None,
+        parse: Optional[Callable[[str, str], T]] = None,
+    ) -> T:
         """Send ``prompt`` and wait for the answer, serialized against any other asker.
 
-        The slot is cleared in a ``finally``, so a ``/stop`` that cancels the waiting turn mid-await
-        (raising CancelledError out of it) still leaves no stale pending request behind.
+        ``parse`` turns the user's reply into the answer, and is the asker's rather than this class's:
+        a workflow's vocabulary belongs to the workflow. The slot is cleared in a ``finally``, so a
+        ``/stop`` that cancels the waiting turn mid-await still leaves no stale pending request behind.
         """
         async with self._lock:
             self._future = asyncio.get_running_loop().create_future()
             self._context = context
+            self._parse = parse
             try:
                 await prompt()
                 return await self._future
             finally:
                 self._future = None
                 self._context = None
+                self._parse = None
 
     def resolve(self, value: T) -> bool:
         """Answer the outstanding request. Returns whether there was one to answer."""
@@ -65,9 +76,23 @@ class PendingRequest(Generic[T]):
         self._future.set_result(value)
         return True
 
+    def parse_reply(self, raw: str, text: str) -> T:
+        """The outstanding request's answer for this reply, via the asker's parser (raw text if none)."""
+        if self._parse is None:
+            return raw
+        return self._parse(raw, text)
+
     def abandon(self) -> None:
         """Resolve with the default answer, if outstanding."""
         self.resolve(self._default)
+
+    def set_default(self, default: T) -> None:
+        """Set the answer an abandoned request resolves with.
+
+        Per-ask rather than per-construction, because a shared slot serves several askers and the safe
+        answer is the asker's to choose.
+        """
+        self._default = default
 
 
 class HumanGate:
@@ -88,10 +113,13 @@ class HumanGate:
         self._is_proactive = is_proactive
         self._turn_conversation = turn_conversation
         self.approval: PendingRequest[bool] = PendingRequest(default=False)
-        self.plan: PendingRequest[Optional[str]] = PendingRequest(default=None)
+        # One slot for whatever the running workflow asks. Single-slot and lock-guarded like approval:
+        # a second asker waits until the first is answered, so the serve loop can never resolve the
+        # wrong waiter.
+        self.decision: PendingRequest[Any] = PendingRequest(default=None)
 
     def abandon_all(self) -> None:
-        """Resolve any pending approval or plan review as denied/rejected.
+        """Resolve any pending approval or workflow decision as denied/rejected.
 
         Called before switching the viewed conversation away from the turn that raised them: that
         turn keeps running in the background (switching does not cancel it), so without this its
@@ -99,7 +127,7 @@ class HumanGate:
         otherwise be misrouted to it instead of starting a new turn.
         """
         self.approval.abandon()
-        self.plan.abandon()
+        self.decision.abandon()
 
     async def approve(self, name: str, arguments: dict) -> bool:
         """Tool-approval gate run before each tool call (published to the model client per run).
@@ -119,38 +147,33 @@ class HumanGate:
             return False
         return await self.approval.ask(lambda: self._ui.ask_approval(name, arguments))
 
-    async def review_plan(self, plan_text: str, critique: Optional[list[str]] = None) -> Optional[str]:
-        """Await the user's decision on a plan: approve (the plan), edit (their text), or reject (None).
+    async def decide(
+        self,
+        prompt: Callable[[], Awaitable[None]],
+        parse: Callable[[str, str], Any],
+        *,
+        default: Any = None,
+        context: Any = None,
+    ) -> Any:
+        """Ask the user something on a workflow's behalf and wait for the answer.
 
-        Any adversarial-reviewer critique is surfaced with the prompt so the human can weigh it. The
-        plan text rides along as the request's context, so ``resolve_reply`` can answer "approve"
-        with the plan the user was actually looking at.
+        ``default`` is what an abandoned request answers with (the user navigated away from the turn
+        that raised it). It is passed per call rather than fixed at construction because it is the
+        workflow's safe answer, not the core's: "reject" for a plan review, but a different word for
+        the next workflow along.
         """
-        return await self.plan.ask(
-            lambda: self._ui.ask_plan_review(plan_text, critique),
-            context=plan_text,
-        )
+        self.decision.set_default(default)
+        return await self.decision.ask(prompt, context=context, parse=parse)
 
     def resolve_reply(self, raw: str, text: str) -> bool:
         """Route an inbound message to whichever request is outstanding. Returns whether it was consumed.
 
-        ``text`` is the lowercased, stripped form; ``raw`` preserves the user's casing, which an
-        edited plan needs. Approval takes precedence: the two are never outstanding at once in
-        practice (a plan review happens before the executor runs any tool), and checking in a fixed
-        order keeps that assumption from mattering.
+        ``text`` is the lowercased, stripped form; ``raw`` preserves the user's casing, which an edited
+        plan needs. Approval takes precedence: the two are never outstanding at once in practice, and
+        checking in a fixed order keeps that assumption from mattering.
         """
         if self.approval.pending:
             return self.approval.resolve(text in ("y", "yes"))
-        if self.plan.pending:
-            return self.plan.resolve(self._parse_plan_reply(raw, text))
+        if self.decision.pending:
+            return self.decision.resolve(self.decision.parse_reply(raw, text))
         return False
-
-    def _parse_plan_reply(self, raw: str, text: str) -> Optional[str]:
-        """approve -> the reviewed plan, reject -> None, anything else -> the user's edited plan."""
-        if text in ("approve", "yes", "y"):
-            return self.plan.context
-        if text in ("reject", "no", "n"):
-            return None
-        if text.startswith("edit:"):
-            return raw.split(":", 1)[1].strip() or self.plan.context
-        return raw.strip()

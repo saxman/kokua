@@ -95,9 +95,9 @@ class Assistant:
         self._tracker = TurnTracker()
         # A per-turn sequence id for the lifecycle log lines.
         self._turn_seq: int = 0
-        # Tool approval and plan review: each a single-slot request the serve loop resolves with the
-        # user's next message. Both are lock-guarded, so concurrent tool calls (or concurrent planned
-        # turns) can never clobber the slot the serve loop is about to resolve.
+        # Tool approval and a workflow's own decision: each a single-slot request the serve loop
+        # resolves with the user's next message. Both are lock-guarded, so concurrent tool calls (or
+        # concurrent workflow turns) can never clobber the slot the serve loop is about to resolve.
         self._human = HumanGate(
             self._ui,
             config,
@@ -118,14 +118,37 @@ class Assistant:
             cancel_active_turn=self._cancel_current_turn,
             state=lambda: self._state,
         )
+
         # Turn execution, reactive and proactive. Reaches the store and the agent cache through the
         # conversation book, which already owns both.
+        #
+        # `TurnRunner` still asks for a `review_plan(plan_text, critique)` callable with planning's own
+        # approve/edit/reject vocabulary; the workflow that will own that vocabulary and call
+        # `self._human.decide` directly has not been wired in yet, so this shim bridges the two ends
+        # for now.
+        async def review_plan(plan_text: str, critique: Optional[list[str]] = None) -> Optional[str]:
+            def parse_plan_reply(raw: str, text: str) -> Optional[str]:
+                if text in ("approve", "yes", "y"):
+                    return plan_text
+                if text in ("reject", "no", "n"):
+                    return None
+                if text.startswith("edit:"):
+                    return raw.split(":", 1)[1].strip() or plan_text
+                return raw.strip()
+
+            return await self._human.decide(
+                lambda: self._ui.ask_plan_review(plan_text, critique),
+                parse_plan_reply,
+                default=None,
+                context=plan_text,
+            )
+
         self._turns = TurnRunner(
             self._book,
             self._ui,
             self._gate,
             config,
-            review_plan=self._human.review_plan,
+            review_plan=review_plan,
             push_conversations=self._maybe_push_conversations,
             delete_conversation=self.delete_conversation,
         )
@@ -455,7 +478,7 @@ class Assistant:
             self._tracker,
             self._gate,
             pending_approval=self._human.approval.pending,
-            pending_plan=self._human.plan.pending,
+            pending_decision=self._human.decision.pending,
         )
 
     async def _proactive(

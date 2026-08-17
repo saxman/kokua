@@ -892,8 +892,8 @@ async def test_a_rejected_plan_records_nothing(tmp_path):
         assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=active_id, plan=True)
     )
     for _ in range(1000):
-        if assistant._human.plan.pending:
-            assistant._human.plan.resolve(None)  # reject
+        if assistant._human.decision.pending:
+            assistant._human.decision.resolve(None)  # reject
             break
         await asyncio.sleep(0)
     else:

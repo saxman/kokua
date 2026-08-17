@@ -1,10 +1,10 @@
-"""PendingRequest: the single-slot, lock-guarded human-decision primitive."""
+"""The human-decision slot: one pending request, whatever vocabulary the asker brings."""
 
 from __future__ import annotations
 
 import asyncio
 
-from kokua.core.interaction import PendingRequest
+from kokua.core.interaction import HumanGate, PendingRequest
 
 
 async def _noop() -> None:
@@ -84,3 +84,76 @@ async def test_concurrent_askers_are_serialized_and_neither_slot_is_clobbered():
 
     await asyncio.wait_for(asyncio.gather(ask("a"), ask("b")), timeout=2.0)
     assert sorted(answered) == ["a", "b"]  # each asker got its own answer, not the other's
+
+
+class _UI:
+    def __init__(self):
+        self.asked: list[str] = []
+
+    async def ask_approval(self, name, arguments):
+        self.asked.append(f"approve:{name}")
+
+
+class _Config:
+    confirm_tools = ["execute_python"]
+
+
+def _gate(ui):
+    return HumanGate(ui, _Config(), active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "c1")
+
+
+async def test_a_decision_uses_the_askers_own_parser():
+    ui = _UI()
+    gate = _gate(ui)
+
+    async def prompt():
+        ui.asked.append("decide")
+
+    task = asyncio.create_task(gate.decide(prompt, lambda raw, text: text.upper(), default=None, context="ctx"))
+    await asyncio.sleep(0)
+    assert gate.decision.pending
+    assert gate.resolve_reply("yep", "yep") is True
+    assert await task == "YEP"
+
+
+async def test_the_parser_can_read_the_context_it_was_given():
+    gate = _gate(_UI())
+
+    async def prompt():
+        return None
+
+    task = asyncio.create_task(
+        gate.decide(prompt, lambda raw, text: gate.decision.context, default=None, context="the plan")
+    )
+    await asyncio.sleep(0)
+    gate.resolve_reply("approve", "approve")
+    assert await task == "the plan"
+
+
+async def test_abandoning_a_decision_answers_with_its_default():
+    gate = _gate(_UI())
+
+    async def prompt():
+        return None
+
+    task = asyncio.create_task(gate.decide(prompt, lambda raw, text: "parsed", default="fallback"))
+    await asyncio.sleep(0)
+    gate.abandon_all()
+    assert await task == "fallback"
+
+
+async def test_approval_takes_precedence_over_a_waiting_decision():
+    gate = _gate(_UI())
+
+    async def prompt():
+        return None
+
+    decision = asyncio.create_task(gate.decide(prompt, lambda raw, text: "decided", default=None))
+    await asyncio.sleep(0)
+    approval = asyncio.create_task(gate.approve("execute_python", {}))
+    await asyncio.sleep(0)
+
+    assert gate.resolve_reply("y", "y") is True
+    assert await approval is True
+    gate.abandon_all()
+    assert await decision is None
