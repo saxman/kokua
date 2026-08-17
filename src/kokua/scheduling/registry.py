@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def record_target(record: dict) -> str:
-    """Return a task record's effective proactive-turn target: one of "active", "new", "task"."""
+    """Return a task record's effective proactive-turn target: one of "active", "new", "task", "latest"."""
     return record.get("target") or "active"
 
 

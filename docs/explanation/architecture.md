@@ -380,7 +380,8 @@ optional and `update_scheduled_task` can change it) and `ConversationBook.list()
 is filtered there -- the agent's read-only conversation tools walk `sessions()` and still see every
 conversation. The page nests a conversation under a task when its `task_id` matches a task *currently in
 the list*, or when it is the `session_id` a `target="task"` record remembers (the only link for a
-conversation minted before `task_id` was recorded). Requiring the task to be present is what makes
+conversation minted before `task_id` was recorded, and the one a `target="latest"` record is about to
+replace). Requiring the task to be present is what makes
 deleting a task return its conversations to the chat list instead of hiding them: keying on `task_id`
 alone would leave an orphan unreachable from the sidebar. Because the nesting is client-side, a firing's
 new conversation appears under its task with no task re-fetch -- `TurnRunner.proactive` already pushes the

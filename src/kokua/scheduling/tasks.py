@@ -27,7 +27,7 @@ from .registry import record_target, add, find, load, remove
 
 logger = logging.getLogger(__name__)
 
-TARGETS = ("active", "new", "task")
+TARGETS = ("active", "new", "task", "latest")
 
 # What a task's next firing is, when there is no countdown to give. Rendered separately by each
 # presentation layer, so the wording can differ between the sidebar and a tool result.
@@ -174,10 +174,11 @@ class TaskService:
         return delay
 
     def _remember_session(self, task_id: str, target: str, used_key) -> None:
-        # Persist the conversation key a "task"-target firing wrote to, so the next firing reuses it.
-        # Re-read the registry so a cancel/delete during the run wins (mirrors the re-arm guard): a
-        # write-back must never resurrect a record the user removed mid-run.
-        if target != "task" or not used_key:
+        # Persist the conversation key a firing used, for the two targets that need it next time:
+        # "task" reuses it, and "latest" deletes it. Re-read the registry so a cancel/delete during
+        # the run wins (mirrors the re-arm guard): a write-back must never resurrect a record the
+        # user removed mid-run.
+        if target not in ("task", "latest") or not used_key:
             return
         current = self._lookup(task_id)
         if current is not None and current.get("session_id") != used_key:
@@ -307,7 +308,11 @@ class TaskService:
                 raise InvalidTarget(target)
             if target != record_target(record):
                 # The dedicated conversation is kept even when the target moves off "task", so flipping
-                # back resumes that history instead of minting a second one.
+                # back resumes that history instead of minting a second one. Moving *onto* "latest" is
+                # the exception: there the remembered key is what the next firing deletes, so keeping it
+                # would make the switch quietly destroy the history the task built up under "task".
+                if target == "latest":
+                    record["session_id"] = ""
                 record["target"] = target
                 changed.append("target")
 

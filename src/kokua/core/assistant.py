@@ -127,6 +127,7 @@ class Assistant:
             config,
             review_plan=self._human.review_plan,
             push_conversations=self._maybe_push_conversations,
+            delete_conversation=self.delete_conversation,
         )
 
     @classmethod

@@ -106,7 +106,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         interval_seconds: Optional[float] = None,
         weekday: Optional[str] = None,
         name: Optional[str] = None,
-        target: Literal["active", "new", "task"] = "active",
+        target: Literal["active", "new", "task", "latest"] = "active",
     ) -> str:
         """Schedule a task that runs an unprompted assistant turn with the given prompt when it is due.
 
@@ -119,9 +119,11 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
             weekday: For "weekly", one of mon/tue/wed/thu/fri/sat/sun.
             name: Optional unique handle to cancel the task later.
             target: Where each firing runs. "active" (default) uses the currently-viewed conversation.
-                "new" runs each firing in its own fresh conversation. "task" gives the task one
-                dedicated conversation, created on the first firing and reused on every later firing so
-                it builds on its own history.
+                "new" runs each firing in its own fresh conversation and keeps them all. "latest" also
+                runs in a fresh conversation but deletes the one before it, so the task keeps only its
+                most recent run -- use it for a task that fires often and whose old runs are noise.
+                "task" gives the task one dedicated conversation, created on the first firing and
+                reused on every later firing so it builds on its own history.
         """
         try:
             schedule = _build_schedule(schedule_type, time_of_day, at_datetime, interval_seconds, weekday)
@@ -198,7 +200,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         interval_seconds: Optional[float] = None,
         weekday: Optional[str] = None,
         name: Optional[str] = None,
-        target: Optional[Literal["active", "new", "task"]] = None,
+        target: Optional[Literal["active", "new", "task", "latest"]] = None,
     ) -> str:
         """Edit an existing scheduled task in place, keeping its id, history, and any fields you omit.
 
@@ -244,7 +246,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         except DuplicateName as exc:
             return f"A task named {exc.name!r} already exists; choose a different name."
         except InvalidTarget as exc:
-            return f"target must be one of active, new, task; got {exc.target!r}."
+            return f"target must be one of active, new, task, latest; got {exc.target!r}."
 
         if not changed:
             return f"Nothing to update on scheduled task {_handle(record)}."
@@ -298,7 +300,8 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         Reproduces exactly what the task's next scheduled firing would do (honoring its ``target``;
         gated tools are auto-denied as they would be for an unattended firing), so you can verify how
         the task behaves. A ``target="task"`` run writes into (and, on the first run, creates and
-        remembers) the task's dedicated conversation. The task's output arrives as a separate message
+        remembers) the task's dedicated conversation; a ``target="latest"`` run replaces the previous
+        run's conversation, deleting it once this one finishes. The task's output arrives as a separate message
         shortly after, not as this tool's return value. Works on a disabled task too.
         """
         try:
@@ -306,7 +309,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         except TaskNotFound:
             return _unknown(id_or_name)
         handle = _handle(record)
-        suffix = " in a new conversation" if (record.get("target") or "active") in ("new", "task") else ""
+        suffix = " in a new conversation" if (record.get("target") or "active") in ("new", "task", "latest") else ""
         note = " (note: this task is disabled)" if not record.get("enabled", True) else ""
         return f"Running task {handle} now; its output will appear shortly{suffix}.{note}"
 

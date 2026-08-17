@@ -280,6 +280,28 @@ async def test_fire_with_new_target_never_remembers_a_session_id(tmp_path):
         _noop_fire.return_key = None
 
 
+async def test_fire_with_latest_target_remembers_the_key_it_will_replace(tmp_path):
+    """ "latest" needs the same write-back "task" does, for the opposite reason: not to reuse the
+    conversation next time but to know which one to delete."""
+    _noop_fire.calls = []
+    _noop_fire.return_key = "run-1"
+    try:
+        scheduler, path, tasks = _make(tmp_path)
+        record, _ = tasks.create("digest", EVERY_MINUTE, name="l", target="latest")
+        _delay, job = scheduler.jobs[record["id"]]
+
+        await job()
+        assert _noop_fire.calls == [("digest", "latest", "l", None)]
+        assert scheduling.load(path)[0]["session_id"] == "run-1"
+
+        _noop_fire.return_key = "run-2"
+        await job()
+        assert _noop_fire.calls[-1] == ("digest", "latest", "l", "run-1")  # handed the one to replace
+        assert scheduling.load(path)[0]["session_id"] == "run-2"
+    finally:
+        _noop_fire.return_key = None
+
+
 async def test_fire_skips_the_session_writeback_if_cancelled_during_the_run(tmp_path):
     _noop_fire.return_key = "sess-late"
 
@@ -520,6 +542,23 @@ def test_update_of_the_target_keeps_the_dedicated_conversation(tmp_path):
     stored = scheduling.load(path)[0]
     assert stored["target"] == "new"
     assert stored["session_id"] == "sess-1"  # reused if the target flips back
+
+
+def test_update_onto_the_latest_target_forgets_the_conversation_it_would_replace(tmp_path):
+    """Moving a task onto "latest" must not make its next firing delete the history the task built up
+    under "task". The remembered key is what "latest" replaces, so switching clears it and the first
+    firing on the new target replaces nothing."""
+    scheduler, path, tasks = _make(tmp_path)
+    tasks.create("p", EVERY_MINUTE, name="t", target="task")
+    record = scheduling.load(path)[0]
+    record["session_id"] = "long-history"
+    scheduling.add(path, record)
+
+    tasks.update("t", target="latest")
+
+    stored = scheduling.load(path)[0]
+    assert stored["target"] == "latest"
+    assert stored["session_id"] == ""
 
 
 def test_update_with_nothing_to_change_is_a_no_op(tmp_path):

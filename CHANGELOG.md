@@ -294,8 +294,13 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   restarts an interval countdown, and it rejects an invalid schedule, a past one-shot, or a name another
   task holds without writing anything.
 - A per-task `target` selects where each firing runs: `active` (the currently-viewed conversation),
-  `new` (a fresh conversation per firing), or `task` (one dedicated conversation, created on the first
-  firing and reused after, so the task builds on its own history; a deleted one is recreated).
+  `new` (a fresh conversation per firing, all kept), `latest` (a fresh conversation per firing, deleting
+  the one before it so the task keeps only its most recent run), or `task` (one dedicated conversation,
+  created on the first firing and reused after, so the task builds on its own history; a deleted one is
+  recreated). `latest` deletes only *after* its own run succeeds, so a firing that errors leaves the last
+  good run to read, and a run the user already deleted is not an error. Moving a task onto `latest`
+  clears the conversation it remembers, so the switch cannot make the next firing destroy the history the
+  task accumulated under `task`.
 - A failing firing is reported and swallowed rather than propagating into the scheduler, which has no
   handler of its own.
 - **A tasks section in the web sidebar**, below the conversation list, showing each task's name,

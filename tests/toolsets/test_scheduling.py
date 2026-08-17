@@ -211,6 +211,30 @@ async def test_run_scheduled_task_says_where_the_output_will_appear(tmp_path):
     assert "now" in out.lower() and "r" in out and "new conversation" in out.lower()
 
 
+async def test_run_scheduled_task_says_where_a_latest_targets_output_will_appear(tmp_path):
+    """ "latest" runs in a fresh conversation like "new", so the model must be told the same thing:
+    the output is not coming back as this tool's return value."""
+    scheduler, path, tools = _make(tmp_path)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="l", target="latest")
+
+    out = await tools["run_scheduled_task"]("l")
+
+    assert "new conversation" in out.lower()
+
+
+async def test_update_naming_an_unknown_target_lists_the_ones_that_exist(tmp_path):
+    """The model picks a target from this sentence when it gets one wrong, so the list has to be
+    complete -- an omitted target is one the model will not offer the user."""
+    scheduler, path, tools = _make(tmp_path)
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="t")
+
+    out = await tools["update_scheduled_task"]("t", target="elsewhere")
+
+    assert "elsewhere" in out
+    for known in ("active", "new", "task", "latest"):
+        assert known in out
+
+
 async def test_run_scheduled_task_notes_a_disabled_task_and_still_runs_it(tmp_path):
     scheduler, path, tools = _make(tmp_path)
     await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="d")

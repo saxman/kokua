@@ -557,6 +557,56 @@ async def test_proactive_task_target_recreates_when_conversation_deleted(tmp_pat
     assert second_key in assistant._store.list_keys()
 
 
+async def test_proactive_latest_target_replaces_the_conversation_it_remembers(tmp_path):
+    """The point of "latest": a task that fires often keeps its most recent run and nothing older,
+    without the user deleting the pile by hand. Unlike "task" it never writes into the remembered
+    conversation -- it mints a fresh one and drops the old."""
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out1", "out2"])
+    )
+    active_key = assistant._active_id
+
+    first_key = await assistant._proactive("first run", target="latest", task_name="digest")
+    assert first_key is not None and first_key != active_key
+    assert first_key in assistant._store.list_keys()  # nothing to replace on the first firing
+
+    second_key = await assistant._proactive("second", target="latest", task_name="digest", session_id=first_key)
+
+    assert second_key and second_key != first_key  # a fresh conversation, not the remembered one
+    assert first_key not in assistant._store.list_keys()  # ...and the one it replaced is gone
+    assert second_key in assistant._store.list_keys()
+    assert active_key in assistant._store.list_keys()  # the user's own conversation is untouched
+
+
+async def test_proactive_latest_target_keeps_the_previous_run_when_the_new_one_fails(tmp_path):
+    """Deleting only after the run succeeds is what keeps a failed firing from leaving nothing to
+    read: the last good run has to outlive a bad one."""
+    channel = _ConvCapturingChannel()
+    clients = iter([MockAsyncModelClient(["out1"]), _FailingClient([])])
+    assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: next(clients))
+
+    first_key = await assistant._proactive("first run", target="latest", task_name="digest")
+    await assistant._proactive("second", target="latest", task_name="digest", session_id=first_key)
+
+    assert first_key in assistant._store.list_keys()  # the last good run survived the failure
+
+
+async def test_proactive_latest_target_tolerates_an_already_deleted_conversation(tmp_path):
+    """The user can delete a run themselves between firings, so the replace must not be the thing
+    that takes down the scheduler job (invariant 6)."""
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out1", "out2"])
+    )
+    first_key = await assistant._proactive("first", target="latest", task_name="digest")
+    await assistant.delete_conversation(first_key)
+
+    second_key = await assistant._proactive("second", target="latest", task_name="digest", session_id=first_key)
+
+    assert second_key and second_key in assistant._store.list_keys()
+
+
 class _FailingClient(MockAsyncModelClient):
     """Raises on run, standing in for an unreachable or misconfigured model server."""
 

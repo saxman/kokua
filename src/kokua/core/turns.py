@@ -87,25 +87,33 @@ class ProactiveTarget:
     """Which conversation an unattended run uses, and how it reports itself.
 
     ``"active"`` runs in the conversation being viewed and echoes the reply there, so the user sees
-    it happen. ``"new"``/``"task"`` run in their own conversation, which the user is by definition
-    not looking at, so instead of echoing a reply into nowhere they announce that it finished and
-    return the key so the caller can find it again.
+    it happen. ``"new"``/``"task"``/``"latest"`` run in their own conversation, which the user is by
+    definition not looking at, so instead of echoing a reply into nowhere they announce that it
+    finished and return the key so the caller can find it again.
+
+    ``replaces`` is the conversation this run supersedes, set only by ``"latest"``: a task that keeps
+    just its most recent run. It is deleted after the run succeeds, never before and never on failure,
+    so a firing that errors leaves the last good run to read.
     """
 
     conversation_id: str
     echo_reply: bool
     announce: Optional[str] = None
     returns_key: bool = False
+    replaces: Optional[str] = None
 
 
 class TurnRunner:
-    def __init__(self, book, ui, gate, config, *, review_plan, push_conversations):
+    def __init__(self, book, ui, gate, config, *, review_plan, push_conversations, delete_conversation):
         self._book = book
         self._ui = ui
         self._gate = gate
         self._config = config
         self._review_plan = review_plan
         self._push_conversations = push_conversations
+        # The assistant's own delete, not the book's: it also abandons a pending approval and switches
+        # the view away, which matters when a "latest" firing replaces the run the user is reading.
+        self._delete_conversation = delete_conversation
 
     # --- reactive -------------------------------------------------------------------------------
 
@@ -242,7 +250,7 @@ class TurnRunner:
         task's conversations under it. A ``"active"`` firing stamps nothing: that conversation belongs
         to the user, not the task.
 
-        Returns the conversation key for ``"new"``/``"task"`` so the caller can remember it, or
+        Returns the conversation key for ``"new"``/``"task"``/``"latest"`` so the caller can remember it, or
         ``None`` for ``"active"``. **The key is returned even when the run fails**, so a task whose
         first firing errors still records the conversation it minted instead of minting another one
         on every subsequent firing.
@@ -257,10 +265,28 @@ class TurnRunner:
             logger.exception("proactive turn error")
             await self._report(f"A scheduled task failed: {describe_error(exc)}")
         else:
+            await self._replace_previous_run(spec)
             if spec.announce:
                 await self._push_conversations()
                 await self._report(spec.announce)
         return spec.conversation_id if spec.returns_key else None
+
+    async def _replace_previous_run(self, spec: ProactiveTarget) -> None:
+        """Delete the conversation a ``target="latest"`` firing superseded, once its own run is done.
+
+        Called only on the success path, and only after ``_run_unattended`` has returned: the delete
+        takes the conversation gate exclusively, which the turn itself was holding, and dropping the
+        old run before the new one finished would leave a failed firing with nothing to read.
+
+        Failures are swallowed the way the run's own are (invariant 6): the user may have deleted the
+        run themselves between firings, and a task must not stop firing over a conversation nobody has.
+        """
+        if not spec.replaces:
+            return
+        try:
+            await self._delete_conversation(spec.replaces)
+        except Exception:
+            logger.warning("Could not delete the conversation a scheduled task replaced", exc_info=True)
 
     def _resolve_target(
         self,
@@ -272,13 +298,15 @@ class TurnRunner:
     ) -> ProactiveTarget:
         """Pick the conversation this firing runs in, minting or reusing one as the target requires.
 
-        A ``"new"``/``"task"`` target degrades to ``"active"`` on a channel with no conversation list:
-        the user would have no way to reach a conversation they cannot see.
+        A ``"new"``/``"task"``/``"latest"`` target degrades to ``"active"`` on a channel with no
+        conversation list: the user would have no way to reach a conversation they cannot see.
         """
-        if target not in ("new", "task") or not self._ui.supports_conversations:
+        if target not in ("new", "task", "latest") or not self._ui.supports_conversations:
             return ProactiveTarget(conversation_id=self._book.active_id, echo_reply=True)
 
-        reuse = session_id if target == "task" else None  # "new" always mints a fresh conversation
+        # Only "task" reuses the remembered conversation. "latest" remembers one too, but to replace
+        # it rather than write into it, so it mints like "new" and hands the old key to the caller.
+        reuse = session_id if target == "task" else None
         if reuse and self._book.exists(reuse):
             session = self._book.get(reuse)
             self._book.touch(session)
@@ -286,11 +314,13 @@ class TurnRunner:
             title = task_name or derive_title([{"role": "user", "content": prompt}]) or "Scheduled task"
             session = self._book.new_session(title=title, task_id=task_id)
         title = session.metadata.get("title") or "Scheduled task"
+        replaces = session_id if target == "latest" and session_id != session.key else None
         return ProactiveTarget(
             conversation_id=session.key,
             echo_reply=False,
             announce=f"Scheduled task '{title}' finished; open the '{title}' conversation to review.",
             returns_key=True,
+            replaces=replaces,
         )
 
     async def _run_unattended(self, prompt: str, spec: ProactiveTarget) -> None:
