@@ -15,10 +15,13 @@ Two tiers, probed once by :func:`is_rich` the way ``ChannelUI`` probes an option
 **Base tier** is any ``AsyncRunner``. Kokua streams ``run()`` into the reply and owns catch-up itself, so
 the runner needs to know nothing about Kokua. The cost is not only presentation fidelity -- AIMU's
 ``PlanExecuteEvaluator``, for instance, runs to completion and yields a single chunk, so it arrives in
-one lump with no live progress -- but persistence too: a base-tier runner never appends to the agent's
-own transcript, so the turn's index always resolves to "nothing to anchor to" and the exchange is not
-saved. The reply reaches the channel and nothing else; reloading the conversation will not show it. A
-workflow author who needs the exchange remembered needs the rich tier.
+one lump with no live progress -- but persistence too, for a *self-contained* runner: one that never
+touches ``ctx.agent`` appends nothing to the agent's own transcript, so the turn's index always resolves
+to "nothing to anchor to" and the exchange is not saved -- the reply reaches the channel and nothing
+else, and reloading the conversation will not show it. That is not a property of the tier itself, only
+of a runner that stays self-contained: ``Workflow.build`` is handed the full ``WorkflowContext``, so a
+base-tier runner that closes over ``ctx.agent`` and calls it directly appends and persists like any
+other turn. A workflow author who needs the exchange remembered without doing that needs the rich tier.
 
 **Rich tier** additionally implements ``run_turn()``, which is handed the channel, the human-decision
 slot, and control of the agent's transcript. Deep planning needs all three: it shows phases and
@@ -70,6 +73,10 @@ class WorkflowContext:
     landed, rewrites the workflow's scaffolding prompt back to the user's own words, and records the
     index here for the caller to read in a ``finally``. That is what lets a cancelled or failed run
     still anchor its sub-agent cards.
+
+    ``settings`` is reserved for the carrying toolset's own configuration section and is always
+    ``None`` until a future release gives a toolset a declared settings handover; a workflow author
+    reaching for it today gets ``None``, not that section.
     """
 
     agent: Any

@@ -795,9 +795,9 @@ class _CancellingRichRunner:
 async def test_a_cancelled_rich_workflow_still_records_its_published_events(tmp_path):
     """The `finally` around a rich workflow's `run_turn` exists so a workflow that raises still
     anchors its sub-agent cards at the index it published, rather than at -1 (which would no-op the
-    recording, per `record_subagent_events`). This is the coverage `test_a_stopped_planned_turn_...`
-    used to give invariant 5 for the planning workflow specifically; that test now hangs (planning has
-    no workflow toolset yet), so this one covers the shape itself, independent of any one workflow."""
+    recording, per `record_subagent_events`). This covers invariant 5 for the workflow branch's shape
+    itself, independent of any one workflow; `test_a_stopped_planned_turn_records_the_events_it_produced`
+    covers the same invariant for planning specifically."""
     channel = FakeChannel()
     client = MockAsyncModelClient(["unused"])
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)

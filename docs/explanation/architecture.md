@@ -28,7 +28,7 @@ src/kokua/
     conversations.py     ConversationBook: store + agent cache + active pointer, and id resolution
     transcripts.py       reading a stored conversation as text: flatten, truncate, search
     turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
-    interaction.py       HumanGate: tool approval and plan review as lock-guarded single slots
+    interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
     settings_runtime.py  SettingsApplier: read, apply live, persist, switch model
     commands: /stop and /diag are parsed inline in assistant._serve_channel; a workflow's own
               command (e.g. /plan) dispatches through self._workflows, built from the toolset registry
@@ -77,8 +77,8 @@ serve loop, and little else. It owns:
   conversation is being viewed. These move together on a switch, which is why they are one object.
 - **`TurnRunner`** -- reactive turns (the user sent something) and proactive turns (a scheduled task
   fired). The six concurrency invariants are documented at the top of that module.
-- **`HumanGate`** -- tool approval and plan review, each a lock-guarded single-slot request the serve
-  loop resolves with the user's next message.
+- **`HumanGate`** -- tool approval and a workflow's own decision, each a lock-guarded single-slot request
+  the serve loop resolves with the user's next message.
 - **`SettingsApplier`** -- reading, applying, and persisting the runtime-mutable settings.
 - **`ChannelUI`** -- the only view of the outside world.
 
@@ -167,7 +167,7 @@ anything; the last two run once per agent, whenever one is built:
    `[[mcp.server]]`, named by its required `name`), and plugin (the `kokua.toolsets` entry-point group,
    skipped entirely when `load_plugins` is off) -- and `registry.register` rejects a name two providers
    claim. A `Toolset` is a frozen dataclass: `name`, `description`, `build`, `guidance`, `cross_cutting`,
-   `entry_point_only`.
+   `entry_point_only`, `workflow`.
 2. **Validate.** `agents.validate_agents` runs before the session store is opened or any server
    connected, so an unknown toolset name, a missing entry agent, an unknown delegation target, a cycle,
    or `skills` on a worker fails with nothing written and nothing connected.

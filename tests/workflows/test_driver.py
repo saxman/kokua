@@ -76,6 +76,9 @@ async def test_a_base_tier_workflow_streams_into_the_reply(tmp_path):
     )
 
     assert channel.sent == ["echoed:hello"]
+    # _BaseRunner is self-contained (never touches ctx.agent), which is what makes a base-tier turn
+    # unpersisted: nothing anchors it, so _persist's snapshot carries no messages for this turn.
+    assert assistant._store.get(assistant._active_id).messages == []
 
 
 async def test_a_rich_tier_workflow_owns_its_turn_and_its_trace(tmp_path):

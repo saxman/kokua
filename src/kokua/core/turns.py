@@ -232,7 +232,7 @@ class TurnRunner:
             agent=agent,
             ui=self._ui,
             config=self._config,
-            settings=None,
+            settings=None,  # reserved for a toolset's own settings section; unset until that release
             msg=msg,
             state=self.state,
             decide=self._decide,

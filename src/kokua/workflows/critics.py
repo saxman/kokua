@@ -54,10 +54,11 @@ class Verdict:
 
 def reviewer_agent(model: Optional[str], system: str, tools: Optional[list[Callable]] = None) -> aio.Agent:
     """A fresh, context-free reviewer agent with the verification toolset (an independent, tool-using
-    critic). ``tools`` overrides ``REVIEWER_TOOLS`` (tests pass their own). No ``tool_approval`` gate:
-    the reviewer runs unattended, so the toolset is curated to hold nothing that would need one -- see
-    ``REVIEWER_TOOLS``. Public so a workflow that needs a judge shaped differently (a debate round, a
-    scored rubric) can build on the same independent agent instead of assembling its own."""
+    critic). ``tools`` overrides ``REVIEWER_TOOLS``, for a workflow that needs its judge grounded in a
+    different (or narrower) toolset than the default. No ``tool_approval`` gate: the reviewer runs
+    unattended, so the toolset is curated to hold nothing that would need one -- see ``REVIEWER_TOOLS``.
+    Public so a workflow that needs a judge shaped differently (a debate round, a scored rubric) can
+    build on the same independent agent instead of assembling its own."""
     return aio.Agent(
         aio.client(model, system=system),
         tools=REVIEWER_TOOLS if tools is None else tools,

@@ -246,11 +246,15 @@ into the reply. **Rich tier** additionally implements `run_turn()` and is handed
 a human decision, and control of the agent's transcript, which is what deep planning needs to show
 phases and reviewer cards and save a clean turn.
 
-Two things to know before choosing a tier. A base-tier turn is **not persisted**: the runner appends
-nothing to the agent's own transcript, so the exchange is gone after a reload. And reaching the model as
-a callable tool via `AsyncRunner.as_tool()` needs your runner to actually *inherit* `aio.AsyncRunner`,
-not merely match its shape -- `as_tool()` is a concrete method the base class provides, not a name Kokua
-looks up. See [`workflows/protocol.py`](../../src/kokua/workflows/protocol.py) for the full contract.
+Three things to know before choosing a tier. A base-tier turn is **not persisted** when the runner is
+self-contained: it appends nothing to the agent's own transcript, so the exchange is gone after a
+reload (a runner that closes over `ctx.agent` and calls it directly is the exception -- see
+`_drive_base_tier` in [`core/turns.py`](../../src/kokua/core/turns.py)). Reaching the model as a
+callable tool via `AsyncRunner.as_tool()` needs your runner to actually *inherit* `aio.AsyncRunner`, not
+merely match its shape -- `as_tool()` is a concrete method the base class provides, not a name Kokua
+looks up. And `WorkflowContext.settings` is always `None` today: it is reserved for the carrying
+toolset's own configuration section, which a future release will fill in. See
+[`workflows/protocol.py`](../../src/kokua/workflows/protocol.py) for the full contract.
 
 Kokua's own two toolsets register exactly this way in its
 [`pyproject.toml`](../../pyproject.toml). If the built-in path and the plugin path ever diverge, the
