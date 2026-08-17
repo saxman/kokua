@@ -252,3 +252,82 @@ async def test_remove_server_reports_only_the_names_no_other_server_still_provid
 async def test_remove_server_rejects_an_unconnected_url(tmp_path):
     with pytest.raises(mcp.NotConnected):
         await mcp.remove_server([], "https://svc/mcp", **_remove_kwargs(tmp_path))
+
+
+# --- The boot reconnect ----------------------------------------------------------------------------
+
+
+def _boot_config(*servers):
+    from kokua.config import AssistantConfig
+
+    return AssistantConfig(mcp_servers=list(servers))
+
+
+async def test_boot_reconnect_logs_the_tool_names_each_server_contributed(monkeypatch, tmp_path, caplog):
+    """The only record of a remote server's tool list, so a later "why didn't it call that?" is answerable.
+
+    Neither config.toml nor ``--list-toolsets`` knows a remote server's tools, and ``add_mcp_server``
+    reports them only on a runtime add, so without this line a boot leaves no trace of what a server
+    actually provided.
+    """
+
+    async def fake_connect(url, **kw):
+        return _FakeClient(["get_positions", "get_quote"]), "oauth"
+
+    monkeypatch.setattr(mcp, "connect_mcp", fake_connect)
+    config = _boot_config(MCPServerConfig(url="https://svc/mcp", name="svc"))
+
+    with caplog.at_level("INFO", logger="kokua.mcp.servers"):
+        await mcp.reconnect_mcp_servers(
+            lambda fn: None, [], config, notify=_noop_notify, oauth_storage_dir=tmp_path / "oauth"
+        )
+
+    logged = " ".join(record.getMessage() for record in caplog.records)
+    assert "get_positions" in logged and "get_quote" in logged
+
+
+async def test_boot_reconnect_says_so_when_a_server_contributes_no_tools(monkeypatch, tmp_path, caplog):
+    """A connected-but-empty server is the case worth naming: it looks identical to a healthy one."""
+
+    async def fake_connect(url, **kw):
+        return _FakeClient([]), "none"
+
+    monkeypatch.setattr(mcp, "connect_mcp", fake_connect)
+    config = _boot_config(MCPServerConfig(url="https://svc/mcp", name="svc"))
+
+    with caplog.at_level("INFO", logger="kokua.mcp.servers"):
+        await mcp.reconnect_mcp_servers(
+            lambda fn: None, [], config, notify=_noop_notify, oauth_storage_dir=tmp_path / "oauth"
+        )
+
+    assert any("no tools" in record.getMessage() for record in caplog.records)
+
+
+async def test_boot_reconnect_through_an_auth_challenge_posts_nothing_to_the_channel(monkeypatch, tmp_path):
+    """Every OAuth server rediscovers its mode through a rejected request on every boot, silently.
+
+    ``notify`` reaches the user's conversation, and only the OAuth provider's redirect handler may use
+    it, when there is no usable cached token. A `notify` call from the challenge path itself would post
+    a message on every single start, and would also destroy the signal that its absence from a log is
+    what tells you token reuse is working.
+    """
+    posted = []
+
+    async def recording_notify(message: str) -> None:
+        posted.append(message)
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        if auth is None:
+            raise RuntimeError("Client error '401 Unauthorized'")
+        return _FakeClient(["get_positions"])
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+    config = _boot_config(MCPServerConfig(url="https://svc/mcp", name="svc"))
+    connections = []
+
+    await mcp.reconnect_mcp_servers(
+        lambda fn: None, connections, config, notify=recording_notify, oauth_storage_dir=tmp_path / "oauth"
+    )
+
+    assert posted == []
+    assert [(c.url, c.auth_mode, c.tools) for c in connections] == [("https://svc/mcp", "oauth", ["get_positions"])]

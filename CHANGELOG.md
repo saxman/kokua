@@ -432,6 +432,21 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   cannot complete because the server lacks dynamic client registration, it returns an actionable "provide
   a bearer token and add the server again" message instead of a raw `OAuthRegistrationError`, and its
   docstring tells the assistant to relay that, ask for a token, and retry with `bearer_token`.
+- **Boot logs the tools each server contributed, by name.** This is the only record of a remote server's
+  tool list: `config.toml` does not know it, `--list-toolsets` runs before any connection so it can only
+  name the server, and `add_mcp_server` reports tool names on a runtime add but a boot reconnect reported
+  nothing. Without it, an agent that answered from its own knowledge rather than calling a server's tool
+  gave you no way to tell whether the tool it needed was absent or merely unused. A server that connects
+  and contributes nothing is named as such, since it otherwise looks identical to a healthy one.
+- **The auth-challenge log line says what it is.** Every non-bearer server rediscovers its auth mode
+  through one rejected unauthenticated request on every boot, because no auth mode is persisted (which
+  keeps a stored mode from going stale against a server that changed its mind). That step used to log
+  "requires authorization; starting OAuth flow", which reads like the user is about to be prompted, when
+  a cached token makes it silent -- misleading enough to send a reader hunting a token-persistence bug
+  that was not there. It now reports a rejected unauthenticated request and an attempt with stored
+  credentials. An authorization link still reaches the conversation only when no usable token exists, so
+  the absence of one is the signal that token reuse is working, and a test pins that the challenge path
+  itself posts nothing.
 - **Startup warns about a provisioned toolset no agent names**, which covers a configured server as well
   as a third-party plugin: it connects, spends its token on the handshake, and is then reachable by
   nobody. Built-in AIMU and core toolsets, and Kokua's own built-in plugin toolsets, are excluded from

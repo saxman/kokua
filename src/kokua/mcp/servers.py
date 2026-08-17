@@ -98,11 +98,19 @@ async def connect_mcp(
 ) -> tuple[Any, str]:
     """Connect to a remote MCP server, returning ``(client, auth_mode_used)``.
 
-    With ``auth_mode`` known (a boot reconnect) the connection uses that mode directly. With it
-    ``None`` (a runtime add) the connection tries unauthenticated first and falls back to the OAuth
-    flow on an auth challenge. A ``bearer_token`` always takes precedence. OAuth posts an
-    authorization link via ``notify`` and persists tokens under ``oauth_storage_dir`` (so a cached
-    token reconnects silently).
+    A ``bearer_token`` always takes precedence. Otherwise the connection tries unauthenticated first
+    and falls back to the OAuth flow on an auth challenge, discovering the mode rather than being told
+    it: nothing persists a server's auth mode across restarts, so every non-bearer server rediscovers
+    it this way on every boot. That costs one rejected request per server per boot and buys having no
+    stored mode that can go stale against a server that changed its mind.
+
+    Passing ``auth_mode`` explicitly skips the discovery for a caller that already knows. No caller
+    currently does; it exists for one that connects to a server it just probed.
+
+    OAuth persists tokens under ``oauth_storage_dir``, so the usual path through the challenge branch
+    below finds a cached token and connects without involving the user at all. ``notify`` posts an
+    authorization link only when there is no usable token, which is why its absence from a log is the
+    signal that token reuse is working.
     """
     if bearer_token:
         return await aio.MCPClient.connect(url=url, auth=bearer_token), "bearer"
@@ -111,13 +119,16 @@ async def connect_mcp(
         return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
     if auth_mode == "none":
         return await aio.MCPClient.connect(url=url), "none"
-    # Unknown (runtime add): try unauthenticated, fall back to OAuth on an auth challenge.
     try:
         return await aio.MCPClient.connect(url=url), "none"
     except Exception as exc:
         if not _looks_like_auth_required(exc):
             raise
-        logger.info("MCP server %s requires authorization; starting OAuth flow.", url)
+        # Deliberately not "starting OAuth flow": this is the routine path for every OAuth server on
+        # every boot, and a cached token makes it silent. Wording it as the start of an interactive
+        # flow reads like the user is about to be prompted, and sends anyone reading the log after a
+        # tool came back empty off hunting a token-persistence bug that isn't there.
+        logger.info("MCP server %s rejected an unauthenticated request; trying OAuth credentials.", url)
         provider = build_chat_oauth(url, notify=notify, token_storage_dir=oauth_storage_dir)
         try:
             return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
@@ -311,10 +322,14 @@ async def reconnect_mcp_servers(
     All servers now live in config.toml ``[[mcp.server]]`` (both hand-authored bearer-token servers and
     runtime-added ones the tool recorded there), so this is a single pass over ``config.mcp_servers``. A
     connect failure logs and continues so one unreachable server can't stop the assistant from starting.
-    Each connection is recorded in ``connections`` (so an agent naming it resolves against it when built,
-    including conversations built later) and fanned out to whatever agents are live at boot (initially just
-    the active one). Boot connects before the first agent is built, which is what lets a config-declared
-    server reach an agent's own tool list at all, rather than only its next spawned sub-agent.
+    Each connection is recorded in ``connections``, so an agent naming it resolves against it when built,
+    including conversations built later. Boot deliberately connects before the first agent is built, which
+    is what lets a config-declared server reach an agent's own tool list at all rather than only its next
+    spawned sub-agent, and which is also why ``for_each_agent`` fans out to nothing here: no agent is live
+    yet. It is taken anyway so this shares one signature with the runtime add, where the fan-out matters.
+
+    Each success logs the tools the server contributed, because nothing else in the process will: see the
+    comment on that line.
     """
     for server in config.mcp_servers:
         try:
@@ -324,6 +339,18 @@ async def reconnect_mcp_servers(
                 notify=notify,
                 oauth_storage_dir=oauth_storage_dir,
             )
-            await attach_server(connections, server.url, client, mode)
+            added = await attach_server(connections, server.url, client, mode)
+            # The names, not just the count: a remote server's tool list is the one part of an agent's
+            # capability this repository cannot show you: it is not in config.toml, not in
+            # `--list-toolsets` (which runs before any connection), and no tool reports it, since
+            # `add_mcp_server` announces its own tools only on a runtime add. Without this line, an
+            # agent that answered from its own knowledge instead of calling a server's tool leaves no
+            # way to tell whether the tool it needed was missing or merely unused.
+            logger.info(
+                "MCP server %s connected (%s): %s",
+                server.url,
+                mode,
+                ", ".join(added) if added else "no tools",
+            )
         except Exception:
             logger.warning("Could not connect MCP server %s; continuing without it.", server.url, exc_info=True)
