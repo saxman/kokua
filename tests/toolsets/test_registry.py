@@ -102,3 +102,24 @@ def test_plugins_module_reexports_the_public_contract():
     assert plugins.TOOLSET_GROUP == "kokua.toolsets"
     assert hasattr(plugins, "ToolsetContext")
     assert hasattr(plugins, "discover_toolsets")
+
+
+def test_a_toolset_may_carry_a_workflow():
+    from kokua.toolsets.registry import workflows_of
+    from kokua.workflows import Workflow
+
+    workflow = Workflow(
+        name="debate",
+        description="Argue it out.",
+        command="debate",
+        usage="/debate <question>",
+        build=lambda ctx: None,
+    )
+    carrier = Toolset(name="debate", description="Debate.", build=lambda ctx: [], workflow=workflow)
+    plain = Toolset(name="plain", description="Plain.", build=lambda ctx: [])
+
+    assert workflows_of([plain, carrier]) == [("debate", workflow)]
+
+
+def test_a_toolset_carries_no_workflow_by_default():
+    assert Toolset(name="plain", description="Plain.", build=lambda ctx: []).workflow is None

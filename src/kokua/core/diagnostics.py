@@ -25,7 +25,7 @@ def format_task_stack(task) -> str:
         return ""
 
 
-def diag_report(tracker: TurnTracker, gate: TurnGate, *, pending_approval: bool, pending_plan: bool) -> str:
+def diag_report(tracker: TurnTracker, gate: TurnGate, *, pending_approval: bool, pending_decision: bool) -> str:
     """The `/diag` text: in-flight turns, gate depth, pending human decisions, and stuck-turn stacks."""
     turns = tracker.all()
     lines = ["Diagnostics:"]
@@ -38,7 +38,8 @@ def diag_report(tracker: TurnTracker, gate: TurnGate, *, pending_approval: bool,
         lines.append("- turn in flight: no")
     lines.append(f"- active turns: {gate.active_turns()}")
     lines.append(
-        f"- pending approval: {'yes' if pending_approval else 'no'} | pending plan: {'yes' if pending_plan else 'no'}"
+        f"- pending approval: {'yes' if pending_approval else 'no'} | pending decision: "
+        f"{'yes' if pending_decision else 'no'}"
     )
     for conversation_id, info in turns:
         if info.handle.done:

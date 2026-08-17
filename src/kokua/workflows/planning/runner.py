@@ -1,74 +1,28 @@
-"""Deep-planning / review orchestration, extracted from the assistant core.
+"""The deep-planning pipeline: draft a plan, optionally review it, execute it, optionally review that.
 
-PlanRunner runs the opt-in `/plan` flow: draft a plan, optionally have an independent reviewer critique
-it and a human approve it, then execute (optionally with an independent result review). It holds the
-agent/channel/config and an injected human plan-review callback, does its own channel sends and transcript
-commits, and returns a PlanResult the caller persists. Constructed fresh per planned turn.
+``PlanningWorkflow`` is the runner the ``planning`` toolset's workflow builds, so ``/plan`` exists only
+for an agent whose ``tools`` declares that toolset. It owns its channel sends and its transcript
+rewriting and hands back a ``WorkflowResult`` the caller persists. The strings it sends to a model live
+in ``prompts.py``; its two reviewers live in ``critics.py``.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Optional
+from dataclasses import dataclass
+from typing import Optional
 
 from aimu import aio
 from aimu.aio.channels.base import ChannelMessage
 
-from kokua.planning import reviewers as review
-from kokua.channels.ui import ChannelUI
-from kokua.config import AssistantConfig
-
-PLAN_PROMPT = """\
-Before doing any work, produce an explicit plan for how you will accomplish the request below. Do NOT \
-carry out the work or produce the final deliverable yet -- only plan.
-
-Request:
-{request}
-
-Your plan should:
-- State the goal and what a complete, correct answer looks like.
-- Give the concrete steps you will take, in order, as a numbered markdown list.
-- For each step, name the specific tool, skill, or MCP service you will use. Where a needed capability \
-is missing, say so and how you will get it: build a new skill (author_skill), connect an MCP service \
-(add_mcp_server), and web-search to find a suitable MCP service or documentation when that helps.
-- Note what you will verify before finishing.
-
-You may use read-only tools (e.g. web search) to inform the plan, but make no changes yet. Respond with \
-just the plan."""
-
-EXECUTE_PROMPT = """\
-Carry out the following approved plan to fully answer the original request. Follow the plan, adapting if \
-you discover something that requires it, and use the tools/skills it names.
-
-Original request:
-{request}
-
-Approved plan:
-{plan}"""
-
-# Feedback blocks fed back into a replan / revise round after an adversarial reviewer rejects.
-REPLAN_FEEDBACK = "\n\nAn independent reviewer rejected your previous plan for these reasons:\n{issues}\n\nProduce a new plan that addresses them."
-
-RESULT_REVISE_PROMPT = """\
-Your previous answer was checked by an independent reviewer and rejected. Revise it to fully address the \
-issues, returning the complete corrected answer (not just the changes).
-
-Original request:
-{request}
-
-Approved plan:
-{plan}
-
-Your previous answer:
-{answer}
-
-Reviewer's issues:
-{issues}"""
-
-
-def _bullets(issues: list[str]) -> str:
-    """Render reviewer issues as a markdown bullet list (or a dash if empty)."""
-    return "\n".join(f"- {i}" for i in issues) or "- (no specific issues given)"
+from kokua.workflows import WorkflowContext, WorkflowResult, critics
+from kokua.workflows.planning import critics as review
+from kokua.workflows.planning.prompts import (
+    EXECUTE_PROMPT,
+    PLAN_PROMPT,
+    REPLAN_FEEDBACK,
+    RESULT_REVISE_PROMPT,
+    bullets,
+)
 
 
 def _tool_evidence(messages: list[dict], max_chars: int = 2000) -> str:
@@ -120,49 +74,34 @@ SUMMARY = Presentation(stream_intermediate=False, announce_phases=False, show_pl
 VERBOSE = Presentation(stream_intermediate=True, announce_phases=True, show_plan_card=False, reviewer_cards=False)
 
 
-@dataclass
-class PlanResult:
-    """Outcome of a planned turn, for the caller to persist. ``committed`` is False on plan-rejection
-    (no committed turn to anchor replay cards to); otherwise ``user_index`` is the index of the committed
-    user message and ``subagent_events`` / ``trace`` are the reload-replay metadata for that turn.
+class PlanningWorkflow(aio.AsyncRunner):
+    """Deep planning as a rich-tier workflow: plan, optionally review, execute, optionally review.
 
-    Only a run that returned normally produces one of these. A cancelled or failed run raises instead,
-    so its index is read from :attr:`PlanRunner.user_index`, which this field mirrors.
+    Constructed fresh per turn, so ``_trace`` needs no reset. Rich tier because every one of its four
+    presentation needs is outside what an ``AsyncRunner`` can express: labeled phases, reviewer cards, a
+    human approve/edit/reject pause, and rewriting the transcript so the saved conversation reads as the
+    user's own words rather than planner scaffolding.
+
+    Subclasses ``aio.AsyncRunner`` rather than merely satisfying its shape, because ``as_tool()`` is a
+    concrete method the base class *provides*: duck-typing ``run`` and ``messages`` would leave the
+    workflow with no way to reach the model as a tool. Kokua's own driver would not notice the
+    difference, since it probes for ``run_turn`` rather than for a base class, which is what makes the
+    inheritance easy to drop by accident and why a test pins it.
     """
 
-    committed: bool
-    user_index: int = -1
-    subagent_events: list[dict] = field(default_factory=list)
-    trace: list[dict] = field(default_factory=list)
-
-
-class PlanRunner:
-    """Runs one deep-planning turn. Constructed fresh per turn, so ``_trace`` needs no reset."""
-
-    def __init__(
-        self,
-        agent: aio.SkillAgent,
-        ui: ChannelUI,
-        config: AssistantConfig,
-        on_plan_review: Callable[[str, Optional[list[str]]], Awaitable[Optional[str]]],
-    ):
-        self._agent = agent
-        self._ui = ui
-        self._config = config
-        self._on_plan_review = on_plan_review
+    def __init__(self, ctx: WorkflowContext):
+        self._ctx = ctx
+        self._agent = ctx.agent
+        self._ui = ctx.ui
+        self._config = ctx.config
         # The raw trace of the in-flight verbose turn: a list of {label, detail, text} phase segments,
         # accumulated by _send_phase / _run_and_capture / _stream_review. None outside a verbose turn.
         self._trace: Optional[list[dict]] = None
-        # Index of this turn's committed user message, published by whichever execution path commits
-        # it and -1 until then. A cancelled or failed run raises instead of returning a PlanResult, so
-        # this is how the caller still anchors that turn's recorded sub-agent cards. It stays -1 when
-        # nothing was committed (a rejected plan, or a run cancelled before it had an answer to show),
-        # because cards filed at an index no message occupies would attach to the next turn's message.
-        self.user_index = -1
 
-    async def run(self, msg: ChannelMessage) -> PlanResult:
-        """Deep planning: plan, optionally adversarially review + human review, then execute (optionally
-        with adversarial result review). Returns a PlanResult for the caller to persist."""
+    async def run_turn(self) -> WorkflowResult:
+        """Plan, optionally adversarially review + human review, then execute (optionally with
+        adversarial result review). Returns a WorkflowResult for the caller to persist."""
+        msg = self._ctx.msg
         mode = VERBOSE if self._config.show_reasoning and self._ui.supports_phases else SUMMARY
         self._trace = [] if mode.announce_phases else None
         events: list[dict] = []
@@ -177,10 +116,10 @@ class PlanRunner:
 
             approved = plan
             if self._config.plan_review:
-                approved = await self._on_plan_review(plan, critique)
+                approved = await self._review_with_human(plan, critique)
                 if approved is None:
                     await self._ui.send("(plan rejected)", reply_to=msg)
-                    return PlanResult(committed=False)
+                    return WorkflowResult(committed=False)
 
             if not self._config.result_review and not mode.announce_phases:
                 return await self._execute_streaming(msg, approved, events)
@@ -188,7 +127,41 @@ class PlanRunner:
         finally:
             self._trace = None
 
-    async def _execute_streaming(self, msg: ChannelMessage, plan: str, events: list[dict]) -> PlanResult:
+    async def run(self, task, generate_kwargs=None, stream=False, images=None):
+        """The base-tier entry point, unused by the core (which calls ``run_turn``) and present because
+        ``AsyncRunner`` declares it abstract: without it this class could not be instantiated at all, and
+        inheriting is what makes ``as_tool()`` available if planning is ever offered to the model."""
+        raise NotImplementedError(
+            "deep planning drives its own turn; the assistant calls run_turn(). Offering it to the "
+            "model as a tool needs a nested variant that does not rewrite the caller's transcript."
+        )
+
+    @property
+    def messages(self):
+        return {"planning": list(self._agent.model_client.messages)}
+
+    async def _review_with_human(self, plan: str, critique: Optional[list[str]]) -> Optional[str]:
+        """Await the user's decision on a plan: approve (the plan), edit (their text), or reject (None).
+
+        The reply vocabulary is here rather than in the core because it is this workflow's: "approve"
+        means "the plan I was shown", which only this workflow knows how to supply.
+        """
+
+        def parse(raw: str, text: str) -> Optional[str]:
+            """approve -> the plan under review, reject -> None, else the user's edited plan."""
+            if text in ("approve", "yes", "y"):
+                return plan
+            if text in ("reject", "no", "n"):
+                return None
+            if text.startswith("edit:"):
+                return raw.split(":", 1)[1].strip() or plan
+            return raw.strip()
+
+        return await self._ctx.decide(
+            lambda: self._ui.ask_plan_review(plan, critique), parse, default=None, context=plan
+        )
+
+    async def _execute_streaming(self, msg: ChannelMessage, plan: str, events: list[dict]) -> WorkflowResult:
         """The unreviewed summary path: stream the executor straight into the reply.
 
         Kept separate from ``_execute_with_review`` because it is genuinely different execution, not a
@@ -209,35 +182,12 @@ class PlanRunner:
             # can call any tool, so a turn that reported a spawn has one here to anchor the spawn's
             # cards to, and it needs the same rewrite a completed turn gets. Synchronous, so a second
             # cancellation cannot cut it short.
-            self._commit_user_message(base_len, msg.text)
-        return PlanResult(committed=True, user_index=self.user_index, subagent_events=events)
-
-    def _publish_user_index(self, base_len: int) -> int:
-        """Resolve where this turn's committed user message sits, publish it, and return it.
-
-        Imported inside the method because importing the ``kokua.core`` *package* pulls in the
-        assistant, which imports this module: at module scope this would be an import cycle.
-        """
-        from kokua.core.messages import resolve_user_index
-
-        self.user_index = resolve_user_index(self._agent.model_client.messages, base_len)
-        return self.user_index
-
-    def _commit_user_message(self, base_len: int, request: str) -> None:
-        """Restore the user's own words over the executor's scaffolding prompt and publish the index.
-
-        The executor's user message is found rather than assumed to sit at ``base_len``, since a
-        conversation's first turn seeds the system message ahead of it: assuming the position both
-        left the scaffolding prompt in the transcript and dropped the turn's cards. A run cancelled
-        before the executor appended anything resolves to -1, and nothing is rewritten.
-        """
-        index = self._publish_user_index(base_len)
-        if index >= 0:
-            self._agent.model_client.messages[index]["content"] = request
+            self._ctx.commit_user_message(base_len, msg.text)
+        return WorkflowResult(committed=True, user_index=self._ctx.user_index, subagent_events=events)
 
     async def _execute_with_review(
         self, msg: ChannelMessage, plan: str, mode: "Presentation", events: list[dict]
-    ) -> PlanResult:
+    ) -> WorkflowResult:
         """Execute, optionally review and revise, then commit one clean turn and surface the answer.
 
         Only the final answer reaches the transcript: the executor's scratch and every revision round
@@ -272,7 +222,7 @@ class PlanRunner:
                         # Out of rounds. In verbose the user watched every round, so the concerns are
                         # already on screen; in summary this appendix is the only trace of them.
                         if not mode.stream_intermediate:
-                            answer += "\n\n---\n_Automated review flagged unresolved issues:_\n" + _bullets(
+                            answer += "\n\n---\n_Automated review flagged unresolved issues:_\n" + bullets(
                                 verdict.issues
                             )
                         break
@@ -280,7 +230,7 @@ class PlanRunner:
                     self._agent.model_client.messages = list(base)  # revise from a clean base
                     answer = await self._run_and_capture(
                         RESULT_REVISE_PROMPT.format(
-                            request=msg.text, plan=plan, answer=answer, issues=_bullets(verdict.issues)
+                            request=msg.text, plan=plan, answer=answer, issues=bullets(verdict.issues)
                         ),
                         msg.images,
                         show_answer=mode.stream_intermediate,
@@ -292,16 +242,19 @@ class PlanRunner:
             # lands back at the pre-execution length however many rounds ran. Resolving from the
             # committed list is what makes "nothing to show" self-evidently unanchored: with no pair
             # there is no user message at or after len(base), so the index stays -1 rather than
-            # pointing at where the *next* turn will commit.
+            # pointing at where the *next* turn will commit. The pair already holds the user's own
+            # words, so committing it here is the publish, with the rewrite a no-op.
             pair = [{"role": "user", "content": msg.text}, {"role": "assistant", "content": answer}]
             self._agent.model_client.messages = base + (pair if answer else [])
-            self._publish_user_index(len(base))
+            self._ctx.commit_user_message(len(base), msg.text)
 
         if mode.stream_intermediate:
             await self._ui.finish_stream()  # already shown live; just terminate the streamed bubble
         else:
             await self._ui.send(answer, reply_to=msg)  # withheld until vetted; show it now
-        return PlanResult(committed=True, user_index=self.user_index, subagent_events=events, trace=self._trace or [])
+        return WorkflowResult(
+            committed=True, user_index=self._ctx.user_index, subagent_events=events, trace=self._trace or []
+        )
 
     async def _plan_review_rounds(
         self, msg: ChannelMessage, plan: str, mode: "Presentation", events: list[dict]
@@ -337,7 +290,7 @@ class PlanRunner:
         attempt: int,
         card,
         stream,
-    ) -> "review.Verdict":
+    ) -> critics.Verdict:
         """One review round, shown either as a summary card or as streamed prose.
 
         ``card`` and ``stream`` are thunks so only the reviewer actually used is ever started; the two
@@ -350,7 +303,7 @@ class PlanRunner:
             return verdict
         return await self._stream_review(stream())
 
-    async def _stream_review(self, open_coro) -> "review.Verdict":
+    async def _stream_review(self, open_coro) -> critics.Verdict:
         """Stream a reviewer's prose reasoning live (captured into the current phase segment for replay),
         then finalize and return its verdict. Emits no summary card -- the prose is the output."""
         client, stream = await open_coro
@@ -359,7 +312,7 @@ class PlanRunner:
         text = await self._ui.stream_activity(stream, show_answer=True)
         if self._trace:  # attach the reviewer's prose to the current phase segment
             self._trace[-1]["text"] = text
-        return await review.finalize_verdict(client)
+        return await critics.finalize_verdict(client)
 
     async def _make_plan(self, msg: ChannelMessage, mode: "Presentation", feedback: Optional[list[str]] = None) -> str:
         """Run the agent to produce a plan, keeping the planning exchange out of the saved conversation.
@@ -370,7 +323,7 @@ class PlanRunner:
         """
         prompt = PLAN_PROMPT.format(request=msg.text)
         if feedback:
-            prompt += REPLAN_FEEDBACK.format(issues=_bullets(feedback))
+            prompt += REPLAN_FEEDBACK.format(issues=bullets(feedback))
         base = list(self._agent.model_client.messages)
         try:
             plan = await self._run_and_capture(prompt, msg.images, show_answer=mode.stream_intermediate)
@@ -408,7 +361,7 @@ class PlanRunner:
             self._trace.append({"label": label, "detail": detail, "text": ""})
         await self._ui.show_phase(label, detail)
 
-    async def _run_review(self, sid: str, role: str, round_: int, coro) -> "review.Verdict":
+    async def _run_review(self, sid: str, role: str, round_: int, coro) -> critics.Verdict:
         """Show a running sub-agent card, await the reviewer, then update the card with its verdict."""
         await self._ui.show_subagent({"id": sid, "role": role, "status": "running", "round": round_})
         verdict = await coro
@@ -419,7 +372,7 @@ class PlanRunner:
         return verdict
 
     @staticmethod
-    def _verdict_event(role: str, round_: int, verdict: "review.Verdict") -> dict:
+    def _verdict_event(role: str, round_: int, verdict: critics.Verdict) -> dict:
         """The persisted (id-less) form of a reviewer verdict, for replay."""
         status = "approved" if verdict.approved else "rejected"
         return {"role": role, "status": status, "issues": list(verdict.issues), "round": round_}
@@ -428,5 +381,5 @@ class PlanRunner:
         """Show the plan (with any residual reviewer concerns), as a plan frame if the channel supports it."""
         text = plan_text
         if critique:
-            text += "\n\n---\n**Reviewer's remaining concerns:**\n" + _bullets(critique)
+            text += "\n\n---\n**Reviewer's remaining concerns:**\n" + bullets(critique)
         await self._ui.show_plan(text)

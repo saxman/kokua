@@ -9,10 +9,11 @@ name is a startup error rather than a silent shadowing, since the loser would va
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Optional, Sequence
 
 if TYPE_CHECKING:
     from kokua.toolsets.context import ToolsetContext
+    from kokua.workflows import Workflow
 
 
 class ToolsetError(RuntimeError):
@@ -41,6 +42,12 @@ class Toolset:
     ``entry_point_only`` marks a toolset that only functions on the agent Kokua constructs directly.
     Its one member is ``skills``: spawned workers are plain AIMU ``Agent`` instances, not
     ``SkillAgent``, so skill injection has nothing to hook.
+
+    ``workflow`` is a custom turn strategy this capability offers (see :mod:`kokua.workflows`). An
+    agent declaring the toolset gets the workflow's command; nothing else grants one, so a turn
+    strategy is declared exactly the way a tool is. A workflow-bearing toolset may still return tools
+    from ``build``, and that is how the same workflow reaches the model as a tool: return
+    ``runner.as_tool(...)``.
     """
 
     name: str
@@ -49,6 +56,7 @@ class Toolset:
     guidance: str = ""
     cross_cutting: bool = False
     entry_point_only: bool = False
+    workflow: Optional["Workflow"] = None
 
 
 class ToolsetRegistry(dict):
@@ -146,3 +154,16 @@ def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:
                 seen.add(name)
                 tools.append(fn)
     return tools
+
+
+def workflows_of(toolsets: Sequence[Toolset]) -> list[tuple[str, "Workflow"]]:
+    """Each workflow ``toolsets`` offers, paired with the name of the toolset carrying it, in declared order.
+
+    Paired rather than bare, because a caller that has to report a problem with a workflow needs to name
+    the toolset the user would edit, and because a workflow's config section is its carrier's.
+
+    Separate from ``select`` because availability and resolution answer different questions: ``select``
+    resolves what one agent holds, while a command map is a property of the entry agent alone (a spawned
+    worker has no channel to invoke a command on).
+    """
+    return [(toolset.name, toolset.workflow) for toolset in toolsets if toolset.workflow is not None]

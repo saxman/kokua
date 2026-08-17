@@ -18,7 +18,16 @@ from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.toolsets.builtin import BUILTIN_TOOLSETS
 from kokua.toolsets.context import LiveState, ToolsetContext
 from kokua.toolsets.core import CORE_TOOLSETS
-from kokua.toolsets.registry import Toolset, ToolsetError, ToolsetRegistry, build_tools, register, select
+from kokua.toolsets.registry import (
+    Toolset,
+    ToolsetError,
+    ToolsetRegistry,
+    build_tools,
+    register,
+    select,
+    workflows_of,
+)
+from kokua.workflows import Workflow
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +143,8 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     switch rather than a naming switch: with it off, a config naming a plugin toolset fails at startup
     with the unknown-name error rather than starting an agent quietly missing a capability.
 
-    Discovered plugins are split by which distribution registered them: Kokua's own five (example,
-    aimu_agents, pdf, image, email) get ``_BUILTIN_PLUGIN_PROVIDER`` rather than ``_PLUGIN_PROVIDER``, so
+    Discovered plugins are split by which distribution registered them: Kokua's own two (aimu_agents,
+    image) get ``_BUILTIN_PLUGIN_PROVIDER`` rather than ``_PLUGIN_PROVIDER``, so
     ``unreferenced_toolsets`` does not warn about ships-in-the-box toolsets the shipped config simply
     never named. Both groups are still built with the same failure tolerance: the split is about what
     counts as news when unreferenced, not about how much this codebase trusts its own plugin code.
@@ -206,6 +215,74 @@ def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
         raise ConfigError(str(error)) from error
     validate_agents(config, registry)
     return registry
+
+
+# Commands the serve loop owns and a workflow therefore cannot claim. Checked at startup, because a
+# workflow silently shadowed by /stop would look like a workflow that simply never runs.
+RESERVED_COMMANDS = frozenset({"stop", "diag"})
+
+
+def build_command_map(config: AssistantConfig, registry: ToolsetRegistry) -> dict[str, "Workflow"]:
+    """The commands the entry agent's declared toolsets offer, by command word.
+
+    Only the entry agent's, because a command arrives on the channel and only that agent has one; a
+    spawned worker declaring a workflow-bearing toolset gets the toolset's tools and no command.
+
+    Collisions raise rather than resolve. A workflow shadowed by a reserved command, or by another
+    workflow, would present as one that inexplicably never runs, and the config naming both is the
+    thing that has to change.
+
+    A command's shape is checked here too, for the same reason: dispatch (``Assistant._serve_channel``)
+    lowercases the incoming text and matches a single whitespace-free token, so a command that is empty,
+    contains whitespace, or is not already lowercase could never be reached -- the exact "inexplicably
+    never runs" failure mode this function otherwise guards against, just caused by the command's own
+    shape instead of a collision with another one.
+    """
+    entry = config.agents[config.entry_agent]
+    toolsets = select(entry.tools, registry, agent=config.entry_agent, entry_point=config.entry_agent)
+    commands: dict[str, Workflow] = {}
+    claimed_by: dict[str, str] = {}
+    for toolset_name, workflow in workflows_of(toolsets):
+        command = workflow.command
+        if not command or command != command.lower() or any(ch.isspace() for ch in command):
+            raise ConfigError(
+                f"toolset {toolset_name!r} offers the command {command!r}, which is not a single "
+                "lowercase word with no whitespace. Dispatch only ever matches a lowercased, "
+                "whitespace-free token, so a command in any other shape is unreachable. Rename the "
+                "workflow's command."
+            )
+        if command in RESERVED_COMMANDS:
+            raise ConfigError(
+                f"toolset {toolset_name!r} offers the /{command} command, which is reserved by "
+                "the assistant itself. Rename the workflow's command."
+            )
+        if command in commands:
+            raise ConfigError(
+                f"toolsets {claimed_by[command]!r} and {toolset_name!r} both offer the "
+                f"/{command} command. Rename one, or drop one from "
+                f"[agents.{config.entry_agent}].tools."
+            )
+        commands[command] = workflow
+        claimed_by[command] = toolset_name
+    return commands
+
+
+def undeclared_workflow_commands(config: AssistantConfig, registry: ToolsetRegistry) -> dict[str, str]:
+    """Every command a workflow-bearing toolset in ``registry`` offers that the entry agent did not
+    declare, mapping the command word to the offering toolset's name.
+
+    This is the gap ``build_command_map`` leaves on purpose: a config that predates naming a
+    workflow's toolset (or dropped it) still gets the command typed at it verbatim -- the web Plan
+    toggle sends ``"/plan <task>"`` over the socket regardless of what ``[agents.*].tools`` says -- so
+    the serve loop needs to recognize the word even though no declared toolset claims it, to answer
+    with what config change would grant it instead of running a plain turn on the literal command text.
+    """
+    declared = set(config.agents[config.entry_agent].tools)
+    return {
+        workflow.command: toolset_name
+        for toolset_name, workflow in workflows_of(list(registry.values()))
+        if toolset_name not in declared
+    }
 
 
 def _reject_cycles(config: AssistantConfig) -> None:

@@ -28,9 +28,10 @@ src/kokua/
     conversations.py     ConversationBook: store + agent cache + active pointer, and id resolution
     transcripts.py       reading a stored conversation as text: flatten, truncate, search
     turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
-    interaction.py       HumanGate: tool approval and plan review as lock-guarded single slots
+    interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
     settings_runtime.py  SettingsApplier: read, apply live, persist, switch model
-    commands are parsed inline in assistant._serve_channel (/stop, /diag, /plan)
+    commands: /stop and /diag are parsed inline in assistant._serve_channel; a workflow's own
+              command (e.g. /plan) dispatches through self._workflows, built from the toolset registry
     diagnostics.py       the /diag report
     build.py             free functions that assemble a model client and wire one declared agent
     subagents.py         SubagentReporter: sub-agent activity as display frames + recorded events
@@ -47,7 +48,9 @@ src/kokua/
     store.py       comment-preserving tomlkit writes, the write policy, and apply_setting
     table.py       RUNTIME_SETTINGS: the one declaration of what is changeable at runtime
 
-  planning/      runner.py (the /plan pipeline), reviewers.py (context-free reviewer agents)
+  workflows/     protocol.py (Workflow, WorkflowContext, WorkflowResult, is_rich), critics.py (the
+                 shared context-free reviewer), planning/ (runner.py's PlanningWorkflow, prompts.py,
+                 critics.py's thin wrappers over the shared reviewer)
   mcp/           servers.py (connect, attach, reconnect, runtime add/remove), auth.py (ChatOAuth)
   scheduling/    recurrence.py (pure schedule math), registry.py (the JSON file), tasks.py (TaskService)
   channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
@@ -57,9 +60,9 @@ src/kokua/
     context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
     agents.py      builds the registry from every provider; resolves and validates one agent
     builtin.py     AIMU's tool groups, its two stores, and skills, wrapped as toolsets
-    core.py        an index over the four TOOLSET constants in the four modules below
-    config.py, conversations.py, mcp_admin.py, scheduling.py -- Kokua's own four, each
-                   wrapping one subsystem's logic as agent tools
+    core.py        an index over the five TOOLSET constants in the five modules below
+    config.py, conversations.py, mcp_admin.py, planning.py, scheduling.py -- Kokua's own five, each
+                   wrapping one subsystem's logic as agent tools (planning wraps a workflow instead)
     aimu_agents.py, image.py -- plugins, like a third party's
 ```
 
@@ -74,8 +77,8 @@ serve loop, and little else. It owns:
   conversation is being viewed. These move together on a switch, which is why they are one object.
 - **`TurnRunner`** -- reactive turns (the user sent something) and proactive turns (a scheduled task
   fired). The six concurrency invariants are documented at the top of that module.
-- **`HumanGate`** -- tool approval and plan review, each a lock-guarded single-slot request the serve
-  loop resolves with the user's next message.
+- **`HumanGate`** -- tool approval and a workflow's own decision, each a lock-guarded single-slot request
+  the serve loop resolves with the user's next message.
 - **`SettingsApplier`** -- reading, applying, and persisting the runtime-mutable settings.
 - **`ChannelUI`** -- the only view of the outside world.
 
@@ -99,7 +102,7 @@ runs -- success, cancellation, connection error, or generic error. On the cancel
 which still await one more status send afterward (the "(stopped)" notice, or the failure message),
 recording first means a second cancellation racing that send cannot propagate past the completed record
 call and drop the turn's events. `ConversationBook.record_subagent_events` persists the result into
-`session.metadata["subagent"][str(user_index)]`, the same map planning's
+`session.metadata["subagent"][str(user_index)]`, the same map a rich-tier workflow's
 reviewer verdict cards write into (a shared merge helper extends rather than overwrites, since one turn
 can produce both). A background turn's cards are muted like the rest of what it streams, but its spawns
 are still recorded, so switching into that conversation later shows the work.
@@ -145,7 +148,7 @@ At least one agent is therefore required, and `Assistant.create` refuses a confi
 
 What the *shipped* config declares is a lean entry agent: `kokua config init` gives
 `[agents.assistant]` the cross-cutting toolsets (memory, documents, skills, config, `mcp-admin`,
-scheduling, conversations, the clock) and no domain toolset, delegating web, filesystem, and compute work
+scheduling, conversations, `planning`, the clock) and no domain toolset, delegating web, filesystem, and compute work
 to `researcher`, `coder`, and `generalist`. That keeps the always-on agent's tool context small, and the
 prompt tells it so: `assemble_system_message` adds the "you are a lean supervisor, you MUST delegate"
 clause only when every toolset the agent declared is `cross_cutting`. But that is a property of the
@@ -164,7 +167,7 @@ anything; the last two run once per agent, whenever one is built:
    `[[mcp.server]]`, named by its required `name`), and plugin (the `kokua.toolsets` entry-point group,
    skipped entirely when `load_plugins` is off) -- and `registry.register` rejects a name two providers
    claim. A `Toolset` is a frozen dataclass: `name`, `description`, `build`, `guidance`, `cross_cutting`,
-   `entry_point_only`.
+   `entry_point_only`, `workflow`.
 2. **Validate.** `agents.validate_agents` runs before the session store is opened or any server
    connected, so an unknown toolset name, a missing entry agent, an unknown delegation target, a cycle,
    or `skills` on a worker fails with nothing written and nothing connected.
@@ -336,13 +339,41 @@ name reaches no agent until a human adds it to an `[agents.*]` table, since that
 only: the tool can connect a server but cannot grant itself the capability. `mcp/auth.py` handles OAuth
 by posting the authorization link into the chat and persisting tokens to disk.
 
-## Planning
+## Workflows
 
-`/plan` (or the web Plan toggle) runs one turn through `planning/runner.py`: draft a plan, optionally
-have an independent reviewer critique it and a human approve it, execute, optionally review the
-result. There is one pipeline; how much of its work is shown is a `Presentation` value with two
-instances, `SUMMARY` and `VERBOSE` (the latter selected by `show_reasoning` on a channel that can
-render phase headers).
+A workflow is a named turn strategy carried by a `Toolset` (its `workflow` field): declaring that
+toolset in an agent's `tools` is what gives the agent the workflow's `/`-command, resolved by
+`toolsets.agents.build_command_map` from the entry agent's own declared toolsets -- the same list
+that resolves its tools, so a turn strategy is granted exactly the way a tool is. A workflow's `build`
+returns an `aimu.aio.AsyncRunner`, AIMU's abstract base for every agent and workflow, so AIMU's own
+`aimu.aio.workflows` (`Chain`, `Parallel`, `Router`, `EvaluatorOptimizer`, `PlanExecuteEvaluator`) work
+here with no adapter. `workflows.is_rich` splits a runner into two tiers by probing for a `run_turn`
+method, the way `ChannelUI` probes an optional channel frame rather than doing an `isinstance` check:
+a **base-tier** runner is driven by `TurnRunner` itself, which streams `run()` into the reply and owns
+catch-up, at the cost that the runner never appends to the agent's own transcript, so a base-tier turn
+has no message to anchor to and does not survive a reload. A **rich-tier** runner additionally
+implements `run_turn()` and is handed a `WorkflowContext` carrying the channel, a `decide()` slot for
+a human decision (the asker supplies its own reply parser, so no one workflow's vocabulary lives in
+the core), and control of the agent's transcript. A workflow that also wants to reach the model as a
+callable tool needs `AsyncRunner.as_tool()`, a concrete method the base class provides rather than a
+name Kokua looks up, so it is available only to a runner that actually subclasses `aio.AsyncRunner`,
+not one that merely matches its shape by duck-typing `run` and `messages`.
+
+`toolsets/planning.py` is the first workflow, and the only core toolset that carries one instead of
+tools: declaring `"planning"` in `[agents.<name>].tools` is what gives that agent the `/plan` command
+(the web UI's Plan toggle sends the same command, and an agent whose `tools` omits `"planning"` has
+neither). Its runner, `PlanningWorkflow` (`workflows/planning/runner.py`), is rich tier -- it shows
+phases and reviewer cards, pauses for a human approve/edit/reject, and rewrites the transcript so a
+planned turn is saved as a plain user/assistant pair rather than as planner scaffolding -- and
+subclasses `aio.AsyncRunner` for the `as_tool()` reason above, even though nothing currently offers it
+to the model as a tool. `/plan` drafts a plan, optionally has an independent reviewer critique it and
+a human approve it, executes, and optionally reviews the result. There is one pipeline; how much of
+its work is shown is a `Presentation` value with two instances, `SUMMARY` and `VERBOSE` (the latter
+selected by `show_reasoning` on a channel that can render phase headers). The reviewer itself is
+generic and workflow-independent: `workflows/critics.py` runs a fresh, context-free agent over a
+curated verification toolset and extracts a typed `Verdict`; `workflows/planning/critics.py` supplies
+only the two prompts (`review_plan`, `review_result`) that make it deep planning's own standard rather
+than a shared one.
 
 ## Web front end
 

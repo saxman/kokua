@@ -7,10 +7,13 @@ from pathlib import Path
 
 from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant
-from kokua.planning.runner import PLAN_PROMPT
+from kokua.toolsets.planning import PLANNING_WORKFLOW
+from kokua.workflows.planning import PlanningWorkflow
+from kokua.workflows.planning.prompts import PLAN_PROMPT
 from kokua.config import AssistantConfig
 from tests.channels import example_agents
 
+from aimu import aio
 from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamingContentType
 
@@ -42,13 +45,23 @@ def _config(tmp_path: Path, **overrides) -> AssistantConfig:
     return AssistantConfig(**base)
 
 
+def test_the_planning_workflow_inherits_the_runner_base_that_carries_as_tool():
+    """``as_tool()`` is a concrete method ``AsyncRunner`` provides, so implementing ``run`` and
+    ``messages`` without inheriting would leave planning unable to reach the model as a tool -- while
+    still passing every other test here, since Kokua's own driver only probes for ``run_turn``."""
+    assert issubclass(PlanningWorkflow, aio.AsyncRunner)
+    assert hasattr(PlanningWorkflow, "as_tool")
+
+
 async def test_autonomous_planned_turn_plans_then_executes(tmp_path):
     channel = FakeChannel()
     client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])  # plan phase, then execute phase
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
     await assistant._handle(
-        ChannelMessage(text="do the thing", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do the thing", channel="fake"),
+        conversation_id=assistant._active_id,
+        workflow=PLANNING_WORKFLOW,
     )
 
     # The plan was surfaced first (no send_plan on this channel -> plain-text fallback), then the answer.
@@ -80,7 +93,7 @@ async def _resolve_when_pending(assistant, value, *, approve=False):
     otherwise resolves with ``value`` (an edited plan, or None to reject).
     """
     for _ in range(1000):
-        pending = assistant._human.plan
+        pending = assistant._human.decision
         if pending.pending:
             pending.resolve(pending.context if approve else value)
             return
@@ -94,7 +107,11 @@ async def test_review_approve_executes(tmp_path):
     assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
 
     turn = asyncio.create_task(
-        assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True)
+        assistant._handle(
+            ChannelMessage(text="do X", channel="fake"),
+            conversation_id=assistant._active_id,
+            workflow=PLANNING_WORKFLOW,
+        )
     )
     await _resolve_when_pending(assistant, None, approve=True)
     await turn
@@ -108,7 +125,11 @@ async def test_review_reject_skips_execution(tmp_path):
     assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
 
     turn = asyncio.create_task(
-        assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True)
+        assistant._handle(
+            ChannelMessage(text="do X", channel="fake"),
+            conversation_id=assistant._active_id,
+            workflow=PLANNING_WORKFLOW,
+        )
     )
     await _resolve_when_pending(assistant, None)  # reject
     await turn
@@ -132,7 +153,11 @@ async def test_review_edit_executes_edited_plan(tmp_path):
     assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
 
     turn = asyncio.create_task(
-        assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True)
+        assistant._handle(
+            ChannelMessage(text="do X", channel="fake"),
+            conversation_id=assistant._active_id,
+            workflow=PLANNING_WORKFLOW,
+        )
     )
     await _resolve_when_pending(assistant, "MY EDITED PLAN")
     await turn

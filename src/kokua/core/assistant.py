@@ -95,9 +95,17 @@ class Assistant:
         self._tracker = TurnTracker()
         # A per-turn sequence id for the lifecycle log lines.
         self._turn_seq: int = 0
-        # Tool approval and plan review: each a single-slot request the serve loop resolves with the
-        # user's next message. Both are lock-guarded, so concurrent tool calls (or concurrent planned
-        # turns) can never clobber the slot the serve loop is about to resolve.
+        # The workflow commands this assistant answers, by command word. Built by create() from the
+        # entry agent's declared toolsets; empty until then, which no serve loop can observe.
+        self._workflows: dict[str, object] = {}
+        # Commands an *installed* workflow-bearing toolset offers that the entry agent did not declare,
+        # by command word, mapping to the toolset's name. Built by create() alongside self._workflows.
+        # Kept distinct from it because the two need opposite handling in the serve loop: one runs the
+        # workflow, the other must not run a plain turn on the literal "/word ..." text.
+        self._undeclared_workflow_commands: dict[str, str] = {}
+        # Tool approval and a workflow's own decision: each a single-slot request the serve loop
+        # resolves with the user's next message. Both are lock-guarded, so concurrent tool calls (or
+        # concurrent workflow turns) can never clobber the slot the serve loop is about to resolve.
         self._human = HumanGate(
             self._ui,
             config,
@@ -125,7 +133,7 @@ class Assistant:
             self._ui,
             self._gate,
             config,
-            review_plan=self._human.review_plan,
+            decide=self._human.decide,
             push_conversations=self._maybe_push_conversations,
             delete_conversation=self.delete_conversation,
         )
@@ -138,13 +146,22 @@ class Assistant:
         # pulls in kokua.core.transcripts -- a submodule of this package -- and importing it triggers
         # kokua/core/__init__ to run, which imports this module. A top-level import here would close
         # that cycle.
-        from kokua.toolsets.agents import unreferenced_toolsets, validated_registry
+        from kokua.toolsets.agents import (
+            build_command_map,
+            undeclared_workflow_commands,
+            unreferenced_toolsets,
+            validated_registry,
+        )
 
         # Built and validated before anything else in this method, because everything else touches
         # something: the next statements open a session store (which mints and persists an empty session)
         # and connect to remote servers. An unknown toolset name, a missing entry agent, or a delegation
         # cycle therefore fails naming the offending value, with nothing written and nothing connected.
         registry = validated_registry(config)
+        # Built here rather than in __init__ because it needs the validated registry, and here rather
+        # than after the store is opened so a collision fails before anything is written.
+        commands = build_command_map(config, registry)
+        undeclared_commands = undeclared_workflow_commands(config, registry)
 
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
@@ -157,6 +174,8 @@ class Assistant:
         # Construct the assistant first so the registry's builder can bind its approval gate: agents are
         # built lazily (on first get), by which point assistant._approve exists.
         assistant = cls(channel, scheduler, store, config)
+        assistant._workflows = commands
+        assistant._undeclared_workflow_commands = undeclared_commands
         initial_id = assistant._book.adopt_most_recent()
         # config.toml is the single source of settings: the panel and update_config write it, and the
         # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
@@ -212,6 +231,8 @@ class Assistant:
         state.for_each_agent = for_each_agent
         assistant._state = state
         assistant._tasks = state.tasks
+        # The workflow context needs the shared toolset state, which does not exist until here.
+        assistant._turns.state = state
 
         assistant._registry = AgentRegistry(
             make_agent_builder(
@@ -408,20 +429,48 @@ class Assistant:
                 if text == "/diag":
                     await self._ui.send(self._diag_report())
                     continue
-                # While an approval or plan review is outstanding, the next message is its answer,
-                # not a new turn. (A `/stop` above still takes priority, cancelling the waiting turn.)
+                # While an approval or a workflow decision is outstanding, the next message is its
+                # answer, not a new turn. (A `/stop` above still takes priority, cancelling the waiting
+                # turn.)
                 if self._human.resolve_reply(raw, text):
                     continue
-                # `/plan <task>` invokes deep planning for this one turn (the web UI's Plan toggle sends
-                # exactly this). Any other message runs a normal, unplanned turn.
-                plan_turn = False
-                if text == "/plan" or text.startswith("/plan "):
-                    task = raw.strip()[len("/plan") :].strip()
-                    if not task:
-                        await self._ui.send("Usage: /plan <task>")
+                # A workflow command runs this one turn through that workflow (the web UI's Plan
+                # toggle sends "/plan <task>", which is exactly this path). Any other message runs a
+                # plain turn. Which commands exist follows from what the entry agent declares, so a
+                # capability the config did not grant has no command here.
+                workflow = None
+                if text.startswith("/"):
+                    # word and rest come from one split, not from re-slicing raw by len(word): that
+                    # used to assume exactly one character (the slash) precedes the word, but split()
+                    # (unlike partition(" ")) also skips any whitespace *before* the word, so a length-
+                    # based slice undercounted whenever a user typed more than one space after the
+                    # slash -- e.g. "/  plan hello" ran the workflow on "an hello".
+                    parts = raw.strip()[1:].split(maxsplit=1)
+                    word = parts[0].lower() if parts else ""
+                    candidate = self._workflows.get(word)
+                    if candidate is not None:
+                        task = parts[1].strip() if len(parts) > 1 else ""
+                        if not task:
+                            await self._ui.send(f"Usage: {candidate.usage}")
+                            continue
+                        msg = replace(msg, text=task)
+                        workflow = candidate
+                    elif word in self._undeclared_workflow_commands:
+                        # An installed toolset offers /word, just not to this entry agent -- e.g. a
+                        # config that predates naming "planning" in [agents.<entry>].tools. Answered
+                        # here instead of falling through to a plain turn, which would otherwise run
+                        # the model on the literal "/word <task>" string and persist that into history.
+                        # Deliberately narrow to a word some installed workflow actually offers: a
+                        # "/"-word nothing offers still falls through below, since a bare first-word
+                        # heuristic would also swallow an ordinary message that starts with a path, like
+                        # "/usr/local/bin is missing".
+                        toolset_name = self._undeclared_workflow_commands[word]
+                        await self._ui.send(
+                            f"The {toolset_name!r} toolset offers /{word}, but no agent declares it. "
+                            f"Add {toolset_name!r} to [agents.{self._config.entry_agent}].tools in "
+                            "your config.toml."
+                        )
                         continue
-                    msg = replace(msg, text=task)
-                    plan_turn = True
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. The gate still serializes same-conversation turns (a proactive turn
                 # on this conversation can't interleave); different conversations' turns don't block
@@ -432,7 +481,7 @@ class Assistant:
                 self._turn_seq += 1
                 preview = (msg.text or "").strip()[:120]
                 logger.info("turn %d submitted for %s: %r", tid, conversation_id, preview)
-                handle = RunHandle.start(self._handle(msg, conversation_id=conversation_id, plan=plan_turn, tid=tid))
+                handle = RunHandle.start(self._handle(msg, conversation_id=conversation_id, workflow=workflow, tid=tid))
                 self._tracker.add(conversation_id, TurnInfo(handle=handle, started=time.monotonic(), preview=preview))
                 handle.task.add_done_callback(lambda _t, cid=conversation_id, h=handle: self._tracker.remove_if(cid, h))
         finally:
@@ -446,16 +495,16 @@ class Assistant:
         return await self._human.approve(name, arguments)
 
     async def _handle(
-        self, msg: ChannelMessage, *, conversation_id: str, plan: bool = False, tid: Optional[int] = None
+        self, msg: ChannelMessage, *, conversation_id: str, workflow=None, tid: Optional[int] = None
     ) -> None:
-        await self._turns.reactive(msg, conversation_id=conversation_id, plan=plan, tid=tid)
+        await self._turns.reactive(msg, conversation_id=conversation_id, workflow=workflow, tid=tid)
 
     def _diag_report(self) -> str:
         return diag_report(
             self._tracker,
             self._gate,
             pending_approval=self._human.approval.pending,
-            pending_plan=self._human.plan.pending,
+            pending_decision=self._human.decision.pending,
         )
 
     async def _proactive(

@@ -49,11 +49,13 @@ Every rule here was learned from a bug. Read them before changing anything in th
    cancelled, connection error, generic error, success -- records as its first action, not as a step
    shared only by the paths that return normally. Recording under the right index is half of this,
    and every path resolves that index with ``resolve_user_index`` (the pre-run length is not it: a
-   first turn seeds the system message ahead of the user message). A planned turn's index cannot come
-   from the ``PlanResult`` either, since a cancelled or failed run raises instead of returning one, so
-   ``PlanRunner`` publishes the index as it commits and the plan branch reads it back in a ``finally``.
+   first turn seeds the system message ahead of the user message). A workflow turn's index cannot come
+   from its ``WorkflowResult`` either, since a cancelled or failed run raises instead of returning one,
+   so a workflow publishes the index through ``WorkflowContext.publish_user_index`` as it commits and
+   the workflow branch reads ``ctx.user_index`` back in a ``finally``.
    (Regressions: ``test_a_second_cancellation_during_the_stopped_send_still_records``,
-   ``test_a_stopped_planned_turn_records_the_events_it_produced``,
+   ``test_a_cancelled_rich_workflow_still_records_its_published_events``,
+   ``test_a_failed_rich_workflow_still_records_its_published_events``,
    ``test_a_first_turns_cards_anchor_to_its_user_message_past_the_system_message``.)
 
 6. **An unattended turn never lets an exception escape.** A scheduled firing has no user awaiting it
@@ -77,7 +79,7 @@ from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.core.errors import describe_error
 from kokua.core.messages import derive_title, resolve_user_index
 from kokua.core.subagents import subagent_events
-from kokua.planning.runner import PlanRunner
+from kokua.workflows import WorkflowContext, is_rich
 
 logger = logging.getLogger(__name__)
 
@@ -104,21 +106,26 @@ class ProactiveTarget:
 
 
 class TurnRunner:
-    def __init__(self, book, ui, gate, config, *, review_plan, push_conversations, delete_conversation):
+    def __init__(self, book, ui, gate, config, *, decide, push_conversations, delete_conversation, state=None):
         self._book = book
         self._ui = ui
         self._gate = gate
         self._config = config
-        self._review_plan = review_plan
+        # Handed to a workflow through its context, so the core never learns any workflow's reply
+        # vocabulary.
+        self._decide = decide
         self._push_conversations = push_conversations
         # The assistant's own delete, not the book's: it also abandons a pending approval and switches
         # the view away, which matters when a "latest" firing replaces the run the user is reading.
         self._delete_conversation = delete_conversation
+        # Shared toolset state, passed through to a workflow's context. Assigned after construction by
+        # the composition root, which builds it later (see Assistant.create).
+        self.state = state
 
     # --- reactive -------------------------------------------------------------------------------
 
     async def reactive(
-        self, msg: ChannelMessage, *, conversation_id: str, plan: bool = False, tid: Optional[int] = None
+        self, msg: ChannelMessage, *, conversation_id: str, workflow=None, tid: Optional[int] = None
     ) -> None:
         """Run a user-initiated turn and send its reply. See the module's concurrency invariants."""
         started = time.monotonic()
@@ -139,16 +146,20 @@ class TurnRunner:
             async with self._gate.turn(conversation_id):  # invariant 1
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
                 try:
-                    if plan:
-                        runner = PlanRunner(agent, self._ui, self._config, self._review_plan)
+                    if workflow is not None:
+                        ctx = self._workflow_context(agent, msg, workflow)
+                        runner = workflow.build(ctx)
                         try:
-                            result = await runner.run(msg)
+                            if is_rich(runner):
+                                result = await runner.run_turn()
+                                self._book.record_workflow_metadata(result, conversation_id)
+                            else:
+                                await self._drive_base_tier(runner, msg, ctx)
                         finally:
-                            # A cancelled or failed planned turn raises instead of returning a
-                            # PlanResult, and the runner publishes the index as it commits, so read it
-                            # from the runner rather than from a result that may never arrive.
-                            user_index = runner.user_index
-                        self._book.record_plan_metadata(result, conversation_id)
+                            # A cancelled or failed workflow raises instead of returning a result, and
+                            # a rich one publishes its index as it commits, so read it from the context
+                            # rather than from a result that may never arrive.
+                            user_index = ctx.user_index
                     else:
                         # Taken here rather than before the gate: it is the lower bound the turn's own
                         # user message is searched for from, so anything another turn appended first
@@ -202,6 +213,50 @@ class TurnRunner:
             self._ui.end_catch_up(conversation_id)
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
+
+    def _workflow_context(self, agent, msg: ChannelMessage, workflow) -> WorkflowContext:
+        """One turn's context for ``workflow``.
+
+        ``commit_user_message`` is bound here rather than implemented by the workflow because finding
+        the committed user message is the core's own subtlety: a first turn seeds the system message
+        ahead of it, so its position cannot be assumed from a pre-run length (see ``resolve_user_index``).
+        """
+
+        def commit_user_message(base_len: int, text: str) -> None:
+            index = resolve_user_index(agent.model_client.messages, base_len)
+            ctx.publish_user_index(index)
+            if index >= 0:
+                agent.model_client.messages[index]["content"] = text
+
+        ctx = WorkflowContext(
+            agent=agent,
+            ui=self._ui,
+            config=self._config,
+            settings=None,  # reserved for a toolset's own settings section; unset until that release
+            msg=msg,
+            state=self.state,
+            decide=self._decide,
+            commit_user_message=commit_user_message,
+        )
+        return ctx
+
+    async def _drive_base_tier(self, runner, msg: ChannelMessage, ctx: WorkflowContext) -> None:
+        """Stream a plain ``AsyncRunner`` into the reply. Not persisted.
+
+        A *self-contained* runner (one that never touches ``ctx.agent``) appends nothing to the agent's
+        own transcript, so ``resolve_user_index`` finds no new user message here and publishes -1:
+        nothing of this exchange reaches ``_persist``'s snapshot or the sub-agent record. The reply
+        reaches the channel and nothing else -- reloading the conversation will not show it. A runner
+        that closes over ``ctx.agent`` and runs it directly does append, and persists normally. Whether
+        a self-contained base-tier turn's own exchange should be persisted is a product question this
+        plan leaves open.
+        """
+        base_len = len(ctx.agent.model_client.messages)
+        try:
+            stream = await runner.run(msg.text, stream=True, images=msg.images)
+            await self._ui.send(stream, reply_to=msg)
+        finally:
+            ctx.publish_user_index(resolve_user_index(ctx.agent.model_client.messages, base_len))
 
     def _record_subagents(self, conversation_id: str, user_index: int) -> None:
         """Persist whatever the turn's spawns reported. Synchronous, so it also runs on the cancelled

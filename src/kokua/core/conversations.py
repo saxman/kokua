@@ -37,7 +37,7 @@ def _now() -> str:
 def _merge_subagent_events(session: Session, user_index: int, events: list[dict]) -> None:
     """Append a turn's sub-agent cards under its user-message index.
 
-    Extends rather than assigns: one turn can produce both reviewer verdict cards (a planned turn)
+    Extends rather than assigns: one turn can produce both reviewer verdict cards (a workflow turn)
     and spawn cards, recorded by different callers.
     """
     session.metadata.setdefault("subagent", {}).setdefault(str(user_index), []).extend(events)
@@ -255,9 +255,9 @@ class ConversationBook:
         self._store.save(session)
         return title_set
 
-    def record_plan_metadata(self, result, conversation_id: str) -> None:
-        """Record a planned turn's reviewer verdicts and verbose trace under the turn's user-message
-        index, so reload replays them. No-op when the turn did not commit (e.g. plan rejected)."""
+    def record_workflow_metadata(self, result, conversation_id: str) -> None:
+        """Record a workflow turn's sub-agent cards and verbose trace under the turn's user-message
+        index, so reload replays them. No-op when the turn did not commit (e.g. a rejected plan)."""
         if not result.committed or result.user_index < 0:
             return
         session = self._store.get(conversation_id)
