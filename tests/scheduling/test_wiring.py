@@ -43,8 +43,8 @@ async def test_list_tasks_reports_the_persisted_registry(tmp_path):
     assert len(items) == 1 and items[0]["id"] == "t1" and items[0]["name"] == "brief"
 
 
-async def test_task_action_disables_a_task_through_the_shared_controls(tmp_path):
-    """The panel's actions go through TaskControls, so the registry and the live scheduler agree."""
+async def test_task_action_disables_a_task_through_the_shared_service(tmp_path):
+    """The panel's actions go through the one TaskService, so the registry and the live scheduler agree."""
     from kokua import scheduling
 
     cfg = _config(tmp_path)
@@ -64,7 +64,7 @@ async def test_task_action_disables_a_task_through_the_shared_controls(tmp_path)
     assistant.task_action("disable", "t1")
 
     assert scheduling.load(cfg.scheduled_tasks_path)[0]["enabled"] is False
-    assert assistant.list_tasks()[0]["next_fire"] == "disabled"
+    assert assistant.list_tasks()[0]["status"] == "disabled"
 
 
 async def test_task_action_rejects_an_unknown_action(tmp_path):

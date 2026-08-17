@@ -210,7 +210,7 @@ class Assistant:
         # Assigned after construction because it closes over assistant._registry, which is built below it.
         state.for_each_agent = for_each_agent
         assistant._state = state
-        assistant._tasks = state.task_controls
+        assistant._tasks = state.tasks
 
         assistant._registry = AgentRegistry(
             make_agent_builder(
@@ -241,7 +241,7 @@ class Assistant:
         # snapshots the provider base for later re-layering).
         assistant._registry.get(assistant._active_id)
 
-        state.arm_tasks()
+        state.tasks.arm_all()
         return assistant
 
     @property
@@ -345,15 +345,17 @@ class Assistant:
 
     def list_tasks(self) -> list[dict]:
         """The scheduled tasks as fields, for a front end that renders its own task rows."""
-        return self._tasks.list_tasks()
+        return self._tasks.list()
 
-    def task_action(self, action: str, id_or_name: str) -> str:
-        """Run one task lifecycle action, returning the sentence its equivalent tool would.
+    def task_action(self, action: str, id_or_name: str) -> None:
+        """Run one task lifecycle action on behalf of a front end.
 
         The action name reaches this from a front end, so it is looked up in a table rather than
-        dispatched on the string. Raises ``ValueError`` for anything not in it.
+        dispatched on the string. Raises ``ValueError`` for anything not in it, and ``TaskError`` for a
+        handle that does not resolve. Nothing is returned: a front end shows the refreshed task list,
+        not a sentence, and the sentences the tools return are written for a model.
         """
-        actions: dict[str, Callable[[], str]] = {
+        actions: dict[str, Callable[[], object]] = {
             "enable": lambda: self._tasks.set_enabled(id_or_name, True),
             "disable": lambda: self._tasks.set_enabled(id_or_name, False),
             "run": lambda: self._tasks.run_now(id_or_name),
@@ -362,7 +364,7 @@ class Assistant:
         run = actions.get(action)
         if run is None:
             raise ValueError(f"unknown task action {action!r}")
-        return run()
+        run()
 
     async def _maybe_push_conversations(self) -> None:
         """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""

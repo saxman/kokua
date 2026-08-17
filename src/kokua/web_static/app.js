@@ -137,14 +137,17 @@ newConvBtn.addEventListener("click", () => {
 
 // --- Scheduled tasks section --------------------------------------------------------------------
 
-// Seconds until the next firing, in the sidebar's units. The server also sends prose in `next_fire`,
-// which is what a task with nothing to count down to (disabled, past-due, unparseable) shows instead.
+// Seconds until the next firing, in the sidebar's units.
 function countdown(seconds) {
   if (seconds < 60) return "in " + Math.max(1, Math.round(seconds)) + "s";
   if (seconds < 3600) return "in " + Math.round(seconds / 60) + "m";
   if (seconds < 86400) return "in " + Math.round(seconds / 3600) + "h";
   return "in " + Math.round(seconds / 86400) + "d";
 }
+
+// A task with nothing to count down to. The server sends the reason as a `status` rather than as
+// prose, so the sidebar words it for a person and the agent's tools word it for a model.
+const STATUS_TEXT = { disabled: "disabled", past: "overdue", invalid: "bad schedule" };
 
 function scheduleText(schedule) {
   if (!schedule || !schedule.type) return "";
@@ -190,7 +193,7 @@ function taskRow(task) {
   const when = document.createElement("span");
   when.className = "task-when";
   const next = task.next_fire_seconds === null || task.next_fire_seconds === undefined
-    ? task.next_fire
+    ? STATUS_TEXT[task.status] || ""
     : countdown(task.next_fire_seconds);
   when.textContent = [scheduleText(task.schedule), next].filter(Boolean).join(" · ");
   text.appendChild(name);

@@ -196,28 +196,17 @@ class LiveState:
             client.close()
 
     @cached_property
-    def _scheduling(self) -> tuple[list, Callable[[], None], Any]:
-        """The scheduler tools, ``arm_all``, and the front-end task controls, built together.
+    def tasks(self) -> Any:
+        """The scheduled-task lifecycle, shared by the ``scheduling`` toolset and the web task panel.
 
-        ``make_scheduler_tools`` returns all three from one closure over the live scheduler, so they
-        cannot be built separately. The assistant needs ``arm_tasks`` at boot whether or not any agent
-        declares the scheduling toolset, since a persisted task must still fire.
+        One instance per process: it pairs each registry write with the matching scheduler (un)arming,
+        so two of them over one registry would let the panel disable a task the agent's copy keeps
+        firing. The assistant reaches for ``arm_all`` at boot whether or not any agent declares the
+        scheduling toolset, since a persisted task must still fire.
         """
-        from kokua.scheduling import make_scheduler_tools
+        from kokua.scheduling import TaskService
 
-        return make_scheduler_tools(self.scheduler, self.config.scheduled_tasks_path, self.proactive)
-
-    @property
-    def scheduler_tools(self) -> list:
-        return self._scheduling[0]
-
-    @property
-    def arm_tasks(self) -> Callable[[], None]:
-        return self._scheduling[1]
-
-    @property
-    def task_controls(self) -> Any:
-        return self._scheduling[2]
+        return TaskService(self.scheduler, self.config.scheduled_tasks_path, self.proactive)
 
 
 @dataclass(frozen=True)

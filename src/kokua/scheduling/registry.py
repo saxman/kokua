@@ -13,7 +13,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def _record_target(record: dict) -> str:
+def record_target(record: dict) -> str:
     """Return a task record's effective proactive-turn target: one of "active", "new", "task"."""
     return record.get("target") or "active"
 
