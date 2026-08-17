@@ -5,6 +5,14 @@ description, and a `build(ctx)` that returns tool callables. Every toolset an in
 came from, lives in one namespace. An agent's `tools` list names toolsets from that namespace, and the
 tools the agent can actually call are whatever those toolsets built.
 
+A toolset can also carry a `Workflow` instead of, or alongside, its tools: a turn strategy the user
+invokes with a `/`-command (`/plan` is the shipped example -- see
+[Architecture](../explanation/architecture.md#workflows)). Declaring the toolset is what grants the
+command, exactly as declaring it grants its tools, and only the **entry** agent's declaration counts,
+since a command arrives on the channel and only the entry agent has one. The command word must be a
+single lowercase token with no whitespace, and cannot be `stop` or `diag`, which are the assistant's
+own; two toolsets offering the same command is a startup error, not a silent shadowing.
+
 So there are two jobs here, and this guide covers both: declaring what an agent holds in `config.toml`,
 and writing a toolset of your own to put something new in the namespace.
 
@@ -36,7 +44,7 @@ from (`"stocks"`, not `"mcp:stocks"`), so this command is the one place provenan
 | Provider | What is in it |
 | --- | --- |
 | **AIMU capability** | the built-in tool groups (`web`, `fs`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`), plus `memory` and `documents` over AIMU's two stores and `skills` for skill authoring |
-| **core subsystem** | Kokua's own: `config`, `conversations`, `mcp-admin`, `scheduling` |
+| **core subsystem** | Kokua's own: `config`, `conversations`, `mcp-admin`, `planning`, `scheduling` |
 | **built-in toolset** | the two `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group: `aimu_agents`, `image` |
 | **skill** | one entry per skill in your skills folder, so an individual skill is declarable by name (see [add skills](add-skills.md)) |
 | **plugin** | every other `Toolset` installed under the `kokua.toolsets` entry-point group -- i.e. one a third party's package registered |
@@ -80,7 +88,7 @@ agent = "assistant"          # the entry agent, and the root of the delegation g
 [agents.assistant]
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
-tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "time"]
+tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "time"]
 delegates_to = ["researcher", "report-writer"]
 
 [agents.researcher]
@@ -126,7 +134,7 @@ An agent's full system message is: its own opener, then its toolsets' guidance i
 the delegation instructions if `delegates_to` is non-empty, and finally a "you are a lean supervisor,
 you MUST delegate" clause only when *every* toolset it declares is marked cross-cutting (something an
 agent holds to manage itself: memory, documents, skills, config, `mcp-admin`, scheduling,
-conversations, the clock). Give that agent one domain toolset and the lean clause disappears, since it
+conversations, `planning`, the clock). Give that agent one domain toolset and the lean clause disappears, since it
 would then contradict the tools the model can see.
 
 Note what `cross_cutting` is **not**: it is not a permission boundary. An agent whose table says
@@ -226,6 +234,23 @@ Four things to know about `build`:
   logged, and the toolset contributes nothing; the assistant still starts. Nothing in the UI says so.
 - **`guidance` is optional and appended to every agent that declares you**, so write it as instructions
   that make sense wherever the toolset lands, not as a description of one agent's job.
+
+### Or carry a workflow instead of tools
+
+Set `workflow=` on your `Toolset` and `build` can return no tools at all: the toolset exists solely to
+grant a turn strategy, the way [`toolsets/planning.py`](../../src/kokua/toolsets/planning.py) does for
+`/plan`. A workflow's `build` returns an `aimu.aio.AsyncRunner`. **Base tier** is any `AsyncRunner`, so
+AIMU's own `aimu.aio.workflows` (`Chain`, `Parallel`, `Router`, `EvaluatorOptimizer`,
+`PlanExecuteEvaluator`) work with just the declaration above and no adapter -- Kokua streams `run()`
+into the reply. **Rich tier** additionally implements `run_turn()` and is handed the channel, a slot for
+a human decision, and control of the agent's transcript, which is what deep planning needs to show
+phases and reviewer cards and save a clean turn.
+
+Two things to know before choosing a tier. A base-tier turn is **not persisted**: the runner appends
+nothing to the agent's own transcript, so the exchange is gone after a reload. And reaching the model as
+a callable tool via `AsyncRunner.as_tool()` needs your runner to actually *inherit* `aio.AsyncRunner`,
+not merely match its shape -- `as_tool()` is a concrete method the base class provides, not a name Kokua
+looks up. See [`workflows/protocol.py`](../../src/kokua/workflows/protocol.py) for the full contract.
 
 Kokua's own two toolsets register exactly this way in its
 [`pyproject.toml`](../../pyproject.toml). If the built-in path and the plugin path ever diverge, the
