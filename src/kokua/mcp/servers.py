@@ -1,11 +1,13 @@
-"""Remote-MCP connection management: the connect/attach helpers and the boot reconnect.
+"""Remote-MCP connection management: connect, attach, the runtime add/remove, and the boot reconnect.
 
 Split out of the assistant core (which only orchestrates); these functions touch the passed-in
-connections list, not `Assistant` state. Lives alongside `auth.py` (the OAuth flow). The agent-facing
-``add_mcp_server`` / ``remove_mcp_server`` tools built on top of these are in `tools.py`, per the
-``<subsystem>/tools.py`` convention. A runtime-added server is recorded straight into config.toml's
-``[[mcp.server]]`` (via config_store), so config.toml is the single source of servers to reconnect at
-the next startup.
+connections list, not `Assistant` state. Lives alongside `auth.py` (the OAuth flow). A runtime-added
+server is recorded straight into config.toml's ``[[mcp.server]]`` (via config_store), so config.toml is
+the single source of servers to reconnect at the next startup.
+
+Nothing here formats a sentence. ``add_server`` and ``remove_server`` return a result record or raise,
+and the ``mcp-admin`` toolset renders what the model reads -- including the long explanation of what a
+newly connected server can and cannot reach this session, which is presentation and belongs there.
 """
 
 from __future__ import annotations
@@ -15,40 +17,14 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
-from urllib.parse import urlparse
 
 from aimu import aio
 
 from kokua.config import AssistantConfig, MCPServerConfig
+from kokua.config import store as config_store
 from kokua.mcp.auth import Notify, build_chat_oauth
 
 logger = logging.getLogger(__name__)
-
-
-def name_from_url(url: str) -> str:
-    """A server name derived from its host, for a server added without one.
-
-    Names are the namespace an agent declares against, so every server needs one. A host is stable,
-    readable, and already unique per server in practice.
-    """
-    host = urlparse(url).hostname or "mcp"
-    return host.replace(".", "-")
-
-
-def disambiguate_name(base: str, used: set[str]) -> str:
-    """``base``, or ``base-2``, ``base-3``, ... -- the first not already in ``used``.
-
-    Two servers on one host (a service exposing several MCP endpoints under one domain) derive the same
-    ``name_from_url`` base; shared by every caller that turns a URL into a registry name (the
-    ``add_mcp_server`` config write and the ``--mcp`` CLI flag), so a config that names two collides the
-    same way regardless of which of them derived the name.
-    """
-    if base not in used:
-        return base
-    suffix = 2
-    while f"{base}-{suffix}" in used:
-        suffix += 1
-    return f"{base}-{suffix}"
 
 
 # Auth modes a server can be reconnected in at boot without a stored secret: unauthenticated, or the
@@ -171,6 +147,135 @@ async def attach_server(connections: list, url: str, client: Any, auth_mode: str
         )
     )
     return added_names
+
+
+class AlreadyConnected(Exception):
+    """This URL is already in the live connection list. Carries the url."""
+
+    def __init__(self, url: str):
+        super().__init__(url)
+        self.url = url
+
+
+class NotConnected(Exception):
+    """No live connection for this URL. Carries the url."""
+
+    def __init__(self, url: str):
+        super().__init__(url)
+        self.url = url
+
+
+class ConnectFailed(Exception):
+    """A connection (or its tool fetch) failed for a reason that is not an auth challenge.
+
+    Its message is the underlying failure's, so a caller can report the cause without unwrapping.
+    """
+
+    def __init__(self, url: str, cause: BaseException):
+        super().__init__(str(cause))
+        self.url = url
+        self.cause = cause
+
+
+@dataclass(frozen=True)
+class ServerAdded:
+    """The outcome of :func:`add_server`.
+
+    ``persisted`` is False for a bearer-token server, which stays session-only because its secret is
+    never written to disk. ``tool_names`` is everything the server exposes, not everything it newly
+    makes callable, which is the asymmetry with :class:`ServerRemoved`.
+    """
+
+    url: str
+    tool_names: list[str]
+    auth_mode: str
+    persisted: bool
+
+
+@dataclass(frozen=True)
+class ServerRemoved:
+    """The outcome of :func:`remove_server`.
+
+    ``freed_tool_names`` excludes any name a still-connected server also provides, since removing this
+    one did not actually take those away.
+    """
+
+    url: str
+    freed_tool_names: list[str]
+
+
+async def add_server(
+    connections: list,
+    url: str,
+    *,
+    bearer_token: Optional[str] = None,
+    notify: Notify,
+    oauth_storage_dir: Path,
+    config_path: Path,
+    for_each_agent: ForEachAgent,
+    refresh_workers: Optional[Callable] = None,
+) -> ServerAdded:
+    """Connect a remote MCP server at runtime and record it.
+
+    Nothing is mounted on any live agent: an agent's own tool list was built once, and this only records
+    the connection. ``refresh_workers``, fanned out over ``for_each_agent``, rebuilds each agent's
+    ``spawn_subagent`` so a worker declaring this server resolves it. A reconnectable server (see
+    :data:`RECONNECTABLE`) is written to config.toml so it returns on the next start.
+
+    Raises :class:`AlreadyConnected`, :class:`BearerTokenRequired`, or :class:`ConnectFailed`.
+    """
+    if any(conn.url == url for conn in connections):
+        raise AlreadyConnected(url)
+    try:
+        client, auth_mode = await connect_mcp(
+            url, bearer_token=bearer_token, notify=notify, oauth_storage_dir=oauth_storage_dir
+        )
+        added = await attach_server(connections, url, client, auth_mode)
+    except BearerTokenRequired:
+        raise
+    except Exception as exc:
+        raise ConnectFailed(url, exc) from exc
+    if refresh_workers is not None:
+        for_each_agent(refresh_workers)  # rebuild spawn_subagent so a worker declaring it resolves it
+    persisted = auth_mode in RECONNECTABLE
+    if persisted:
+        config_store.add_mcp_server(config_path, url)
+    return ServerAdded(url=url, tool_names=added, auth_mode=auth_mode, persisted=persisted)
+
+
+async def remove_server(
+    connections: list,
+    url: str,
+    *,
+    config_path: Path,
+    for_each_agent: ForEachAgent,
+    refresh_workers: Optional[Callable] = None,
+) -> ServerRemoved:
+    """Disconnect a server added earlier, forget it, and stop reconnecting it at startup.
+
+    Nothing is stripped from a live agent's own tool list, which this does not own; the change reaches
+    the next sub-agent spawned, via the same ``refresh_workers`` fan-out ``add_server`` uses.
+
+    Raises :class:`NotConnected`.
+    """
+    entry = next((conn for conn in connections if conn.url == url), None)
+    if entry is None:
+        raise NotConnected(url)
+
+    # `entry.tools` lists every tool name this server exposes, but a same-named tool from another
+    # still-connected server was never separately recorded; only report names this removal actually
+    # frees up.
+    still_owned = {name for conn in connections if conn is not entry for name in conn.tools}
+    freed = sorted(set(entry.tools) - still_owned)
+    connections.remove(entry)
+    if refresh_workers is not None:
+        for_each_agent(refresh_workers)  # rebuild spawn_subagent so a worker declaring it stops seeing it
+    try:
+        await entry.client.aclose()
+    except Exception:
+        logger.debug("Error closing MCP client for %s", url, exc_info=True)
+    config_store.remove_mcp_server(config_path, url)
+    return ServerRemoved(url=url, freed_tool_names=freed)
 
 
 def _resolve_server_token(server: MCPServerConfig) -> Optional[str]:

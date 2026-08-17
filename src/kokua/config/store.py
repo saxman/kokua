@@ -15,12 +15,42 @@ clobbered; that is accepted rather than guarded with file locking.
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 import tomlkit
 from tomlkit import TOMLDocument
 
 from kokua.config import file as settings
-from kokua.mcp.servers import disambiguate_name, name_from_url
+
+
+def name_from_url(url: str) -> str:
+    """A server name derived from its host, for a server added without one.
+
+    Names are the namespace an agent declares against, so every server needs one. A host is stable,
+    readable, and already unique per server in practice.
+    """
+    host = urlparse(url).hostname or "mcp"
+    return host.replace(".", "-")
+
+
+def disambiguate_name(base: str, used: set[str]) -> str:
+    """``base``, or ``base-2``, ``base-3``, ... -- the first not already in ``used``.
+
+    Two servers on one host (a service exposing several MCP endpoints under one domain) derive the same
+    ``name_from_url`` base; shared by every caller that turns a URL into a registry name (the
+    ``add_mcp_server`` config write and the ``--mcp`` CLI flag), so a config that names two collides the
+    same way regardless of which of them derived the name.
+
+    These two live with the write that mints the name rather than in ``mcp/servers.py``, where they used
+    to: ``config`` is the bottom layer and imports nothing above it, which is what lets
+    ``mcp/servers.py`` record a runtime-added server here.
+    """
+    if base not in used:
+        return base
+    suffix = 2
+    while f"{base}-{suffix}" in used:
+        suffix += 1
+    return f"{base}-{suffix}"
 
 
 def _load(path: Path) -> TOMLDocument:

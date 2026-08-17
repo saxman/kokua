@@ -8,26 +8,7 @@ from kokua.config import MCPServerConfig
 from kokua.mcp.servers import (
     _looks_like_auth_required,
     _looks_like_registration_unsupported,
-    disambiguate_name,
-    name_from_url,
 )
-
-
-def test_name_from_url_replaces_dots_in_the_host_with_hyphens():
-    assert name_from_url("https://broker.example.com/mcp") == "broker-example-com"
-
-
-def test_name_from_url_falls_back_to_mcp_when_there_is_no_host():
-    assert name_from_url("not-a-url") == "mcp"
-
-
-def test_disambiguate_name_returns_the_base_when_free():
-    assert disambiguate_name("stocks", set()) == "stocks"
-
-
-def test_disambiguate_name_appends_a_numeric_suffix_on_collision():
-    assert disambiguate_name("stocks", {"stocks"}) == "stocks-2"
-    assert disambiguate_name("stocks", {"stocks", "stocks-2"}) == "stocks-3"
 
 
 @pytest.mark.parametrize(
@@ -125,3 +106,149 @@ def test_resolve_server_token_warns_when_env_unset(monkeypatch, caplog):
 
 async def _noop_notify(message: str) -> None:
     pass
+
+
+# --- The runtime add/remove ------------------------------------------------------------------------
+
+
+class _FakeClient:
+    def __init__(self, tool_names=()):
+        self._tool_names = list(tool_names)
+        self.closed = False
+
+    async def as_tools(self):
+        return [_named(name) for name in self._tool_names]
+
+    async def aclose(self):
+        self.closed = True
+
+
+def _named(name):
+    def fn():
+        return None
+
+    fn.__name__ = name
+    return fn
+
+
+async def _noop_notify(message: str) -> None:
+    return None
+
+
+def _kwargs(tmp_path, **overrides):
+    base = {
+        "notify": _noop_notify,
+        "oauth_storage_dir": tmp_path / "oauth",
+        "config_path": tmp_path / "config.toml",
+        "for_each_agent": lambda fn: None,
+    }
+    base.update(overrides)
+    return base
+
+
+def _remove_kwargs(tmp_path, **overrides):
+    """remove_server needs no connect machinery, so it takes neither notify nor the OAuth dir."""
+    base = {"config_path": tmp_path / "config.toml", "for_each_agent": lambda fn: None}
+    base.update(overrides)
+    return base
+
+
+async def test_add_server_records_the_connection_and_persists_a_reconnectable_one(monkeypatch, tmp_path):
+    async def fake_connect(url, **kw):
+        return _FakeClient(["search_docs"]), "none"
+
+    monkeypatch.setattr(mcp, "connect_mcp", fake_connect)
+    connections = []
+
+    result = await mcp.add_server(connections, "https://svc/mcp", **_kwargs(tmp_path))
+
+    assert result.tool_names == ["search_docs"] and result.auth_mode == "none"
+    assert result.persisted is True
+    assert [conn.url for conn in connections] == ["https://svc/mcp"]
+    assert "https://svc/mcp" in (tmp_path / "config.toml").read_text(encoding="utf-8")
+
+
+async def test_add_server_keeps_a_bearer_server_out_of_the_config_file(monkeypatch, tmp_path):
+    """Its secret is never written to disk, so it cannot be reconnected at boot and is not recorded."""
+
+    async def fake_connect(url, **kw):
+        return _FakeClient([]), "bearer"
+
+    monkeypatch.setattr(mcp, "connect_mcp", fake_connect)
+
+    result = await mcp.add_server([], "https://svc/mcp", bearer_token="t", **_kwargs(tmp_path))
+
+    assert result.persisted is False
+    assert not (tmp_path / "config.toml").exists()
+
+
+async def test_add_server_rejects_a_url_already_connected(tmp_path):
+    connections = [mcp.ServerConnection(url="https://svc/mcp", client=None, tools=[], auth_mode="none")]
+
+    with pytest.raises(mcp.AlreadyConnected):
+        await mcp.add_server(connections, "https://svc/mcp", **_kwargs(tmp_path))
+
+
+async def test_add_server_wraps_a_connection_failure_but_not_a_bearer_challenge(monkeypatch, tmp_path):
+    async def refusing(url, **kw):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(mcp, "connect_mcp", refusing)
+    with pytest.raises(mcp.ConnectFailed) as failure:
+        await mcp.add_server([], "https://svc/mcp", **_kwargs(tmp_path))
+    assert "connection refused" in str(failure.value)
+
+    async def demanding(url, **kw):
+        raise mcp.BearerTokenRequired(url)
+
+    monkeypatch.setattr(mcp, "connect_mcp", demanding)
+    with pytest.raises(mcp.BearerTokenRequired):
+        await mcp.add_server([], "https://svc/mcp", **_kwargs(tmp_path))
+
+
+async def test_add_server_refreshes_every_live_agents_delegate(monkeypatch, tmp_path):
+    """A worker declaring the server resolves it on the next spawn, which is the only in-process reach."""
+
+    async def fake_connect(url, **kw):
+        return _FakeClient([]), "none"
+
+    monkeypatch.setattr(mcp, "connect_mcp", fake_connect)
+    refreshed = []
+
+    await mcp.add_server(
+        [],
+        "https://svc/mcp",
+        **_kwargs(tmp_path, for_each_agent=lambda fn: refreshed.append(fn)),
+        refresh_workers=lambda agent: None,
+    )
+
+    assert len(refreshed) == 1
+
+
+async def test_remove_server_closes_forgets_and_unpersists(tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[[mcp.server]]\nurl = "https://svc/mcp"\nname = "svc"\n', encoding="utf-8")
+    client = _FakeClient()
+    connections = [mcp.ServerConnection(url="https://svc/mcp", client=client, tools=["a"], auth_mode="none")]
+
+    result = await mcp.remove_server(
+        connections, "https://svc/mcp", **_remove_kwargs(tmp_path, config_path=config_path)
+    )
+
+    assert result.freed_tool_names == ["a"]
+    assert connections == [] and client.closed is True
+    assert "https://svc/mcp" not in config_path.read_text(encoding="utf-8")
+
+
+async def test_remove_server_reports_only_the_names_no_other_server_still_provides(tmp_path):
+    going = mcp.ServerConnection(url="https://a/mcp", client=_FakeClient(), tools=["shared", "mine"], auth_mode="none")
+    staying = mcp.ServerConnection(url="https://b/mcp", client=_FakeClient(), tools=["shared"], auth_mode="none")
+
+    result = await mcp.remove_server([going, staying], "https://a/mcp", **_remove_kwargs(tmp_path))
+
+    assert result.freed_tool_names == ["mine"]
+
+
+async def test_remove_server_rejects_an_unconnected_url(tmp_path):
+    with pytest.raises(mcp.NotConnected):
+        await mcp.remove_server([], "https://svc/mcp", **_remove_kwargs(tmp_path))

@@ -22,7 +22,7 @@ from . import plugins
 from .aimu_compat import AimuVersionError, require_aimu
 from kokua.config import file as settings
 from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
-from kokua.mcp.servers import disambiguate_name, name_from_url
+from kokua.config.store import disambiguate_name, name_from_url
 from .logging_setup import configure_logging
 
 

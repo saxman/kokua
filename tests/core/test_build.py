@@ -167,8 +167,8 @@ async def test_a_toolset_name_two_providers_claim_refuses_to_start_as_a_config_e
 ENTRY_AGENT_TOOLS = {
     "kokua core/tools.py": {"list_conversations", "read_conversation", "search_conversations"},
     "kokua config/tools.py": {"read_config", "update_config"},
-    "kokua mcp/tools.py": {"add_mcp_server", "remove_mcp_server"},
-    "kokua scheduling/tools.py": {
+    "kokua toolsets/mcp_admin.py": {"add_mcp_server", "remove_mcp_server"},
+    "kokua toolsets/scheduling.py": {
         "schedule_task",
         "list_scheduled_tasks",
         "get_scheduled_task",

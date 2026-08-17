@@ -132,8 +132,9 @@ def make_agent_builder(
     from kokua.core.messages import expand_message_images
 
     # Assigned here, once, rather than by the caller: the mcp-admin toolset reads this off the context
-    # instead of importing this module directly (this module imports mcp.tools, so that import would be
-    # circular), and every agent this builder produces must share the one callback.
+    # instead of importing this module directly (this module reaches toolsets.mcp_admin through
+    # toolsets.agents, so that import would be circular), and every agent this builder produces must
+    # share the one callback.
     state.refresh_workers = lambda agent: rebuild_delegation_tool(agent, state)
 
     def build(conversation_id: str) -> aio.SkillAgent:

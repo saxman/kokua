@@ -6,7 +6,7 @@ second declaration that could drift from the first.
 
 from kokua.config.tools import TOOLSET as CONFIG_TOOLSET
 from kokua.core.tools import TOOLSET as CONVERSATIONS_TOOLSET
-from kokua.mcp.tools import TOOLSET as MCP_TOOLSET
+from kokua.toolsets.mcp_admin import TOOLSET as MCP_TOOLSET
 from kokua.toolsets.scheduling import TOOLSET as SCHEDULING_TOOLSET
 from kokua.toolsets.registry import Toolset
 

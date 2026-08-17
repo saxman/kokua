@@ -134,3 +134,24 @@ def test_remove_mcp_server_absent_returns_false(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[[mcp.server]]\nurl = "https://a/mcp"\n', encoding="utf-8")
     assert config_store.remove_mcp_server(path, "https://gone/mcp") is False
+
+
+# The names an [[mcp.server]] entry is minted with. They live here, with the write, so `config`
+# imports nothing above it and `mcp/servers.py` can record a runtime-added server through this module.
+
+
+def test_name_from_url_replaces_dots_in_the_host_with_hyphens():
+    assert config_store.name_from_url("https://broker.example.com/mcp") == "broker-example-com"
+
+
+def test_name_from_url_falls_back_to_mcp_when_there_is_no_host():
+    assert config_store.name_from_url("not-a-url") == "mcp"
+
+
+def test_disambiguate_name_returns_the_base_when_free():
+    assert config_store.disambiguate_name("stocks", set()) == "stocks"
+
+
+def test_disambiguate_name_appends_a_numeric_suffix_on_collision():
+    assert config_store.disambiguate_name("stocks", {"stocks"}) == "stocks-2"
+    assert config_store.disambiguate_name("stocks", {"stocks", "stocks-2"}) == "stocks-3"
