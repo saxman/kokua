@@ -123,3 +123,24 @@ def test_a_toolset_may_carry_a_workflow():
 
 def test_a_toolset_carries_no_workflow_by_default():
     assert Toolset(name="plain", description="Plain.", build=lambda ctx: []).workflow is None
+
+
+def test_a_toolset_declares_settings_with_defaults():
+    from kokua.toolsets.registry import Setting, Toolset
+
+    toolset = Toolset(
+        name="planning",
+        description="P.",
+        build=lambda ctx: [],
+        settings=(Setting("review_rounds", int, 2), Setting("plan_review", bool, False, hot=True)),
+    )
+
+    assert [s.key for s in toolset.settings] == ["review_rounds", "plan_review"]
+    assert toolset.settings[0].hot is False
+    assert toolset.settings[1].hot is True
+
+
+def test_a_toolset_declares_no_settings_by_default():
+    from kokua.toolsets.registry import Toolset
+
+    assert Toolset(name="plain", description="P.", build=lambda ctx: []).settings == ()

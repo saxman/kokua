@@ -9,7 +9,7 @@ name is a startup error rather than a silent shadowing, since the loser would va
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Optional, Sequence
 
 if TYPE_CHECKING:
     from kokua.toolsets.context import ToolsetContext
@@ -19,6 +19,29 @@ if TYPE_CHECKING:
 class ToolsetError(RuntimeError):
     """A toolset could not be registered or resolved. Carries an actionable message: which name, which
     agent declared it, and what the valid choices are."""
+
+
+@dataclass(frozen=True)
+class Setting:
+    """One ``config.toml`` key a toolset owns.
+
+    The section is not named here: it is always the toolset's own name, which is what makes two
+    toolsets unable to claim one section. The toolset namespace already rejects a duplicate name, so it
+    rejects a duplicate section for free.
+
+    ``hot`` means the setting can change without a restart, reaching the running session through the
+    settings panel and ``update_config``. Being flagged here *is* what makes it hot; there is no second
+    list to keep in step.
+
+    This is the author's declaration, deliberately separate from ``config.table.RuntimeSetting``, which
+    is the table entry the applier and the persist path drive off. A toolset author should not have to
+    know about ``AssistantConfig`` attribute names or channel mirroring to own a setting.
+    """
+
+    key: str
+    kind: type
+    default: Any
+    hot: bool = False
 
 
 @dataclass(frozen=True)
@@ -48,6 +71,10 @@ class Toolset:
     strategy is declared exactly the way a tool is. A workflow-bearing toolset may still return tools
     from ``build``, and that is how the same workflow reaches the model as a tool: return
     ``runner.as_tool(...)``.
+
+    ``settings`` are the ``config.toml`` keys this toolset owns, in its own ``[<name>]`` section. Their
+    values reach ``build`` through ``ctx.settings`` and a workflow through its context, so a capability
+    ships its configuration alongside the code that reads it.
     """
 
     name: str
@@ -57,6 +84,7 @@ class Toolset:
     cross_cutting: bool = False
     entry_point_only: bool = False
     workflow: Optional["Workflow"] = None
+    settings: tuple[Setting, ...] = ()
 
 
 class ToolsetRegistry(dict):
