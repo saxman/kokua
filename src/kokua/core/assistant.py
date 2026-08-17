@@ -95,6 +95,9 @@ class Assistant:
         self._tracker = TurnTracker()
         # A per-turn sequence id for the lifecycle log lines.
         self._turn_seq: int = 0
+        # The workflow commands this assistant answers, by command word. Built by create() from the
+        # entry agent's declared toolsets; empty until then, which no serve loop can observe.
+        self._workflows: dict[str, object] = {}
         # Tool approval and a workflow's own decision: each a single-slot request the serve loop
         # resolves with the user's next message. Both are lock-guarded, so concurrent tool calls (or
         # concurrent workflow turns) can never clobber the slot the serve loop is about to resolve.
@@ -125,7 +128,7 @@ class Assistant:
             self._ui,
             self._gate,
             config,
-            review_plan=self._review_plan,
+            decide=self._human.decide,
             push_conversations=self._maybe_push_conversations,
             delete_conversation=self.delete_conversation,
         )
@@ -138,13 +141,16 @@ class Assistant:
         # pulls in kokua.core.transcripts -- a submodule of this package -- and importing it triggers
         # kokua/core/__init__ to run, which imports this module. A top-level import here would close
         # that cycle.
-        from kokua.toolsets.agents import unreferenced_toolsets, validated_registry
+        from kokua.toolsets.agents import build_command_map, unreferenced_toolsets, validated_registry
 
         # Built and validated before anything else in this method, because everything else touches
         # something: the next statements open a session store (which mints and persists an empty session)
         # and connect to remote servers. An unknown toolset name, a missing entry agent, or a delegation
         # cycle therefore fails naming the offending value, with nothing written and nothing connected.
         registry = validated_registry(config)
+        # Built here rather than in __init__ because it needs the validated registry, and here rather
+        # than after the store is opened so a collision fails before anything is written.
+        commands = build_command_map(config, registry)
 
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
@@ -157,6 +163,7 @@ class Assistant:
         # Construct the assistant first so the registry's builder can bind its approval gate: agents are
         # built lazily (on first get), by which point assistant._approve exists.
         assistant = cls(channel, scheduler, store, config)
+        assistant._workflows = commands
         initial_id = assistant._book.adopt_most_recent()
         # config.toml is the single source of settings: the panel and update_config write it, and the
         # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
@@ -212,6 +219,8 @@ class Assistant:
         state.for_each_agent = for_each_agent
         assistant._state = state
         assistant._tasks = state.tasks
+        # The workflow context needs the shared toolset state, which does not exist until here.
+        assistant._turns.state = state
 
         assistant._registry = AgentRegistry(
             make_agent_builder(
@@ -408,20 +417,26 @@ class Assistant:
                 if text == "/diag":
                     await self._ui.send(self._diag_report())
                     continue
-                # While an approval or plan review is outstanding, the next message is its answer,
-                # not a new turn. (A `/stop` above still takes priority, cancelling the waiting turn.)
+                # While an approval or a workflow decision is outstanding, the next message is its
+                # answer, not a new turn. (A `/stop` above still takes priority, cancelling the waiting
+                # turn.)
                 if self._human.resolve_reply(raw, text):
                     continue
-                # `/plan <task>` invokes deep planning for this one turn (the web UI's Plan toggle sends
-                # exactly this). Any other message runs a normal, unplanned turn.
-                plan_turn = False
-                if text == "/plan" or text.startswith("/plan "):
-                    task = raw.strip()[len("/plan") :].strip()
-                    if not task:
-                        await self._ui.send("Usage: /plan <task>")
-                        continue
-                    msg = replace(msg, text=task)
-                    plan_turn = True
+                # A workflow command runs this one turn through that workflow (the web UI's Plan
+                # toggle sends "/plan <task>", which is exactly this path). Any other message runs a
+                # plain turn. Which commands exist follows from what the entry agent declares, so a
+                # capability the config did not grant has no command here.
+                workflow = None
+                if text.startswith("/"):
+                    word = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
+                    candidate = self._workflows.get(word)
+                    if candidate is not None:
+                        task = raw.strip()[len(word) + 1 :].strip()
+                        if not task:
+                            await self._ui.send(f"Usage: {candidate.usage}")
+                            continue
+                        msg = replace(msg, text=task)
+                        workflow = candidate
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. The gate still serializes same-conversation turns (a proactive turn
                 # on this conversation can't interleave); different conversations' turns don't block
@@ -432,7 +447,7 @@ class Assistant:
                 self._turn_seq += 1
                 preview = (msg.text or "").strip()[:120]
                 logger.info("turn %d submitted for %s: %r", tid, conversation_id, preview)
-                handle = RunHandle.start(self._handle(msg, conversation_id=conversation_id, plan=plan_turn, tid=tid))
+                handle = RunHandle.start(self._handle(msg, conversation_id=conversation_id, workflow=workflow, tid=tid))
                 self._tracker.add(conversation_id, TurnInfo(handle=handle, started=time.monotonic(), preview=preview))
                 handle.task.add_done_callback(lambda _t, cid=conversation_id, h=handle: self._tracker.remove_if(cid, h))
         finally:
@@ -445,35 +460,10 @@ class Assistant:
     async def _approve(self, name: str, arguments: dict) -> bool:
         return await self._human.approve(name, arguments)
 
-    async def _review_plan(self, plan_text: str, critique: Optional[list[str]] = None) -> Optional[str]:
-        """Bridge `TurnRunner`'s planning-specific review callback to the generalized decision slot.
-
-        `TurnRunner` (and the `PlanRunner` it hands this to) still expect a `review_plan(plan_text,
-        critique)` callable speaking planning's own approve/edit/reject vocabulary. That vocabulary
-        belongs to the planning workflow, not the core, but the workflow has not been wired in to call
-        `self._human.decide` itself yet, so this is a temporary shim.
-        """
-
-        def parse_plan_reply(raw: str, text: str) -> Optional[str]:
-            if text in ("approve", "yes", "y"):
-                return plan_text
-            if text in ("reject", "no", "n"):
-                return None
-            if text.startswith("edit:"):
-                return raw.split(":", 1)[1].strip() or plan_text
-            return raw.strip()
-
-        return await self._human.decide(
-            lambda: self._ui.ask_plan_review(plan_text, critique),
-            parse_plan_reply,
-            default=None,
-            context=plan_text,
-        )
-
     async def _handle(
-        self, msg: ChannelMessage, *, conversation_id: str, plan: bool = False, tid: Optional[int] = None
+        self, msg: ChannelMessage, *, conversation_id: str, workflow=None, tid: Optional[int] = None
     ) -> None:
-        await self._turns.reactive(msg, conversation_id=conversation_id, plan=plan, tid=tid)
+        await self._turns.reactive(msg, conversation_id=conversation_id, workflow=workflow, tid=tid)
 
     def _diag_report(self) -> str:
         return diag_report(

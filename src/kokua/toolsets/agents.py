@@ -18,7 +18,16 @@ from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.toolsets.builtin import BUILTIN_TOOLSETS
 from kokua.toolsets.context import LiveState, ToolsetContext
 from kokua.toolsets.core import CORE_TOOLSETS
-from kokua.toolsets.registry import Toolset, ToolsetError, ToolsetRegistry, build_tools, register, select
+from kokua.toolsets.registry import (
+    Toolset,
+    ToolsetError,
+    ToolsetRegistry,
+    build_tools,
+    register,
+    select,
+    workflows_of,
+)
+from kokua.workflows import Workflow
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +215,42 @@ def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
         raise ConfigError(str(error)) from error
     validate_agents(config, registry)
     return registry
+
+
+# Commands the serve loop owns and a workflow therefore cannot claim. Checked at startup, because a
+# workflow silently shadowed by /stop would look like a workflow that simply never runs.
+RESERVED_COMMANDS = frozenset({"stop", "diag"})
+
+
+def build_command_map(config: AssistantConfig, registry: ToolsetRegistry) -> dict[str, "Workflow"]:
+    """The commands the entry agent's declared toolsets offer, by command word.
+
+    Only the entry agent's, because a command arrives on the channel and only that agent has one; a
+    spawned worker declaring a workflow-bearing toolset gets the toolset's tools and no command.
+
+    Collisions raise rather than resolve. A workflow shadowed by a reserved command, or by another
+    workflow, would present as one that inexplicably never runs, and the config naming both is the
+    thing that has to change.
+    """
+    entry = config.agents[config.entry_agent]
+    toolsets = select(entry.tools, registry, agent=config.entry_agent, entry_point=config.entry_agent)
+    commands: dict[str, Workflow] = {}
+    claimed_by: dict[str, str] = {}
+    for toolset_name, workflow in workflows_of(toolsets):
+        if workflow.command in RESERVED_COMMANDS:
+            raise ConfigError(
+                f"toolset {toolset_name!r} offers the /{workflow.command} command, which is reserved by "
+                "the assistant itself. Rename the workflow's command."
+            )
+        if workflow.command in commands:
+            raise ConfigError(
+                f"toolsets {claimed_by[workflow.command]!r} and {toolset_name!r} both offer the "
+                f"/{workflow.command} command. Rename one, or drop one from "
+                f"[agents.{config.entry_agent}].tools."
+            )
+        commands[workflow.command] = workflow
+        claimed_by[workflow.command] = toolset_name
+    return commands
 
 
 def _reject_cycles(config: AssistantConfig) -> None:
