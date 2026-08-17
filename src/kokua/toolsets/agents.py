@@ -143,8 +143,8 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     switch rather than a naming switch: with it off, a config naming a plugin toolset fails at startup
     with the unknown-name error rather than starting an agent quietly missing a capability.
 
-    Discovered plugins are split by which distribution registered them: Kokua's own five (example,
-    aimu_agents, pdf, image, email) get ``_BUILTIN_PLUGIN_PROVIDER`` rather than ``_PLUGIN_PROVIDER``, so
+    Discovered plugins are split by which distribution registered them: Kokua's own two (aimu_agents,
+    image) get ``_BUILTIN_PLUGIN_PROVIDER`` rather than ``_PLUGIN_PROVIDER``, so
     ``unreferenced_toolsets`` does not warn about ships-in-the-box toolsets the shipped config simply
     never named. Both groups are still built with the same failure tolerance: the split is about what
     counts as news when unreferenced, not about how much this codebase trusts its own plugin code.

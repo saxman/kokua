@@ -95,7 +95,7 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 
 ### Deep planning
 
-- **[Plan before doing](src/kokua/planning/).** When you ask for it, the assistant drafts an explicit plan first -- which tools, skills, and MCP services it will use, what it will search for, where it needs to build a skill or connect a server -- then carries it out. Planning is per request, not a global mode: use the **Plan** toggle beside the message box, or send `/plan <task>` (which also works in the CLI).
+- **[Plan before doing](src/kokua/workflows/planning/).** When you ask for it, the assistant drafts an explicit plan first -- which tools, skills, and MCP services it will use, what it will search for, where it needs to build a skill or connect a server -- then carries it out. Planning is per request, not a global mode: use the **Plan** toggle beside the message box, or send `/plan <task>` (which also works in the CLI).
 - **Human review.** Enable *Review the plan before executing* to pause a planned turn for your Approve / Edit / Reject; otherwise the plan runs automatically.
 - **Adversarial review.** An independent reviewer agent with no conversation context can critique the plan (Kokua re-plans on rejection) and/or the final answer before you see it (Kokua revises, up to `review_rounds`). Both are off by default and combine with human review, whose prompt shows you the critique. Reviewing the result means the answer cannot stream live: the agentic loop still streams, but the answer appears only once it passes.
 - **Reviewers check their claims.** Each reviewer is a tool-using agent that runs a bounded assessment over a curated verification toolset (current date/time, web lookup, arithmetic) before returning a verdict, so it can confirm recency and numeric claims instead of rejecting what it cannot verify from the request alone. The toolset excludes your memory, documents, skills, and MCP servers, keeping the reviewer an independent critic with no access to your state, and excludes `execute_python` because a reviewer cannot be approval-gated (see [Security](#security)).
@@ -129,7 +129,7 @@ agent = "assistant"          # which table below is the agent you talk to
 [agents.assistant]
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
-tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "time"]
+tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "time"]
 delegates_to = ["researcher", "coder", "generalist"]
 ```
 
@@ -201,7 +201,7 @@ That last line is what CI's `package` job runs before installing the wheel into 
 core/         the transport-agnostic runtime: assistant, conversations, turns, interaction,
               settings_runtime, diagnostics, build, agent_registry, turn_gate, messages, errors
 config/       the settings schema, the TOML file, the writers, the runtime-settings table
-planning/     the /plan pipeline and the context-free reviewer agents
+workflows/    the workflow protocol (the two tiers) and planning/, the /plan pipeline it carries
 mcp/          remote MCP servers and their OAuth
 scheduling/   recurrence math, the durable task registry, the agent-facing tools
 channels/     ChannelUI plus the concrete channels

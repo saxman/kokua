@@ -322,6 +322,33 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   is deletable too. Deleting the conversation a `target="task"` record remembers is safe -- its next
   firing mints a fresh one rather than failing.
 
+### Workflows: a pluggable turn strategy
+
+- **A `Toolset` can carry a `Workflow`, a named turn strategy, instead of (or alongside) tools.**
+  Declaring that toolset in an agent's `tools` is what gives the agent the workflow's `/`-command,
+  resolved from the same toolset registry every other capability is -- a turn strategy is granted the
+  same way a tool is, and no code path grants one a config did not declare. Deep planning, described
+  below, is the first workflow and is no longer a hardcoded core feature.
+- **`[agents.*].tools` must name `planning` for `/plan` to exist**, on the web Plan toggle as much as
+  the CLI. An existing `config.toml` that predates this release and does not list it loses the command
+  with **no startup warning**, because a core toolset (unlike a third party's) is deliberately exempt
+  from the unreferenced-toolset warning below. The fix is one line: add `"planning"` to the entry
+  agent's `tools`.
+- **A third party ships a workflow exactly the way it ships a toolset**, through the `kokua.toolsets`
+  entry-point group -- no separate mechanism for a turn strategy versus a tool.
+- **Two tiers.** A workflow builds an `aimu.aio.AsyncRunner`, so any of AIMU's own
+  `aimu.aio.workflows` runners (`Chain`, `Parallel`, `Router`, `EvaluatorOptimizer`,
+  `PlanExecuteEvaluator`) works as a base-tier workflow with no adapter: Kokua streams its `run()`
+  into the reply. **A base-tier turn is not persisted**: the runner appends nothing to the agent's own
+  transcript, so there is no message to anchor the turn to, and the exchange is gone after a reload.
+  That is documented behavior a base-tier workflow author needs to know going in, not a bug to file.
+  The rich tier (a runner that also implements `run_turn()`) gets the channel, the human-decision
+  slot, and control of the transcript instead, which is what lets deep planning persist a planned turn
+  as a plain user/assistant pair.
+- `AssistantConfig` is unchanged in this release: planning's toggles (`plan_review`,
+  `plan_review_agent`, `result_review`, `review_rounds`, `show_reasoning`) still live on it directly.
+  Moving workflow-owned settings into their own table is the next release's work.
+
 ### Deep planning and adversarial review
 
 - **Planning is per request, not a global mode**: the web UI's Plan toggle beside the message box (a
@@ -529,13 +556,13 @@ notice on startup.
 
 ### Internals and development
 
-- `src/kokua/` is grouped by subsystem -- `core/`, `config/`, `planning/`, `mcp/`, `scheduling/`,
+- `src/kokua/` is grouped by subsystem -- `core/`, `config/`, `workflows/`, `mcp/`, `scheduling/`,
   `channels/`, `frontends/`, `toolsets/` -- and `tests/` mirrors it exactly.
 - `Assistant` is a composition root and the serve loop; it delegates to `ConversationBook` (store +
   agent cache + active pointer), `TurnRunner`, `HumanGate`, `SettingsApplier`, and `ChannelUI`.
   `ChannelUI` is the one adapter that probes each optional channel capability once and gives every rich
   frame a documented fallback, so there is no `isinstance(channel, WebChannel)` in `core/` or
-  `planning/`. `channels/protocol.py` declares the rich surface for documentation and typing.
+  `workflows/`. `channels/protocol.py` declares the rich surface for documentation and typing.
 - The six principles that decide what belongs in the core, each with the code that backs it, are in
   [docs/explanation/design-principles.md](docs/explanation/design-principles.md); the architecture
   narrative is in [docs/explanation/architecture.md](docs/explanation/architecture.md).

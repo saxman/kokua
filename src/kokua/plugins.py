@@ -11,7 +11,7 @@ registers an entry point, with no change to Kokua's core:
     [project.entry-points."kokua.toolsets"]
     weather = "my_weather_pack:TOOLSET"
 
-The built-in `cli` / `web` front ends and the `example` toolset are registered exactly this
+The built-in `cli` / `web` front ends and the `image` toolset are registered exactly this
 way in Kokua's own pyproject. A hardcoded fallback registry also lists the built-in front ends
 so the app still works when run from a source checkout that hasn't been ``pip install``-ed (no
 entry-point metadata yet).
@@ -33,10 +33,10 @@ from kokua.toolsets import Toolset, ToolsetContext
 FRONTEND_GROUP = "kokua.frontends"
 TOOLSET_GROUP = "kokua.toolsets"
 
-# This project's own distribution name (see kokua/__init__.py's version("kokua")). Kokua's five built-in
-# toolsets (example, aimu_agents, pdf, image, email) register under TOOLSET_GROUP exactly as a
-# third-party plugin would; own_distribution_toolset_names tells those apart from a real third party's by
-# checking which distribution registered the entry point, so a sixth one added later needs no update here.
+# This project's own distribution name (see kokua/__init__.py's version("kokua")). Kokua's own built-in
+# toolsets (aimu_agents, image) register under TOOLSET_GROUP exactly as a third-party plugin would;
+# own_distribution_toolset_names tells those apart from a real third party's by checking which
+# distribution registered the entry point, so a third one added later needs no update here.
 _OWN_DISTRIBUTION = "kokua"
 
 __all__ = [

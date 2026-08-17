@@ -142,9 +142,8 @@ class _RecordingRunner:
 
 async def _run_one_message(assistant: Assistant, channel: FakeChannel) -> None:
     """Drive the serve loop over ``channel``'s fixed inbound list, then let whatever turn it started
-    finish. ``FakeChannel.receive()`` is a finite generator (no ``/stop`` needed to end it), so this
-    never hangs the way driving a real conversation's ``/plan`` used to before the planning toolset
-    existed (see the task report)."""
+    finish. ``FakeChannel.receive()`` is a finite generator (no ``/stop`` needed to end it), so a
+    workflow-dispatching turn (e.g. ``/plan``) completing normally is enough to end this helper."""
     await assistant._serve_channel()
     info = assistant._tracker.get(assistant._active_id)
     if info is not None:

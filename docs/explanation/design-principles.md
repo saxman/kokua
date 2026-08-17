@@ -22,7 +22,7 @@ and [frontends/web.py](../../src/kokua/frontends/web.py) share it unchanged.
 resolves it to exactly one documented fallback, so no caller asks `getattr(channel, "send_x", None)`
 for itself. [`channels/protocol.py`](../../src/kokua/channels/protocol.py) declares the rich surface
 for documentation and typing, and nothing does `isinstance` against it. There is no
-`isinstance(channel, WebChannel)` anywhere in `core/` or `planning/`. Where a capability changes what
+`isinstance(channel, WebChannel)` anywhere in `core/` or `workflows/`. Where a capability changes what
 the core *does* rather than how it renders, it is a named boolean -- `supports_conversations`,
 `supports_phases`, `supports_streamed_activity` -- not an inline `getattr`.
 
@@ -41,9 +41,12 @@ built-in front ends lazily, and `kokua/__init__.py` exposes `Assistant` through 
 [`toolsets/image.py`](../../src/kokua/toolsets/image.py) exists as the template.
 
 This now reaches Kokua's *own* capabilities, not just third-party ones. `config`, `conversations`,
-`mcp-admin`, and `scheduling` are each a `Toolset` declared in a `toolsets/` module that wraps one
-subsystem's logic as agent tools, indexed in [`toolsets/core.py`](../../src/kokua/toolsets/core.py);
-memory, documents, and
+`mcp-admin`, `planning`, and `scheduling` are each a `Toolset` declared in a `toolsets/` module,
+indexed in [`toolsets/core.py`](../../src/kokua/toolsets/core.py). Four of the five wrap one
+subsystem's logic as agent tools; the fifth, `planning`, wraps a `Workflow` instead -- a named turn
+strategy an agent earns by declaring the toolset exactly the way it earns a tool, resolved into the
+agent's `/`-command from that same declared `tools` list (see
+[architecture.md](architecture.md#workflows)). memory, documents, and
 skills are toolsets wrapping AIMU's own factories in
 [`toolsets/builtin.py`](../../src/kokua/toolsets/builtin.py). All of them land in the same registry
 namespace a plugin does. `kokua --list-toolsets` prints that namespace grouped by provider, and the
@@ -147,10 +150,10 @@ injectable and why the builders are free functions rather than methods on the as
 
 *How this cashes out:* `Assistant.create(config, channel, client=..., client_factory=...)` exists so
 a test can inject. [`core/build.py`](../../src/kokua/core/build.py) is free functions taking a config
-and returning parts. `planning/reviewers.py`'s `_reviewer_agent` is factored out, in its own words,
-"so tests can monkeypatch it". `pytest`'s `addopts` deselect `-m e2e`; the Playwright suite skips
-rather than errors when the extra is absent. `tests/helpers.py` vendors `MockAsyncModelClient` so the
-suite does not reach into the sibling AIMU checkout.
+and returning parts. `workflows/critics.py`'s review functions are kept module-level, in the module's
+own words, "so tests can monkeypatch them". `pytest`'s `addopts` deselect `-m e2e`; the Playwright
+suite skips rather than errors when the extra is absent. `tests/helpers.py` vendors
+`MockAsyncModelClient` so the suite does not reach into the sibling AIMU checkout.
 
 ## What follows from these principles
 
