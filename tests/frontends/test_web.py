@@ -1295,12 +1295,12 @@ def test_ws_plan_review_reject_skips_execution(tmp_path):
 def test_ws_plan_review_agent_surfaces_critique_to_human(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
 
-    from kokua.planning.reviewers import Verdict
+    from kokua.workflows.critics import Verdict
 
     async def reject(*a, **k):
         return Verdict(approved=False, issues=["needs a verification step"])
 
-    monkeypatch.setattr("kokua.planning.reviewers.review_plan", reject)
+    monkeypatch.setattr("kokua.workflows.planning.critics.review_plan", reject)
     app = build_app(
         _config(tmp_path, plan_review=True, plan_review_agent=True, review_rounds=0),
         client=MockAsyncModelClient(["THE PLAN"]),
@@ -1316,12 +1316,12 @@ def test_ws_plan_review_agent_surfaces_critique_to_human(tmp_path, monkeypatch):
 def test_ws_subagent_frames_live_and_replayed(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
 
-    from kokua.planning.reviewers import Verdict
+    from kokua.workflows.critics import Verdict
 
     async def reject(*a, **k):
         return Verdict(approved=False, issues=["needs a verification step"])
 
-    monkeypatch.setattr("kokua.planning.reviewers.review_plan", reject)
+    monkeypatch.setattr("kokua.workflows.planning.critics.review_plan", reject)
     # review_rounds=0 -> one plan review (rejected), then proceed autonomously and execute.
     app = build_app(
         _config(tmp_path, plan_review_agent=True, review_rounds=0),

@@ -8,7 +8,8 @@ from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
 from tests.channels import example_agents
-from kokua.planning.reviewers import Verdict
+from kokua.toolsets.planning import PLANNING_WORKFLOW
+from kokua.workflows.critics import Verdict
 
 from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType
@@ -79,8 +80,8 @@ def _patch_reviewer(monkeypatch, which, verdicts):
     async def fake_finalize(_client):
         return next(seq)
 
-    monkeypatch.setattr(f"kokua.planning.reviewers.stream_{which}", fake_open)
-    monkeypatch.setattr("kokua.planning.reviewers.finalize_verdict", fake_finalize)
+    monkeypatch.setattr(f"kokua.workflows.planning.critics.stream_{which}", fake_open)
+    monkeypatch.setattr("kokua.workflows.critics.finalize_verdict", fake_finalize)
 
 
 REJECT = Verdict(approved=False, issues=["needs work"])
@@ -93,7 +94,7 @@ async def test_verbose_no_reviewers_streams_phases_and_commits(tmp_path):
     assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     assert [label for label, _ in channel.phases] == ["Planner", "Executor"]
@@ -117,7 +118,7 @@ async def test_verbose_plan_review_streams_and_records_trace(tmp_path, monkeypat
     )
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     labels = [label for label, _ in channel.phases]
@@ -144,7 +145,7 @@ async def test_verbose_result_review_streams_every_version(tmp_path, monkeypatch
     )
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     labels = [label for label, _ in channel.phases]
@@ -172,7 +173,7 @@ async def test_show_reasoning_without_phase_channel_uses_normal_path(tmp_path):
     assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     assert channel.phases == []  # verbose path skipped

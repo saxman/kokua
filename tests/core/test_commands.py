@@ -11,7 +11,7 @@ from aimu.models import StreamChunk, StreamingContentType
 from kokua.config import AssistantConfig
 from kokua.config.file import ConfigError
 from kokua.core.assistant import Assistant
-from kokua.toolsets.agents import build_command_map
+from kokua.toolsets.agents import build_command_map, validated_registry
 from kokua.toolsets.registry import Toolset, register
 from kokua.workflows import Workflow
 from tests.channels import FakeChannel, _config, example_agents
@@ -33,6 +33,16 @@ def test_a_declared_workflow_gets_its_command():
     registry = _registry(Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("plan")))
 
     assert set(build_command_map(config, registry)) == {"plan"}
+
+
+def test_the_shipped_entry_agent_earns_the_plan_command():
+    """The one link between the shipped `[agents.assistant].tools` and `/plan` existing at all: drop
+    "planning" from that list and the command (and the web UI's Plan toggle) silently stops working."""
+    config = AssistantConfig(agents=example_agents(), entry_agent="assistant")
+
+    commands = build_command_map(config, validated_registry(config))
+
+    assert commands["plan"].usage == "/plan <task>"
 
 
 def test_an_undeclared_workflow_gets_no_command():
@@ -174,7 +184,8 @@ async def test_extra_spaces_after_the_slash_do_not_corrupt_the_task(tmp_path):
 async def test_an_unrecognized_command_runs_a_plain_turn(tmp_path):
     channel = FakeChannel(inbound=["/foo bar"])
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["a reply"]))
-    # No toolset offers "foo", so assistant._workflows is empty; the text runs through unchanged.
+    # No toolset offers "foo" (the shipped config's only command is /plan), so the text runs through
+    # unchanged rather than being read as a command.
 
     await _run_one_message(assistant, channel)
 

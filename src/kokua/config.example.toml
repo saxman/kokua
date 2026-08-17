@@ -75,7 +75,7 @@ show_tools = true
 # manage itself and hands specialized work to the three workers below.
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
-tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "time"]
+tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "time"]
 delegates_to = ["researcher", "coder", "generalist"]
 
 [agents.researcher]
@@ -188,8 +188,9 @@ level = "INFO"
 # use_ssl = false               # false -> STARTTLS on connect; true -> implicit TLS (SMTP_SSL)
 
 [planning]
-# Deep planning is invoked per request -- the web UI's Plan toggle, or a "/plan <task>" message -- and
-# drafts an explicit plan (which tools/skills/MCP services to use or build) before doing the work.
+# Deep planning is a toolset: [agents.<name>].tools must list "planning" for the "/plan <task>" command
+# (and the web UI's Plan toggle) to exist at all. It drafts an explicit plan (which tools/skills/MCP
+# services to use or build) before doing the work.
 # plan_review pauses that planned turn for your Approve/Edit/Reject; off runs the plan autonomously.
 # plan_review is toggleable at runtime in the web settings panel.
 # plan_review = false

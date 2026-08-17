@@ -21,7 +21,8 @@ from aimu.models import StreamChunk, StreamingContentType
 from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
 from tests.channels import example_agents
-from kokua.planning.reviewers import Verdict
+from kokua.toolsets.planning import PLANNING_WORKFLOW
+from kokua.workflows.critics import Verdict
 
 
 class RecordingChannel(Channel):
@@ -107,11 +108,11 @@ def reviewers(monkeypatch):
         async def fake_review_result(*args, **kwargs):
             return next(results)
 
-        monkeypatch.setattr("kokua.planning.reviewers.stream_plan_review", fake_stream_open)
-        monkeypatch.setattr("kokua.planning.reviewers.stream_result_review", fake_stream_open)
-        monkeypatch.setattr("kokua.planning.reviewers.finalize_verdict", fake_finalize)
-        monkeypatch.setattr("kokua.planning.reviewers.review_plan", fake_review_plan)
-        monkeypatch.setattr("kokua.planning.reviewers.review_result", fake_review_result)
+        monkeypatch.setattr("kokua.workflows.planning.critics.stream_plan_review", fake_stream_open)
+        monkeypatch.setattr("kokua.workflows.planning.critics.stream_result_review", fake_stream_open)
+        monkeypatch.setattr("kokua.workflows.critics.finalize_verdict", fake_finalize)
+        monkeypatch.setattr("kokua.workflows.planning.critics.review_plan", fake_review_plan)
+        monkeypatch.setattr("kokua.workflows.planning.critics.review_result", fake_review_result)
 
     return install
 
@@ -123,7 +124,7 @@ REJECT = Verdict(approved=False, issues=["needs work"])
 async def _planned_turn(tmp_path, channel, replies, **config):
     assistant = await Assistant.create(_config(tmp_path, **config), channel, client=MockAsyncModelClient(list(replies)))
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
     return assistant
 
@@ -272,11 +273,15 @@ async def test_human_rejection_stops_the_turn_and_commits_nothing(tmp_path, verb
     import asyncio
 
     turn = asyncio.create_task(
-        assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True)
+        assistant._handle(
+            ChannelMessage(text="do X", channel="fake"),
+            conversation_id=assistant._active_id,
+            workflow=PLANNING_WORKFLOW,
+        )
     )
     for _ in range(1000):
-        if assistant._human.plan.pending:
-            assistant._human.plan.resolve(None)  # reject
+        if assistant._human.decision.pending:
+            assistant._human.decision.resolve(None)  # reject
             break
         await asyncio.sleep(0)
     else:

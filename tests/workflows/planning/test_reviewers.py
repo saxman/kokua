@@ -1,17 +1,25 @@
-"""Mock-only tests for adversarial plan + result review (monkeypatching the reviewer)."""
+"""Mock-only tests for adversarial plan + result review (monkeypatching the reviewer).
+
+The shared critic (``kokua.workflows.critics``) is covered here rather than in a module of its own
+because every one of its behaviors is reached through planning's two reviewers: those are the only
+prompts in the repository, so a test of the critic's tool loop or its typed verdict is a test of a
+planned turn's review round as well, and splitting them would only move the mock setup.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from tests.helpers import MockAsyncModelClient
-from kokua.planning import reviewers as review
+from kokua.toolsets.planning import PLANNING_WORKFLOW
+from kokua.workflows import critics
+from kokua.workflows.planning import critics as review
 from kokua.config import table as runtime_settings
 from kokua.core.assistant import Assistant
-from kokua.planning.runner import _tool_evidence
+from kokua.workflows.planning.runner import _tool_evidence
 from kokua.config import AssistantConfig
 from tests.channels import example_agents
-from kokua.planning.reviewers import Verdict
+from kokua.workflows.critics import Verdict
 
 from aimu import aio
 from aimu.aio.channels.base import Channel, ChannelMessage
@@ -66,7 +74,7 @@ def _verdicts(seq, monkeypatch, which):
         calls["n"] += 1
         return v
 
-    monkeypatch.setattr(f"kokua.planning.reviewers.{which}", fake)
+    monkeypatch.setattr(f"kokua.workflows.planning.critics.{which}", fake)
     return calls
 
 
@@ -84,7 +92,7 @@ def test_verdict_defaults():
 
 def test_reviewer_toolset_boundary():
     """The reviewer gets verification tools (date, web, arithmetic) but no access to user state."""
-    names = {t.__name__ for t in review.REVIEWER_TOOLS}
+    names = {t.__name__ for t in critics.REVIEWER_TOOLS}
     # Present: the motivating date tool, web lookup, and arithmetic.
     assert {"get_current_date_and_time", "web_search", "get_webpage", "calculate"} <= names
     # Absent: the user's memory/documents, skill authoring, and MCP mutation.
@@ -96,7 +104,7 @@ def test_reviewer_toolset_holds_nothing_the_approval_gate_would_have_to_cover():
     """A reviewer cannot be approval-gated (nobody to ask mid-review), so its toolset must contain no
     tool that needs a gate. Pinned against the shipped `confirm_tools` default rather than a literal
     list, so adding a name there fails here until the reviewer's toolset is re-checked."""
-    names = {t.__name__ for t in review.REVIEWER_TOOLS}
+    names = {t.__name__ for t in critics.REVIEWER_TOOLS}
     assert not (names & set(AssistantConfig().confirm_tools))
     assert "execute_python" not in names  # the specific escape this guards: arbitrary code, unsandboxed
 
@@ -129,7 +137,7 @@ async def test_review_result_includes_evidence_in_prompt(monkeypatch):
         client = MockAsyncModelClient(["assessment", '{"approved": true, "issues": [], "suggestions": ""}'])
         client.model.supports_structured_output = False
         monkeypatch.setattr(
-            "kokua.planning.reviewers._reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
+            "kokua.workflows.critics.reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
         )
         await review.review_result("mock", "do X", "PLAN", "ANSWER", evidence)
         first_user = client.messages[0]["content"]
@@ -149,7 +157,7 @@ async def test_reviewer_runs_tool_loop_then_extracts_verdict(monkeypatch):
     def fake_reviewer_agent(model, system, tools=None):
         return aio.Agent(client, tools=[])  # tools irrelevant: the mock fakes the tool round
 
-    monkeypatch.setattr("kokua.planning.reviewers._reviewer_agent", fake_reviewer_agent)
+    monkeypatch.setattr("kokua.workflows.critics.reviewer_agent", fake_reviewer_agent)
 
     verdict = await review.review_plan("mock", "do X", "PLAN")
 
@@ -168,12 +176,12 @@ async def test_streamed_reviewer_streams_then_extracts_verdict(monkeypatch):
     )
     client.model.supports_structured_output = False
     monkeypatch.setattr(
-        "kokua.planning.reviewers._reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
+        "kokua.workflows.critics.reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
     )
 
     rc, stream = await review.stream_plan_review("mock", "do X", "PLAN")
     parts = [ch.content async for ch in stream if ch.phase == StreamingContentType.GENERATING]
-    verdict = await review.finalize_verdict(rc)
+    verdict = await critics.finalize_verdict(rc)
 
     assert "streamed assessment" in "".join(parts)
     assert any(m.get("role") == "tool" for m in client.messages)
@@ -190,7 +198,7 @@ async def test_plan_review_replans_then_approves(tmp_path, monkeypatch):
     assistant = await Assistant.create(_config(tmp_path, plan_review_agent=True), channel, client=client)
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     assert calls["n"] == 2  # reviewed twice (reject then approve)
@@ -208,7 +216,7 @@ async def test_plan_review_exhausts_and_surfaces_critique(tmp_path, monkeypatch)
     )
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     # review_rounds=1 -> one replan, then proceed with the best plan plus surfaced concerns.
@@ -226,7 +234,7 @@ async def test_result_review_revises_then_approves(tmp_path, monkeypatch):
     assistant = await Assistant.create(_config(tmp_path, result_review=True), channel, client=client)
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     # Result review disables streaming: the answer arrives as a plain-string send, and it's the revised one.
@@ -245,7 +253,7 @@ async def test_result_review_exhausts_and_notes_issues(tmp_path, monkeypatch):
     assistant = await Assistant.create(_config(tmp_path, result_review=True, review_rounds=1), channel, client=client)
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     assert any("unresolved issues" in text.lower() for kind, text in channel.sent if kind == "str")
@@ -259,14 +267,14 @@ async def test_result_review_receives_executor_evidence(tmp_path, monkeypatch):
         captured["evidence"] = evidence
         return APPROVE
 
-    monkeypatch.setattr("kokua.planning.reviewers.review_result", fake_review_result)
+    monkeypatch.setattr("kokua.workflows.planning.critics.review_result", fake_review_result)
     channel = FakeChannel()
     # planning: PLAN; executor does a tool round ("tool" -> "ANS") then a continuation turn ("FINAL").
     client = MockAsyncModelClient(["PLAN", "tool", "ANS", "FINAL"])
     assistant = await Assistant.create(_config(tmp_path, result_review=True), channel, client=client)
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     # The evidence carries the executor's tool result (the mock's tool round), not just the final answer.
@@ -283,7 +291,7 @@ async def test_plan_review_emits_and_records_subagent(tmp_path, monkeypatch):
     assistant = await Assistant.create(_config(tmp_path, plan_review_agent=True), channel, client=client)
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     # Each round emits a running card then its verdict: reject (round 0), approve (round 1).
@@ -301,7 +309,7 @@ async def test_result_review_emits_and_records_subagent(tmp_path, monkeypatch):
     assistant = await Assistant.create(_config(tmp_path, result_review=True), channel, client=client)
 
     await assistant._handle(
-        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, plan=True
+        ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
 
     assert [e["status"] for e in channel.subagent] == ["running", "rejected", "running", "approved"]

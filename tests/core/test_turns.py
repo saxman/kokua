@@ -9,6 +9,7 @@ import pytest
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
+from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
 from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
@@ -878,8 +879,8 @@ class _PlansThenSpawnsAndHangsClient(MockAsyncModelClient):
 
 async def test_a_stopped_planned_turn_records_the_events_it_produced(tmp_path):
     """`/stop` mid-spawn on a `/plan` turn: the card is anchored where a completed planned turn's
-    would be. The plan branch used to take its index from the returned PlanResult, which a cancelled
-    run never produces, so the index stayed -1 and the recording silently no-opped."""
+    would be. The planning branch used to take its index from the result the run returns, which a
+    cancelled run never produces, so the index stayed -1 and the recording silently no-opped."""
     client = _PlansThenSpawnsAndHangsClient()
     channel = _StopChannel(client.started, text="/plan long task")
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)
@@ -968,7 +969,9 @@ async def test_a_rejected_plan_records_nothing(tmp_path):
     active_id = assistant._active_id
 
     turn = asyncio.create_task(
-        assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=active_id, plan=True)
+        assistant._handle(
+            ChannelMessage(text="do X", channel="fake"), conversation_id=active_id, workflow=PLANNING_WORKFLOW
+        )
     )
     for _ in range(1000):
         if assistant._human.decision.pending:
@@ -1122,7 +1125,9 @@ async def test_a_first_planned_turns_cards_anchor_to_its_user_message(tmp_path):
     client.reporter = assistant._subagent_reporter
     active_id = assistant._active_id
 
-    await assistant._handle(ChannelMessage(text="do X", channel="fake"), conversation_id=active_id, plan=True)
+    await assistant._handle(
+        ChannelMessage(text="do X", channel="fake"), conversation_id=active_id, workflow=PLANNING_WORKFLOW
+    )
 
     session = assistant._store.get(active_id)
     assert _user_positions(session.messages) == [1]
