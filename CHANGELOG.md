@@ -312,7 +312,10 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   (`task_id` in its metadata), which is the durable link a task name is not. Grouping happens on the
   page, not in the core: nothing is filtered out of `ConversationBook.list()`, so the agent's
   conversation tools still see every conversation. A conversation whose task has been deleted falls back
-  into the chat list rather than becoming unreachable.
+  into the chat list rather than becoming unreachable. Each nested row carries its own delete, like a
+  chat row: a task that mints a conversation per firing accumulates them here, and the run being viewed
+  is deletable too. Deleting the conversation a `target="task"` record remembers is safe -- its next
+  firing mints a fresh one rather than failing.
 
 ### Deep planning and adversarial review
 

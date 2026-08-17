@@ -124,8 +124,13 @@ body.resizing { user-select: none; }
 .task-conv { display: flex; align-items: center; gap: 5px; padding: 3px 8px 3px 18px; border-radius: 6px;
   cursor: pointer; border-left: 2px solid transparent; font-size: 0.82em; color: var(--fg-dim); }
 .task-conv-marker { flex: none; color: var(--fg-faint); }
-.task-conv-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Grows so the delete button is pushed to the row's right edge, as it is on a chat row. */
+.task-conv-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .task-conv:hover { background: var(--surface); color: var(--fg); }
+.task-conv-delete { flex: none; border: none; background: none; color: var(--fg-faint); cursor: pointer;
+  font-size: 1.1em; line-height: 1; padding: 0 2px; opacity: 0; }
+.task-conv:hover .task-conv-delete { opacity: 1; }
+.task-conv-delete:hover { color: var(--danger); }
 .task-conv.active { background: var(--surface); border-left-color: var(--accent); color: var(--fg);
   font-weight: 600; cursor: default; }
 /* A thin strip naming the conversation being viewed, rather than a dark bar naming the application. */

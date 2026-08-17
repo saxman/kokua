@@ -720,6 +720,45 @@ def test_a_task_conversation_can_be_opened_from_its_task(page, live_server):
     expect(page.locator(".bubble.user")).to_contain_text("Summarize my calendar and unread mail.")
 
 
+def test_a_task_conversation_can_be_deleted_from_its_task(page, live_server):
+    """A task that mints a conversation per firing piles them up under its row, so each one needs the
+    delete its chat-list twin has always had. Reloaded at the end: the row must be gone because the
+    server deleted the conversation, not because the click removed a node."""
+    page.on("dialog", lambda dialog: dialog.accept())
+    _open(page, live_server(delay=0.0, seed=_seed_task_and_conversations))
+    rows = page.locator("#task-list .task-conv")
+    expect(rows).to_have_count(2)
+    surviving = rows.nth(1).locator(".task-conv-label").inner_text()
+
+    rows.first.hover()
+    rows.first.locator(".task-conv-delete").click()
+
+    expect(rows).to_have_count(1)
+    expect(rows.locator(".task-conv-label")).to_have_text(surviving)
+
+    page.reload()
+    page.wait_for_selector("#conv-list li")
+    expect(page.locator("#task-list .task-conv")).to_have_count(1)
+
+
+def test_deleting_a_task_conversation_does_not_also_open_it(page, live_server):
+    """The row is click-to-switch, so the delete button has to stop the event reaching it: otherwise
+    deleting a run first navigates into the run being deleted. Asserted on which row stays active
+    rather than on the heading, because every firing of a task carries the same title and so a switch
+    between two of them would not move it."""
+    page.on("dialog", lambda dialog: dialog.accept())
+    _open(page, live_server(delay=0.0, seed=_seed_task_and_conversations))
+    rows = page.locator("#task-list .task-conv")
+    expect(rows).to_have_count(2)
+    active_label = page.locator("#task-list .task-conv.active .task-conv-label").inner_text()
+
+    rows.nth(1).hover()  # the row that is NOT the conversation being viewed
+    rows.nth(1).locator(".task-conv-delete").click()
+
+    expect(rows).to_have_count(1)
+    expect(page.locator("#task-list .task-conv.active .task-conv-label")).to_have_text(active_label)
+
+
 def test_an_orphaned_task_conversation_falls_back_to_the_chat_list(page, live_server):
     """A conversation whose task is gone must stay reachable. Excluding every conversation carrying a
     task_id would hide it from the sidebar entirely."""

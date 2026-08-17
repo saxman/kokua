@@ -231,11 +231,27 @@ function taskConversationRow(conv) {
   marker.setAttribute("aria-hidden", "true");
   const label = document.createElement("span");
   label.className = "task-conv-label";
-  label.textContent = relativeTime(conv.updated_at) || conv.title;
+  const when = relativeTime(conv.updated_at);
+  label.textContent = when || conv.title;
   li.appendChild(marker);
   li.appendChild(label);
   li.title = conv.title;
   if (!conv.active) li.addEventListener("click", () => selectConversation(conv.id));
+  // A task minting a conversation per firing piles them up here, so each firing needs the delete the
+  // chat list has. Appended for the active row too, matching that list: the run you are reading is
+  // the one you are most likely to be done with. The prompt names the run rather than the title,
+  // which every firing of a task shares and so cannot tell two of them apart.
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "task-conv-delete";
+  del.textContent = "×";
+  del.title = "Delete this run";
+  del.addEventListener("click", (e) => {
+    e.stopPropagation();  // don't also switch to the conversation being deleted
+    if (!confirm(when ? `Delete this run from ${when}?` : `Delete "${conv.title}"?`)) return;
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "delete", id: conv.id }));
+  });
+  li.appendChild(del);
   return li;
 }
 
