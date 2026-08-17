@@ -1,4 +1,7 @@
-"""Tests for the assistant's read_config / update_config tools."""
+"""The ``config`` toolset: what read_config / update_config report back to the model.
+
+The policy and the apply-then-persist ordering underneath are covered in ``tests/config/test_store.py``.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,7 @@ import tomllib
 
 import pytest
 
-from kokua.config import tools as config_tools
+from kokua.toolsets import config as config_tools
 
 
 def _read(path):

@@ -4,7 +4,7 @@ Each is declared in the sibling module that wraps its subsystem, so this file is
 second declaration that could drift from the first.
 """
 
-from kokua.config.tools import TOOLSET as CONFIG_TOOLSET
+from kokua.toolsets.config import TOOLSET as CONFIG_TOOLSET
 from kokua.toolsets.conversations import TOOLSET as CONVERSATIONS_TOOLSET
 from kokua.toolsets.mcp_admin import TOOLSET as MCP_TOOLSET
 from kokua.toolsets.scheduling import TOOLSET as SCHEDULING_TOOLSET

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import tomllib
 
+import pytest
+
 from kokua.config import store as config_store
 from kokua.config import file as settings
 
@@ -155,3 +157,77 @@ def test_disambiguate_name_returns_the_base_when_free():
 def test_disambiguate_name_appends_a_numeric_suffix_on_collision():
     assert config_store.disambiguate_name("stocks", {"stocks"}) == "stocks-2"
     assert config_store.disambiguate_name("stocks", {"stocks", "stocks-2"}) == "stocks-3"
+
+
+# --- The programmatic-write policy and the apply path ------------------------------------------------
+
+
+async def _noop_apply(section, key, value):
+    return None
+
+
+def test_is_locked_covers_the_named_keys_and_every_agent_table():
+    assert config_store.is_locked("security", "confirm_tools")
+    assert config_store.is_locked("email", "to")
+    assert config_store.is_locked("paths", "data_dir")
+    # By prefix, because a section name is per-agent and cannot be enumerated ahead of time.
+    assert config_store.is_locked("agents", "assistant")
+    assert config_store.is_locked("agents.researcher", "tools")
+    assert not config_store.is_locked("display", "show_tools")
+
+
+def test_read_text_reports_an_absent_file_as_none(tmp_path):
+    path = tmp_path / "config.toml"
+    assert config_store.read_text(path) is None
+    path.write_text("[assistant]\n", encoding="utf-8")
+    assert "[assistant]" in config_store.read_text(path)
+
+
+async def test_apply_setting_persists_a_cold_setting_without_touching_the_session(tmp_path):
+    applied = []
+    path = tmp_path / "config.toml"
+
+    result = await config_store.apply_setting(path, "web", "port", "9100", lambda *a: applied.append(a))
+
+    assert result.hot is False and result.value == 9100
+    assert _read(path)["web"]["port"] == 9100
+    assert applied == []
+
+
+async def test_apply_setting_applies_a_hot_setting_before_persisting_it(tmp_path):
+    applied = []
+
+    async def apply_hot(section, key, value):
+        applied.append((section, key, value))
+
+    path = tmp_path / "config.toml"
+    result = await config_store.apply_setting(path, "generation", "temperature", "0.3", apply_hot)
+
+    assert result.hot is True and applied == [("generation", "temperature", 0.3)]
+    assert _read(path)["generation"]["temperature"] == 0.3
+
+
+async def test_apply_setting_does_not_persist_a_hot_setting_that_failed_to_apply(tmp_path):
+    """The ordering is the point: a value that breaks the live session must not be left to break the
+    next startup too."""
+
+    async def apply_hot(section, key, value):
+        raise RuntimeError("bad model")
+
+    path = tmp_path / "config.toml"
+    with pytest.raises(config_store.HotApplyFailed) as failure:
+        await config_store.apply_setting(path, "assistant", "model", "nonsense:model", apply_hot)
+
+    assert "bad model" in str(failure.value)
+    assert not path.exists()
+
+
+async def test_apply_setting_refuses_a_locked_key_and_rejects_a_bad_value(tmp_path):
+    path = tmp_path / "config.toml"
+
+    with pytest.raises(config_store.SettingLocked):
+        await config_store.apply_setting(path, "email", "to", "attacker@x.com", _noop_apply)
+    with pytest.raises(settings.ConfigError):
+        await config_store.apply_setting(path, "web", "port", "not-a-number", _noop_apply)
+
+    assert not path.exists()

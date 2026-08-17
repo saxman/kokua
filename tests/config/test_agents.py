@@ -87,18 +87,18 @@ def test_removed_memory_key_names_the_toolsets_that_replace_it(tmp_path):
 
 
 def test_the_agents_section_cannot_be_written_by_the_assistant():
-    from kokua.config.tools import _is_locked
+    from kokua.config.store import is_locked
 
-    assert _is_locked("agents.assistant", "tools")
-    assert _is_locked("agents", "assistant")
-    assert _is_locked("security", "confirm_tools")
-    assert not _is_locked("display", "show_tools")
+    assert is_locked("agents.assistant", "tools")
+    assert is_locked("agents", "assistant")
+    assert is_locked("security", "confirm_tools")
+    assert not is_locked("display", "show_tools")
 
 
 async def test_update_config_refuses_an_agent_table_and_still_writes_a_runtime_setting(tmp_path):
     """The predicate is wired into the tool, not just defined: an agent table is refused and unchanged,
     while an ordinary runtime setting still goes through."""
-    from kokua.config.tools import make_config_tools
+    from kokua.toolsets.config import make_config_tools
 
     path = tmp_path / "config.toml"
     path.write_text('[agents.assistant]\ntools = ["time"]\n', encoding="utf-8")

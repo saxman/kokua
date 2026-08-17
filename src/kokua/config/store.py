@@ -1,26 +1,36 @@
-"""Comment-preserving writes to config.toml.
+"""Programmatic reads and comment-preserving writes to config.toml.
 
 The config file is both hand-authored and app-written (the web settings panel, the ``add_mcp_server``
 tool, and the assistant's own ``update_config`` tool all write it). stdlib ``tomllib`` only reads TOML,
 so writes go through ``tomlkit``, which patches the parsed document in place and so keeps the user's
-comments and formatting. ``settings.py`` still owns reads and validation; this module only writes.
+comments and formatting. ``settings.py`` still owns config reads and validation; this module owns the
+write path and the policy that guards it.
 
 When the file does not exist yet, the first write seeds it from the shipped example (``config init``'s
 content) so a fresh file keeps its documentation rather than becoming a bare one-key stub.
 
 Single-user app: writes are last-writer-wins. A hand-edit made while the app is also writing can be
 clobbered; that is accepted rather than guarded with file locking.
+
+Nothing here formats a sentence. ``apply_setting`` returns what it did or raises; the ``config``
+toolset in ``toolsets/config.py`` words it for the model.
 """
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Awaitable, Callable
 from urllib.parse import urlparse
 
 import tomlkit
 from tomlkit import TOMLDocument
 
 from kokua.config import file as settings
+from kokua.config import table as runtime_settings
+
+logger = logging.getLogger(__name__)
 
 
 def name_from_url(url: str) -> str:
@@ -156,3 +166,97 @@ def remove_mcp_server(path: Path, url: str) -> bool:
             _write(path, doc)
             return True
     return False
+
+
+# --- The programmatic-write policy and the apply path ------------------------------------------------
+
+# Keys no programmatic write may change, even behind the approval prompt: the tool-approval gate
+# itself, the locked email recipient, and where all state lives. Only a hand-edit of config.toml
+# changes these.
+LOCKED_KEYS: frozenset[tuple[str, str]] = frozenset(
+    {("security", "confirm_tools"), ("email", "to"), ("paths", "data_dir")}
+)
+
+
+class SettingLocked(Exception):
+    """This key may only be changed by hand-editing config.toml. Carries the section and key."""
+
+    def __init__(self, section: str, key: str):
+        super().__init__(f"[{section}].{key}")
+        self.section = section
+        self.key = key
+
+
+class HotApplyFailed(Exception):
+    """A hot-appliable setting could not be applied to the running session, so nothing was written.
+
+    Its message is the underlying failure's, so a caller can report the cause without unwrapping.
+    """
+
+    def __init__(self, section: str, key: str, cause: BaseException):
+        super().__init__(str(cause))
+        self.section = section
+        self.key = key
+        self.cause = cause
+
+
+@dataclass(frozen=True)
+class AppliedSetting:
+    """What :func:`apply_setting` did. ``hot`` says it also took effect in the running session."""
+
+    section: str
+    key: str
+    value: object
+    hot: bool
+
+
+def is_locked(section: str, key: str) -> bool:
+    """Whether only a hand-edit may change this key.
+
+    ``[agents.*]`` is locked wholesale, and by prefix rather than by an entry in :data:`LOCKED_KEYS`,
+    because a section name is per-agent (``agents.<name>``) and so cannot be enumerated ahead of time.
+    It declares what every agent can do, and ``update_config`` is a tool the assistant holds, so a
+    writable agent table would let the assistant widen its own reach. Granting a capability stays a
+    human decision.
+    """
+    return (section, key) in LOCKED_KEYS or section == "agents" or section.startswith("agents.")
+
+
+def read_text(path: Path) -> str | None:
+    """The config file's contents, or ``None`` when it does not exist yet."""
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+async def apply_setting(
+    path: Path,
+    section: str,
+    key: str,
+    raw: str,
+    apply_hot: Callable[[str, str, object], Awaitable[None]],
+) -> AppliedSetting:
+    """Coerce, apply, and persist one setting. Raises rather than reporting.
+
+    A hot-appliable change (model, generation kwargs, display and planning flags) is applied to the
+    live session BEFORE it is written, so a value that fails to apply -- an invalid model, say -- is not
+    persisted and left to break the next startup. That ordering is the whole reason this is one function
+    rather than a coerce call and a write call at the call site.
+
+    Raises :class:`SettingLocked`, ``ConfigError`` (from coercion), or :class:`HotApplyFailed`.
+    """
+    if is_locked(section, key):
+        raise SettingLocked(section, key)
+    coerced = settings.coerce_config_string(section, key, raw)
+
+    if runtime_settings.is_hot(section, key):
+        try:
+            await apply_hot(section, key, coerced)
+        except Exception as error:
+            logger.warning("Could not apply [%s].%s live", section, key, exc_info=True)
+            raise HotApplyFailed(section, key, error) from error
+        set_value(path, section, key, coerced)
+        return AppliedSetting(section, key, coerced, hot=True)
+
+    set_value(path, section, key, coerced)
+    return AppliedSetting(section, key, coerced, hot=False)
