@@ -98,6 +98,11 @@ class Assistant:
         # The workflow commands this assistant answers, by command word. Built by create() from the
         # entry agent's declared toolsets; empty until then, which no serve loop can observe.
         self._workflows: dict[str, object] = {}
+        # Commands an *installed* workflow-bearing toolset offers that the entry agent did not declare,
+        # by command word, mapping to the toolset's name. Built by create() alongside self._workflows.
+        # Kept distinct from it because the two need opposite handling in the serve loop: one runs the
+        # workflow, the other must not run a plain turn on the literal "/word ..." text.
+        self._undeclared_workflow_commands: dict[str, str] = {}
         # Tool approval and a workflow's own decision: each a single-slot request the serve loop
         # resolves with the user's next message. Both are lock-guarded, so concurrent tool calls (or
         # concurrent workflow turns) can never clobber the slot the serve loop is about to resolve.
@@ -141,7 +146,12 @@ class Assistant:
         # pulls in kokua.core.transcripts -- a submodule of this package -- and importing it triggers
         # kokua/core/__init__ to run, which imports this module. A top-level import here would close
         # that cycle.
-        from kokua.toolsets.agents import build_command_map, unreferenced_toolsets, validated_registry
+        from kokua.toolsets.agents import (
+            build_command_map,
+            undeclared_workflow_commands,
+            unreferenced_toolsets,
+            validated_registry,
+        )
 
         # Built and validated before anything else in this method, because everything else touches
         # something: the next statements open a session store (which mints and persists an empty session)
@@ -151,6 +161,7 @@ class Assistant:
         # Built here rather than in __init__ because it needs the validated registry, and here rather
         # than after the store is opened so a collision fails before anything is written.
         commands = build_command_map(config, registry)
+        undeclared_commands = undeclared_workflow_commands(config, registry)
 
         connections: list[ServerConnection] = []
         oauth_storage_dir = config.data_dir / "mcp-oauth"
@@ -164,6 +175,7 @@ class Assistant:
         # built lazily (on first get), by which point assistant._approve exists.
         assistant = cls(channel, scheduler, store, config)
         assistant._workflows = commands
+        assistant._undeclared_workflow_commands = undeclared_commands
         initial_id = assistant._book.adopt_most_recent()
         # config.toml is the single source of settings: the panel and update_config write it, and the
         # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
@@ -443,6 +455,22 @@ class Assistant:
                             continue
                         msg = replace(msg, text=task)
                         workflow = candidate
+                    elif word in self._undeclared_workflow_commands:
+                        # An installed toolset offers /word, just not to this entry agent -- e.g. a
+                        # config that predates naming "planning" in [agents.<entry>].tools. Answered
+                        # here instead of falling through to a plain turn, which would otherwise run
+                        # the model on the literal "/word <task>" string and persist that into history.
+                        # Deliberately narrow to a word some installed workflow actually offers: a
+                        # "/"-word nothing offers still falls through below, since a bare first-word
+                        # heuristic would also swallow an ordinary message that starts with a path, like
+                        # "/usr/local/bin is missing".
+                        toolset_name = self._undeclared_workflow_commands[word]
+                        await self._ui.send(
+                            f"The {toolset_name!r} toolset offers /{word}, but no agent declares it. "
+                            f"Add {toolset_name!r} to [agents.{self._config.entry_agent}].tools in "
+                            "your config.toml."
+                        )
+                        continue
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. The gate still serializes same-conversation turns (a proactive turn
                 # on this conversation can't interleave); different conversations' turns don't block

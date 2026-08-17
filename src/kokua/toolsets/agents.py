@@ -267,6 +267,24 @@ def build_command_map(config: AssistantConfig, registry: ToolsetRegistry) -> dic
     return commands
 
 
+def undeclared_workflow_commands(config: AssistantConfig, registry: ToolsetRegistry) -> dict[str, str]:
+    """Every command a workflow-bearing toolset in ``registry`` offers that the entry agent did not
+    declare, mapping the command word to the offering toolset's name.
+
+    This is the gap ``build_command_map`` leaves on purpose: a config that predates naming a
+    workflow's toolset (or dropped it) still gets the command typed at it verbatim -- the web Plan
+    toggle sends ``"/plan <task>"`` over the socket regardless of what ``[agents.*].tools`` says -- so
+    the serve loop needs to recognize the word even though no declared toolset claims it, to answer
+    with what config change would grant it instead of running a plain turn on the literal command text.
+    """
+    declared = set(config.agents[config.entry_agent].tools)
+    return {
+        workflow.command: toolset_name
+        for toolset_name, workflow in workflows_of(list(registry.values()))
+        if toolset_name not in declared
+    }
+
+
 def _reject_cycles(config: AssistantConfig) -> None:
     """Depth-first search over ``delegates_to``, reporting the first cycle as the path that closes it."""
     path: list[str] = []

@@ -330,10 +330,12 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   same way a tool is, and no code path grants one a config did not declare. Deep planning, described
   below, is the first workflow and is no longer a hardcoded core feature.
 - **`[agents.*].tools` must name `planning` for `/plan` to exist**, on the web Plan toggle as much as
-  the CLI. An existing `config.toml` that predates this release and does not list it loses the command
-  with **no startup warning**, because a core toolset (unlike a third party's) is deliberately exempt
-  from the unreferenced-toolset warning below. The fix is one line: add `"planning"` to the entry
-  agent's `tools`.
+  the CLI. An existing `config.toml` that predates this release and does not list it gets no startup
+  warning, because a core toolset (unlike a third party's) is deliberately exempt from the
+  unreferenced-toolset warning below -- but typing `/plan` still gets an actionable reply rather than
+  the model answering the literal `"/plan <task>"` text: the serve loop recognizes any command an
+  installed workflow-bearing toolset offers, even one the entry agent didn't declare, and says which
+  toolset to add. The fix is one line: add `"planning"` to the entry agent's `tools`.
 - **A third party ships a workflow exactly the way it ships a toolset**, through the `kokua.toolsets`
   entry-point group -- no separate mechanism for a turn strategy versus a tool.
 - **Two tiers.** A workflow builds an `aimu.aio.AsyncRunner`, so any of AIMU's own

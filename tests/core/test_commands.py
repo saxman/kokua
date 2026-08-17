@@ -6,12 +6,13 @@ import asyncio
 
 import pytest
 
+from aimu.aio.channels.base import ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType
 
 from kokua.config import AssistantConfig
 from kokua.config.file import ConfigError
 from kokua.core.assistant import Assistant
-from kokua.toolsets.agents import build_command_map, validated_registry
+from kokua.toolsets.agents import build_command_map, undeclared_workflow_commands, validated_registry
 from kokua.toolsets.registry import Toolset, register
 from kokua.workflows import Workflow
 from tests.channels import FakeChannel, _config, example_agents
@@ -65,6 +66,18 @@ def test_a_workflow_may_not_claim_a_reserved_command():
 
     with pytest.raises(ConfigError, match="reserved"):
         build_command_map(config, registry)
+
+
+def test_undeclared_workflow_commands_excludes_declared_and_includes_undeclared():
+    agents = example_agents()
+    agents["assistant"].tools = ["declared"]
+    config = AssistantConfig(agents=agents, entry_agent="assistant")
+    registry = _registry(
+        Toolset(name="declared", description="D.", build=lambda ctx: [], workflow=_workflow("d")),
+        Toolset(name="undeclared", description="U.", build=lambda ctx: [], workflow=_workflow("u")),
+    )
+
+    assert undeclared_workflow_commands(config, registry) == {"u": "undeclared"}
 
 
 def test_two_workflows_may_not_claim_one_command():
@@ -204,3 +217,38 @@ async def test_a_known_command_with_no_task_replies_with_its_usage(tmp_path):
     await _run_one_message(assistant, channel)
 
     assert channel.sent == ["Usage: /plan <task>"]
+
+
+# --- an installed workflow's command with no declaring agent (the un-migrated-config case) --------
+
+
+async def test_an_undeclared_workflow_command_gets_an_actionable_reply_and_starts_no_turn(tmp_path):
+    """The finding this guards against: a config that predates naming "planning" in
+    [agents.assistant].tools must not let /plan fall through to a plain turn. That path would run the
+    model on the literal "/plan do the thing" string and `_persist` would write that literal string into
+    the saved transcript as the user's message -- disagreeing with the web UI's Plan toggle, whose chat
+    bubble shows the user's own words. Proven here by leaving a real turn's history untouched by the
+    /plan attempt that follows it, in the same conversation.
+    """
+    cfg = _config(tmp_path)
+    channel1 = FakeChannel()
+    assistant1 = await Assistant.create(cfg, channel1, client=MockAsyncModelClient(["hi there"]))
+    await assistant1._handle(ChannelMessage(text="hi"), conversation_id=assistant1._active_id)
+    before = [dict(m) for m in assistant1._store.get(assistant1._active_id).messages]
+    assistant1._store.close()  # flush TinyDB before assistant2 reopens the same file
+
+    agents = example_agents()
+    agents["assistant"].tools = [name for name in agents["assistant"].tools if name != "planning"]
+    channel2 = FakeChannel(inbound=["/plan do the thing"])
+    assistant2 = await Assistant.create(
+        _config(tmp_path, agents=agents), channel2, client=MockAsyncModelClient(["should not run"])
+    )
+
+    await _run_one_message(assistant2, channel2)
+
+    assert channel2.sent == [
+        "The 'planning' toolset offers /plan, but no agent declares it. Add 'planning' to "
+        "[agents.assistant].tools in your config.toml."
+    ]
+    after = [dict(m) for m in assistant2._store.get(assistant2._active_id).messages]
+    assert after == before
