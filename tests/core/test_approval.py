@@ -196,8 +196,7 @@ async def test_switch_away_resolves_pending_approval_as_denied(tmp_path):
 async def test_switch_away_resolves_a_pending_decision_with_its_default(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
-    assistant._human.decision.set_default(None)  # this asker's safe answer; not implied by construction
-    asking = asyncio.create_task(assistant._human.decision.ask(_noop_prompt, context="the plan"))
+    asking = asyncio.create_task(assistant._human.decision.ask(_noop_prompt, context="the plan", default=None))
     await asyncio.sleep(0)
     await assistant.select_conversation(assistant._active_id)  # switching (even to the same id)
     assert await asking is None

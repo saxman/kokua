@@ -14,9 +14,14 @@ asker wait until the first has been answered and the slot cleared.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
+logger = logging.getLogger(__name__)
+
 T = TypeVar("T")
+
+_UNSET = object()  # distinguishes "no default given for this ask" from a legitimate default of None
 
 
 class PendingRequest(Generic[T]):
@@ -50,14 +55,22 @@ class PendingRequest(Generic[T]):
         *,
         context: Any = None,
         parse: Optional[Callable[[str, str], T]] = None,
+        default: Any = _UNSET,
     ) -> T:
         """Send ``prompt`` and wait for the answer, serialized against any other asker.
 
         ``parse`` turns the user's reply into the answer, and is the asker's rather than this class's:
-        a workflow's vocabulary belongs to the workflow. The slot is cleared in a ``finally``, so a
-        ``/stop`` that cancels the waiting turn mid-await still leaves no stale pending request behind.
+        a workflow's vocabulary belongs to the workflow. ``default`` (if given) overrides the answer an
+        abandoned request resolves with, for this ask only: it is set under the same lock that guards
+        the rest of this ask's state and restored in the ``finally``, so an overlapping second asker's
+        default can never leak onto the first asker's abandon. The slot is cleared in that same
+        ``finally``, so a ``/stop`` that cancels the waiting turn mid-await still leaves no stale
+        pending request behind.
         """
         async with self._lock:
+            previous_default = self._default
+            if default is not _UNSET:
+                self._default = default
             self._future = asyncio.get_running_loop().create_future()
             self._context = context
             self._parse = parse
@@ -65,6 +78,7 @@ class PendingRequest(Generic[T]):
                 await prompt()
                 return await self._future
             finally:
+                self._default = previous_default
                 self._future = None
                 self._context = None
                 self._parse = None
@@ -85,14 +99,6 @@ class PendingRequest(Generic[T]):
     def abandon(self) -> None:
         """Resolve with the default answer, if outstanding."""
         self.resolve(self._default)
-
-    def set_default(self, default: T) -> None:
-        """Set the answer an abandoned request resolves with.
-
-        Per-ask rather than per-construction, because a shared slot serves several askers and the safe
-        answer is the asker's to choose.
-        """
-        self._default = default
 
 
 class HumanGate:
@@ -162,8 +168,7 @@ class HumanGate:
         workflow's safe answer, not the core's: "reject" for a plan review, but a different word for
         the next workflow along.
         """
-        self.decision.set_default(default)
-        return await self.decision.ask(prompt, context=context, parse=parse)
+        return await self.decision.ask(prompt, context=context, parse=parse, default=default)
 
     def resolve_reply(self, raw: str, text: str) -> bool:
         """Route an inbound message to whichever request is outstanding. Returns whether it was consumed.
@@ -171,9 +176,20 @@ class HumanGate:
         ``text`` is the lowercased, stripped form; ``raw`` preserves the user's casing, which an edited
         plan needs. Approval takes precedence: the two are never outstanding at once in practice, and
         checking in a fixed order keeps that assumption from mattering.
+
+        A decision's parser is the asker's code, not the core's, so it can raise on a reply it did not
+        expect (a plugin workflow's parser is by design arbitrary). Left unguarded that would propagate
+        out of the serve loop and take the whole assistant down over one bad reply; caught here, the
+        request is abandoned (answered with its own default) and the loop keeps serving.
         """
         if self.approval.pending:
             return self.approval.resolve(text in ("y", "yes"))
         if self.decision.pending:
-            return self.decision.resolve(self.decision.parse_reply(raw, text))
+            try:
+                answer = self.decision.parse_reply(raw, text)
+            except Exception:
+                logger.warning("Workflow decision parser failed; answering with its default", exc_info=True)
+                self.decision.abandon()
+                return True
+            return self.decision.resolve(answer)
         return False

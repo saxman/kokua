@@ -86,6 +86,40 @@ async def test_concurrent_askers_are_serialized_and_neither_slot_is_clobbered():
     assert sorted(answered) == ["a", "b"]  # each asker got its own answer, not the other's
 
 
+async def test_a_second_askers_default_does_not_leak_onto_the_first():
+    """The race `default` is set and restored under the lock to prevent.
+
+    A starts an ask with its own default and is still inside its prompt (holding the lock) when B's
+    ask is created and blocks acquiring that same lock. If B's default took effect as soon as `ask` is
+    called, rather than once B actually holds the slot, an abandon at this point would answer A's
+    waiter with B's safe answer instead of A's own -- exactly what a conversation switch's
+    `abandon_all()` does on every overlap, not just a contrived one.
+    """
+    request: PendingRequest[str] = PendingRequest(default="unset")
+    a_is_prompting = asyncio.Event()
+    release_a = asyncio.Event()
+
+    async def prompt_a() -> None:
+        a_is_prompting.set()
+        await release_a.wait()
+
+    a = asyncio.create_task(request.ask(prompt_a, default="a-default"))
+    await a_is_prompting.wait()
+    assert request.pending
+
+    b = asyncio.create_task(request.ask(_noop, default="b-default"))
+    await asyncio.sleep(0)  # B blocks acquiring the lock; it must not touch `_default` yet
+
+    request.abandon()  # only A's request occupies the slot right now
+    release_a.set()
+    assert await a == "a-default"  # not "b-default"
+
+    await asyncio.sleep(0)  # let B acquire the now-free lock and register its own future
+    assert request.pending
+    request.abandon()
+    assert await b == "b-default"
+
+
 class _UI:
     def __init__(self):
         self.asked: list[str] = []
@@ -157,3 +191,30 @@ async def test_approval_takes_precedence_over_a_waiting_decision():
     assert await approval is True
     gate.abandon_all()
     assert await decision is None
+
+
+async def test_a_raising_parser_abandons_the_decision_instead_of_crashing_the_serve_loop():
+    """A workflow's parser is arbitrary code (by design, that includes third-party plugins), so it can
+    raise on a reply it did not expect. Before decisions had their own parser, the code running here
+    was core-owned string matching that could not raise; `resolve_reply` now guards the call so one bad
+    reply abandons that decision rather than propagating out of the serve loop and killing the process.
+    """
+    gate = _gate(_UI())
+
+    async def prompt():
+        return None
+
+    def bad_parser(raw, text):
+        raise ValueError("does not understand this reply")
+
+    task = asyncio.create_task(gate.decide(prompt, bad_parser, default="safe-default"))
+    await asyncio.sleep(0)
+    assert gate.resolve_reply("whatever", "whatever") is True  # consumed, not propagated
+    assert await task == "safe-default"
+    assert not gate.decision.pending  # the slot is clean for the next decision
+
+    # The gate keeps serving: a later decision with a well-behaved parser works normally.
+    followup = asyncio.create_task(gate.decide(prompt, lambda raw, text: text.upper(), default=None))
+    await asyncio.sleep(0)
+    assert gate.resolve_reply("ok", "ok") is True
+    assert await followup == "OK"

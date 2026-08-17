@@ -118,37 +118,14 @@ class Assistant:
             cancel_active_turn=self._cancel_current_turn,
             state=lambda: self._state,
         )
-
         # Turn execution, reactive and proactive. Reaches the store and the agent cache through the
         # conversation book, which already owns both.
-        #
-        # `TurnRunner` still asks for a `review_plan(plan_text, critique)` callable with planning's own
-        # approve/edit/reject vocabulary; the workflow that will own that vocabulary and call
-        # `self._human.decide` directly has not been wired in yet, so this shim bridges the two ends
-        # for now.
-        async def review_plan(plan_text: str, critique: Optional[list[str]] = None) -> Optional[str]:
-            def parse_plan_reply(raw: str, text: str) -> Optional[str]:
-                if text in ("approve", "yes", "y"):
-                    return plan_text
-                if text in ("reject", "no", "n"):
-                    return None
-                if text.startswith("edit:"):
-                    return raw.split(":", 1)[1].strip() or plan_text
-                return raw.strip()
-
-            return await self._human.decide(
-                lambda: self._ui.ask_plan_review(plan_text, critique),
-                parse_plan_reply,
-                default=None,
-                context=plan_text,
-            )
-
         self._turns = TurnRunner(
             self._book,
             self._ui,
             self._gate,
             config,
-            review_plan=review_plan,
+            review_plan=self._review_plan,
             push_conversations=self._maybe_push_conversations,
             delete_conversation=self.delete_conversation,
         )
@@ -467,6 +444,31 @@ class Assistant:
 
     async def _approve(self, name: str, arguments: dict) -> bool:
         return await self._human.approve(name, arguments)
+
+    async def _review_plan(self, plan_text: str, critique: Optional[list[str]] = None) -> Optional[str]:
+        """Bridge `TurnRunner`'s planning-specific review callback to the generalized decision slot.
+
+        `TurnRunner` (and the `PlanRunner` it hands this to) still expect a `review_plan(plan_text,
+        critique)` callable speaking planning's own approve/edit/reject vocabulary. That vocabulary
+        belongs to the planning workflow, not the core, but the workflow has not been wired in to call
+        `self._human.decide` itself yet, so this is a temporary shim.
+        """
+
+        def parse_plan_reply(raw: str, text: str) -> Optional[str]:
+            if text in ("approve", "yes", "y"):
+                return plan_text
+            if text in ("reject", "no", "n"):
+                return None
+            if text.startswith("edit:"):
+                return raw.split(":", 1)[1].strip() or plan_text
+            return raw.strip()
+
+        return await self._human.decide(
+            lambda: self._ui.ask_plan_review(plan_text, critique),
+            parse_plan_reply,
+            default=None,
+            context=plan_text,
+        )
 
     async def _handle(
         self, msg: ChannelMessage, *, conversation_id: str, plan: bool = False, tid: Optional[int] = None
