@@ -25,8 +25,8 @@ src/kokua/
 
   core/          the transport-agnostic runtime
     assistant.py         composition root + serve loop; delegates everything below
-    conversations.py     ConversationBook: store + agent cache + active pointer
-    tools.py             the `conversations` toolset: read-only sight of the user's other conversations
+    conversations.py     ConversationBook: store + agent cache + active pointer, and id resolution
+    transcripts.py       reading a stored conversation as text: flatten, truncate, search
     turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
     interaction.py       HumanGate: tool approval and plan review as lock-guarded single slots
     settings_runtime.py  SettingsApplier: read, apply live, persist, switch model
@@ -44,13 +44,12 @@ src/kokua/
     schema.py      AssistantConfig, AgentConfig, MCPServerConfig, the default prompt
     paths.py       the three locations that must resolve before config.toml can be read
     file.py        TOML discovery, parsing, schema validation
-    store.py       comment-preserving tomlkit writes
+    store.py       comment-preserving tomlkit writes, the write policy, and apply_setting
     table.py       RUNTIME_SETTINGS: the one declaration of what is changeable at runtime
-    tools.py       the assistant's own read_config / update_config
 
   planning/      runner.py (the /plan pipeline), reviewers.py (context-free reviewer agents)
-  mcp/           servers.py (connect, attach, reconnect), tools.py (runtime add/remove), auth.py (ChatOAuth)
-  scheduling/    recurrence.py (pure schedule math), registry.py (the JSON file), tools.py (agent tools)
+  mcp/           servers.py (connect, attach, reconnect, runtime add/remove), auth.py (ChatOAuth)
+  scheduling/    recurrence.py (pure schedule math), registry.py (the JSON file), tasks.py (TaskService)
   channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
   frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
   toolsets/      the one namespace of named capabilities
@@ -58,7 +57,9 @@ src/kokua/
     context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
     agents.py      builds the registry from every provider; resolves and validates one agent
     builtin.py     AIMU's tool groups, its two stores, and skills, wrapped as toolsets
-    core.py        an index over the four TOOLSET constants in Kokua's subsystem tools.py files
+    core.py        an index over the four TOOLSET constants in the four modules below
+    config.py, conversations.py, mcp_admin.py, scheduling.py -- Kokua's own four, each
+                   wrapping one subsystem's logic as agent tools
     aimu_agents.py, image.py -- plugins, like a third party's
 ```
 
@@ -175,11 +176,12 @@ anything; the last two run once per agent, whenever one is built:
    deduplicating by `__name__` and keeping the first, so declared order decides a collision. `ctx` is a
    `ToolsetContext`: the one process-wide `LiveState` plus this agent (`None` for a spawned worker).
    `build` must create only closures, never process state -- every shared singleton (the memory store,
-   the document store, the `SkillManager`, the scheduler tools) is a lazy property on `LiveState`, so two
+   the document store, the `SkillManager`, the `TaskService`) is a lazy property on `LiveState`, so two
    agents declaring one toolset share one rather than constructing two, and the two stores are opened only
-   because some agent declared them. The `SkillManager` and the scheduler are the exceptions to that last
-   half, and not by accident: every agent is a `SkillAgent` and so takes the manager regardless, and
-   `arm_tasks` has to fire a persisted scheduled task whether or not any agent can talk about scheduling.
+   because some agent declared them. The `SkillManager` and the `TaskService` are the exceptions to that
+   last half, and not by accident: every agent is a `SkillAgent` and so takes the manager regardless, and
+   `tasks.arm_all()` has to fire a persisted scheduled task whether or not any agent can talk about
+   scheduling.
 
 The prompt is assembled from the same selected list, in `agents.assemble_system_message`. For the entry
 agent, a `--system` flag wins outright over its declared opener; a worker's declared opener is never
@@ -204,30 +206,38 @@ rather than a naming convention alone:
 | `store_memory`, `search_memories`, `list_memories` | AIMU `make_memory_tools` | `memory` |
 | `save_document`, `read_document`, `list_documents`, `search_documents` | AIMU `make_document_tools` | `documents` |
 | `get_current_date_and_time`, `convert_time` | AIMU `builtin.time` | `time` |
-| `add_mcp_server`, `remove_mcp_server` | `mcp/tools.py` | `mcp-admin` |
-| `read_config`, `update_config` | `config/tools.py` | `config` |
-| `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task` | `scheduling/tools.py` | `scheduling` |
-| `list_conversations`, `read_conversation`, `search_conversations` | `core/tools.py` | `conversations` |
+| `add_mcp_server`, `remove_mcp_server` | `toolsets/mcp_admin.py` | `mcp-admin` |
+| `read_config`, `update_config` | `toolsets/config.py` | `config` |
+| `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task` | `toolsets/scheduling.py` | `scheduling` |
+| `list_conversations`, `read_conversation`, `search_conversations` | `toolsets/conversations.py` | `conversations` |
 | `spawn_subagent` | AIMU `make_async_subagent_tool` | implied by a non-empty `delegates_to` |
 
-Two conventions keep this honest. Kokua-side agent tools live in a subsystem's `tools.py` (which also
-exports that subsystem's `TOOLSET`) and nowhere else, so `grep -rl '@tool' src/kokua/` finds exactly
-those four files plus `toolsets/`. And `test_entry_agent_toolset_is_exactly_the_documented_inventory` in
+Two conventions keep this honest. Every Kokua-side agent tool lives under `toolsets/` and nowhere else,
+so `grep -rl '@tool' src/kokua/` finds only files in that one directory. And
+`test_entry_agent_toolset_is_exactly_the_documented_inventory` in
 `tests/core/test_build.py` asserts the built agent's tool names as an **exact set** mirroring this table,
 so adding a tool to the entry agent fails the suite until the table is updated, and a plugin toolset
 leaking onto it fails too. Documentation alone would have rotted; the test is what makes the table
 trustworthy.
 
-The pattern for a new Kokua capability: a `make_*_tools(...)` factory in the owning subsystem's
-`tools.py`, closing over the live state it needs, plus a `TOOLSET` in that same module whose `build`
-pulls that state off the context, added to `toolsets/core.py`'s index. A capability that needs nothing but
-`AssistantConfig` should be a plugin toolset instead. Either way it reaches an agent only when a
-`[agents.*]` table names it.
+The pattern for a new Kokua capability is two modules, split by who reads the output. The logic goes in
+the owning subsystem (`core/`, `config/`, `mcp/`, `scheduling/`) and returns data or raises a typed
+error; it holds only what agents and front ends both need, and formats nothing. The agent tools go in
+`toolsets/<name>.py`: a `make_*_tools(...)` factory closing over the live state, the docstrings that
+steer the model, every sentence it reads, and a `TOOLSET` whose `build` pulls that state off the context,
+added to `toolsets/core.py`'s index. A capability that needs nothing but `AssistantConfig` should be a
+plugin toolset instead. Either way it reaches an agent only when a `[agents.*]` table names it.
+
+The split earns its keep where the two readers diverge. A scheduled task's next firing is a `status` to
+`TaskService`, "~3600s" to the model, and "in 1h" in the sidebar; when the service returned one sentence,
+the web panel was showing prose written to steer a model.
 
 ### Reading across conversations
 
-`core/tools.py` defines `list_conversations`, `read_conversation`, and `search_conversations`, wrapped as
-the `conversations` toolset. Two decisions in it are worth knowing before changing them.
+`toolsets/conversations.py` defines `list_conversations`, `read_conversation`, and
+`search_conversations` over `core/transcripts.py` (flattening, truncation, search) and
+`ConversationBook.resolve` (an id or a unique prefix). Two decisions in it are worth knowing before
+changing them.
 
 The shipped config gives it to the entry agent and to no worker, deliberately: a worker shares no history
 and has no conversation identity, so "the user's other conversations" means nothing to it, and granting
@@ -292,7 +302,7 @@ rather than a generic unknown-key one.
 `config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
 comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Three writers: the web
 settings panel, the `add_mcp_server`/`remove_mcp_server` tools, and the assistant's own
-`update_config`. `update_config` refuses a security blocklist (`confirm_tools`, `email.to`,
+`update_config`. `update_config` refuses the keys `config/store.py`'s `is_locked` guards (`confirm_tools`, `email.to`,
 `data_dir`) plus the whole `[agents.*]` section, matched by section prefix since agent names cannot be
 enumerated in advance, and applies hot-appliable keys live.
 
@@ -357,10 +367,12 @@ that wants a task list implements its own; it is not a hole in the channel contr
 
 `task_action` is the seam that keeps the panel honest. Every task mutation pairs a registry write with
 the scheduler (un)arming that must accompany it, and both the agent's tools and the panel go through the
-same `scheduling.TaskControls` handle that `make_scheduler_tools` returns alongside the tools, so the two
-cannot drift: a front end that edited `scheduled_tasks.json` directly would leave the in-memory scheduler
-firing a task the registry calls disabled. The action name arrives from the browser, so it is looked up
-in a table and raises for anything else rather than being dispatched on.
+one `scheduling.TaskService` on `LiveState`, so the two cannot drift: a front end that edited
+`scheduled_tasks.json` directly would leave the in-memory scheduler firing a task the registry calls
+disabled. What they do *not* share is wording: the service returns records and raises `TaskError`, and
+`task_action` returns nothing, because the panel answers with a refreshed task list rather than a
+sentence. The action name arrives from the browser, so it is looked up in a table and raises for anything
+else rather than being dispatched on.
 
 Grouping a task's conversations under it happens **on the page**, not in the core. `new_session` stamps
 `metadata["task_id"]` on any conversation a firing mints (the task's id, not its name, since a name is

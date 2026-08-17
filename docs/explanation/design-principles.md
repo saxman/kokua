@@ -41,8 +41,9 @@ built-in front ends lazily, and `kokua/__init__.py` exposes `Assistant` through 
 [`toolsets/image.py`](../../src/kokua/toolsets/image.py) exists as the template.
 
 This now reaches Kokua's *own* capabilities, not just third-party ones. `config`, `conversations`,
-`mcp-admin`, and `scheduling` are each a `Toolset` declared in the subsystem `tools.py` whose live state
-it needs and indexed in [`toolsets/core.py`](../../src/kokua/toolsets/core.py); memory, documents, and
+`mcp-admin`, and `scheduling` are each a `Toolset` declared in a `toolsets/` module that wraps one
+subsystem's logic as agent tools, indexed in [`toolsets/core.py`](../../src/kokua/toolsets/core.py);
+memory, documents, and
 skills are toolsets wrapping AIMU's own factories in
 [`toolsets/builtin.py`](../../src/kokua/toolsets/builtin.py). All of them land in the same registry
 namespace a plugin does. `kokua --list-toolsets` prints that namespace grouped by provider, and the

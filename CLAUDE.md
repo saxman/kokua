@@ -77,7 +77,7 @@ each claim, is in [docs/explanation/design-principles.md](docs/explanation/desig
 3. **`config.toml` is the single source of settings, and the app writes it.** No parallel store. A
    runtime-mutable setting is one entry in `config/table.py`'s `RUNTIME_SETTINGS`, which drives the
    schema, the sanitizer, the hot-apply set, the live-apply loop, and the persist path at once.
-   `[agents.*]` is hand-edit only (locked by section prefix in `config/tools.py`), because
+   `[agents.*]` is hand-edit only (locked by section prefix in `config/store.py`'s `is_locked`), because
    `update_config` is a tool the assistant holds and a writable agent table would let it widen its own
    reach.
 4. **All state under one directory the user owns.** `$KOKUA_HOME`, default `~/.kokua`. Every leaf
@@ -105,17 +105,18 @@ src/kokua/
   cli.py  plugins.py  images.py  logging_setup.py  config.example.toml  web_static/
   core/         assistant (composition root + serve loop), conversations, turns, interaction,
                 settings_runtime, diagnostics, build, agent_registry, turn_gate, turn_registry,
-                messages, errors, tools
-  config/       schema, paths, file, store, table, tools
+                messages, errors, transcripts
+  config/       schema, paths, file, store (writes + write policy), table
   planning/     runner (the /plan pipeline), reviewers
-  mcp/          servers, auth, tools
-  scheduling/   recurrence (pure math), registry (the JSON file), tools
+  mcp/          servers (connect, attach, add, remove), auth
+  scheduling/   recurrence (pure math), registry (the JSON file), tasks (TaskService)
   channels/     ui (ChannelUI), protocol (RichChannel), cli, web
   frontends/    cli, web           -- registered as plugins, exactly like a third party's
   toolsets/     registry (Toolset, select, build_tools), context (LiveState, ToolsetContext),
                 agents (build_registry, validate_agents, prompt assembly, delegation),
-                builtin (AIMU groups/stores/skills), core (Kokua's four TOOLSETs),
-                example, aimu_agents, pdf, image, email -- plugins, like a third party's
+                builtin (AIMU groups/stores/skills), core (an index over Kokua's four),
+                config, conversations, mcp_admin, scheduling -- Kokua's own four,
+                example, aimu_agents, image -- plugins, like a third party's
 ```
 
 `tests/` mirrors this layout. Public import surface: `kokua.plugins`, `kokua.config`, `kokua.core`,
@@ -155,13 +156,27 @@ manual browser check.
 Use English punctuation (no em dashes) and inclusive terminology (allowlist/blocklist, primary/replica,
 main branch). Keep the core small; prefer a plugin over a core change.
 
-**Agent tools live in `<subsystem>/tools.py`.** A module that defines an `@aimu.tool` is either a
-subsystem's `tools.py` (`core/`, `config/`, `mcp/`, `scheduling/`) or a toolset module under
-`toolsets/`; nothing else contains one. A tool group belongs to the subsystem whose live state it needs,
-and the factory takes that state as arguments (`make_scheduler_tools`, `make_conversation_tools`), so
-`grep -rl '@tool' src/kokua/` should only ever find those files. Each of those four `tools.py` modules
-also exports a `TOOLSET` wrapping its factory, indexed in `toolsets/core.py`, so the capability is
-declared next to the tools it wraps rather than in a second list that could drift.
+**Agent tools live under `toolsets/`, and only there.** A module that defines an `@aimu.tool` is a
+toolset module; nothing else contains one, so `grep -rl '@tool' src/kokua/` should only ever find files
+in that one directory. Each of Kokua's own four (`toolsets/config.py`, `conversations.py`,
+`mcp_admin.py`, `scheduling.py`) also exports the `TOOLSET` wrapping its factory, indexed in
+`toolsets/core.py`, so the capability is declared next to the tools it wraps rather than in a second
+list that could drift.
+
+**A subsystem holds logic, not presentation.** `core/`, `config/`, `mcp/`, and `scheduling/` contain
+only what agents *and* front ends need. They return records and raise typed errors
+(`TaskNotFound`, `ConnectFailed`, `SettingLocked`); they never format a sentence, never shape a
+signature to fit a tool schema, and never import `aimu.tools`. The toolset module wrapping one owns its
+tool schemas, its model-facing docstrings, and every string a reader sees. Where the two readers want
+different words, each renders its own: a task with no countdown is a `status` from `TaskService`,
+"disabled" to the model, and "disabled" in the sidebar because app.js says so, not because the service
+did. The flat scalar arguments of `schedule_task` are the clearest case of a signature that belongs to
+the tool surface rather than the domain, which is why `_build_schedule` lives in `toolsets/scheduling.py`.
+
+Two dependency rules fall out of this and are worth stating: `config/` is the bottom layer and imports
+nothing above it (which is why `name_from_url` lives in `config/store.py`, not `mcp/servers.py`), and a
+`toolsets/` module annotating a `core/` type imports it under `TYPE_CHECKING`, since `core/build.py`
+reaches `toolsets/` and a real import would close the cycle.
 
 Note the convention is only half the answer: about half the tools the shipped entry agent holds come
 from AIMU and are not in this repo at all, which is why

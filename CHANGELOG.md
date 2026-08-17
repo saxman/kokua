@@ -203,10 +203,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.14.1 or newer
   fit, the *oldest* messages are dropped behind a count, so a read always ends with the most recent
   message. Search matches the phrase first and falls back to all-of-these-words within one message,
   saying which it used.
-- **Agent tools are findable.** A module defining an `@aimu.tool` is either a subsystem's `tools.py`
-  (`core/`, `config/`, `mcp/`, `scheduling/`) or a toolset module under `toolsets/`, so
-  `grep -rl '@tool' src/kokua/` finds exactly those; each of those four `tools.py` modules also exports the
-  `TOOLSET` that wraps its factory, indexed in `toolsets/core.py`. Because about half the 27 tools the
+- **Agent tools are findable, and are only presentation.** Every module defining an `@aimu.tool` is a
+  toolset module, so `grep -rl '@tool' src/kokua/` finds only files under `toolsets/`. Kokua's own four
+  (`config.py`, `conversations.py`, `mcp_admin.py`, `scheduling.py`) each wrap one subsystem and export
+  the `TOOLSET` for it, indexed in `toolsets/core.py`. The subsystem underneath (`core/transcripts.py`,
+  `config/store.py`, `mcp/servers.py`, `scheduling/tasks.py`) holds only what agents and front ends both
+  need: it returns records and raises typed errors, and formats no sentence. Because about half the 27 tools the
   shipped entry agent holds come from AIMU and cannot be grepped here at all,
   [docs/explanation/architecture.md](docs/explanation/architecture.md#how-an-agents-tools-resolve) carries
   the full inventory with the factory that builds each and the toolset it is declared as, and
@@ -301,9 +303,10 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   when there are no tasks, collapses (remembered per browser), and scrolls independently of the
   conversation list so neither can crowd the other out. Creating and editing tasks stays in chat, where
   the model turns a natural-language schedule into a validated one.
-- The panel's actions and the agent's tools share one implementation (`scheduling.TaskControls`), so a
-  registry write and the scheduler (un)arming that must accompany it can never come apart. The action
-  name arrives from the browser and is allowlisted rather than dispatched on.
+- The panel's actions and the agent's tools share one implementation (`scheduling.TaskService`), so a
+  registry write and the scheduler (un)arming that must accompany it can never come apart. They do not
+  share wording: the service returns records, and the panel and the model each phrase their own. The
+  action name arrives from the browser and is allowlisted rather than dispatched on.
 - **Each task's conversations are nested under it** in that section and left out of the chat list, so
   the chat list holds only conversations you started. A conversation records the task that minted it
   (`task_id` in its metadata), which is the durable link a task name is not. Grouping happens on the
