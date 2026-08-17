@@ -19,8 +19,9 @@ from tests.channels import FakeChannel, _config, example_agents
 from tests.helpers import MockAsyncModelClient
 
 
-def _workflow(command: str) -> Workflow:
-    return Workflow(name=command, description="W.", command=command, usage=f"/{command} <x>", build=lambda ctx: None)
+def _workflow(name: str, command: str) -> Workflow:
+    """A workflow named after its carrying toolset, which ``build_command_map`` requires."""
+    return Workflow(name=name, description="W.", command=command, usage=f"/{command} <x>", build=lambda ctx: None)
 
 
 def _registry(*toolsets: Toolset):
@@ -31,7 +32,9 @@ def test_a_declared_workflow_gets_its_command():
     agents = example_agents()
     agents["assistant"].tools = ["planning"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
-    registry = _registry(Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("plan")))
+    registry = _registry(
+        Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("planning", "plan"))
+    )
 
     assert set(build_command_map(config, registry)) == {"plan"}
 
@@ -52,7 +55,7 @@ def test_an_undeclared_workflow_gets_no_command():
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
         Toolset(name="time", description="T.", build=lambda ctx: []),
-        Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("plan")),
+        Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("planning", "plan")),
     )
 
     assert build_command_map(config, registry) == {}
@@ -62,7 +65,9 @@ def test_a_workflow_may_not_claim_a_reserved_command():
     agents = example_agents()
     agents["assistant"].tools = ["stopper"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
-    registry = _registry(Toolset(name="stopper", description="S.", build=lambda ctx: [], workflow=_workflow("stop")))
+    registry = _registry(
+        Toolset(name="stopper", description="S.", build=lambda ctx: [], workflow=_workflow("stopper", "stop"))
+    )
 
     with pytest.raises(ConfigError, match="reserved"):
         build_command_map(config, registry)
@@ -73,8 +78,8 @@ def test_undeclared_workflow_commands_excludes_declared_and_includes_undeclared(
     agents["assistant"].tools = ["declared"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
-        Toolset(name="declared", description="D.", build=lambda ctx: [], workflow=_workflow("d")),
-        Toolset(name="undeclared", description="U.", build=lambda ctx: [], workflow=_workflow("u")),
+        Toolset(name="declared", description="D.", build=lambda ctx: [], workflow=_workflow("declared", "d")),
+        Toolset(name="undeclared", description="U.", build=lambda ctx: [], workflow=_workflow("undeclared", "u")),
     )
 
     assert undeclared_workflow_commands(config, registry) == {"u": "undeclared"}
@@ -85,11 +90,25 @@ def test_two_workflows_may_not_claim_one_command():
     agents["assistant"].tools = ["a", "b"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
     registry = _registry(
-        Toolset(name="a", description="A.", build=lambda ctx: [], workflow=_workflow("go")),
-        Toolset(name="b", description="B.", build=lambda ctx: [], workflow=_workflow("go")),
+        Toolset(name="a", description="A.", build=lambda ctx: [], workflow=_workflow("a", "go")),
+        Toolset(name="b", description="B.", build=lambda ctx: [], workflow=_workflow("b", "go")),
     )
 
     with pytest.raises(ConfigError, match="both offer the /go command"):
+        build_command_map(config, registry)
+
+
+def test_a_workflow_must_share_its_toolsets_name():
+    """A workflow's settings are its toolset's ``[<name>]`` section, resolved by the workflow's name, so a
+    disagreeing name would hand the workflow either nothing or another capability's section."""
+    agents = example_agents()
+    agents["assistant"].tools = ["widgets"]
+    config = AssistantConfig(agents=agents, entry_agent="assistant")
+    registry = _registry(
+        Toolset(name="widgets", description="W.", build=lambda ctx: [], workflow=_workflow("gadgets", "go"))
+    )
+
+    with pytest.raises(ConfigError, match="carries workflow 'gadgets'"):
         build_command_map(config, registry)
 
 
@@ -100,7 +119,9 @@ def test_an_empty_command_is_rejected():
     agents = example_agents()
     agents["assistant"].tools = ["planning"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
-    registry = _registry(Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("")))
+    registry = _registry(
+        Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("planning", ""))
+    )
 
     with pytest.raises(ConfigError, match="not a single lowercase word"):
         build_command_map(config, registry)
@@ -110,7 +131,9 @@ def test_a_command_containing_whitespace_is_rejected():
     agents = example_agents()
     agents["assistant"].tools = ["planning"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
-    registry = _registry(Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("do it")))
+    registry = _registry(
+        Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("planning", "do it"))
+    )
 
     with pytest.raises(ConfigError, match="not a single lowercase word"):
         build_command_map(config, registry)
@@ -123,7 +146,9 @@ def test_a_non_lowercase_command_is_rejected():
     agents = example_agents()
     agents["assistant"].tools = ["stopper"]
     config = AssistantConfig(agents=agents, entry_agent="assistant")
-    registry = _registry(Toolset(name="stopper", description="S.", build=lambda ctx: [], workflow=_workflow("Stop")))
+    registry = _registry(
+        Toolset(name="stopper", description="S.", build=lambda ctx: [], workflow=_workflow("stopper", "Stop"))
+    )
 
     with pytest.raises(ConfigError, match="not a single lowercase word"):
         build_command_map(config, registry)

@@ -112,12 +112,11 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
 # AssistantConfig field name, or "<toolset>.<key>" for a key a toolset owns (see `_coerce_flat`).
 # `bool` is an int subclass, so it is rejected for numeric fields unless explicitly accepted.
 #
-# Startup-only keys are declared here; the runtime-mutable ones (model, the display and planning flags,
-# and each toolset's hot settings) come from the settings table, so the two never drift. `build_schema`
-# joins them.
+# Startup-only keys are declared here; the runtime-mutable ones (model, the display flags, and each
+# toolset's hot settings) come from the settings table, so the two never drift. A toolset's *cold* keys
+# are neither: they come from `settings_sources.startup_schema`. `build_schema` joins all three.
 _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
     ("assistant", "system_message"): ("system_message", (str,), "a string", None),
-    ("planning", "review_rounds"): ("review_rounds", (int,), "an integer", None),
     ("assistant", "agent"): ("entry_agent", (str,), "a string", None),
     ("assistant", "concurrent_tools"): ("concurrent_tools", (bool,), "a boolean", None),
     ("assistant", "load_plugins"): ("load_plugins", (bool,), "a boolean", None),

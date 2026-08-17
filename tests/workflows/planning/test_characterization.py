@@ -20,7 +20,7 @@ from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType
 from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
-from tests.channels import example_agents
+from tests.channels import example_agents, planning_settings
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows.critics import Verdict
 
@@ -76,8 +76,18 @@ class RecordingChannel(Channel):
         self.events.append(("ask_plan_review", plan, critique))
 
 
+def _planning(**overrides) -> dict[str, dict]:
+    """This module's ``[planning]`` section: one replan/revise round, plus the flags a test sets."""
+    return planning_settings(review_rounds=1, **overrides)
+
+
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant", "review_rounds": 1}
+    base = {
+        "data_dir": tmp_path,
+        "agents": example_agents(),
+        "entry_agent": "assistant",
+        "toolset_settings": _planning(),
+    }
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -121,8 +131,11 @@ APPROVE = Verdict(approved=True)
 REJECT = Verdict(approved=False, issues=["needs work"])
 
 
-async def _planned_turn(tmp_path, channel, replies, **config):
-    assistant = await Assistant.create(_config(tmp_path, **config), channel, client=MockAsyncModelClient(list(replies)))
+async def _planned_turn(tmp_path, channel, replies, **planning):
+    """Run one planned turn, with ``planning`` naming the ``[planning]`` flags this case turns on."""
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=_planning(**planning)), channel, client=MockAsyncModelClient(list(replies))
+    )
     await assistant._handle(
         ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
     )
@@ -265,7 +278,7 @@ async def test_human_rejection_stops_the_turn_and_commits_nothing(tmp_path, verb
     channel = RecordingChannel()
 
     assistant = await Assistant.create(
-        _config(tmp_path, plan_review=True, show_reasoning=verbose),
+        _config(tmp_path, toolset_settings=_planning(plan_review=True, show_reasoning=verbose)),
         channel,
         client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]),
     )

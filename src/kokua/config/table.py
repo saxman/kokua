@@ -105,17 +105,13 @@ class RuntimeSetting:
 # The settings Kokua's own core owns, each backed by an ``AssistantConfig`` field. Whatever the installed
 # toolsets declared is appended to these to form the live table (see ``config.settings_sources``).
 #
-# The four [planning] flags are core entries because ``AssistantConfig`` still carries them and the
-# planning code still reads those attributes. They become the planning toolset's own declaration when
-# planning reads its section instead; until then, moving them here would leave planning unconfigurable.
+# Short on purpose: a setting belongs here only if the core itself reads it. Everything a capability
+# reads is that capability's own declaration, which is where the [planning] flags live (see
+# ``toolsets.planning.PLANNING_SETTINGS``).
 CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = (
     RuntimeSetting("model", "assistant", str),
     RuntimeSetting("show_thinking", "display", bool, mirror_on_channel=True),
     RuntimeSetting("show_tools", "display", bool, mirror_on_channel=True),
-    RuntimeSetting("plan_review", "planning", bool),
-    RuntimeSetting("plan_review_agent", "planning", bool),
-    RuntimeSetting("result_review", "planning", bool),
-    RuntimeSetting("show_reasoning", "planning", bool),
 )
 
 

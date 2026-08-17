@@ -9,7 +9,7 @@ import pytest
 from tests.helpers import MockAsyncModelClient
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME, WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
-from tests.channels import example_agents
+from tests.channels import example_agents, planning_settings
 from kokua.frontends.web import build_app
 
 from aimu.aio.channels.base import ChannelMessage
@@ -38,7 +38,14 @@ class _FakeWS:
 
 
 def _config(tmp_path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
+    base = {
+        "data_dir": tmp_path,
+        "agents": example_agents(),
+        "entry_agent": "assistant",
+        # A resolved config always carries the declared [planning] section; a planned turn through this
+        # config reads its settings the way a real one does.
+        "toolset_settings": planning_settings(),
+    }
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -1263,7 +1270,10 @@ def test_ws_plan_autonomous_emits_plan_then_answer(tmp_path):
 def test_ws_plan_review_approve_then_executes(tmp_path):
     from starlette.testclient import TestClient
 
-    app = build_app(_config(tmp_path, plan_review=True), client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]))
+    app = build_app(
+        _config(tmp_path, toolset_settings=planning_settings(plan_review=True)),
+        client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]),
+    )
     with TestClient(app).websocket_connect("/ws") as ws:
         ws.send_text("/plan do X")
         assert _drain_until(ws, "plan")["text"] == "THE PLAN"
@@ -1283,7 +1293,10 @@ def test_ws_plan_review_reject_skips_execution(tmp_path):
 
     # Only the plan response is queued; if execution ran it would raise (index error), so a clean
     # "(plan rejected)" message proves execution was skipped.
-    app = build_app(_config(tmp_path, plan_review=True), client=MockAsyncModelClient(["THE PLAN"]))
+    app = build_app(
+        _config(tmp_path, toolset_settings=planning_settings(plan_review=True)),
+        client=MockAsyncModelClient(["THE PLAN"]),
+    )
     with TestClient(app).websocket_connect("/ws") as ws:
         ws.send_text("/plan do X")
         _drain_until(ws, "plan_review")
@@ -1302,7 +1315,9 @@ def test_ws_plan_review_agent_surfaces_critique_to_human(tmp_path, monkeypatch):
 
     monkeypatch.setattr("kokua.workflows.planning.critics.review_plan", reject)
     app = build_app(
-        _config(tmp_path, plan_review=True, plan_review_agent=True, review_rounds=0),
+        _config(
+            tmp_path, toolset_settings=planning_settings(plan_review=True, plan_review_agent=True, review_rounds=0)
+        ),
         client=MockAsyncModelClient(["THE PLAN"]),
     )
     with TestClient(app).websocket_connect("/ws") as ws:
@@ -1324,7 +1339,7 @@ def test_ws_subagent_frames_live_and_replayed(tmp_path, monkeypatch):
     monkeypatch.setattr("kokua.workflows.planning.critics.review_plan", reject)
     # review_rounds=0 -> one plan review (rejected), then proceed autonomously and execute.
     app = build_app(
-        _config(tmp_path, plan_review_agent=True, review_rounds=0),
+        _config(tmp_path, toolset_settings=planning_settings(plan_review_agent=True, review_rounds=0)),
         client=MockAsyncModelClient(["THE PLAN", "THE ANSWER"]),
     )
     with TestClient(app).websocket_connect("/ws") as ws:

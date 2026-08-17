@@ -38,6 +38,26 @@ if TYPE_CHECKING:
     from aimu.aio import AsyncRunner
 
 
+class SettingsView:
+    """Attribute access over one toolset's settings bucket.
+
+    A view rather than a generated dataclass: the keys are known only at runtime, and a workflow reading
+    ``settings.review_rounds`` should fail loudly on a key its toolset never declared rather than
+    silently return None, which would read as the setting's own default.
+    """
+
+    def __init__(self, values: dict):
+        self._values = values
+
+    def __getattr__(self, name: str):
+        try:
+            return self._values[name]
+        except KeyError:
+            raise AttributeError(
+                f"no setting {name!r} in this toolset's section; declare it in the toolset's `settings`"
+            ) from None
+
+
 @dataclass
 class WorkflowResult:
     """What a workflow hands back for the caller to persist.
@@ -74,9 +94,9 @@ class WorkflowContext:
     index here for the caller to read in a ``finally``. That is what lets a cancelled or failed run
     still anchor its sub-agent cards.
 
-    ``settings`` is reserved for the carrying toolset's own configuration section and is always
-    ``None`` until a future release gives a toolset a declared settings handover; a workflow author
-    reaching for it today gets ``None``, not that section.
+    ``settings`` is attribute access over the carrying toolset's own ``config.toml`` section: every key
+    that toolset declared, at whatever the file set or the declaration defaulted to. The section is the
+    toolset's name, which is why a workflow shares it (see ``toolsets.agents.build_command_map``).
     """
 
     agent: Any

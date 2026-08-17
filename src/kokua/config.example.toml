@@ -191,6 +191,9 @@ level = "INFO"
 # Deep planning is a toolset: [agents.<name>].tools must list "planning" for the "/plan <task>" command
 # (and the web UI's Plan toggle) to exist at all. It drafts an explicit plan (which tools/skills/MCP
 # services to use or build) before doing the work.
+# Every key below belongs to that toolset: this section exists because the toolset declares it, and the
+# keys are only read when an agent declares the toolset. A section named after a toolset is how a
+# third-party workflow ships its settings too, so nothing here is special-cased for planning.
 # plan_review pauses that planned turn for your Approve/Edit/Reject; off runs the plan autonomously.
 # plan_review is toggleable at runtime in the web settings panel.
 # plan_review = false

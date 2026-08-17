@@ -19,6 +19,7 @@ from aimu.models import StreamingContentType
 from kokua.config import AssistantConfig
 from kokua.config import file as settings
 from kokua.config.schema import AgentConfig
+from kokua.toolsets.planning import PLANNING_SETTINGS
 
 
 class FakeChannel(Channel):
@@ -81,6 +82,27 @@ def example_agents() -> dict[str, AgentConfig]:
     return {name: AgentConfig(**deepcopy(spec)) for name, spec in _shipped_agents().items()}
 
 
+def planning_settings(**overrides) -> dict[str, dict]:
+    """A complete ``toolset_settings`` carrying the ``[planning]`` section, with these overrides applied.
+
+    Derived from the planning toolset's own declarations rather than hard-coded, for two reasons. A test
+    constructing an ``AssistantConfig`` directly skips ``seed_toolset_defaults`` (only ``resolve_config``
+    runs it), so without every declared key the workflow's ``ctx.settings`` raises on the first one it
+    reads; and deriving means a newly declared setting cannot break these tests.
+
+    An override the toolset does not declare raises, so a typo fails here rather than being silently
+    dropped into a bucket nothing reads.
+    """
+    declared = {setting.key: setting.default for setting in PLANNING_SETTINGS}
+    unknown = set(overrides) - set(declared)
+    if unknown:
+        raise AssertionError(
+            f"the planning toolset declares no setting(s) {', '.join(sorted(unknown))}. "
+            f"It declares: {', '.join(declared)}."
+        )
+    return {"planning": {**declared, **overrides}}
+
+
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
     base = {
         # All leaf paths derive from data_dir; point it at the test's tmp dir.
@@ -91,6 +113,11 @@ def _config(tmp_path: Path, **overrides) -> AssistantConfig:
         # that could drift.
         "agents": example_agents(),
         "entry_agent": "assistant",
+        # A resolved config carries a section for every declared toolset, and planning's is the one Kokua
+        # ships, so a planned turn through this config reads its settings the way a real one does. A caller
+        # needing a non-default flag replaces this wholesale:
+        # `_config(tmp_path, toolset_settings=planning_settings(plan_review=True))`.
+        "toolset_settings": planning_settings(),
     }
     base.update(overrides)
     return AssistantConfig(**base)

@@ -94,6 +94,9 @@ class PlanningWorkflow(aio.AsyncRunner):
         self._agent = ctx.agent
         self._ui = ctx.ui
         self._config = ctx.config
+        # This workflow's own [planning] section. Separate from _config, which is only consulted for
+        # core settings (the model the reviewers run on).
+        self._settings = ctx.settings
         # The raw trace of the in-flight verbose turn: a list of {label, detail, text} phase segments,
         # accumulated by _send_phase / _run_and_capture / _stream_review. None outside a verbose turn.
         self._trace: Optional[list[dict]] = None
@@ -102,26 +105,26 @@ class PlanningWorkflow(aio.AsyncRunner):
         """Plan, optionally adversarially review + human review, then execute (optionally with
         adversarial result review). Returns a WorkflowResult for the caller to persist."""
         msg = self._ctx.msg
-        mode = VERBOSE if self._config.show_reasoning and self._ui.supports_phases else SUMMARY
+        mode = VERBOSE if self._settings.show_reasoning and self._ui.supports_phases else SUMMARY
         self._trace = [] if mode.announce_phases else None
         events: list[dict] = []
         try:
             await self._phase(mode, "Planner", "drafting a plan")
             plan = await self._make_plan(msg, mode)
             critique: Optional[list[str]] = None
-            if self._config.plan_review_agent:
+            if self._settings.plan_review_agent:
                 plan, critique = await self._plan_review_rounds(msg, plan, mode, events)
             if mode.show_plan_card:  # in verbose the plan was already streamed as it was written
                 await self._send_plan(plan, critique)
 
             approved = plan
-            if self._config.plan_review:
+            if self._settings.plan_review:
                 approved = await self._review_with_human(plan, critique)
                 if approved is None:
                     await self._ui.send("(plan rejected)", reply_to=msg)
                     return WorkflowResult(committed=False)
 
-            if not self._config.result_review and not mode.announce_phases:
+            if not self._settings.result_review and not mode.announce_phases:
                 return await self._execute_streaming(msg, approved, events)
             return await self._execute_with_review(msg, approved, mode, events)
         finally:
@@ -195,14 +198,14 @@ class PlanningWorkflow(aio.AsyncRunner):
         never becomes conversation history the model will later see.
         """
         base = list(self._agent.model_client.messages)
-        rounds = self._config.review_rounds
+        rounds = self._settings.review_rounds
         answer = ""
         try:
             await self._phase(mode, "Executor", "carrying out the plan")
             answer = await self._run_and_capture(
                 EXECUTE_PROMPT.format(request=msg.text, plan=plan), msg.images, show_answer=mode.stream_intermediate
             )
-            if self._config.result_review:
+            if self._settings.result_review:
                 for attempt in range(rounds + 1):
                     evidence = _tool_evidence(self._agent.model_client.messages[len(base) :])
                     verdict = await self._review_once(
@@ -261,7 +264,7 @@ class PlanningWorkflow(aio.AsyncRunner):
     ) -> tuple[str, Optional[list[str]]]:
         """Have an independent, context-free agent critique the plan; re-plan on rejection up to
         review_rounds. Returns the final plan and any residual issues (None if the reviewer approved)."""
-        rounds = self._config.review_rounds
+        rounds = self._settings.review_rounds
         for attempt in range(rounds + 1):
             verdict = await self._review_once(
                 mode,

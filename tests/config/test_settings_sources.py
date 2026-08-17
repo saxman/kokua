@@ -83,10 +83,32 @@ def test_a_toolset_named_after_a_core_section_may_not_declare_settings():
 
 
 def test_a_toolset_named_after_a_core_section_is_fine_while_it_declares_nothing():
-    """Only claiming the section's keys is refused. The shipped ``planning`` toolset is exactly this case:
-    its name matches a section the core still parses, and it declares nothing yet."""
+    """Only claiming the section's keys is refused, so a name that merely collides costs nothing until the
+    toolset wants settings of its own."""
     assert build_settings_table([_toolset(name="email")]).settings == CORE_RUNTIME_SETTINGS
     assert startup_schema([_toolset(name="email")]) == {}
+
+
+def test_the_shipped_planning_toolset_owns_its_section():
+    """The handover this mechanism exists for: ``[planning]`` reaches the table and the seeded config
+    through the same declaration path a third party's toolset uses, with no core entry behind it."""
+    table = build_settings_table()
+
+    assert table.by_toml("planning", "plan_review").toolset == "planning"
+    assert table.by_toml("planning", "plan_review").wire_key == "planning.plan_review"
+    assert table.by_toml("planning", "review_rounds") is None  # cold: a startup-only key
+    assert ("planning", "review_rounds") in startup_schema()
+    assert not any(setting.section == "planning" for setting in CORE_RUNTIME_SETTINGS)
+
+    config = AssistantConfig()
+    seed_toolset_defaults(config)
+    assert config.toolset_settings["planning"] == {
+        "plan_review": False,
+        "plan_review_agent": False,
+        "result_review": False,
+        "show_reasoning": False,
+        "review_rounds": 2,
+    }
 
 
 def test_a_reserved_name_is_also_refused_for_a_cold_declaration():

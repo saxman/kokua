@@ -72,9 +72,11 @@ class Toolset:
     from ``build``, and that is how the same workflow reaches the model as a tool: return
     ``runner.as_tool(...)``.
 
-    ``settings`` are the ``config.toml`` keys this toolset owns, in its own ``[<name>]`` section. Their
-    values reach ``build`` through ``ctx.settings`` and a workflow through its context, so a capability
-    ships its configuration alongside the code that reads it.
+    ``settings`` are the ``config.toml`` keys this toolset owns, in its own ``[<name>]`` section, so a
+    capability ships its configuration alongside the code that reads it. Their values land in
+    ``config.toolset_settings[<name>]``: a workflow reads them as attributes through
+    ``WorkflowContext.settings``, and ``build`` reads them from ``ctx.config.toolset_settings[<name>]``,
+    which is complete by then because every declared default is seeded at startup.
     """
 
     name: str

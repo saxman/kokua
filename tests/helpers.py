@@ -18,9 +18,11 @@ from kokua.config.table import CORE_RUNTIME_SETTINGS, SettingsTable
 def core_table() -> SettingsTable:
     """The table for a test that has to pass one to ``config.file.load`` or ``apply_setting``.
 
-    Core-only, which is right for a test not exercising a toolset's own section: none of the toolsets
-    Kokua ships declares a setting, so this holds exactly what ``build_settings_table()`` returns in a
-    real run. A test covering a contributed setting builds its own table with the entries it needs.
+    Core-only, and so *narrower* than a real run's table: the shipped ``planning`` toolset declares its
+    own section, which this deliberately omits. Right for a test about a core key -- a config naming a
+    toolset's section will read as an unknown key through this table, which is the point when the test is
+    not about a contributed setting. A test that needs one uses ``build_settings_table()``, or builds its
+    own table with the entries it needs.
     """
     return SettingsTable(CORE_RUNTIME_SETTINGS)
 

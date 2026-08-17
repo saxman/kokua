@@ -10,14 +10,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.helpers import MockAsyncModelClient, core_table
+from tests.helpers import MockAsyncModelClient
+from kokua.config.settings_sources import build_settings_table
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import critics
 from kokua.workflows.planning import critics as review
 from kokua.core.assistant import Assistant
 from kokua.workflows.planning.runner import _tool_evidence
 from kokua.config import AssistantConfig
-from tests.channels import example_agents
+from tests.channels import example_agents, planning_settings
 from kokua.workflows.critics import Verdict
 
 from aimu import aio
@@ -59,7 +60,12 @@ class FakeChannel(Channel):
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
+    base = {
+        "data_dir": tmp_path,
+        "agents": example_agents(),
+        "entry_agent": "assistant",
+        "toolset_settings": planning_settings(),
+    }
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -194,7 +200,9 @@ async def test_plan_review_replans_then_approves(tmp_path, monkeypatch):
     calls = _verdicts([REJECT, APPROVE], monkeypatch, "review_plan")
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])  # plan, replan, execute
-    assistant = await Assistant.create(_config(tmp_path, plan_review_agent=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(plan_review_agent=True)), channel, client=client
+    )
 
     await assistant._handle(
         ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
@@ -211,7 +219,9 @@ async def test_plan_review_exhausts_and_surfaces_critique(tmp_path, monkeypatch)
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])
     assistant = await Assistant.create(
-        _config(tmp_path, plan_review_agent=True, review_rounds=1), channel, client=client
+        _config(tmp_path, toolset_settings=planning_settings(plan_review_agent=True, review_rounds=1)),
+        channel,
+        client=client,
     )
 
     await assistant._handle(
@@ -230,7 +240,9 @@ async def test_result_review_revises_then_approves(tmp_path, monkeypatch):
     _verdicts([REJECT, APPROVE], monkeypatch, "review_result")
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN", "ANS1", "ANS2"])  # plan, execute, revise
-    assistant = await Assistant.create(_config(tmp_path, result_review=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(result_review=True)), channel, client=client
+    )
 
     await assistant._handle(
         ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
@@ -249,7 +261,11 @@ async def test_result_review_exhausts_and_notes_issues(tmp_path, monkeypatch):
     _verdicts([REJECT], monkeypatch, "review_result")  # never approves
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN", "ANS1", "ANS2"])
-    assistant = await Assistant.create(_config(tmp_path, result_review=True, review_rounds=1), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(result_review=True, review_rounds=1)),
+        channel,
+        client=client,
+    )
 
     await assistant._handle(
         ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
@@ -270,7 +286,9 @@ async def test_result_review_receives_executor_evidence(tmp_path, monkeypatch):
     channel = FakeChannel()
     # planning: PLAN; executor does a tool round ("tool" -> "ANS") then a continuation turn ("FINAL").
     client = MockAsyncModelClient(["PLAN", "tool", "ANS", "FINAL"])
-    assistant = await Assistant.create(_config(tmp_path, result_review=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(result_review=True)), channel, client=client
+    )
 
     await assistant._handle(
         ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
@@ -287,7 +305,9 @@ async def test_plan_review_emits_and_records_subagent(tmp_path, monkeypatch):
     _verdicts([REJECT, APPROVE], monkeypatch, "review_plan")
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])
-    assistant = await Assistant.create(_config(tmp_path, plan_review_agent=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(plan_review_agent=True)), channel, client=client
+    )
 
     await assistant._handle(
         ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
@@ -305,7 +325,9 @@ async def test_result_review_emits_and_records_subagent(tmp_path, monkeypatch):
     _verdicts([REJECT, APPROVE], monkeypatch, "review_result")
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN", "ANS1", "ANS2"])
-    assistant = await Assistant.create(_config(tmp_path, result_review=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(result_review=True)), channel, client=client
+    )
 
     await assistant._handle(
         ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
@@ -320,15 +342,22 @@ async def test_result_review_emits_and_records_subagent(tmp_path, monkeypatch):
 
 
 async def test_settings_carry_review_flags(tmp_path):
+    """The panel reaches a planning flag under its namespaced wire key, and applying one lands in the
+    toolset's own section -- the same place the workflow reads it from."""
     channel = FakeChannel()
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
     s = assistant.current_settings()
-    assert s["plan_review_agent"] is False and s["result_review"] is False
+    assert s["planning.plan_review_agent"] is False and s["planning.result_review"] is False
 
-    await assistant.apply_settings({"plan_review_agent": True, "result_review": True, "generate_kwargs": {}})
-    assert assistant._config.plan_review_agent is True and assistant._config.result_review is True
+    await assistant.apply_settings(
+        {"planning.plan_review_agent": True, "planning.result_review": True, "generate_kwargs": {}}
+    )
+    section = assistant._config.toolset_settings["planning"]
+    assert section["plan_review_agent"] is True and section["result_review"] is True
 
 
 def test_sanitize_keeps_review_flags():
-    result = core_table().sanitize({"plan_review_agent": True, "result_review": False})
-    assert result["plan_review_agent"] is True and result["result_review"] is False
+    """Through the live table, since these are the planning toolset's declarations rather than core
+    entries: a core-only table would drop both keys as unknown."""
+    result = build_settings_table().sanitize({"planning.plan_review_agent": True, "planning.result_review": False})
+    assert result["planning.plan_review_agent"] is True and result["planning.result_review"] is False

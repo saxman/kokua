@@ -7,7 +7,7 @@ from pathlib import Path
 from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
-from tests.channels import example_agents
+from tests.channels import example_agents, planning_settings
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows.critics import Verdict
 
@@ -61,7 +61,12 @@ class VerboseChannel(Channel):
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
+    base = {
+        "data_dir": tmp_path,
+        "agents": example_agents(),
+        "entry_agent": "assistant",
+        "toolset_settings": planning_settings(),
+    }
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -91,7 +96,9 @@ APPROVE = Verdict(approved=True)
 async def test_verbose_no_reviewers_streams_phases_and_commits(tmp_path):
     channel = VerboseChannel()
     client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])  # planner, executor
-    assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(show_reasoning=True)), channel, client=client
+    )
 
     await assistant._handle(
         ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW
@@ -114,7 +121,9 @@ async def test_verbose_plan_review_streams_and_records_trace(tmp_path, monkeypat
     channel = VerboseChannel()
     client = MockAsyncModelClient(["PLAN1", "PLAN2", "ANSWER"])  # plan, replan, executor
     assistant = await Assistant.create(
-        _config(tmp_path, plan_review_agent=True, show_reasoning=True), channel, client=client
+        _config(tmp_path, toolset_settings=planning_settings(plan_review_agent=True, show_reasoning=True)),
+        channel,
+        client=client,
     )
 
     await assistant._handle(
@@ -141,7 +150,9 @@ async def test_verbose_result_review_streams_every_version(tmp_path, monkeypatch
     channel = VerboseChannel()
     client = MockAsyncModelClient(["PLAN", "ANS1", "ANS2"])  # plan, execute, revise
     assistant = await Assistant.create(
-        _config(tmp_path, result_review=True, show_reasoning=True), channel, client=client
+        _config(tmp_path, toolset_settings=planning_settings(result_review=True, show_reasoning=True)),
+        channel,
+        client=client,
     )
 
     await assistant._handle(
@@ -170,7 +181,9 @@ async def test_show_reasoning_without_phase_channel_uses_normal_path(tmp_path):
 
     channel = PlainChannel()
     client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])
-    assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(show_reasoning=True)), channel, client=client
+    )
 
     await assistant._handle(
         ChannelMessage(text="do X", channel="fake"), conversation_id=assistant._active_id, workflow=PLANNING_WORKFLOW

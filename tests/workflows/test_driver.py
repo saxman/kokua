@@ -9,6 +9,7 @@ from aimu.models import StreamChunk, StreamingContentType
 
 from kokua.config import AssistantConfig
 from kokua.core.assistant import Assistant
+from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
 from tests.channels import FakeChannel, example_agents
 from tests.helpers import MockAsyncModelClient
@@ -102,3 +103,71 @@ async def test_a_rich_tier_workflow_owns_its_turn_and_its_trace(tmp_path):
     assert channel.sent == ["rich reply"]
     session = assistant._book.get(assistant._active_id)
     assert session.metadata["trace"]["0"] == [{"label": "L", "detail": "d", "text": "t"}]
+
+
+async def test_a_workflow_reads_its_own_declared_settings(tmp_path):
+    """``ctx.settings`` is the carrying toolset's own ``config.toml`` section, keyed by the toolset name
+    the workflow shares. Named "planning" here because that is the section this config sets, not because
+    the core knows anything about planning."""
+    channel = FakeChannel()
+    captured = {}
+
+    class _Peek:
+        def __init__(self, ctx):
+            self.ctx = ctx
+            captured["rounds"] = ctx.settings.review_rounds
+            captured["review"] = ctx.settings.plan_review
+
+        async def run(self, task, generate_kwargs=None, stream=False, images=None):
+            return "ok"
+
+        @property
+        def messages(self):
+            return {}
+
+        async def run_turn(self):
+            await self.ctx.ui.send("ok")
+            return WorkflowResult(committed=False)
+
+    config = _config(tmp_path, toolset_settings={"planning": {"review_rounds": 7, "plan_review": True}})
+    assistant = await Assistant.create(config, channel, client=MockAsyncModelClient(["unused"]))
+    peeking = Workflow(name="planning", description="P.", command="plan", usage=PLANNING_WORKFLOW.usage, build=_Peek)
+
+    await assistant._handle(
+        ChannelMessage(text="x", channel="fake"), conversation_id=assistant._active_id, workflow=peeking
+    )
+
+    assert captured == {"rounds": 7, "review": True}
+
+
+async def test_a_workflow_reading_an_undeclared_setting_fails_loudly(tmp_path):
+    """A view rather than a dict lookup returning None: a workflow asking for a key its toolset never
+    declared has a bug in the declaration, and a silent None would surface as the setting's default."""
+    seen = {}
+
+    class _Peek:
+        def __init__(self, ctx):
+            try:
+                ctx.settings.never_declared
+            except AttributeError as error:
+                seen["error"] = str(error)
+
+        async def run(self, task, generate_kwargs=None, stream=False, images=None):
+            return "ok"
+
+        @property
+        def messages(self):
+            return {}
+
+        async def run_turn(self):
+            return WorkflowResult(committed=False)
+
+    config = _config(tmp_path, toolset_settings={"planning": {"plan_review": True}})
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient(["unused"]))
+    peeking = Workflow(name="planning", description="P.", command="plan", usage="/plan <t>", build=_Peek)
+
+    await assistant._handle(
+        ChannelMessage(text="x", channel="fake"), conversation_id=assistant._active_id, workflow=peeking
+    )
+
+    assert "never_declared" in seen["error"] and "settings" in seen["error"]

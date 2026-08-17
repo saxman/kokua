@@ -79,7 +79,7 @@ from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.core.errors import describe_error
 from kokua.core.messages import derive_title, resolve_user_index
 from kokua.core.subagents import subagent_events
-from kokua.workflows import WorkflowContext, is_rich
+from kokua.workflows import SettingsView, WorkflowContext, is_rich
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +232,9 @@ class TurnRunner:
             agent=agent,
             ui=self._ui,
             config=self._config,
-            settings=None,  # reserved for a toolset's own settings section; unset until that release
+            # The carrying toolset's own config section, which is why this is keyed by the workflow's
+            # name: build_command_map refuses a workflow whose name differs from its toolset's.
+            settings=SettingsView(self._config.toolset_settings.get(workflow.name, {})),
             msg=msg,
             state=self.state,
             decide=self._decide,

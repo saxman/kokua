@@ -62,26 +62,12 @@ class AssistantConfig:
     # Surface the model's reasoning and tool calls in the channel, not just the final answer.
     show_thinking: bool = True
     show_tools: bool = True
-    # Deep planning is invoked per request (the web UI's Plan toggle or a "/plan <task>" message): the
-    # turn first produces an explicit plan (tools/skills/MCP to use or build) before executing.
-    # plan_review gates execution on the user's Approve/Edit/Reject; off is autonomous (plan shown, then
-    # it proceeds).
-    plan_review: bool = False
-    # Adversarial review (deep planning). plan_review_agent: an independent, context-free agent critiques
-    # the plan and Kokua re-plans on rejection. result_review: an independent agent checks the final answer
-    # before it is shown (the loop still streams; only the final answer is withheld) and revises on reject.
-    # review_rounds bounds each replan/revise loop.
-    plan_review_agent: bool = False
-    result_review: bool = False
-    review_rounds: int = 2
-    # Verbose trace (deep planning): stream every LLM call in a planned turn -- planner, each reviewer
-    # (prose reasoning + verdict), executor, and every revision -- under labeled phase headers, showing
-    # every intermediate version. Overrides result_review's "hide until vetted" gate. Off by default.
-    show_reasoning: bool = False
     # Each toolset's own config section, by toolset name: every key the toolset declared, seeded with its
     # declared default and overlaid with what config.toml sets. A toolset (and a workflow) therefore
     # always reads a complete view, and Kokua's own dataclass carries no field for a capability that may
-    # not be installed.
+    # not be installed. Deep planning's flags are the first case, and the reason there is no plan_review
+    # or review_rounds field above: they are the planning toolset's [planning] section, declared in
+    # toolsets.planning.PLANNING_SETTINGS and read by the workflow through its context.
     toolset_settings: dict[str, dict] = field(default_factory=dict)
     # The toolset sections config.toml actually contained, captured before the declared defaults were
     # seeded. After seeding there is a bucket for every declared setting, so this is the only record of

@@ -11,7 +11,7 @@ from aimu.aio.channels.base import Channel, ChannelMessage
 from kokua.core.assistant import Assistant
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow
-from tests.channels import FakeChannel, _ConvCapturingChannel, _config
+from tests.channels import FakeChannel, _ConvCapturingChannel, _config, planning_settings
 from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
 from tests.helpers import MockAsyncModelClient
 
@@ -948,7 +948,9 @@ async def test_a_stopped_reviewed_planned_turn_with_no_answer_records_nothing(tm
     user message will occupy, which would show this turn's cards on that one."""
     client = _PlansThenSpawnsAndHangsClient()
     channel = _PhaseStopChannel(client.started, text="/plan long task")
-    assistant = await Assistant.create(_config(tmp_path, show_reasoning=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(show_reasoning=True)), channel, client=client
+    )
     client.reporter = assistant._subagent_reporter
 
     await assistant._serve_channel()
@@ -964,7 +966,9 @@ async def test_a_rejected_plan_records_nothing(tmp_path):
     """A rejected plan commits no user message, so a spawn the planner made has nothing to anchor to.
     Recording it at the pre-execution length would file it under whatever the next turn commits there."""
     client = _SpawningClient("THE PLAN")
-    assistant = await Assistant.create(_config(tmp_path, plan_review=True), FakeChannel(), client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(plan_review=True)), FakeChannel(), client=client
+    )
     client.reporter = assistant._subagent_reporter
     active_id = assistant._active_id
 

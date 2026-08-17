@@ -11,7 +11,7 @@ from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows.planning import PlanningWorkflow
 from kokua.workflows.planning.prompts import PLAN_PROMPT
 from kokua.config import AssistantConfig
-from tests.channels import example_agents
+from tests.channels import example_agents, planning_settings
 
 from aimu import aio
 from aimu.aio.channels.base import Channel, ChannelMessage
@@ -40,7 +40,12 @@ class FakeChannel(Channel):
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
-    base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
+    base = {
+        "data_dir": tmp_path,
+        "agents": example_agents(),
+        "entry_agent": "assistant",
+        "toolset_settings": planning_settings(),
+    }
     base.update(overrides)
     return AssistantConfig(**base)
 
@@ -104,7 +109,9 @@ async def _resolve_when_pending(assistant, value, *, approve=False):
 async def test_review_approve_executes(tmp_path):
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN", "ANSWER"])
-    assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(plan_review=True)), channel, client=client
+    )
 
     turn = asyncio.create_task(
         assistant._handle(
@@ -122,7 +129,9 @@ async def test_review_approve_executes(tmp_path):
 async def test_review_reject_skips_execution(tmp_path):
     channel = FakeChannel()
     client = MockAsyncModelClient(["PLAN"])  # only the plan; execution must not run (would need a 2nd)
-    assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(plan_review=True)), channel, client=client
+    )
 
     turn = asyncio.create_task(
         assistant._handle(
@@ -150,7 +159,9 @@ async def test_review_edit_executes_edited_plan(tmp_path):
 
     RecordingMock.prompts = []
     client = RecordingMock(["PLAN", "ANSWER"])
-    assistant = await Assistant.create(_config(tmp_path, plan_review=True), channel, client=client)
+    assistant = await Assistant.create(
+        _config(tmp_path, toolset_settings=planning_settings(plan_review=True)), channel, client=client
+    )
 
     turn = asyncio.create_task(
         assistant._handle(
@@ -173,9 +184,12 @@ async def test_current_settings_and_apply_carry_plan_flags(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)
 
     s = assistant.current_settings()
-    assert s["plan_review"] is False
+    # Namespaced, because the key belongs to the planning toolset rather than to the core: the panel is
+    # one flat object, and two toolsets may both reasonably want a "plan_review".
+    assert s["planning.plan_review"] is False
+    assert "plan_review" not in s  # the un-namespaced key is nobody's
     assert "plan_mode" not in s  # the global toggle is gone; planning is per-request
 
-    await assistant.apply_settings({"plan_review": True, "generate_kwargs": {}})
-    assert assistant._config.plan_review is True
-    assert assistant.current_settings()["plan_review"] is True
+    await assistant.apply_settings({"planning.plan_review": True, "generate_kwargs": {}})
+    assert assistant._config.toolset_settings["planning"]["plan_review"] is True
+    assert assistant.current_settings()["planning.plan_review"] is True

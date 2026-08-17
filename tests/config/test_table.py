@@ -25,9 +25,8 @@ from kokua.config.table import (
 def _table() -> SettingsTable:
     """The core table plus a third party's two settings.
 
-    The contributed example is a fictional ``widgets`` toolset rather than ``planning``, because the four
-    planning flags are still core entries (``AssistantConfig`` carries them) and one TOML key may only be
-    declared once -- which is what ``test_two_declarations_of_one_toml_key_are_rejected`` pins.
+    A fictional ``widgets`` toolset rather than a shipped one (``planning``), so these tests describe the
+    mechanism and not one capability's current declaration.
     """
     return SettingsTable(
         [
@@ -93,15 +92,19 @@ def test_the_toml_schema_covers_contributed_sections():
 
 def test_two_declarations_of_one_toml_key_are_rejected():
     """Two entries for one ``[section].key`` disagree about where the value lives, so the panel would
-    carry both keys, apply both, and write the key twice -- leaving the loser silently unread. That is the
-    state a toolset would create by declaring a key the core still owns, so the table refuses to hold it."""
-    with pytest.raises(ValueError, match=r"two runtime settings claim \[planning\].plan_review"):
-        SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("plan_review", "planning", bool, toolset="planning")])
+    carry both keys, apply both, and write the key twice -- leaving the loser silently unread. Reachable
+    from two toolset providers that share a name, since only the *registry* rejects a duplicate name and
+    the settings path never goes through it."""
+    with pytest.raises(ValueError, match=r"two runtime settings claim \[widgets\].verbose"):
+        SettingsTable([*_table().settings, RuntimeSetting("verbose", "widgets", bool, toolset="widgets")])
 
 
 def test_the_duplicate_message_names_both_sides():
-    with pytest.raises(ValueError, match="Kokua's core and toolset 'planning'"):
-        SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("plan_review", "planning", bool, toolset="planning")])
+    """The core-versus-toolset case, which is what makes naming both sides worth doing. ``settings_sources``
+    refuses a toolset named after a core section before it can reach here, so this is the backstop that
+    makes that refusal not the only thing standing between the panel and one key written to two places."""
+    with pytest.raises(ValueError, match="Kokua's core and toolset 'display'"):
+        SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("show_tools", "display", bool, toolset="display")])
 
 
 def test_every_core_runtime_setting_is_an_assistant_config_field():
@@ -175,15 +178,6 @@ def test_sanitize_model_and_flags():
     assert result["model"] == "anthropic:x"  # trimmed
     assert result["show_thinking"] is True
     assert "show_tools" not in result  # non-bool dropped
-
-
-def test_sanitize_keeps_plan_flags():
-    result = SettingsTable(CORE_RUNTIME_SETTINGS).sanitize(
-        {"plan_review_agent": True, "plan_review": False, "plan_bogus": True}
-    )
-    assert result["plan_review_agent"] is True
-    assert result["plan_review"] is False
-    assert "plan_bogus" not in result
 
 
 def test_sanitize_blank_model_omitted():

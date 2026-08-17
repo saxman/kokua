@@ -232,6 +232,12 @@ def build_command_map(config: AssistantConfig, registry: ToolsetRegistry) -> dic
     workflow, would present as one that inexplicably never runs, and the config naming both is the
     thing that has to change.
 
+    A workflow must also share its carrying toolset's name, checked here because this is where the two
+    are paired. A workflow's settings are the toolset's ``[<name>]`` section (``WorkflowContext.settings``
+    resolves them by the workflow's name), so a second, disagreeing name would hand a workflow either
+    nothing or another capability's section. That is why the rule is one name rather than a
+    ``settings_key`` field: a field could disagree with the section the values actually came from.
+
     A command's shape is checked here too, for the same reason: dispatch (``Assistant._serve_channel``)
     lowercases the incoming text and matches a single whitespace-free token, so a command that is empty,
     contains whitespace, or is not already lowercase could never be reached -- the exact "inexplicably
@@ -243,6 +249,11 @@ def build_command_map(config: AssistantConfig, registry: ToolsetRegistry) -> dic
     commands: dict[str, Workflow] = {}
     claimed_by: dict[str, str] = {}
     for toolset_name, workflow in workflows_of(toolsets):
+        if workflow.name != toolset_name:
+            raise ConfigError(
+                f"toolset {toolset_name!r} carries workflow {workflow.name!r}; a workflow must share its "
+                "toolset's name, since that is the config section its settings come from."
+            )
         command = workflow.command
         if not command or command != command.lower() or any(ch.isspace() for ch in command):
             raise ConfigError(

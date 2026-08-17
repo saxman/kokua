@@ -111,9 +111,12 @@ def test_security_confirm_tools_from_file():
 
 
 def test_planning_flags_from_file():
+    """[planning] is the planning toolset's own section, so its keys land in that toolset's bucket and
+    the unset ones are seeded from the declaration rather than from an ``AssistantConfig`` default."""
     _write_config("[planning]\nplan_review = true\nresult_review = true\n")
-    cfg = _resolve()
-    assert cfg.plan_review is True and cfg.result_review is True
+    section = _resolve().toolset_settings["planning"]
+    assert section["plan_review"] is True and section["result_review"] is True
+    assert section["review_rounds"] == 2  # seeded from the declared default
 
 
 def test_generation_section_collects_into_dict():
