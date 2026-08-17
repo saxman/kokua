@@ -317,7 +317,11 @@ class TurnRunner:
                 start = len(agent.model_client.messages)
                 reply = await agent.run(prompt)
                 for message in agent.model_client.messages[start:]:
-                    message[PROVENANCE_KEY] = PROVENANCE_PROACTIVE
+                    # setdefault, not assignment: the agent loop tags the turns it injects itself
+                    # (`continuation`, `final_answer`), and those tags are how a transcript tells an
+                    # injected nudge from something the user typed. Overwriting them made every nudge
+                    # replay as a user bubble.
+                    message.setdefault(PROVENANCE_KEY, PROVENANCE_PROACTIVE)
                 if spec.echo_reply:
                     await self._ui.send(reply)
                 self._record_subagents(conversation_id, resolve_user_index(agent.model_client.messages, start))

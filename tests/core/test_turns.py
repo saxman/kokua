@@ -49,6 +49,46 @@ async def test_assistant_proactive_tags_turn_provenance(tmp_path):
     assert all(p in (None, PROVENANCE_PROACTIVE) for p in tagged)
 
 
+async def test_assistant_proactive_keeps_the_loops_own_provenance(tmp_path):
+    """The proactive tag must not overwrite the tags the agent loop already set on the turns it
+    injected. A degenerate turn makes the loop inject a continuation nudge and mark it
+    ``continuation``; stamping every message ``proactive`` on top left the nudge indistinguishable
+    from user input, so the web transcript replayed it as a user bubble."""
+    from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROACTIVE
+
+    # An empty first response is a degenerate turn, which is what makes the loop nudge and retry.
+    client = MockAsyncModelClient(["", "Here is the summary."])
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+
+    await assistant._proactive("summarize the news")
+
+    messages = assistant._agent.model_client.messages
+    nudges = [m for m in messages if m.get(PROVENANCE_KEY) == PROVENANCE_CONTINUATION]
+    assert len(nudges) == 1
+    assert nudges[0]["role"] == "user"
+    # Everything the loop did not tag itself is still marked as the unattended turn it belongs to.
+    assert messages[-1].get(PROVENANCE_KEY) == PROVENANCE_PROACTIVE
+
+
+async def test_proactive_reports_a_turn_the_model_had_no_room_to_finish(tmp_path):
+    """A scheduled task whose conversation has outgrown the model's context window used to show a run
+    of continuation prompts and no work: the agent loop read each cut-off turn as a model that failed
+    to answer and nudged it, which only left less room. AIMU raises instead, and the task's failure
+    report is where the user finds out, so it has to carry the reason and not just a class name."""
+    channel = FakeChannel()
+    client = MockAsyncModelClient([""])
+    client.last_output_truncated = True
+    client.last_usage = {"input_tokens": 32693, "output_tokens": 75, "total_tokens": 32768}
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+
+    await assistant._proactive("summarize the news")
+
+    report = channel.sent[-1]
+    assert "scheduled task failed" in report
+    assert "cut off" in report and "32693" in report
+    assert "context window" in report
+
+
 async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path):
     """A target="active" proactive run auto-denies a gated tool even when it fires on the CURRENTLY
     VIEWED conversation (where streaming_conversation == _active_id would otherwise look foreground and

@@ -24,7 +24,7 @@ classifiers = [
 # web tool frame). This floor is what ships in the wheel and what a PyPI install resolves;
 # [tool.uv.sources] below separately redirects development installs to the sibling checkout.
 dependencies = [
-    "aimu[ollama,openai_compat]>=0.14.1",
+    "aimu[ollama,openai_compat]>=0.14.2",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
     # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
     "tomlkit>=0.13",

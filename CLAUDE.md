@@ -22,7 +22,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.14.1`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.14.2`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -31,7 +31,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.14.1` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.14.2` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -39,11 +39,13 @@ Consequences for working in this repo:
   new enough while the code behind it does not (an editable install's version says what its branch
   claims), and the floor catches the capabilities that are not importable symbols -- AIMU 0.13.1 added
   the tool result to its web `tool` frame, which no `getattr` can detect and which would otherwise
-  degrade silently to tool cards with no output. The probe is currently a *signature* check, not a name
-  lookup: the newest surface Kokua depends on is `SkillManager(include=...)`, a keyword argument whose
-  absence no `getattr` would notice and which would silently hand a worker every skill on disk. If you
-  add a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the `pyproject.toml` floor in the
-  same commit, and move the probe to whatever the new surface is.
+  degrade silently to tool cards with no output. The probe is currently a name lookup for
+  `aimu.agents.TruncatedTurnError`, the newest surface Kokua depends on: without it the agent loop
+  answers a turn the model had no room to finish by nudging it, which is how a scheduled task produced
+  rounds of continuation prompts and no work. It takes whatever shape the surface has, and a *signature*
+  check when that surface is a keyword argument no `getattr` would notice (as `SkillManager(include=...)`
+  was, before this). If you add a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the
+  `pyproject.toml` floor in the same commit, and move the probe to whatever the new surface is.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is
