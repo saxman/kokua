@@ -243,11 +243,13 @@ class TurnRunner:
     async def _drive_base_tier(self, runner, msg: ChannelMessage, ctx: WorkflowContext) -> None:
         """Stream a plain ``AsyncRunner`` into the reply. Not persisted.
 
-        The runner runs on its own, never appending to the agent's own transcript, so
-        ``resolve_user_index`` finds no new user message here and publishes -1: nothing of this
-        exchange reaches ``_persist``'s snapshot or the sub-agent record. The reply reaches the
-        channel and nothing else -- reloading the conversation will not show it. Whether a base-tier
-        turn's own exchange should be persisted is a product question this plan leaves open.
+        A *self-contained* runner (one that never touches ``ctx.agent``) appends nothing to the agent's
+        own transcript, so ``resolve_user_index`` finds no new user message here and publishes -1:
+        nothing of this exchange reaches ``_persist``'s snapshot or the sub-agent record. The reply
+        reaches the channel and nothing else -- reloading the conversation will not show it. A runner
+        that closes over ``ctx.agent`` and runs it directly does append, and persists normally. Whether
+        a self-contained base-tier turn's own exchange should be persisted is a product question this
+        plan leaves open.
         """
         base_len = len(ctx.agent.model_client.messages)
         try:
