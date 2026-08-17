@@ -139,6 +139,30 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
 }
 
 
+# The tables ``load`` parses itself, key by key, rather than through the flat schema above: each has its
+# own branch in ``load`` because it maps to one dict/list field or a nested table, not to one field per key.
+_STRUCTURED_SECTIONS = frozenset({"generation", "subagents", "agents", "mcp"})
+
+
+def core_sections() -> frozenset[str]:
+    """Every ``config.toml`` section Kokua's own core parses.
+
+    A toolset's settings section is always the toolset's own name, so a toolset named after one of these
+    would claim a section the core already owns. Because a contributed entry wins the merge in
+    :func:`build_schema`, that key would then parse into the toolset's bucket while the ``AssistantConfig``
+    field behind it stayed at its default -- a capability silently switching off in a config the user never
+    edited. ``config.settings_sources`` rejects such a name at startup.
+
+    Derived from the schema and the structured tables rather than hand-listed at the place that checks it,
+    so the reserved set cannot drift from the sections it exists to protect.
+    """
+    return frozenset(
+        {section for section, _ in _STARTUP_SCHEMA}
+        | {setting.section for setting in runtime_settings.CORE_RUNTIME_SETTINGS}
+        | _STRUCTURED_SECTIONS
+    )
+
+
 def build_schema(table, extra: Optional[dict] = None) -> dict:
     """The full TOML schema: the startup-only keys, the settings table's, and any extra entries.
 
@@ -146,6 +170,10 @@ def build_schema(table, extra: Optional[dict] = None) -> dict:
     toolsets and ``config`` is the bottom layer: it may not import ``kokua.toolsets`` or
     ``kokua.plugins``. The caller that knows both (``kokua.cli``) passes both in. ``extra`` carries the
     *cold* keys a toolset declared, which the table does not hold because it holds only hot ones.
+
+    A contributed entry wins over a startup-only one of the same name, which is what lets a capability take
+    over a key the core used to own. That only reads as an upgrade because a toolset cannot be *named* after
+    a section the core still parses (see :func:`core_sections`).
     """
     return {**_STARTUP_SCHEMA, **table.toml_schema(), **(extra or {})}
 

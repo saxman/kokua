@@ -11,8 +11,53 @@ existence comes from the config file, so it cannot contribute to the schema that
 
 from __future__ import annotations
 
+from typing import Iterator
+
+from kokua.config.file import core_sections
 from kokua.config.schema import AssistantConfig
 from kokua.config.table import CORE_RUNTIME_SETTINGS, TYPE_LABELS, RuntimeSetting, SettingsTable
+
+
+def declared_settings(toolsets) -> Iterator[tuple]:
+    """Each declared setting paired with the toolset declaring it, rejecting one Kokua cannot honor.
+
+    The single seam every consumer below goes through, so a bad declaration fails once, at startup, naming
+    the toolset that has to change. Validated here rather than in ``Toolset`` itself because none of these
+    rules is knowable from one ``Setting`` alone: two of them need the config sections the core already
+    parses, and the third needs the kinds the schema and the panel sanitizer can actually handle.
+
+    A toolset declaring nothing is skipped before any check, so a toolset merely *named* after a core
+    section is fine: what is refused is claiming that section's keys.
+    """
+    from kokua.toolsets.registry import ToolsetError
+
+    reserved = core_sections()
+    for toolset in toolsets:
+        if not toolset.settings:
+            continue
+        if toolset.name in reserved:
+            raise ToolsetError(
+                f"toolset {toolset.name!r} declares settings, but [{toolset.name}] is a config.toml section "
+                "Kokua's own core parses. A toolset's settings section is always its own name, so its keys "
+                "would take over that section and the core setting behind them would silently stay at its "
+                f"default. Rename the toolset. Sections the core owns: {', '.join(sorted(reserved))}."
+            )
+        seen: set[str] = set()
+        for setting in toolset.settings:
+            if setting.kind not in TYPE_LABELS:
+                supported = ", ".join(sorted(kind.__name__ for kind in TYPE_LABELS))
+                raise ToolsetError(
+                    f"toolset {toolset.name!r} declares setting {setting.key!r} of unsupported type "
+                    f"{setting.kind.__name__}. A config.toml setting must be one of: {supported}."
+                )
+            if setting.key in seen:
+                raise ToolsetError(
+                    f"toolset {toolset.name!r} declares setting {setting.key!r} twice. One key gets one "
+                    f"declaration: [{toolset.name}].{setting.key} has a single value, a single type, and a "
+                    "single default."
+                )
+            seen.add(setting.key)
+            yield toolset, setting
 
 
 def declaring_toolsets() -> list:
@@ -31,8 +76,7 @@ def build_settings_table(toolsets=None) -> SettingsTable:
     """The live table: core entries plus one entry per hot setting a toolset declared."""
     contributed = [
         RuntimeSetting(setting.key, toolset.name, setting.kind, toolset=toolset.name)
-        for toolset in (declaring_toolsets() if toolsets is None else toolsets)
-        for setting in toolset.settings
+        for toolset, setting in declared_settings(declaring_toolsets() if toolsets is None else toolsets)
         if setting.hot
     ]
     return SettingsTable([*CORE_RUNTIME_SETTINGS, *contributed])
@@ -51,8 +95,7 @@ def startup_schema(toolsets=None) -> dict:
             TYPE_LABELS[setting.kind],
             None,
         )
-        for toolset in (declaring_toolsets() if toolsets is None else toolsets)
-        for setting in toolset.settings
+        for toolset, setting in declared_settings(declaring_toolsets() if toolsets is None else toolsets)
         if not setting.hot
     }
 
@@ -64,9 +107,5 @@ def seed_toolset_defaults(config: AssistantConfig, toolsets=None) -> None:
     the user has a section for it, and ``config.toolset_settings`` never carries a key no toolset
     declared.
     """
-    for toolset in declaring_toolsets() if toolsets is None else toolsets:
-        if not toolset.settings:
-            continue
-        bucket = config.toolset_settings.setdefault(toolset.name, {})
-        for setting in toolset.settings:
-            bucket.setdefault(setting.key, setting.default)
+    for toolset, setting in declared_settings(declaring_toolsets() if toolsets is None else toolsets):
+        config.toolset_settings.setdefault(toolset.name, {}).setdefault(setting.key, setting.default)

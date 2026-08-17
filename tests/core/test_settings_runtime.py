@@ -51,37 +51,37 @@ def _applier(config, table):
 
 
 def _table():
-    return SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("plan_review", "planning", bool, toolset="planning")])
+    """The core table plus a third party's one hot setting. ``widgets`` rather than ``planning``, since the
+    planning flags are still core entries and one TOML key gets one declaration."""
+    return SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("verbose", "widgets", bool, toolset="widgets")])
 
 
 async def test_applying_a_contributed_setting_reaches_the_live_config(tmp_path: Path):
-    config = AssistantConfig(
-        config_path=tmp_path / "config.toml", toolset_settings={"planning": {"plan_review": False}}
-    )
+    config = AssistantConfig(config_path=tmp_path / "config.toml", toolset_settings={"widgets": {"verbose": False}})
     applier = _applier(config, _table())
 
-    await applier.apply(_table().sanitize({"planning.plan_review": True}))
+    await applier.apply(_table().sanitize({"widgets.verbose": True}))
 
-    assert config.toolset_settings["planning"]["plan_review"] is True
+    assert config.toolset_settings["widgets"]["verbose"] is True
 
 
 def test_persisting_a_contributed_setting_writes_its_own_section(tmp_path: Path):
     path = tmp_path / "config.toml"
     path.write_text("", encoding="utf-8")
-    config = AssistantConfig(config_path=path, toolset_settings={"planning": {}})
+    config = AssistantConfig(config_path=path, toolset_settings={"widgets": {}})
     table = _table()
 
-    _applier(config, table).persist(table.sanitize({"planning.plan_review": True}))
+    _applier(config, table).persist(table.sanitize({"widgets.verbose": True}))
 
-    assert tomllib.loads(path.read_text())["planning"]["plan_review"] is True
+    assert tomllib.loads(path.read_text())["widgets"]["verbose"] is True
 
 
 def test_the_panel_payload_carries_a_contributed_setting_namespaced(tmp_path: Path):
-    config = AssistantConfig(config_path=tmp_path / "config.toml", toolset_settings={"planning": {"plan_review": True}})
+    config = AssistantConfig(config_path=tmp_path / "config.toml", toolset_settings={"widgets": {"verbose": True}})
 
     current = _applier(config, _table()).current()
 
-    assert current["planning.plan_review"] is True
+    assert current["widgets.verbose"] is True
 
 
 async def test_boot_applies_config_generation_and_flags(tmp_path):

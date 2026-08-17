@@ -15,14 +15,15 @@ from kokua.config.settings_sources import (
     seed_toolset_defaults,
     startup_schema,
 )
-from kokua.toolsets.registry import Setting, Toolset
+from kokua.config.table import CORE_RUNTIME_SETTINGS, TYPE_LABELS
+from kokua.toolsets.registry import Setting, Toolset, ToolsetError
 
 HOT = Setting("rounds", int, 2, hot=True)
 COLD = Setting("endpoint", str, "https://example.invalid")
 
 
-def _toolset(*declared: Setting) -> Toolset:
-    return Toolset(name="widgets", description="A test capability.", build=lambda ctx: [], settings=declared)
+def _toolset(*declared: Setting, name: str = "widgets") -> Toolset:
+    return Toolset(name=name, description="A test capability.", build=lambda ctx: [], settings=declared)
 
 
 def _write_config(text: str):
@@ -68,6 +69,50 @@ def test_seeding_leaves_no_bucket_for_a_toolset_that_declares_nothing():
     config = AssistantConfig()
     seed_toolset_defaults(config, [_toolset()])
     assert config.toolset_settings == {}
+
+
+def test_a_toolset_named_after_a_core_section_may_not_declare_settings():
+    """A toolset's section is always its own name, and a contributed entry wins the schema merge, so a
+    plugin named ``email`` declaring ``host`` would route [email].host into its own bucket and leave
+    ``AssistantConfig.email_host`` unset -- the email capability switching itself off in a config nobody
+    edited. Every section the core parses is refused, including the structured tables and the ones only the
+    settings table declares (``display``)."""
+    for reserved in ("email", "display", "assistant", "security", "paths", "logging", "web", "generation", "agents"):
+        with pytest.raises(ToolsetError, match=rf"\[{reserved}\] is a config.toml section"):
+            build_settings_table([_toolset(HOT, name=reserved)])
+
+
+def test_a_toolset_named_after_a_core_section_is_fine_while_it_declares_nothing():
+    """Only claiming the section's keys is refused. The shipped ``planning`` toolset is exactly this case:
+    its name matches a section the core still parses, and it declares nothing yet."""
+    assert build_settings_table([_toolset(name="email")]).settings == CORE_RUNTIME_SETTINGS
+    assert startup_schema([_toolset(name="email")]) == {}
+
+
+def test_a_reserved_name_is_also_refused_for_a_cold_declaration():
+    with pytest.raises(ToolsetError, match=r"\[logging\] is a config.toml section"):
+        startup_schema([_toolset(COLD, name="logging")])
+
+
+def test_an_unsupported_setting_type_is_refused_by_name():
+    """``TYPE_LABELS`` is the whole supported set: an unlisted kind has no error label for the parser and
+    no branch in the panel sanitizer, so it would be a bare KeyError at startup or a value silently
+    dropped on every save. A clear refusal is the honest answer, not a new type."""
+    with pytest.raises(ToolsetError, match="unsupported type float"):
+        build_settings_table([_toolset(Setting("threshold", float, 0.5, hot=True))])
+    with pytest.raises(ToolsetError, match="must be one of: bool, int, str"):
+        startup_schema([_toolset(Setting("threshold", float, 0.5))])
+
+
+def test_the_supported_types_are_exactly_the_labelled_ones():
+    """Pins the derivation: the refusal message and the schema's labels read the same table."""
+    for kind in TYPE_LABELS:
+        assert build_settings_table([_toolset(Setting("k", kind, None, hot=True))]).by_toml("widgets", "k") is not None
+
+
+def test_one_toolset_declaring_a_key_twice_is_refused():
+    with pytest.raises(ToolsetError, match="declares setting 'rounds' twice"):
+        build_settings_table([_toolset(HOT, Setting("rounds", bool, False, hot=True))])
 
 
 def test_kokuas_core_toolsets_are_a_declaring_source():

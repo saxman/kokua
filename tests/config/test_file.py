@@ -319,20 +319,20 @@ def test_a_contributed_section_parses_into_the_toolset_bucket(tmp_path):
 
     path = tmp_path / "config.toml"
     path.write_text(
-        "[agents.assistant]\ntools = []\n\n[planning]\nplan_review = true\nreview_rounds = 4\n",
+        "[agents.assistant]\ntools = []\n\n[widgets]\nverbose = true\nrounds = 4\n",
         encoding="utf-8",
     )
     table = SettingsTable(
         [
             *CORE_RUNTIME_SETTINGS,
-            RuntimeSetting("plan_review", "planning", bool, toolset="planning"),
-            RuntimeSetting("review_rounds", "planning", int, toolset="planning"),
+            RuntimeSetting("verbose", "widgets", bool, toolset="widgets"),
+            RuntimeSetting("rounds", "widgets", int, toolset="widgets"),
         ]
     )
 
     overrides = settings.load(str(path), table=table)
 
-    assert overrides["toolset_settings"] == {"planning": {"plan_review": True, "review_rounds": 4}}
+    assert overrides["toolset_settings"] == {"widgets": {"verbose": True, "rounds": 4}}
 
 
 def test_an_unknown_key_in_a_contributed_section_is_rejected(tmp_path):
@@ -340,9 +340,9 @@ def test_an_unknown_key_in_a_contributed_section_is_rejected(tmp_path):
     from kokua.config.table import CORE_RUNTIME_SETTINGS, SettingsTable
 
     path = tmp_path / "config.toml"
-    path.write_text("[agents.assistant]\ntools = []\n\n[planning]\nnonsense = 1\n", encoding="utf-8")
+    path.write_text("[agents.assistant]\ntools = []\n\n[widgets]\nnonsense = 1\n", encoding="utf-8")
 
-    with pytest.raises(settings.ConfigError, match=r"unknown config key \[planning\].nonsense"):
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[widgets\].nonsense"):
         settings.load(str(path), table=SettingsTable(CORE_RUNTIME_SETTINGS))
 
 
@@ -351,10 +351,8 @@ def test_a_wrong_typed_contributed_value_is_rejected(tmp_path):
     from kokua.config.table import CORE_RUNTIME_SETTINGS, RuntimeSetting, SettingsTable
 
     path = tmp_path / "config.toml"
-    path.write_text('[agents.assistant]\ntools = []\n\n[planning]\nreview_rounds = "two"\n', encoding="utf-8")
-    table = SettingsTable(
-        [*CORE_RUNTIME_SETTINGS, RuntimeSetting("review_rounds", "planning", int, toolset="planning")]
-    )
+    path.write_text('[agents.assistant]\ntools = []\n\n[widgets]\nrounds = "two"\n', encoding="utf-8")
+    table = SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("rounds", "widgets", int, toolset="widgets")])
 
     with pytest.raises(settings.ConfigError, match="must be an integer"):
         settings.load(str(path), table=table)

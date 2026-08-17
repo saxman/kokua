@@ -24,6 +24,10 @@ from kokua.config import file as settings
 from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
 from kokua.config.settings_sources import build_settings_table, seed_toolset_defaults, startup_schema
 from kokua.config.store import disambiguate_name, name_from_url
+
+# Safe at module level, unlike kokua.toolsets.agents below: `from . import plugins` above already imports
+# kokua.toolsets, and registry.py itself imports no AIMU surface the preflight checks.
+from kokua.toolsets.registry import ToolsetError
 from .logging_setup import configure_logging
 
 
@@ -309,7 +313,6 @@ def _print_toolsets(config: AssistantConfig) -> None:
     # Imported here, not at module level: kokua.toolsets.agents reaches kokua.core, which imports the
     # AIMU surface `preflight` exists to check, and this module must be importable before that check runs.
     from kokua.toolsets.agents import build_registry
-    from kokua.toolsets.registry import ToolsetError
 
     try:
         registry = build_registry(config)
@@ -372,10 +375,13 @@ def main() -> None:
         return
 
     # A ConfigError is a user mistake with a known fix (a missing config.toml, no [agents.*] tables, a
-    # bad key), so it prints as an instruction. A traceback here would bury the one line that matters.
+    # bad key), so it prints as an instruction. A traceback here would bury the one line that matters. A
+    # ToolsetError joins it because resolve_config now reads the installed toolsets' settings declarations,
+    # and a bad one (a reserved section name, an unsupported type) is the same kind of fixable mistake --
+    # made by whoever wrote the toolset, who needs the sentence rather than a stack.
     try:
         config = resolve_config(args)
-    except ConfigError as e:
+    except (ConfigError, ToolsetError) as e:
         print(e, file=sys.stderr)
         raise SystemExit(2) from None
 

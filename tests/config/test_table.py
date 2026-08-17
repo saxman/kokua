@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from kokua.config import AssistantConfig
 from kokua.config import file as settings
 from kokua.config.table import (
@@ -21,19 +23,25 @@ from kokua.config.table import (
 
 
 def _table() -> SettingsTable:
+    """The core table plus a third party's two settings.
+
+    The contributed example is a fictional ``widgets`` toolset rather than ``planning``, because the four
+    planning flags are still core entries (``AssistantConfig`` carries them) and one TOML key may only be
+    declared once -- which is what ``test_two_declarations_of_one_toml_key_are_rejected`` pins.
+    """
     return SettingsTable(
         [
             *CORE_RUNTIME_SETTINGS,
-            RuntimeSetting("plan_review", "planning", bool, toolset="planning"),
-            RuntimeSetting("review_rounds", "planning", int, toolset="planning"),
+            RuntimeSetting("verbose", "widgets", bool, toolset="widgets"),
+            RuntimeSetting("rounds", "widgets", int, toolset="widgets"),
         ]
     )
 
 
 def test_a_contributed_setting_is_hot_and_findable_by_its_toml_location():
     table = _table()
-    assert table.is_hot("planning", "plan_review") is True
-    assert table.by_toml("planning", "plan_review").toolset == "planning"
+    assert table.is_hot("widgets", "verbose") is True
+    assert table.by_toml("widgets", "verbose").toolset == "widgets"
 
 
 def test_a_core_setting_keeps_a_bare_wire_key():
@@ -41,32 +49,32 @@ def test_a_core_setting_keeps_a_bare_wire_key():
 
 
 def test_a_contributed_setting_is_namespaced_on_the_wire():
-    assert _table().by_toml("planning", "plan_review").wire_key == "planning.plan_review"
+    assert _table().by_toml("widgets", "verbose").wire_key == "widgets.verbose"
 
 
 def test_sanitize_accepts_both_wire_shapes_and_drops_junk():
     cleaned = _table().sanitize(
         {
             "show_tools": True,
-            "planning.plan_review": True,
-            "planning.review_rounds": "not an int",
+            "widgets.verbose": True,
+            "widgets.rounds": "not an int",
             "unknown": 1,
         }
     )
     assert cleaned["show_tools"] is True
-    assert cleaned["planning.plan_review"] is True
-    assert "planning.review_rounds" not in cleaned
+    assert cleaned["widgets.verbose"] is True
+    assert "widgets.rounds" not in cleaned
     assert "unknown" not in cleaned
     assert cleaned["generate_kwargs"] == {}
 
 
 def test_a_contributed_setting_reads_and_writes_the_toolset_bucket():
-    config = AssistantConfig(toolset_settings={"planning": {"plan_review": False}})
-    setting = _table().by_toml("planning", "plan_review")
+    config = AssistantConfig(toolset_settings={"widgets": {"verbose": False}})
+    setting = _table().by_toml("widgets", "verbose")
 
     assert setting.read(config, lambda name, default: default) is False
     setting.write(config, True, lambda name, value: None)
-    assert config.toolset_settings["planning"]["plan_review"] is True
+    assert config.toolset_settings["widgets"]["verbose"] is True
 
 
 def test_a_core_setting_still_reads_and_writes_a_config_attribute():
@@ -79,8 +87,21 @@ def test_a_core_setting_still_reads_and_writes_a_config_attribute():
 
 def test_the_toml_schema_covers_contributed_sections():
     schema = _table().toml_schema()
-    assert ("planning", "plan_review") in schema
-    assert schema[("planning", "review_rounds")][1] == (int,)
+    assert ("widgets", "verbose") in schema
+    assert schema[("widgets", "rounds")][1] == (int,)
+
+
+def test_two_declarations_of_one_toml_key_are_rejected():
+    """Two entries for one ``[section].key`` disagree about where the value lives, so the panel would
+    carry both keys, apply both, and write the key twice -- leaving the loser silently unread. That is the
+    state a toolset would create by declaring a key the core still owns, so the table refuses to hold it."""
+    with pytest.raises(ValueError, match=r"two runtime settings claim \[planning\].plan_review"):
+        SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("plan_review", "planning", bool, toolset="planning")])
+
+
+def test_the_duplicate_message_names_both_sides():
+    with pytest.raises(ValueError, match="Kokua's core and toolset 'planning'"):
+        SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("plan_review", "planning", bool, toolset="planning")])
 
 
 def test_every_core_runtime_setting_is_an_assistant_config_field():

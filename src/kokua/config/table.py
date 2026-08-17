@@ -175,17 +175,39 @@ def _coerce_runtime(value: Any, setting: RuntimeSetting) -> Optional[Any]:
     return None
 
 
+def _declared_by(setting: RuntimeSetting) -> str:
+    """Which side declared a setting, for the message about two of them claiming one TOML key."""
+    return f"toolset {setting.toolset!r}" if setting.toolset else "Kokua's core"
+
+
 class SettingsTable:
     """Every runtime-mutable setting in this process: Kokua's own plus each toolset's.
 
     An instance rather than module state because the set is not known until the toolsets are, and the
     alternative (module functions over a core-only default) would be a second source of truth for
     exactly the question this table exists to answer.
+
+    One TOML key may be declared once. Two entries for a ``[section].key`` is a ``ValueError`` here rather
+    than a last-wins lookup, because the two would disagree about where the value lives: a core entry
+    writes an ``AssistantConfig`` attribute and a contributed one writes ``toolset_settings``, and the
+    panel would carry both keys, apply both, and persist the key twice.
     """
 
     def __init__(self, settings: Sequence[RuntimeSetting]):
         self.settings: tuple[RuntimeSetting, ...] = tuple(settings)
-        self._by_toml = {(s.section, s.toml_key): s for s in self.settings}
+        self._by_toml: dict[tuple[str, str], RuntimeSetting] = {}
+        for setting in self.settings:
+            location = (setting.section, setting.toml_key)
+            existing = self._by_toml.get(location)
+            if existing is not None:
+                raise ValueError(
+                    f"two runtime settings claim [{setting.section}].{setting.toml_key}: "
+                    f"{_declared_by(existing)} and {_declared_by(setting)}. One TOML key gets one "
+                    "declaration: the panel payload, the live-apply path and the persist path all resolve "
+                    "it through this table, so two entries would apply and write the key twice, to "
+                    "different destinations, and the loser would then be invisible."
+                )
+            self._by_toml[location] = setting
         self._by_field = {s.field: s for s in self.settings if not s.toolset}
         self._by_wire = {s.wire_key: s for s in self.settings}
 
