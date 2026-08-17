@@ -25,6 +25,11 @@ from kokua.core.messages import compact_message_images, derive_title
 from kokua.core.turn_gate import TurnGate
 
 
+# Shortest leading fragment of a conversation id that ``resolve`` will accept. Long enough that a
+# prefix hit is not a coincidence among 32-hex ids.
+ID_PREFIX_MIN = 6
+
+
 def _now() -> str:
     return datetime.now().isoformat()
 
@@ -285,6 +290,27 @@ class ConversationBook:
 
     def get(self, conversation_id: str) -> Session:
         return self._store.get(conversation_id)
+
+    def resolve(self, conversation_id: str) -> Optional[Session]:
+        """The stored session for an id, or ``None``.
+
+        A unique leading fragment of at least ``ID_PREFIX_MIN`` characters also resolves; an ambiguous
+        one does not, so a caller can report that rather than open the wrong conversation. The fragment
+        exists because a caller that saw a 32-hex id in a listing is apt to shorten it, and it is long
+        enough that a prefix hit is not a coincidence.
+
+        Reads only the store, never ``agent_for``: resolving must stay cheap and side-effect-free, and
+        building an agent is neither (see ``toolsets/conversations.py`` for the full reasoning).
+        """
+        wanted = (conversation_id or "").strip().strip("'\"`")
+        if not wanted:
+            return None
+        if self.exists(wanted):
+            return self.get(wanted)
+        if len(wanted) < ID_PREFIX_MIN:
+            return None
+        matches = [session for session in self.sessions() if session.key.startswith(wanted)]
+        return matches[0] if len(matches) == 1 else None
 
     def save(self, session: Session) -> None:
         self._store.save(session)

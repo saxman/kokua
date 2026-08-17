@@ -344,3 +344,26 @@ async def test_sessions_backs_list_and_shares_its_ordering(tmp_path):
     book = assistant._book
     assert [session.key for session in book.sessions()] == [item["id"] for item in book.list()]
     assert len(book.sessions()) == 2
+
+
+def test_resolve_accepts_a_unique_prefix_but_not_an_ambiguous_or_short_one(tmp_path):
+    """A caller that saw a 32-hex id in a listing tends to shorten it, so a long-enough unique fragment
+    resolves; an ambiguous one must not, or it would silently open the wrong conversation."""
+    import asyncio
+
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    from kokua.core.conversations import ConversationBook
+    from kokua.core.turn_gate import TurnGate
+
+    config = _config(tmp_path)
+    store = TinyDBSessionStore(str(config.sessions_path))
+    for key in ("abcdef0000", "abcdef1111", "zzzzzz9999"):
+        store.save(Session(key=key, metadata={"updated_at": "2026-08-11T09:14:00"}, messages=[]))
+    book = ConversationBook(store, TurnGate(lambda cid: asyncio.Lock()), config, on_active_change=lambda _cid: None)
+
+    assert book.resolve("zzzzzz9999").key == "zzzzzz9999"
+    assert book.resolve("zzzzzz").key == "zzzzzz9999"
+    assert book.resolve("abcdef") is None  # ambiguous
+    assert book.resolve("zzz") is None  # shorter than ID_PREFIX_MIN
+    assert book.resolve("") is None

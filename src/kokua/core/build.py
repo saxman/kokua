@@ -32,7 +32,7 @@ def resolve_system_message(config: AssistantConfig, agent_name: str, toolsets: S
     agent was built with rather than recomputing a possibly different one.
     """
     # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which pulls
-    # in kokua.core.tools -- a submodule of this package -- and importing it triggers kokua/core/__init__
+    # in kokua.core.transcripts -- a submodule of this package -- and importing it triggers kokua/core/__init__
     # to run, which imports this module. A top-level import here would close that cycle.
     from kokua.toolsets.agents import assemble_system_message
 

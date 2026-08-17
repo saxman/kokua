@@ -134,7 +134,7 @@ class Assistant:
         cls, config: AssistantConfig, channel: Channel, *, client=None, client_factory=None
     ) -> "Assistant":
         # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which
-        # pulls in kokua.core.tools -- a submodule of this package -- and importing it triggers
+        # pulls in kokua.core.transcripts -- a submodule of this package -- and importing it triggers
         # kokua/core/__init__ to run, which imports this module. A top-level import here would close
         # that cycle.
         from kokua.toolsets.agents import unreferenced_toolsets, validated_registry

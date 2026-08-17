@@ -1,7 +1,7 @@
-"""The entry agent's read-only cross-conversation tools: flattening, bounding, and the honesty markers.
+"""The ``conversations`` toolset: bounding, the honesty markers, and what each tool says.
 
-The pure helpers are tested directly; the tools are built over a real ``TinyDBSessionStore`` and
-``ConversationBook`` (no agents, no model) and called as plain coroutines.
+Built over a real ``TinyDBSessionStore`` and ``ConversationBook`` (no agents, no model) and called as
+plain coroutines. The transcript helpers underneath are covered in ``tests/core/test_transcripts.py``.
 """
 
 from __future__ import annotations
@@ -9,20 +9,16 @@ from __future__ import annotations
 import asyncio
 
 from aimu.aio.channels.base import ChannelMessage
-from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.sessions import Session, TinyDBSessionStore
 
 from kokua.core.assistant import Assistant
-from kokua.core.tools import (
+from kokua.toolsets.conversations import (
     ACTIVE_CONVERSATION_NOTE,
     BLANK_QUERY,
     MAX_CONTEXT_CHARS,
-    MAX_MESSAGE_CHARS,
     NO_CONVERSATIONS,
     RUNNING_TURN_NOTE,
-    flatten_transcript,
     make_conversation_tools,
-    truncate_lines,
 )
 from kokua.core.conversations import ConversationBook
 from kokua.core.turn_gate import TurnGate
@@ -55,77 +51,6 @@ def _tools(book: ConversationBook, running=()) -> dict:
 
 def _said(role: str, text, **extra) -> dict:
     return {"role": role, "content": text, **extra}
-
-
-# --- flattening ------------------------------------------------------------------------------------
-
-
-def test_flatten_keeps_only_what_was_said():
-    lines = flatten_transcript(
-        [
-            _said("system", "you are a lean supervisor"),
-            _said("user", "how is the weather"),
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {"name": "web_search"}}]},
-            {"role": "tool", "tool_call_id": "c1", "content": "sunny, 21C"},
-            _said("assistant", "It is sunny.", thinking="let me check the search result"),
-        ]
-    )
-    assert lines == ["user: how is the weather", "assistant: It is sunny."]
-    joined = "\n".join(lines)
-    assert "web_search" not in joined
-    assert "lean supervisor" not in joined
-    assert "let me check" not in joined
-
-
-def test_flatten_prefixes_the_message_time_when_present():
-    stamped = flatten_transcript([_said("user", "hi", timestamp="2026-08-11T09:14:31.123456")])
-    assert stamped == ["[2026-08-11 09:14] user: hi"]
-    assert flatten_transcript([_said("user", "hi")]) == ["user: hi"]
-
-
-def test_flatten_skips_injected_turns_and_labels_proactive():
-    lines = flatten_transcript(
-        [
-            _said("user", "continue", **{PROVENANCE_KEY: PROVENANCE_CONTINUATION}),
-            _said("assistant", "Your flight leaves at 8.", **{PROVENANCE_KEY: PROVENANCE_PROACTIVE}),
-        ]
-    )
-    assert lines == ["assistant (proactive): Your flight leaves at 8."]
-
-
-def test_flatten_replaces_image_blocks_with_a_placeholder():
-    lines = flatten_transcript(
-        [
-            _said(
-                "user",
-                [
-                    {"type": "text", "text": "look"},
-                    {"type": "image_url", "image_url": {"url": "/images/ab.png"}},
-                ],
-            )
-        ]
-    )
-    assert lines == ["user: look [image]"]
-    assert "/images/ab.png" not in lines[0]
-
-
-def test_flatten_cuts_one_oversized_message():
-    (line,) = flatten_transcript([_said("user", "x" * 5000)])
-    assert "[message truncated, 5000 chars total]" in line
-    assert len(line) < MAX_MESSAGE_CHARS + 100
-
-
-def test_truncate_lines_drops_oldest_and_counts_them():
-    lines = [f"line {n}" for n in range(20)]
-    kept, dropped = truncate_lines(lines, 30)
-    assert kept == lines[len(lines) - len(kept) :]  # a suffix: the newest entries
-    assert sum(len(line) + 1 for line in kept) <= 30
-    assert dropped == len(lines) - len(kept)
-
-
-def test_truncate_lines_keeps_at_least_the_newest_line():
-    lines = ["old", "newest"]
-    assert truncate_lines(lines, 1) == (["newest"], 1)
 
 
 # --- list_conversations ----------------------------------------------------------------------------
