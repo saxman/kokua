@@ -10,11 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.helpers import MockAsyncModelClient
+from tests.helpers import MockAsyncModelClient, core_table
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import critics
 from kokua.workflows.planning import critics as review
-from kokua.config import table as runtime_settings
 from kokua.core.assistant import Assistant
 from kokua.workflows.planning.runner import _tool_evidence
 from kokua.config import AssistantConfig
@@ -331,5 +330,5 @@ async def test_settings_carry_review_flags(tmp_path):
 
 
 def test_sanitize_keeps_review_flags():
-    result = runtime_settings.sanitize({"plan_review_agent": True, "result_review": False})
+    result = core_table().sanitize({"plan_review_agent": True, "result_review": False})
     assert result["plan_review_agent"] is True and result["result_review"] is False

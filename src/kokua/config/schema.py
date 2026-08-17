@@ -78,6 +78,16 @@ class AssistantConfig:
     # (prose reasoning + verdict), executor, and every revision -- under labeled phase headers, showing
     # every intermediate version. Overrides result_review's "hide until vetted" gate. Off by default.
     show_reasoning: bool = False
+    # Each toolset's own config section, by toolset name: every key the toolset declared, seeded with its
+    # declared default and overlaid with what config.toml sets. A toolset (and a workflow) therefore
+    # always reads a complete view, and Kokua's own dataclass carries no field for a capability that may
+    # not be installed.
+    toolset_settings: dict[str, dict] = field(default_factory=dict)
+    # The toolset sections config.toml actually contained, captured before the declared defaults were
+    # seeded. After seeding there is a bucket for every declared setting, so this is the only record of
+    # which sections the user wrote -- which is what a startup warning about a section no installed
+    # toolset owns has to know.
+    configured_sections: tuple[str, ...] = ()
     # Remote MCP servers to connect at startup; each may name an env var holding its bearer token.
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     # Email (SMTP send). Recipients are LOCKED to email_to: the send_email tool takes no recipient, so

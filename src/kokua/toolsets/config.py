@@ -22,8 +22,12 @@ from kokua.config import store as config_store
 from kokua.toolsets.registry import Toolset
 
 
-def make_config_tools(config_path: Path, apply_hot: Callable[[str, str, object], Awaitable[None]]) -> list[Callable]:
-    """Build ``read_config`` / ``update_config`` bound to the config file and the live-apply callback."""
+def make_config_tools(
+    config_path: Path, apply_hot: Callable[[str, str, object], Awaitable[None]], table
+) -> list[Callable]:
+    """Build ``read_config`` / ``update_config`` bound to the config file, the live-apply callback, and
+    the live settings table, so ``update_config`` resolves a key against the same declarations the
+    settings panel does."""
 
     @tool
     async def read_config() -> str:
@@ -48,7 +52,7 @@ def make_config_tools(config_path: Path, apply_hot: Callable[[str, str, object],
         security-critical keys cannot be changed here and must be hand-edited in the file.
         """
         try:
-            applied = await config_store.apply_setting(config_path, section, key, value, apply_hot)
+            applied = await config_store.apply_setting(config_path, section, key, value, apply_hot, table=table)
         except config_store.SettingLocked:
             return (
                 f"[{section}].{key} is security-critical and can only be changed by hand-editing "
@@ -70,6 +74,6 @@ def make_config_tools(config_path: Path, apply_hot: Callable[[str, str, object],
 TOOLSET = Toolset(
     name="config",
     description="Read config.toml and change a runtime setting, persisted back to the file.",
-    build=lambda ctx: make_config_tools(ctx.config.config_path, ctx.state.reapply_config),
+    build=lambda ctx: make_config_tools(ctx.config.config_path, ctx.state.reapply_config, ctx.state.settings_table),
     cross_cutting=True,
 )

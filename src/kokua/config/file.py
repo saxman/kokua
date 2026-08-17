@@ -108,11 +108,13 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
     return AgentConfig(**fields)
 
 
-# (section, key) -> (AssistantConfig field, accepted TOML types, human label, optional converter).
+# (section, key) -> (target, accepted TOML types, human label, optional converter), where a target is an
+# AssistantConfig field name, or "<toolset>.<key>" for a key a toolset owns (see `_coerce_flat`).
 # `bool` is an int subclass, so it is rejected for numeric fields unless explicitly accepted.
 #
-# Startup-only keys are declared here; the runtime-mutable ones (model, display and planning flags)
-# are generated from runtime_settings.RUNTIME_SETTINGS below, so the two never drift.
+# Startup-only keys are declared here; the runtime-mutable ones (model, the display and planning flags,
+# and each toolset's hot settings) come from the settings table, so the two never drift. `build_schema`
+# joins them.
 _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
     ("assistant", "system_message"): ("system_message", (str,), "a string", None),
     ("planning", "review_rounds"): ("review_rounds", (int,), "an integer", None),
@@ -136,29 +138,36 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("logging", "level"): ("log_level", (str,), "a string", None),
 }
 
-_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
-    **_STARTUP_SCHEMA,
-    **{
-        (setting.section, setting.toml_key): (setting.field, (setting.kind,), setting.label, None)
-        for setting in runtime_settings.RUNTIME_SETTINGS
-    },
-}
+
+def build_schema(table, extra: Optional[dict] = None) -> dict:
+    """The full TOML schema: the startup-only keys, the settings table's, and any extra entries.
+
+    Takes the table rather than importing one, because the contributed half comes from the installed
+    toolsets and ``config`` is the bottom layer: it may not import ``kokua.toolsets`` or
+    ``kokua.plugins``. The caller that knows both (``kokua.cli``) passes both in. ``extra`` carries the
+    *cold* keys a toolset declared, which the table does not hold because it holds only hot ones.
+    """
+    return {**_STARTUP_SCHEMA, **table.toml_schema(), **(extra or {})}
 
 
-def _coerce_flat(section: str, key: str, value: Any) -> tuple[str, Any]:
-    """Validate one scalar ``[section].key`` against ``_SCHEMA``; return ``(field, coerced)``."""
-    spec = _SCHEMA.get((section, key))
+def _coerce_flat(schema: dict, section: str, key: str, value: Any) -> tuple[str, Any]:
+    """Validate one scalar ``[section].key`` against ``schema``; return ``(target, coerced)``.
+
+    ``target`` is an ``AssistantConfig`` field name for a core key, or ``"<toolset>.<key>"`` for one a
+    toolset owns; ``load`` routes the two differently.
+    """
+    spec = schema.get((section, key))
     if spec is None:
         raise ConfigError(f"unknown config key [{section}].{key}")
-    field, types, label, convert = spec
+    target, types, label, convert = spec
     rejected_bool = isinstance(value, bool) and bool not in types
     if rejected_bool or not isinstance(value, types):
         raise ConfigError(f"[{section}].{key} must be {label}, got {type(value).__name__}")
-    return field, (convert(section, key, value) if convert else value)
+    return target, (convert(section, key, value) if convert else value)
 
 
 def _parse_scalar(section: str, key: str, raw: str, types: tuple[type, ...]) -> Any:
-    """Parse a string from the ``update_config`` tool into the TOML type ``_SCHEMA`` expects."""
+    """Parse a string from the ``update_config`` tool into the TOML type the schema expects."""
     if bool in types:
         lowered = raw.strip().lower()
         if lowered in ("true", "false"):
@@ -174,7 +183,7 @@ def _parse_scalar(section: str, key: str, raw: str, types: tuple[type, ...]) -> 
     return raw
 
 
-def coerce_config_string(section: str, key: str, raw: str) -> Any:
+def coerce_config_string(section: str, key: str, raw: str, *, table) -> Any:
     """Validate and coerce a string value from the ``update_config`` tool into its config type.
 
     The tool passes every value as a string (LLM-friendly, avoids a union-typed argument); this maps
@@ -188,13 +197,13 @@ def coerce_config_string(section: str, key: str, raw: str) -> Any:
             number = float(raw)
         except ValueError:
             raise ConfigError(f"[generation].{key} must be a number, got {raw!r}")
-        cleaned = runtime_settings.sanitize({"generate_kwargs": {key: number}})["generate_kwargs"]
+        cleaned = table.sanitize({"generate_kwargs": {key: number}})["generate_kwargs"]
         if key not in cleaned:
             raise ConfigError(f"[generation].{key} is out of the allowed range")
         return cleaned[key]
     if section in ("subagents", "agents", "mcp"):
         raise ConfigError(f"[{section}] has no scalar keys editable with update_config")
-    spec = _SCHEMA.get((section, key))
+    spec = build_schema(table).get((section, key))
     if spec is None:
         raise ConfigError(f"unknown config key [{section}].{key}")
     _, types, _, convert = spec
@@ -225,8 +234,15 @@ def resolve_path(explicit: Optional[str]) -> tuple[Path, bool]:
     return paths.config_path(), False
 
 
-def load(explicit: Optional[str] = None) -> dict[str, Any]:
+def load(explicit: Optional[str] = None, *, table, extra_schema: Optional[dict] = None) -> dict[str, Any]:
     """Parse the config file into a dict of ``AssistantConfig`` field overrides.
+
+    ``table`` is the live :class:`kokua.config.table.SettingsTable`, which carries the hot sections the
+    installed toolsets own, and ``extra_schema`` their cold keys. ``table`` is a required keyword rather
+    than a default, because a default would silently parse a toolset's section as an unknown key.
+
+    A key a toolset owns is returned nested under ``"toolset_settings"`` rather than as a flat field,
+    since it has no ``AssistantConfig`` field to be one.
 
     The file is required, not optional. Agents live only in it and the assistant cannot run without
     at least one, so "no config" is not a state Kokua can start in; failing here with the command that
@@ -239,6 +255,7 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
     with path.open("rb") as file:
         data = tomllib.load(file)
 
+    schema = build_schema(table, extra_schema)
     overrides: dict[str, Any] = {}
     for section, entries in data.items():
         if not isinstance(entries, dict):
@@ -246,8 +263,8 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
         if (section, None) in _REMOVED_KEYS:
             raise ConfigError(_REMOVED_KEYS[(section, None)])
         # The [generation] table maps to the single `generation` dict field (one key per generation
-        # kwarg) rather than the usual one-key-one-field _SCHEMA entries, so handle it separately.
-        # Types are checked loudly here; range validation is left to runtime_settings.sanitize.
+        # kwarg) rather than the usual one-key-one-field schema entries, so handle it separately.
+        # Types are checked loudly here; range validation is left to the settings table's sanitizer.
         if section == "generation":
             for key, value in entries.items():
                 if key not in runtime_settings.GENERATION_KEYS:
@@ -267,7 +284,7 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
                 raise ConfigError(f"unknown config key [subagents].{key}")
             continue
         # The [agents] table holds one sub-table per agent, each parsed into an AgentConfig, so it is
-        # handled specially like [generation]/[mcp] rather than via _SCHEMA's flat one-key-one-field map.
+        # handled specially like [generation]/[mcp] rather than via the schema's flat one-key-one-target map.
         if section == "agents":
             overrides["agents"] = {name: _parse_agent(name, spec) for name, spec in entries.items()}
             continue
@@ -282,6 +299,10 @@ def load(explicit: Optional[str] = None) -> dict[str, Any]:
         for key, value in entries.items():
             if (section, key) in _REMOVED_KEYS:
                 raise ConfigError(_REMOVED_KEYS[(section, key)])
-            field, coerced = _coerce_flat(section, key, value)
-            overrides[field] = coerced
+            target, coerced = _coerce_flat(schema, section, key, value)
+            if "." in target:
+                toolset, setting_key = target.split(".", 1)
+                overrides.setdefault("toolset_settings", {}).setdefault(toolset, {})[setting_key] = coerced
+            else:
+                overrides[target] = coerced
     return overrides

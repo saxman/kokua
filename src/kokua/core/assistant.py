@@ -24,7 +24,7 @@ from aimu.aio import Channel, ModelConnectionError, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import Session, TinyDBSessionStore
 
-from kokua.config import table as runtime_settings
+from kokua.config.settings_sources import build_settings_table
 from kokua.core.agent_registry import AgentRegistry
 from kokua.channels.ui import ChannelUI
 from kokua.channels.web import proactive_turn, streaming_conversation
@@ -64,6 +64,10 @@ class Assistant:
         config: AssistantConfig,
     ):
         self._ui = ChannelUI(channel)
+        # The live settings table: Kokua's own entries plus whatever the installed toolsets declared.
+        # Built here because the applier below needs it, and shared with the config toolset through
+        # LiveState so a hot `update_config` resolves against the same table the panel does.
+        self._settings_table = build_settings_table()
         # One reporter for this connection (Assistant.create runs once per WebSocket connection): every
         # conversation's spawn_subagent reports through it, and it resolves the turn to record into
         # from a contextvar rather than from construction.
@@ -119,6 +123,7 @@ class Assistant:
             config,
             self._ui,
             self._gate,
+            table=self._settings_table,
             live_agents=lambda: self._registry.live_agents(),
             cached_ids=lambda: self._registry.cached_ids(),
             agent_for=lambda conversation_id: self._registry.get(conversation_id),
@@ -179,7 +184,7 @@ class Assistant:
         initial_id = assistant._book.adopt_most_recent()
         # config.toml is the single source of settings: the panel and update_config write it, and the
         # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
-        for setting in runtime_settings.RUNTIME_SETTINGS:
+        for setting in assistant._settings_table.settings:
             if setting.mirror_on_channel:
                 assistant._ui.set_display_flag(setting.field, getattr(config, setting.field))
         assistant._mcp_servers = connections  # same list the MCP tools append to / remove from
@@ -226,6 +231,7 @@ class Assistant:
             reapply_config=assistant._settings.apply_one,
             observer=assistant._subagent_reporter,
             registry=registry,
+            settings_table=assistant._settings_table,
         )
         # Assigned after construction because it closes over assistant._registry, which is built below it.
         state.for_each_agent = for_each_agent

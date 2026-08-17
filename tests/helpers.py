@@ -1,6 +1,6 @@
-"""Test helpers: a mock async model client.
+"""Test helpers: a mock async model client, and the settings table a config parse needs.
 
-Vendored from AIMU's ``tests/helpers_aio.py`` (the ``MockAsyncModelClient``) so Kokua's tests are
+The ``MockAsyncModelClient`` is vendored from AIMU's ``tests/helpers_aio.py`` so Kokua's tests are
 self-contained and don't reach into the AIMU repo's test directory.
 """
 
@@ -11,6 +11,18 @@ from unittest.mock import MagicMock
 
 from aimu.aio._base import AsyncBaseModelClient
 from aimu.models import StreamChunk, StreamingContentType
+
+from kokua.config.table import CORE_RUNTIME_SETTINGS, SettingsTable
+
+
+def core_table() -> SettingsTable:
+    """The table for a test that has to pass one to ``config.file.load`` or ``apply_setting``.
+
+    Core-only, which is right for a test not exercising a toolset's own section: none of the toolsets
+    Kokua ships declares a setting, so this holds exactly what ``build_settings_table()`` returns in a
+    real run. A test covering a contributed setting builds its own table with the entries it needs.
+    """
+    return SettingsTable(CORE_RUNTIME_SETTINGS)
 
 
 class MockAsyncModelClient(AsyncBaseModelClient):

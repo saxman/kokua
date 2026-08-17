@@ -1,8 +1,9 @@
 """Applying a settings change to a running assistant, and persisting it to config.toml.
 
-Everything here is driven by ``runtime_settings.RUNTIME_SETTINGS``: reading the panel's values back,
-applying them live, mirroring the display flags onto the channel, and writing them to their own
-``[section].key``. Adding a setting touches none of this code.
+Everything here is driven by the :class:`~kokua.config.table.SettingsTable` it is handed: reading the
+panel's values back, applying them live, mirroring the display flags onto the channel, and writing them
+to their own ``[section].key``. Adding a setting -- Kokua's own or a toolset's -- touches none of this
+code, and a setting a toolset owns is applied and persisted exactly the way a core one is.
 
 Two things are not table-driven because they are not per-setting:
 
@@ -21,7 +22,7 @@ from typing import Awaitable, Callable, Optional
 from aimu import aio
 
 from kokua.config import store as config_store
-from kokua.config import table as runtime_settings
+from kokua.config.table import GENERATION_KEYS, SettingsTable
 from kokua.core.build import build_model_client, entry_agent_system_message
 from kokua.config import AssistantConfig
 from kokua.toolsets.context import LiveState
@@ -49,6 +50,7 @@ class SettingsApplier:
         ui,
         gate,
         *,
+        table: SettingsTable,
         live_agents: Callable[[], list],
         cached_ids: Callable[[], list[str]],
         agent_for: Callable[[str], object],
@@ -59,6 +61,7 @@ class SettingsApplier:
         self._config = config
         self._ui = ui
         self._gate = gate
+        self._table = table
         self._live_agents = live_agents
         self._cached_ids = cached_ids
         self._agent_for = agent_for
@@ -102,25 +105,15 @@ class SettingsApplier:
 
     def current(self) -> dict:
         """The effective runtime settings for the web panel: model, prefs, generate kwargs."""
-        settings = {setting.field: self._read(setting) for setting in runtime_settings.RUNTIME_SETTINGS}
+        settings = {s.wire_key: s.read(self._config, self._ui.display_flag) for s in self._table.settings}
         settings["generate_kwargs"] = dict(self._active_agent().model_client.default_generate_kwargs)
         return settings
-
-    def _read(self, setting: runtime_settings.RuntimeSetting):
-        """One setting's effective value: the channel's copy of a mirrored flag wins, since that is
-        the one actually consulted while streaming."""
-        value = getattr(self._config, setting.field)
-        if setting.kind is str:
-            return str(value) if value else ""
-        if setting.mirror_on_channel:
-            return self._ui.display_flag(setting.field, value)
-        return value
 
     # --- write -----------------------------------------------------------------------------------
 
     async def apply_and_persist(self, incoming: dict) -> None:
         """Apply a settings-panel change at runtime and write it to config.toml so it survives restarts."""
-        applied = await self.apply(runtime_settings.sanitize(incoming))
+        applied = await self.apply(self._table.sanitize(incoming))
         self.persist(applied)
 
     async def apply(self, settings: dict) -> dict:
@@ -138,12 +131,12 @@ class SettingsApplier:
         async with self._gate.exclusive():
             if switching:
                 await self.switch_model(new_model)
-            for setting in runtime_settings.RUNTIME_SETTINGS:
-                if setting.field not in settings or setting.field == "model":  # model: handled above
+            for setting in self._table.settings:
+                # Matched on the wire key, not the field: a toolset may own a key called "model", and only
+                # the core model setting is the one switch_model handled above.
+                if setting.wire_key not in settings or setting.wire_key == "model":
                     continue
-                setattr(self._config, setting.field, settings[setting.field])
-                if setting.mirror_on_channel:
-                    self._ui.set_display_flag(setting.field, settings[setting.field])
+                setting.write(self._config, settings[setting.wire_key], self._ui.set_display_flag)
             self._config.generation = settings["generate_kwargs"]
             for agent in self._live_agents():
                 layer_generate_kwargs(agent.model_client, self._base_generate_kwargs, self._config)
@@ -156,11 +149,11 @@ class SettingsApplier:
         field in the panel removes it from the file and the provider default takes over again.
         """
         path = self._config.config_path
-        for setting in runtime_settings.RUNTIME_SETTINGS:
-            if setting.field in settings:
-                config_store.set_value(path, setting.section, setting.toml_key, settings[setting.field])
+        for setting in self._table.settings:
+            if setting.wire_key in settings:
+                config_store.set_value(path, setting.section, setting.toml_key, settings[setting.wire_key])
         generate_kwargs = settings["generate_kwargs"]
-        for key in runtime_settings.GENERATION_KEYS:
+        for key in GENERATION_KEYS:
             if key in generate_kwargs:
                 config_store.set_value(path, "generation", key, generate_kwargs[key])
             else:
@@ -177,10 +170,10 @@ class SettingsApplier:
         if section == "generation":
             applied["generate_kwargs"][key] = value
         else:
-            setting = runtime_settings.by_toml(section, key)
+            setting = self._table.by_toml(section, key)
             if setting is not None:
-                applied[setting.field] = value
-        await self.apply(runtime_settings.sanitize(applied))
+                applied[setting.wire_key] = value
+        await self.apply(self._table.sanitize(applied))
 
     async def switch_model(self, model: str) -> None:
         """Rebuild every live agent's client for the new model, preserving each conversation's messages.

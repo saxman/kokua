@@ -1,29 +1,98 @@
-"""Unit tests for the runtime-settings table and its sanitizer.
+"""The settings table: core entries plus whatever a toolset contributed, in one lookup.
 
-The `test_every_runtime_setting_*` tests are the enforcement mechanism for the table's promise:
-adding a runtime setting is one RUNTIME_SETTINGS entry, one AssistantConfig field, and one web-panel
-input. They fail loudly if an entry is added without its counterparts.
+The `test_every_core_runtime_setting_*` tests are the enforcement mechanism for the table's promise:
+adding a core runtime setting is one CORE_RUNTIME_SETTINGS entry, one AssistantConfig field, and one
+web-panel input. They fail loudly if an entry is added without its counterparts.
 """
 
 from __future__ import annotations
 
 import re
 
-from kokua.config import table as runtime_settings
-from kokua.config import file as settings
 from kokua.config import AssistantConfig
+from kokua.config import file as settings
+from kokua.config.table import (
+    CORE_RUNTIME_SETTINGS,
+    GENERATION_KEYS,
+    GENERATION_SETTINGS,
+    RuntimeSetting,
+    SettingsTable,
+)
 
 
-def test_every_runtime_setting_is_an_assistant_config_field():
+def _table() -> SettingsTable:
+    return SettingsTable(
+        [
+            *CORE_RUNTIME_SETTINGS,
+            RuntimeSetting("plan_review", "planning", bool, toolset="planning"),
+            RuntimeSetting("review_rounds", "planning", int, toolset="planning"),
+        ]
+    )
+
+
+def test_a_contributed_setting_is_hot_and_findable_by_its_toml_location():
+    table = _table()
+    assert table.is_hot("planning", "plan_review") is True
+    assert table.by_toml("planning", "plan_review").toolset == "planning"
+
+
+def test_a_core_setting_keeps_a_bare_wire_key():
+    assert SettingsTable(CORE_RUNTIME_SETTINGS).by_field("show_tools").wire_key == "show_tools"
+
+
+def test_a_contributed_setting_is_namespaced_on_the_wire():
+    assert _table().by_toml("planning", "plan_review").wire_key == "planning.plan_review"
+
+
+def test_sanitize_accepts_both_wire_shapes_and_drops_junk():
+    cleaned = _table().sanitize(
+        {
+            "show_tools": True,
+            "planning.plan_review": True,
+            "planning.review_rounds": "not an int",
+            "unknown": 1,
+        }
+    )
+    assert cleaned["show_tools"] is True
+    assert cleaned["planning.plan_review"] is True
+    assert "planning.review_rounds" not in cleaned
+    assert "unknown" not in cleaned
+    assert cleaned["generate_kwargs"] == {}
+
+
+def test_a_contributed_setting_reads_and_writes_the_toolset_bucket():
+    config = AssistantConfig(toolset_settings={"planning": {"plan_review": False}})
+    setting = _table().by_toml("planning", "plan_review")
+
+    assert setting.read(config, lambda name, default: default) is False
+    setting.write(config, True, lambda name, value: None)
+    assert config.toolset_settings["planning"]["plan_review"] is True
+
+
+def test_a_core_setting_still_reads_and_writes_a_config_attribute():
     config = AssistantConfig()
-    for setting in runtime_settings.RUNTIME_SETTINGS:
+    setting = SettingsTable(CORE_RUNTIME_SETTINGS).by_field("show_tools")
+
+    setting.write(config, False, lambda name, value: None)
+    assert config.show_tools is False
+
+
+def test_the_toml_schema_covers_contributed_sections():
+    schema = _table().toml_schema()
+    assert ("planning", "plan_review") in schema
+    assert schema[("planning", "review_rounds")][1] == (int,)
+
+
+def test_every_core_runtime_setting_is_an_assistant_config_field():
+    config = AssistantConfig()
+    for setting in CORE_RUNTIME_SETTINGS:
         assert hasattr(config, setting.field), f"{setting.field} is not an AssistantConfig field"
 
 
-def test_runtime_settings_do_not_collide_with_startup_only_keys():
+def test_core_runtime_settings_do_not_collide_with_startup_only_keys():
     """A table entry that shadows a startup-only schema key would silently win, changing that key's
-    type and making it hot. The generated half of _SCHEMA must not overlap the hand-written half."""
-    generated = {(s.section, s.toml_key) for s in runtime_settings.RUNTIME_SETTINGS}
+    type and making it hot. The table's half of the built schema must not overlap the hand-written half."""
+    generated = {(s.section, s.toml_key) for s in CORE_RUNTIME_SETTINGS}
     assert not (generated & set(settings._STARTUP_SCHEMA)), "a runtime setting shadows a startup-only key"
 
 
@@ -43,7 +112,7 @@ def _example_keys() -> set[tuple[str, str]]:
     return pairs
 
 
-def test_every_runtime_setting_is_documented_under_its_own_section():
+def test_every_core_runtime_setting_is_documented_under_its_own_section():
     """config.example.toml documents every key at its default (commented out counts as documented).
 
     Section-aware on purpose: the example file is hand-maintained and so is the only source of truth
@@ -51,52 +120,54 @@ def test_every_runtime_setting_is_documented_under_its_own_section():
     [section], which is exactly the mistake that makes a setting silently fail to persist.
     """
     documented = _example_keys()
-    for setting in runtime_settings.RUNTIME_SETTINGS:
+    for setting in CORE_RUNTIME_SETTINGS:
         assert (setting.section, setting.toml_key) in documented, (
             f"[{setting.section}].{setting.toml_key} is not documented in config.example.toml"
         )
-    for generation in runtime_settings.GENERATION_SETTINGS:
+    for generation in GENERATION_SETTINGS:
         assert ("generation", generation.field) in documented, (
             f"[generation].{generation.field} is not documented in config.example.toml"
         )
 
 
 def test_generation_keys_match_the_generation_table():
-    assert runtime_settings.GENERATION_KEYS == tuple(s.field for s in runtime_settings.GENERATION_SETTINGS)
+    assert GENERATION_KEYS == tuple(s.field for s in GENERATION_SETTINGS)
 
 
 def test_sanitize_drops_unknown_and_coerces_types():
-    result = runtime_settings.sanitize({"generate_kwargs": {"temperature": "0.5", "max_tokens": 10, "bogus": 1}})
+    result = _table().sanitize({"generate_kwargs": {"temperature": "0.5", "max_tokens": 10, "bogus": 1}})
     assert result["generate_kwargs"] == {"temperature": 0.5, "max_tokens": 10}
 
 
 def test_sanitize_drops_out_of_range_and_none():
-    result = runtime_settings.sanitize({"generate_kwargs": {"temperature": 5.0, "top_p": 0.9, "top_k": None}})
+    result = _table().sanitize({"generate_kwargs": {"temperature": 5.0, "top_p": 0.9, "top_k": None}})
     assert result["generate_kwargs"] == {"top_p": 0.9}  # temperature out of [0,2], top_k None
 
 
 def test_sanitize_rejects_bools_for_numeric_kwargs():
-    result = runtime_settings.sanitize({"generate_kwargs": {"temperature": True}})
+    result = _table().sanitize({"generate_kwargs": {"temperature": True}})
     assert result["generate_kwargs"] == {}
 
 
 def test_sanitize_model_and_flags():
-    result = runtime_settings.sanitize({"model": "  anthropic:x  ", "show_thinking": True, "show_tools": "yes"})
+    result = _table().sanitize({"model": "  anthropic:x  ", "show_thinking": True, "show_tools": "yes"})
     assert result["model"] == "anthropic:x"  # trimmed
     assert result["show_thinking"] is True
     assert "show_tools" not in result  # non-bool dropped
 
 
 def test_sanitize_keeps_plan_flags():
-    result = runtime_settings.sanitize({"plan_review_agent": True, "plan_review": False, "plan_bogus": True})
+    result = SettingsTable(CORE_RUNTIME_SETTINGS).sanitize(
+        {"plan_review_agent": True, "plan_review": False, "plan_bogus": True}
+    )
     assert result["plan_review_agent"] is True
     assert result["plan_review"] is False
     assert "plan_bogus" not in result
 
 
 def test_sanitize_blank_model_omitted():
-    assert "model" not in runtime_settings.sanitize({"model": "   "})
+    assert "model" not in _table().sanitize({"model": "   "})
 
 
 def test_sanitize_always_has_generate_kwargs():
-    assert runtime_settings.sanitize({}) == {"generate_kwargs": {}}
+    assert _table().sanitize({}) == {"generate_kwargs": {}}

@@ -9,6 +9,7 @@ import pytest
 from kokua.config import paths
 from kokua.config import file as settings
 from kokua.cli import _init_config, build_arg_parser, resolve_config
+from tests.helpers import core_table
 
 
 def _write_config(text: str):
@@ -28,7 +29,7 @@ def test_missing_default_file_is_an_error_naming_the_fix():
     one, so starting without a file is not a state Kokua can be in."""
     paths.config_path().unlink()
     with pytest.raises(settings.ConfigError, match="kokua config init"):
-        settings.load()
+        settings.load(table=core_table())
 
 
 def test_file_overrides_built_in_defaults():
@@ -83,25 +84,25 @@ def test_explicit_config_flag(tmp_path):
 
 def test_explicit_missing_file_errors(tmp_path):
     with pytest.raises(settings.ConfigError, match="not found"):
-        settings.load(str(tmp_path / "nope.toml"))
+        settings.load(str(tmp_path / "nope.toml"), table=core_table())
 
 
 def test_unknown_key_raises():
     _write_config('[assistant]\nbogus = 1\nmodel = "m"\n')
     with pytest.raises(settings.ConfigError, match=r"unknown config key \[assistant\].bogus"):
-        settings.load()
+        settings.load(table=core_table())
 
 
 def test_type_mismatch_raises():
     _write_config('[web]\nport = "not-an-int"\n')
     with pytest.raises(settings.ConfigError, match=r"\[web\].port must be an integer"):
-        settings.load()
+        settings.load(table=core_table())
 
 
 def test_bool_rejected_for_numeric_field():
     _write_config("[web]\nport = true\n")
     with pytest.raises(settings.ConfigError, match=r"\[web\].port must be an integer"):
-        settings.load()
+        settings.load(table=core_table())
 
 
 def test_security_confirm_tools_from_file():
@@ -123,13 +124,13 @@ def test_generation_section_collects_into_dict():
 def test_generation_unknown_key_raises():
     _write_config("[generation]\nbogus = 1\ntemperature = 0.5\n")
     with pytest.raises(settings.ConfigError, match=r"unknown config key \[generation\].bogus"):
-        settings.load()
+        settings.load(table=core_table())
 
 
 def test_generation_type_mismatch_raises():
     _write_config('[generation]\ntemperature = "hot"\n')
     with pytest.raises(settings.ConfigError, match=r"\[generation\].temperature must be a number"):
-        settings.load()
+        settings.load(table=core_table())
 
 
 def test_data_dir_override_redirects_leaf_paths(tmp_path):
@@ -173,21 +174,21 @@ def test_agent_tools_must_be_a_string_list(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[agents.bad]\ntools = [1, 2]\n", encoding="utf-8")
     with pytest.raises(settings.ConfigError, match="tools"):
-        settings.load(str(path))
+        settings.load(str(path), table=core_table())
 
 
 def test_agent_delegates_to_must_be_a_string_list(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[agents.bad]\ndelegates_to = [1]\n", encoding="utf-8")
     with pytest.raises(settings.ConfigError, match="delegates_to"):
-        settings.load(str(path))
+        settings.load(str(path), table=core_table())
 
 
 def test_subagents_unknown_top_level_key_raises(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[subagents]\nbogus = 1\n", encoding="utf-8")
     with pytest.raises(settings.ConfigError, match="bogus"):
-        settings.load(str(path))
+        settings.load(str(path), table=core_table())
 
 
 def test_mcp_server_tables_parse(tmp_path):
@@ -202,7 +203,7 @@ def test_mcp_server_tables_parse(tmp_path):
         'name = "plain"\n',
         encoding="utf-8",
     )
-    servers = settings.load(str(path))["mcp_servers"]
+    servers = settings.load(str(path), table=core_table())["mcp_servers"]
     assert [(s.url, s.token_env) for s in servers] == [
         ("https://api.githubcopilot.com/mcp/", "GITHUB_MCP_TOKEN"),
         ("https://plain/mcp", None),
@@ -215,7 +216,7 @@ def test_mcp_server_name_parses(tmp_path):
         '[[mcp.server]]\nurl = "https://broker/mcp"\nname = "stocks"\n',
         encoding="utf-8",
     )
-    servers = settings.load(str(path))["mcp_servers"]
+    servers = settings.load(str(path), table=core_table())["mcp_servers"]
     assert (servers[0].url, servers[0].name) == ("https://broker/mcp", "stocks")
 
 
@@ -223,21 +224,21 @@ def test_mcp_server_missing_url_raises(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[[mcp.server]]\ntoken_env = "X"\n', encoding="utf-8")
     with pytest.raises(settings.ConfigError, match="url"):
-        settings.load(str(path))
+        settings.load(str(path), table=core_table())
 
 
 def test_mcp_server_unknown_key_raises(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[[mcp.server]]\nurl = "https://x/mcp"\nname = "x"\nbearer = "nope"\n', encoding="utf-8")
     with pytest.raises(settings.ConfigError, match="bearer"):
-        settings.load(str(path))
+        settings.load(str(path), table=core_table())
 
 
 def test_mcp_unknown_top_level_key_raises(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[mcp]\nservers = ["https://x/mcp"]\n', encoding="utf-8")
     with pytest.raises(settings.ConfigError, match=r"\[mcp\].servers"):
-        settings.load(str(path))
+        settings.load(str(path), table=core_table())
 
 
 def test_agent_cache_cap_parsed(tmp_path, monkeypatch):
@@ -245,50 +246,52 @@ def test_agent_cache_cap_parsed(tmp_path, monkeypatch):
     (tmp_path / "config.toml").write_text("[assistant]\nagent_cache_cap = 3\n")
     from kokua.config import file as settings
 
-    overrides = settings.load()
+    overrides = settings.load(table=core_table())
     assert overrides["agent_cache_cap"] == 3
 
 
 def test_coerce_config_string_scalars():
-    assert settings.coerce_config_string("assistant", "model", "anthropic:x") == "anthropic:x"
-    assert settings.coerce_config_string("display", "show_thinking", "false") is False
-    assert settings.coerce_config_string("display", "show_tools", "true") is True
-    assert settings.coerce_config_string("web", "port", "9100") == 9100
+    assert settings.coerce_config_string("assistant", "model", "anthropic:x", table=core_table()) == "anthropic:x"
+    assert settings.coerce_config_string("display", "show_thinking", "false", table=core_table()) is False
+    assert settings.coerce_config_string("display", "show_tools", "true", table=core_table()) is True
+    assert settings.coerce_config_string("web", "port", "9100", table=core_table()) == 9100
 
 
 def test_coerce_config_string_list():
-    assert settings.coerce_config_string("security", "confirm_tools", "execute_python, update_config") == [
+    assert settings.coerce_config_string(
+        "security", "confirm_tools", "execute_python, update_config", table=core_table()
+    ) == [
         "execute_python",
         "update_config",
     ]
 
 
 def test_coerce_config_string_generation_range_checked():
-    assert settings.coerce_config_string("generation", "temperature", "0.3") == 0.3
+    assert settings.coerce_config_string("generation", "temperature", "0.3", table=core_table()) == 0.3
     with pytest.raises(settings.ConfigError, match="temperature"):
-        settings.coerce_config_string("generation", "temperature", "9")  # above the 2.0 max
+        settings.coerce_config_string("generation", "temperature", "9", table=core_table())  # above the 2.0 max
 
 
 def test_coerce_config_string_bad_int_raises():
     with pytest.raises(settings.ConfigError, match=r"\[web\].port"):
-        settings.coerce_config_string("web", "port", "not-an-int")
+        settings.coerce_config_string("web", "port", "not-an-int", table=core_table())
 
 
 def test_coerce_config_string_unknown_key_raises():
     with pytest.raises(settings.ConfigError, match="unknown config key"):
-        settings.coerce_config_string("assistant", "bogus", "x")
+        settings.coerce_config_string("assistant", "bogus", "x", table=core_table())
 
 
 def test_coerce_config_string_rejects_structured_sections():
     with pytest.raises(settings.ConfigError, match="mcp"):
-        settings.coerce_config_string("mcp", "server", "x")
+        settings.coerce_config_string("mcp", "server", "x", table=core_table())
 
 
 def test_shipped_example_loads_cleanly(caplog):
     """The example's active keys must parse without unknown-key or type warnings/errors."""
     _init()
     with caplog.at_level(logging.WARNING):
-        overrides = settings.load()
+        overrides = settings.load(table=core_table())
     assert not any(rec.levelno >= logging.WARNING for rec in caplog.records)
     assert overrides  # the example leaves several keys active at their default
     cfg = _resolve()
@@ -299,7 +302,7 @@ def test_explicit_missing_file_is_also_an_error(tmp_path):
     """--config PATH pointing at nothing was already an error; the default location now behaves the
     same way, so the two paths do not disagree about whether a config is optional."""
     with pytest.raises(settings.ConfigError, match="config file not found"):
-        settings.load(str(tmp_path / "nope.toml"))
+        settings.load(str(tmp_path / "nope.toml"), table=core_table())
 
 
 def test_a_config_defining_no_agents_still_parses(tmp_path):
@@ -307,4 +310,51 @@ def test_a_config_defining_no_agents_still_parses(tmp_path):
     one is Assistant.create's call (see tests/core/test_build.py)."""
     path = tmp_path / "config.toml"
     path.write_text("[assistant]\nconcurrent_tools = true\n", encoding="utf-8")
-    assert settings.load(str(path)).get("agents") is None
+    assert settings.load(str(path), table=core_table()).get("agents") is None
+
+
+def test_a_contributed_section_parses_into_the_toolset_bucket(tmp_path):
+    from kokua.config import file as settings
+    from kokua.config.table import CORE_RUNTIME_SETTINGS, RuntimeSetting, SettingsTable
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[agents.assistant]\ntools = []\n\n[planning]\nplan_review = true\nreview_rounds = 4\n",
+        encoding="utf-8",
+    )
+    table = SettingsTable(
+        [
+            *CORE_RUNTIME_SETTINGS,
+            RuntimeSetting("plan_review", "planning", bool, toolset="planning"),
+            RuntimeSetting("review_rounds", "planning", int, toolset="planning"),
+        ]
+    )
+
+    overrides = settings.load(str(path), table=table)
+
+    assert overrides["toolset_settings"] == {"planning": {"plan_review": True, "review_rounds": 4}}
+
+
+def test_an_unknown_key_in_a_contributed_section_is_rejected(tmp_path):
+    from kokua.config import file as settings
+    from kokua.config.table import CORE_RUNTIME_SETTINGS, SettingsTable
+
+    path = tmp_path / "config.toml"
+    path.write_text("[agents.assistant]\ntools = []\n\n[planning]\nnonsense = 1\n", encoding="utf-8")
+
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[planning\].nonsense"):
+        settings.load(str(path), table=SettingsTable(CORE_RUNTIME_SETTINGS))
+
+
+def test_a_wrong_typed_contributed_value_is_rejected(tmp_path):
+    from kokua.config import file as settings
+    from kokua.config.table import CORE_RUNTIME_SETTINGS, RuntimeSetting, SettingsTable
+
+    path = tmp_path / "config.toml"
+    path.write_text('[agents.assistant]\ntools = []\n\n[planning]\nreview_rounds = "two"\n', encoding="utf-8")
+    table = SettingsTable(
+        [*CORE_RUNTIME_SETTINGS, RuntimeSetting("review_rounds", "planning", int, toolset="planning")]
+    )
+
+    with pytest.raises(settings.ConfigError, match="must be an integer"):
+        settings.load(str(path), table=table)

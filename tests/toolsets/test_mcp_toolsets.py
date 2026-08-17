@@ -6,6 +6,7 @@ from kokua.config.file import ConfigError
 from kokua.config.schema import AgentConfig, AssistantConfig, MCPServerConfig
 from kokua.toolsets.agents import build_registry
 from kokua.toolsets.context import LiveState, ToolsetContext
+from tests.helpers import core_table
 
 
 class FakeConnection:
@@ -103,5 +104,5 @@ def test_a_server_without_a_name_is_a_config_error(tmp_path):
     from kokua.config.file import load
 
     with pytest.raises(ConfigError) as excinfo:
-        AssistantConfig(**load(str(path)))
+        AssistantConfig(**load(str(path), table=core_table()))
     assert "name" in str(excinfo.value)

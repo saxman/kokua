@@ -8,6 +8,7 @@ import pytest
 
 from kokua.config import store as config_store
 from kokua.config import file as settings
+from tests.helpers import core_table
 
 
 def _read(path):
@@ -69,7 +70,7 @@ def test_add_mcp_server_appends_and_is_readable_by_settings(tmp_path):
     path.write_text("", encoding="utf-8")
     config_store.add_mcp_server(path, "https://plain/mcp")
     config_store.add_mcp_server(path, "https://auth/mcp", token_env="TOK")
-    servers = settings.load(str(path))["mcp_servers"]
+    servers = settings.load(str(path), table=core_table())["mcp_servers"]
     assert [(s.url, s.token_env) for s in servers] == [
         ("https://plain/mcp", None),
         ("https://auth/mcp", "TOK"),
@@ -81,7 +82,7 @@ def test_add_mcp_server_updates_existing_url(tmp_path):
     path.write_text("", encoding="utf-8")
     config_store.add_mcp_server(path, "https://x/mcp")
     config_store.add_mcp_server(path, "https://x/mcp", token_env="TOK")
-    servers = settings.load(str(path))["mcp_servers"]
+    servers = settings.load(str(path), table=core_table())["mcp_servers"]
     assert [(s.url, s.token_env) for s in servers] == [("https://x/mcp", "TOK")]
 
 
@@ -93,7 +94,7 @@ def test_add_mcp_server_two_urls_on_one_host_get_distinct_names(tmp_path):
     path.write_text("", encoding="utf-8")
     config_store.add_mcp_server(path, "https://broker.example.com/mcp/quotes")
     config_store.add_mcp_server(path, "https://broker.example.com/mcp/orders")
-    servers = settings.load(str(path))["mcp_servers"]
+    servers = settings.load(str(path), table=core_table())["mcp_servers"]
     names = [s.name for s in servers]
     assert len(set(names)) == len(names)
     assert names[0] == "broker-example-com"
@@ -118,7 +119,7 @@ def test_add_mcp_server_replacing_an_existing_url_keeps_its_hand_edited_name(tmp
     path = tmp_path / "config.toml"
     path.write_text('[[mcp.server]]\nurl = "https://x/mcp"\nname = "custom-name"\n', encoding="utf-8")
     config_store.add_mcp_server(path, "https://x/mcp", token_env="TOK")
-    servers = settings.load(str(path))["mcp_servers"]
+    servers = settings.load(str(path), table=core_table())["mcp_servers"]
     assert [(s.url, s.name, s.token_env) for s in servers] == [("https://x/mcp", "custom-name", "TOK")]
 
 
@@ -128,7 +129,7 @@ def test_remove_mcp_server(tmp_path):
     config_store.add_mcp_server(path, "https://a/mcp")
     config_store.add_mcp_server(path, "https://b/mcp")
     assert config_store.remove_mcp_server(path, "https://a/mcp") is True
-    servers = settings.load(str(path))["mcp_servers"]
+    servers = settings.load(str(path), table=core_table())["mcp_servers"]
     assert [s.url for s in servers] == ["https://b/mcp"]
 
 
@@ -187,7 +188,9 @@ async def test_apply_setting_persists_a_cold_setting_without_touching_the_sessio
     applied = []
     path = tmp_path / "config.toml"
 
-    result = await config_store.apply_setting(path, "web", "port", "9100", lambda *a: applied.append(a))
+    result = await config_store.apply_setting(
+        path, "web", "port", "9100", lambda *a: applied.append(a), table=core_table()
+    )
 
     assert result.hot is False and result.value == 9100
     assert _read(path)["web"]["port"] == 9100
@@ -201,7 +204,7 @@ async def test_apply_setting_applies_a_hot_setting_before_persisting_it(tmp_path
         applied.append((section, key, value))
 
     path = tmp_path / "config.toml"
-    result = await config_store.apply_setting(path, "generation", "temperature", "0.3", apply_hot)
+    result = await config_store.apply_setting(path, "generation", "temperature", "0.3", apply_hot, table=core_table())
 
     assert result.hot is True and applied == [("generation", "temperature", 0.3)]
     assert _read(path)["generation"]["temperature"] == 0.3
@@ -216,7 +219,7 @@ async def test_apply_setting_does_not_persist_a_hot_setting_that_failed_to_apply
 
     path = tmp_path / "config.toml"
     with pytest.raises(config_store.HotApplyFailed) as failure:
-        await config_store.apply_setting(path, "assistant", "model", "nonsense:model", apply_hot)
+        await config_store.apply_setting(path, "assistant", "model", "nonsense:model", apply_hot, table=core_table())
 
     assert "bad model" in str(failure.value)
     assert not path.exists()
@@ -226,8 +229,8 @@ async def test_apply_setting_refuses_a_locked_key_and_rejects_a_bad_value(tmp_pa
     path = tmp_path / "config.toml"
 
     with pytest.raises(config_store.SettingLocked):
-        await config_store.apply_setting(path, "email", "to", "attacker@x.com", _noop_apply)
+        await config_store.apply_setting(path, "email", "to", "attacker@x.com", _noop_apply, table=core_table())
     with pytest.raises(settings.ConfigError):
-        await config_store.apply_setting(path, "web", "port", "not-a-number", _noop_apply)
+        await config_store.apply_setting(path, "web", "port", "not-a-number", _noop_apply, table=core_table())
 
     assert not path.exists()

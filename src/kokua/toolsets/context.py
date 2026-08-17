@@ -22,6 +22,7 @@ from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.skills import SkillManager
 
 from kokua.config.schema import AssistantConfig
+from kokua.config.table import SettingsTable
 
 # The toolset that grants author_skill / add_skill_script. Declaring it opts an agent out of catalogue
 # scoping, since an author has to see the skill it just wrote (see `skill_manager`).
@@ -69,6 +70,10 @@ class LiveState:
     # than imported by the toolsets that need it, since it lives in core.build and core.build imports
     # them.
     refresh_workers: Optional[Callable[[Any], None]] = None
+    # Every runtime-mutable setting this process knows, so the config toolset's update_config resolves a
+    # key against the same declarations the settings panel applies. Assigned by the composition root,
+    # which builds one table and shares it with the applier.
+    settings_table: Optional[SettingsTable] = None
 
     @cached_property
     def memory_store(self) -> SemanticMemoryStore:

@@ -10,6 +10,7 @@ import tomllib
 import pytest
 
 from kokua.toolsets import config as config_tools
+from tests.helpers import core_table
 
 
 def _read(path):
@@ -22,7 +23,7 @@ def _tools(tmp_path, apply_hot=None):
         return None
 
     path = tmp_path / "config.toml"
-    read_config, update_config = config_tools.make_config_tools(path, apply_hot or _noop)
+    read_config, update_config = config_tools.make_config_tools(path, apply_hot or _noop, core_table())
     return path, read_config, update_config
 
 

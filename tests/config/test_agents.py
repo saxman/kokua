@@ -4,13 +4,14 @@ import pytest
 
 from kokua.config.file import ConfigError, load
 from kokua.config.schema import AssistantConfig
+from tests.helpers import core_table
 
 
 def _load(tmp_path, body: str) -> AssistantConfig:
     """Write a config file and resolve it the way the CLI does: file dict into the dataclass."""
     path = tmp_path / "config.toml"
     path.write_text(body)
-    return AssistantConfig(**load(str(path)))
+    return AssistantConfig(**load(str(path), table=core_table()))
 
 
 MINIMAL = """
@@ -106,7 +107,7 @@ async def test_update_config_refuses_an_agent_table_and_still_writes_a_runtime_s
     async def apply_hot(section, key, value):
         return None
 
-    update = next(t for t in make_config_tools(path, apply_hot) if t.__name__ == "update_config")
+    update = next(t for t in make_config_tools(path, apply_hot, core_table()) if t.__name__ == "update_config")
 
     refusal = await update(section="agents.assistant", key="tools", value="fs, compute")
     assert "hand-editing" in refusal
@@ -126,7 +127,7 @@ def test_the_shipped_example_config_loads_and_validates(tmp_path):
     source = files("kokua").joinpath("config.example.toml")
     path = tmp_path / "config.toml"
     shutil.copyfile(str(source), path)
-    config = AssistantConfig(**load(str(path)))
+    config = AssistantConfig(**load(str(path), table=core_table()))
     validate_agents(config, build_registry(config))
     assert config.entry_agent in config.agents
 

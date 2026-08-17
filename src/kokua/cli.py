@@ -22,6 +22,7 @@ from . import plugins
 from .aimu_compat import AimuVersionError, require_aimu
 from kokua.config import file as settings
 from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
+from kokua.config.settings_sources import build_settings_table, seed_toolset_defaults, startup_schema
 from kokua.config.store import disambiguate_name, name_from_url
 from .logging_setup import configure_logging
 
@@ -177,10 +178,23 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
 
 
 def resolve_config(args: argparse.Namespace) -> AssistantConfig:
-    """Merge built-in defaults < config file < CLI flags into the final config."""
+    """Merge built-in defaults < config file < CLI flags into the final config.
+
+    The settings table is built before the file is parsed, because the installed toolsets are what say
+    which sections exist. Toolset discovery is side-effect-free and deliberately not gated on
+    ``load_plugins``: gating it would make a config file naming a third party's section unparseable
+    whenever plugins are switched off, which is a worse failure than the capability simply being absent.
+    """
     config_path, _ = settings.resolve_path(args.config)
-    overrides = {"config_path": config_path, **settings.load(args.config), **_cli_overrides(args)}
-    return AssistantConfig(**overrides)
+    table = build_settings_table()
+    from_file = settings.load(args.config, table=table, extra_schema=startup_schema())
+    # Captured before seeding, which fills every declared key and so erases the difference between a
+    # section the user wrote and one Kokua defaulted.
+    configured = tuple(sorted(from_file.get("toolset_settings", {})))
+    overrides = {"config_path": config_path, **from_file, **_cli_overrides(args)}
+    config = AssistantConfig(**overrides, configured_sections=configured)
+    seed_toolset_defaults(config)
+    return config
 
 
 def _init_config(args: argparse.Namespace) -> int:

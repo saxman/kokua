@@ -15,7 +15,7 @@ from kokua.config.schema import AgentConfig
 from kokua.core.assistant import Assistant
 from tests.channels import FakeChannel, _config
 from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
-from tests.helpers import MockAsyncModelClient
+from tests.helpers import MockAsyncModelClient, core_table
 
 
 def _using(name: str, url: str) -> dict:
@@ -257,7 +257,7 @@ def _persisted_servers(cfg):
 
     if not cfg.config_path.exists():
         return []
-    return settings.load(str(cfg.config_path)).get("mcp_servers", [])
+    return settings.load(str(cfg.config_path), table=core_table()).get("mcp_servers", [])
 
 
 def _restart_config(tmp_path, cfg):
