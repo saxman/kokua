@@ -8,6 +8,10 @@ change (``config.store.is_locked``).
 The policy, the coercion, and the apply-then-persist ordering are all in ``config/store.py``. What is
 here is the two tool schemas and the four sentences that report what happened -- including the one that
 says a change waits for a restart, which is what keeps the assistant honest about a cold setting.
+
+One thing this module has to supply rather than merely wrap: *which keys exist*. ``config/`` cannot see
+the installed toolsets, so the cold half of their declarations is assembled here and handed down (see
+:func:`make_config_tools`).
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from aimu.tools import tool
 
 from kokua.config import file as settings
 from kokua.config import store as config_store
+from kokua.config.settings_sources import startup_schema
 from kokua.toolsets.registry import Toolset
 
 
@@ -27,7 +32,16 @@ def make_config_tools(
 ) -> list[Callable]:
     """Build ``read_config`` / ``update_config`` bound to the config file, the live-apply callback, and
     the live settings table, so ``update_config`` resolves a key against the same declarations the
-    settings panel does."""
+    settings panel does.
+
+    The table is only half of those declarations: it holds hot settings, so the *cold* keys a toolset
+    declared are resolved from ``startup_schema()``, computed once here. This module is above ``config/``
+    and so may read the installed toolsets, which is the reason the seam is here rather than inside
+    ``config.store`` -- and it is the same route ``kokua.cli`` takes to build the parse schema, so the
+    tool and the file agree about which keys exist by construction. Without it the assistant would answer
+    "unknown config key" for a cold toolset key sitting in the user's own file.
+    """
+    cold_schema = startup_schema()
 
     @tool
     async def read_config() -> str:
@@ -47,12 +61,14 @@ def make_config_tools(
 
         Pass the value as a string; it is coerced to the setting's real type (numbers, true/false, and
         comma-separated lists are understood). Setting the model, a generation parameter (temperature,
-        max_tokens, ...), or a display/planning flag takes effect immediately in this session; any other
-        setting is saved and takes effect the next time Kokua restarts (the result says which). A few
-        security-critical keys cannot be changed here and must be hand-edited in the file.
+        max_tokens, ...), or a display or planning flag takes effect immediately in this session; any
+        other setting is saved and takes effect the next time Kokua restarts (the result says which). A
+        few security-critical keys cannot be changed here and must be hand-edited in the file.
         """
         try:
-            applied = await config_store.apply_setting(config_path, section, key, value, apply_hot, table=table)
+            applied = await config_store.apply_setting(
+                config_path, section, key, value, apply_hot, table=table, extra_schema=cold_schema
+            )
         except config_store.SettingLocked:
             return (
                 f"[{section}].{key} is security-critical and can only be changed by hand-editing "

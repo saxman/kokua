@@ -210,12 +210,17 @@ def _parse_scalar(section: str, key: str, raw: str, types: tuple[type, ...]) -> 
     return raw
 
 
-def coerce_config_string(section: str, key: str, raw: str, *, table) -> Any:
+def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schema: Optional[dict] = None) -> Any:
     """Validate and coerce a string value from the ``update_config`` tool into its config type.
 
     The tool passes every value as a string (LLM-friendly, avoids a union-typed argument); this maps
     it onto the type the config schema expects. Raises ``ConfigError`` with a user-facing message for an
     unknown key, a wrong-typed/out-of-range value, or a structured section that has no scalar entries.
+
+    ``extra_schema`` is the same *cold* toolset keys ``load`` takes, and for the same reason: the table
+    holds only hot settings, so without it a key a toolset declared as cold is not in any schema this can
+    see and the tool answers "unknown config key" for a key sitting in the user's file. It is passed in,
+    never imported, because ``config`` is the bottom layer and cannot reach the installed toolsets.
     """
     if section == "generation":
         if key not in runtime_settings.GENERATION_KEYS:
@@ -230,7 +235,7 @@ def coerce_config_string(section: str, key: str, raw: str, *, table) -> Any:
         return cleaned[key]
     if section in ("subagents", "agents", "mcp"):
         raise ConfigError(f"[{section}] has no scalar keys editable with update_config")
-    spec = build_schema(table).get((section, key))
+    spec = build_schema(table, extra_schema).get((section, key))
     if spec is None:
         raise ConfigError(f"unknown config key [{section}].{key}")
     _, types, _, convert = spec

@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 from urllib.parse import urlparse
 
 import tomlkit
@@ -236,23 +236,25 @@ async def apply_setting(
     apply_hot: Callable[[str, str, object], Awaitable[None]],
     *,
     table,
+    extra_schema: Optional[dict] = None,
 ) -> AppliedSetting:
     """Coerce, apply, and persist one setting. Raises rather than reporting.
 
-    A hot-appliable change (model, generation kwargs, the display and planning flags, and whatever the
-    installed toolsets declared as hot) is applied to the live session BEFORE it is written, so a value
-    that fails to apply -- an invalid model, say -- is not persisted and left to break the next startup.
-    That ordering is the whole reason this is one function rather than a coerce call and a write call at
-    the call site.
+    A hot-appliable change (model, generation kwargs, and whatever the installed toolsets declared as
+    hot) is applied to the live session BEFORE it is written, so a value that fails to apply -- an
+    invalid model, say -- is not persisted and left to break the next startup. That ordering is the whole
+    reason this is one function rather than a coerce call and a write call at the call site.
 
     ``table`` is the live :class:`~kokua.config.table.SettingsTable`: it decides both what a value coerces
-    to and whether the change is hot, so both questions are answered by the same declaration.
+    to and whether the change is hot, so both questions are answered by the same declaration. ``table``
+    alone is not the whole schema, though: it holds only hot settings, so ``extra_schema`` carries the
+    *cold* keys the installed toolsets declared, without which this refuses one as an unknown key.
 
     Raises :class:`SettingLocked`, ``ConfigError`` (from coercion), or :class:`HotApplyFailed`.
     """
     if is_locked(section, key):
         raise SettingLocked(section, key)
-    coerced = settings.coerce_config_string(section, key, raw, table=table)
+    coerced = settings.coerce_config_string(section, key, raw, table=table, extra_schema=extra_schema)
 
     if table.is_hot(section, key):
         try:

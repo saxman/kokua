@@ -80,6 +80,38 @@ async def test_update_config_hot_key_not_persisted_when_apply_fails(tmp_path):
     assert "could not be applied" in result.lower()
 
 
+async def test_update_config_sets_a_cold_toolset_key(tmp_path):
+    """The round trip a toolset's *cold* key takes through this tool, which the table alone cannot answer:
+    it holds hot settings only, so ``make_config_tools`` resolves the rest from ``startup_schema()``.
+    Uses the shipped ``[planning].review_rounds`` deliberately -- the assistant refusing a key that is
+    plainly in the user's config file is the failure this pins."""
+    path, _, update_config = _tools(tmp_path)
+
+    result = await update_config("planning", "review_rounds", "3")
+
+    assert _read(path)["planning"]["review_rounds"] == 3
+    assert "restart" in result.lower()  # cold: saved, effective next startup
+
+
+async def test_update_config_type_checks_a_cold_toolset_key(tmp_path):
+    path, _, update_config = _tools(tmp_path)
+
+    result = await update_config("planning", "review_rounds", "several")
+
+    assert "must be an integer" in result
+    assert not path.exists()
+
+
+async def test_update_config_still_refuses_an_undeclared_key_in_a_toolset_section(tmp_path):
+    """Widening the schema with the cold half must not turn a toolset's section into a free-for-all."""
+    path, _, update_config = _tools(tmp_path)
+
+    result = await update_config("planning", "made_up", "1")
+
+    assert "unknown config key" in result
+    assert not path.exists()
+
+
 @pytest.mark.parametrize(
     "section,key,value",
     [("security", "confirm_tools", "[]"), ("email", "to", "attacker@x.com"), ("paths", "data_dir", "/tmp/x")],

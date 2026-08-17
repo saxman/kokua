@@ -197,6 +197,36 @@ async def test_apply_setting_persists_a_cold_setting_without_touching_the_sessio
     assert applied == []
 
 
+async def test_apply_setting_resolves_a_cold_toolset_key_from_the_extra_schema(tmp_path):
+    """A cold declaration is in no table, so ``extra_schema`` is the only thing that makes it resolvable
+    here. Without it the assistant's own ``update_config`` refuses a key sitting in the user's file, which
+    is what this pins: the same call is an unknown key when the cold half is not passed."""
+    cold = {("widgets", "endpoint"): ("widgets.endpoint", (str,), "a string", None)}
+    path = tmp_path / "config.toml"
+
+    result = await config_store.apply_setting(
+        path, "widgets", "endpoint", "https://set/by-tool", _noop_apply, table=core_table(), extra_schema=cold
+    )
+
+    assert result.hot is False and result.value == "https://set/by-tool"
+    assert _read(path)["widgets"]["endpoint"] == "https://set/by-tool"
+
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[widgets\].endpoint"):
+        await config_store.apply_setting(path, "widgets", "endpoint", "https://x", _noop_apply, table=core_table())
+
+
+async def test_apply_setting_type_checks_a_cold_toolset_key(tmp_path):
+    cold = {("widgets", "rounds"): ("widgets.rounds", (int,), "an integer", None)}
+    path = tmp_path / "config.toml"
+
+    with pytest.raises(settings.ConfigError, match=r"\[widgets\].rounds must be an integer"):
+        await config_store.apply_setting(
+            path, "widgets", "rounds", "many", _noop_apply, table=core_table(), extra_schema=cold
+        )
+
+    assert not path.exists()
+
+
 async def test_apply_setting_applies_a_hot_setting_before_persisting_it(tmp_path):
     applied = []
 
