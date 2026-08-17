@@ -428,10 +428,16 @@ class Assistant:
                 # capability the config did not grant has no command here.
                 workflow = None
                 if text.startswith("/"):
-                    word = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
+                    # word and rest come from one split, not from re-slicing raw by len(word): that
+                    # used to assume exactly one character (the slash) precedes the word, but split()
+                    # (unlike partition(" ")) also skips any whitespace *before* the word, so a length-
+                    # based slice undercounted whenever a user typed more than one space after the
+                    # slash -- e.g. "/  plan hello" ran the workflow on "an hello".
+                    parts = raw.strip()[1:].split(maxsplit=1)
+                    word = parts[0].lower() if parts else ""
                     candidate = self._workflows.get(word)
                     if candidate is not None:
-                        task = raw.strip()[len(word) + 1 :].strip()
+                        task = parts[1].strip() if len(parts) > 1 else ""
                         if not task:
                             await self._ui.send(f"Usage: {candidate.usage}")
                             continue

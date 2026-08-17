@@ -49,11 +49,13 @@ Every rule here was learned from a bug. Read them before changing anything in th
    cancelled, connection error, generic error, success -- records as its first action, not as a step
    shared only by the paths that return normally. Recording under the right index is half of this,
    and every path resolves that index with ``resolve_user_index`` (the pre-run length is not it: a
-   first turn seeds the system message ahead of the user message). A planned turn's index cannot come
-   from the ``PlanResult`` either, since a cancelled or failed run raises instead of returning one, so
-   ``PlanRunner`` publishes the index as it commits and the plan branch reads it back in a ``finally``.
+   first turn seeds the system message ahead of the user message). A workflow turn's index cannot come
+   from its ``WorkflowResult`` either, since a cancelled or failed run raises instead of returning one,
+   so a workflow publishes the index through ``WorkflowContext.publish_user_index`` as it commits and
+   the workflow branch reads ``ctx.user_index`` back in a ``finally``.
    (Regressions: ``test_a_second_cancellation_during_the_stopped_send_still_records``,
-   ``test_a_stopped_planned_turn_records_the_events_it_produced``,
+   ``test_a_cancelled_rich_workflow_still_records_its_published_events``,
+   ``test_a_failed_rich_workflow_still_records_its_published_events``,
    ``test_a_first_turns_cards_anchor_to_its_user_message_past_the_system_message``.)
 
 6. **An unattended turn never lets an exception escape.** A scheduled firing has no user awaiting it
@@ -239,10 +241,13 @@ class TurnRunner:
         return ctx
 
     async def _drive_base_tier(self, runner, msg: ChannelMessage, ctx: WorkflowContext) -> None:
-        """Stream a plain ``AsyncRunner`` into the reply, committing the turn like an unplanned one.
+        """Stream a plain ``AsyncRunner`` into the reply. Not persisted.
 
-        The runner is handed the user's own words and never sees the transcript, so nothing needs
-        rewriting: the index is simply resolved from the pre-run length the way a plain turn's is.
+        The runner runs on its own, never appending to the agent's own transcript, so
+        ``resolve_user_index`` finds no new user message here and publishes -1: nothing of this
+        exchange reaches ``_persist``'s snapshot or the sub-agent record. The reply reaches the
+        channel and nothing else -- reloading the conversation will not show it. Whether a base-tier
+        turn's own exchange should be persisted is a product question this plan leaves open.
         """
         base_len = len(ctx.agent.model_client.messages)
         try:

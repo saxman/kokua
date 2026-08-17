@@ -9,10 +9,13 @@ without any mechanism of Kokua's own.
 
 Two tiers, probed once by :func:`is_rich` the way ``ChannelUI`` probes an optional frame:
 
-**Base tier** is any ``AsyncRunner``. Kokua streams ``run()`` into the reply and owns catch-up, index
-resolution, and persistence itself, so the runner needs to know nothing about Kokua. The cost is
-presentation fidelity: AIMU's ``PlanExecuteEvaluator``, for instance, runs to completion and yields a
-single chunk, so it arrives in one lump with no live progress.
+**Base tier** is any ``AsyncRunner``. Kokua streams ``run()`` into the reply and owns catch-up itself, so
+the runner needs to know nothing about Kokua. The cost is not only presentation fidelity -- AIMU's
+``PlanExecuteEvaluator``, for instance, runs to completion and yields a single chunk, so it arrives in
+one lump with no live progress -- but persistence too: a base-tier runner never appends to the agent's
+own transcript, so the turn's index always resolves to "nothing to anchor to" and the exchange is not
+saved. The reply reaches the channel and nothing else; reloading the conversation will not show it. A
+workflow author who needs the exchange remembered needs the rich tier.
 
 **Rich tier** additionally implements ``run_turn()``, which is handed the channel, the human-decision
 slot, and control of the agent's transcript. Deep planning needs all three: it shows phases and

@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+
+from aimu.models import StreamChunk, StreamingContentType
 
 from kokua.config import AssistantConfig
 from kokua.config.file import ConfigError
+from kokua.core.assistant import Assistant
 from kokua.toolsets.agents import build_command_map
 from kokua.toolsets.registry import Toolset, register
 from kokua.workflows import Workflow
-from tests.channels import example_agents
+from tests.channels import FakeChannel, _config, example_agents
+from tests.helpers import MockAsyncModelClient
 
 
 def _workflow(command: str) -> Workflow:
@@ -62,3 +68,129 @@ def test_two_workflows_may_not_claim_one_command():
 
     with pytest.raises(ConfigError, match="both offer the /go command"):
         build_command_map(config, registry)
+
+
+# --- command shape: dispatch only ever matches a lowercase, whitespace-free word ------------------
+
+
+def test_an_empty_command_is_rejected():
+    agents = example_agents()
+    agents["assistant"].tools = ["planning"]
+    config = AssistantConfig(agents=agents, entry_agent="assistant")
+    registry = _registry(Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("")))
+
+    with pytest.raises(ConfigError, match="not a single lowercase word"):
+        build_command_map(config, registry)
+
+
+def test_a_command_containing_whitespace_is_rejected():
+    agents = example_agents()
+    agents["assistant"].tools = ["planning"]
+    config = AssistantConfig(agents=agents, entry_agent="assistant")
+    registry = _registry(Toolset(name="planning", description="P.", build=lambda ctx: [], workflow=_workflow("do it")))
+
+    with pytest.raises(ConfigError, match="not a single lowercase word"):
+        build_command_map(config, registry)
+
+
+def test_a_non_lowercase_command_is_rejected():
+    """Dispatch lowercases the incoming word before lookup, so an uppercase command could never be
+    reached -- and worse, it would slip past the reserved-word check under its own, different case
+    (``"Stop"`` isn't ``"stop"``) and then be silently shadowed by the real `/stop` at runtime."""
+    agents = example_agents()
+    agents["assistant"].tools = ["stopper"]
+    config = AssistantConfig(agents=agents, entry_agent="assistant")
+    registry = _registry(Toolset(name="stopper", description="S.", build=lambda ctx: [], workflow=_workflow("Stop")))
+
+    with pytest.raises(ConfigError, match="not a single lowercase word"):
+        build_command_map(config, registry)
+
+
+# --- the serve loop's own parsing: word/task split, unknown commands, empty task ------------------
+
+
+class _RecordingRunner:
+    """A base-tier runner that records the task text it is handed and echoes it back."""
+
+    def __init__(self):
+        self.tasks: list[str] = []
+
+    async def run(self, task, generate_kwargs=None, stream=False, images=None):
+        self.tasks.append(task)
+        if not stream:
+            return f"ran:{task}"
+
+        async def chunks():
+            yield StreamChunk(StreamingContentType.GENERATING, f"ran:{task}", agent="t", iteration=0)
+
+        return chunks()
+
+    @property
+    def messages(self):
+        return {}
+
+
+async def _run_one_message(assistant: Assistant, channel: FakeChannel) -> None:
+    """Drive the serve loop over ``channel``'s fixed inbound list, then let whatever turn it started
+    finish. ``FakeChannel.receive()`` is a finite generator (no ``/stop`` needed to end it), so this
+    never hangs the way driving a real conversation's ``/plan`` used to before the planning toolset
+    existed (see the task report)."""
+    await assistant._serve_channel()
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+
+async def test_a_matched_command_routes_to_its_workflow_with_the_task_text(tmp_path):
+    channel = FakeChannel(inbound=["/plan hello"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["unused"]))
+    runner = _RecordingRunner()
+    assistant._workflows = {
+        "plan": Workflow(name="plan", description="P.", command="plan", usage="/plan <task>", build=lambda ctx: runner)
+    }
+
+    await _run_one_message(assistant, channel)
+
+    assert runner.tasks == ["hello"]
+    assert channel.sent == ["ran:hello"]
+
+
+async def test_extra_spaces_after_the_slash_do_not_corrupt_the_task(tmp_path):
+    """Regression for a length-based re-slice that assumed exactly one character preceded the word:
+    it undercounted whenever more than one space followed the slash, running the workflow on a
+    truncated, off-by-one task ("an hello" instead of "hello")."""
+    channel = FakeChannel(inbound=["/  plan hello"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["unused"]))
+    runner = _RecordingRunner()
+    assistant._workflows = {
+        "plan": Workflow(name="plan", description="P.", command="plan", usage="/plan <task>", build=lambda ctx: runner)
+    }
+
+    await _run_one_message(assistant, channel)
+
+    assert runner.tasks == ["hello"]
+
+
+async def test_an_unrecognized_command_runs_a_plain_turn(tmp_path):
+    channel = FakeChannel(inbound=["/foo bar"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["a reply"]))
+    # No toolset offers "foo", so assistant._workflows is empty; the text runs through unchanged.
+
+    await _run_one_message(assistant, channel)
+
+    assert channel.sent == ["a reply"]
+    assert assistant._agent.model_client.messages[0]["content"] == "/foo bar"
+
+
+async def test_a_known_command_with_no_task_replies_with_its_usage(tmp_path):
+    channel = FakeChannel(inbound=["/plan"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    assistant._workflows = {
+        "plan": Workflow(
+            name="plan", description="P.", command="plan", usage="/plan <task>", build=lambda ctx: _RecordingRunner()
+        )
+    }
+
+    await _run_one_message(assistant, channel)
+
+    assert channel.sent == ["Usage: /plan <task>"]

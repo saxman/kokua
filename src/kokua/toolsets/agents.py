@@ -231,25 +231,39 @@ def build_command_map(config: AssistantConfig, registry: ToolsetRegistry) -> dic
     Collisions raise rather than resolve. A workflow shadowed by a reserved command, or by another
     workflow, would present as one that inexplicably never runs, and the config naming both is the
     thing that has to change.
+
+    A command's shape is checked here too, for the same reason: dispatch (``Assistant._serve_channel``)
+    lowercases the incoming text and matches a single whitespace-free token, so a command that is empty,
+    contains whitespace, or is not already lowercase could never be reached -- the exact "inexplicably
+    never runs" failure mode this function otherwise guards against, just caused by the command's own
+    shape instead of a collision with another one.
     """
     entry = config.agents[config.entry_agent]
     toolsets = select(entry.tools, registry, agent=config.entry_agent, entry_point=config.entry_agent)
     commands: dict[str, Workflow] = {}
     claimed_by: dict[str, str] = {}
     for toolset_name, workflow in workflows_of(toolsets):
-        if workflow.command in RESERVED_COMMANDS:
+        command = workflow.command
+        if not command or command != command.lower() or any(ch.isspace() for ch in command):
             raise ConfigError(
-                f"toolset {toolset_name!r} offers the /{workflow.command} command, which is reserved by "
+                f"toolset {toolset_name!r} offers the command {command!r}, which is not a single "
+                "lowercase word with no whitespace. Dispatch only ever matches a lowercased, "
+                "whitespace-free token, so a command in any other shape is unreachable. Rename the "
+                "workflow's command."
+            )
+        if command in RESERVED_COMMANDS:
+            raise ConfigError(
+                f"toolset {toolset_name!r} offers the /{command} command, which is reserved by "
                 "the assistant itself. Rename the workflow's command."
             )
-        if workflow.command in commands:
+        if command in commands:
             raise ConfigError(
-                f"toolsets {claimed_by[workflow.command]!r} and {toolset_name!r} both offer the "
-                f"/{workflow.command} command. Rename one, or drop one from "
+                f"toolsets {claimed_by[command]!r} and {toolset_name!r} both offer the "
+                f"/{command} command. Rename one, or drop one from "
                 f"[agents.{config.entry_agent}].tools."
             )
-        commands[workflow.command] = workflow
-        claimed_by[workflow.command] = toolset_name
+        commands[command] = workflow
+        claimed_by[command] = toolset_name
     return commands
 
 

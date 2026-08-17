@@ -9,6 +9,7 @@ import pytest
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
+from kokua.workflows import Workflow
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
 from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
 from tests.helpers import MockAsyncModelClient
@@ -773,6 +774,84 @@ async def test_a_stopped_turn_records_the_events_it_produced(tmp_path):
 
     metadata = assistant._store.get(assistant._active_id).metadata
     assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1"]
+
+
+class _CancellingRichRunner:
+    """Publishes an index and a sub-agent event, then is cancelled -- standing in for `/stop` arriving
+    mid-turn without needing a real cancellation, since raising `CancelledError` from `run_turn` is
+    indistinguishable to `reactive`'s `except asyncio.CancelledError` from one delivered by the task."""
+
+    def __init__(self, ctx, reporter):
+        self.ctx = ctx
+        self.reporter = reporter
+
+    async def run_turn(self):
+        self.ctx.publish_user_index(0)
+        await self.reporter.spawned("r-1", "researcher", "find X")
+        raise asyncio.CancelledError()
+
+
+async def test_a_cancelled_rich_workflow_still_records_its_published_events(tmp_path):
+    """The `finally` around a rich workflow's `run_turn` exists so a workflow that raises still
+    anchors its sub-agent cards at the index it published, rather than at -1 (which would no-op the
+    recording, per `record_subagent_events`). This is the coverage `test_a_stopped_planned_turn_...`
+    used to give invariant 5 for the planning workflow specifically; that test now hangs (planning has
+    no workflow toolset yet), so this one covers the shape itself, independent of any one workflow."""
+    channel = FakeChannel()
+    client = MockAsyncModelClient(["unused"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    workflow = Workflow(
+        name="cancels",
+        description="C.",
+        command="cancels",
+        usage="/cancels <x>",
+        build=lambda ctx: _CancellingRichRunner(ctx, assistant._subagent_reporter),
+    )
+
+    await assistant._handle(
+        ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id, workflow=workflow
+    )
+
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1"]
+    assert channel.sent == ["(stopped)"]
+
+
+class _FailingRichRunner:
+    """Publishes an index and a sub-agent event, then fails outright (not cancelled) -- the other
+    branch that reaches the same `finally`."""
+
+    def __init__(self, ctx, reporter):
+        self.ctx = ctx
+        self.reporter = reporter
+
+    async def run_turn(self):
+        self.ctx.publish_user_index(0)
+        await self.reporter.spawned("r-1", "researcher", "find X")
+        raise RuntimeError("boom")
+
+
+async def test_a_failed_rich_workflow_still_records_its_published_events(tmp_path):
+    """Same shape as the cancelled case, through the generic-error branch: the events a workflow
+    published before raising must still land, and the user still gets a failure message."""
+    channel = FakeChannel()
+    client = MockAsyncModelClient(["unused"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    workflow = Workflow(
+        name="fails",
+        description="F.",
+        command="fails",
+        usage="/fails <x>",
+        build=lambda ctx: _FailingRichRunner(ctx, assistant._subagent_reporter),
+    )
+
+    await assistant._handle(
+        ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id, workflow=workflow
+    )
+
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert [event["id"] for event in metadata["subagent"]["0"]] == ["r-1"]
+    assert channel.sent == ["Sorry, the request failed: RuntimeError: boom"]
 
 
 class _PlansThenSpawnsAndHangsClient(MockAsyncModelClient):
