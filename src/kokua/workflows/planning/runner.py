@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from aimu import aio
 from aimu.aio.channels.base import ChannelMessage
 
 from kokua.workflows import WorkflowContext, WorkflowResult, critics
@@ -73,13 +74,19 @@ SUMMARY = Presentation(stream_intermediate=False, announce_phases=False, show_pl
 VERBOSE = Presentation(stream_intermediate=True, announce_phases=True, show_plan_card=False, reviewer_cards=False)
 
 
-class PlanningWorkflow:
+class PlanningWorkflow(aio.AsyncRunner):
     """Deep planning as a rich-tier workflow: plan, optionally review, execute, optionally review.
 
     Constructed fresh per turn, so ``_trace`` needs no reset. Rich tier because every one of its four
     presentation needs is outside what an ``AsyncRunner`` can express: labeled phases, reviewer cards, a
     human approve/edit/reject pause, and rewriting the transcript so the saved conversation reads as the
     user's own words rather than planner scaffolding.
+
+    Subclasses ``aio.AsyncRunner`` rather than merely satisfying its shape, because ``as_tool()`` is a
+    concrete method the base class *provides*: duck-typing ``run`` and ``messages`` would leave the
+    workflow with no way to reach the model as a tool. Kokua's own driver would not notice the
+    difference, since it probes for ``run_turn`` rather than for a base class, which is what makes the
+    inheritance easy to drop by accident and why a test pins it.
     """
 
     def __init__(self, ctx: WorkflowContext):
@@ -121,9 +128,9 @@ class PlanningWorkflow:
             self._trace = None
 
     async def run(self, task, generate_kwargs=None, stream=False, images=None):
-        """The base-tier entry point, unused by the core (which calls ``run_turn``) and present so this
-        workflow is a complete ``AsyncRunner``: that is what makes ``as_tool()`` available if planning
-        is ever offered to the model as a tool."""
+        """The base-tier entry point, unused by the core (which calls ``run_turn``) and present because
+        ``AsyncRunner`` declares it abstract: without it this class could not be instantiated at all, and
+        inheriting is what makes ``as_tool()`` available if planning is ever offered to the model."""
         raise NotImplementedError(
             "deep planning drives its own turn; the assistant calls run_turn(). Offering it to the "
             "model as a tool needs a nested variant that does not rewrite the caller's transcript."

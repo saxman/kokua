@@ -5,7 +5,10 @@ toolset gets the workflow's command, and nothing else does. The declaration buil
 ``aimu.aio.AsyncRunner``, which is AIMU's abstract base for every agent and workflow, so AIMU's own
 ``aimu.aio.workflows`` (Chain, Parallel, Router, EvaluatorOptimizer, PlanExecuteEvaluator) are usable
 here with no adapter, and ``AsyncRunner.as_tool()`` is how a workflow reaches the model as a tool
-without any mechanism of Kokua's own.
+without any mechanism of Kokua's own. Note what that costs a hand-written workflow: ``as_tool()`` is a
+concrete method the base class *provides*, not a name Kokua looks up, so a runner that wants tool entry
+has to subclass ``aio.AsyncRunner`` rather than just implement ``run`` and ``messages``. AIMU's own
+workflows already do; anything written from scratch opts in by inheriting.
 
 Two tiers, probed once by :func:`is_rich` the way ``ChannelUI`` probes an optional frame:
 

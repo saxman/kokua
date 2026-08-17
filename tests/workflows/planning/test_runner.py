@@ -8,10 +8,12 @@ from pathlib import Path
 from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant
 from kokua.toolsets.planning import PLANNING_WORKFLOW
+from kokua.workflows.planning import PlanningWorkflow
 from kokua.workflows.planning.prompts import PLAN_PROMPT
 from kokua.config import AssistantConfig
 from tests.channels import example_agents
 
+from aimu import aio
 from aimu.aio.channels.base import Channel, ChannelMessage
 from aimu.models import StreamingContentType
 
@@ -41,6 +43,14 @@ def _config(tmp_path: Path, **overrides) -> AssistantConfig:
     base = {"data_dir": tmp_path, "agents": example_agents(), "entry_agent": "assistant"}
     base.update(overrides)
     return AssistantConfig(**base)
+
+
+def test_the_planning_workflow_inherits_the_runner_base_that_carries_as_tool():
+    """``as_tool()`` is a concrete method ``AsyncRunner`` provides, so implementing ``run`` and
+    ``messages`` without inheriting would leave planning unable to reach the model as a tool -- while
+    still passing every other test here, since Kokua's own driver only probes for ``run_turn``."""
+    assert issubclass(PlanningWorkflow, aio.AsyncRunner)
+    assert hasattr(PlanningWorkflow, "as_tool")
 
 
 async def test_autonomous_planned_turn_plans_then_executes(tmp_path):
