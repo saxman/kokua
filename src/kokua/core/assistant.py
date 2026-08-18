@@ -25,6 +25,7 @@ from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import Session, TinyDBSessionStore
 
 from kokua.config.settings_sources import build_settings_table
+from kokua.config.table import CORE_RUNTIME_SETTINGS
 from kokua.core.agent_registry import AgentRegistry
 from kokua.channels.ui import ChannelUI
 from kokua.channels.web import proactive_turn, streaming_conversation
@@ -185,7 +186,12 @@ class Assistant:
         initial_id = assistant._book.adopt_most_recent()
         # config.toml is the single source of settings: the panel and update_config write it, and the
         # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
-        for setting in assistant._settings_table.settings:
+        # Over CORE_RUNTIME_SETTINGS, not the live table: a contributed entry's value lives in
+        # `config.toolset_settings`, not as a `config` attribute, so `getattr(config, setting.field)`
+        # below is only sound for a core entry. No contributed entry sets `mirror_on_channel` today, but
+        # nothing stops one from declaring it, and this loop must not become an `AttributeError` at boot
+        # if one ever does.
+        for setting in CORE_RUNTIME_SETTINGS:
             if setting.mirror_on_channel:
                 assistant._ui.set_display_flag(setting.field, getattr(config, setting.field))
         assistant._mcp_servers = connections  # same list the MCP tools append to / remove from

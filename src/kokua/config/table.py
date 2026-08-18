@@ -205,7 +205,6 @@ class SettingsTable:
                 )
             self._by_toml[location] = setting
         self._by_field = {s.field: s for s in self.settings if not s.toolset}
-        self._by_wire = {s.wire_key: s for s in self.settings}
 
     def by_toml(self, section: str, key: str) -> Optional[RuntimeSetting]:
         """The runtime setting a ``[section].key`` names, or None if it is not runtime-mutable."""
@@ -217,9 +216,6 @@ class SettingsTable:
         Core only: a contributed setting has no ``AssistantConfig`` attribute to be named by.
         """
         return self._by_field.get(field)
-
-    def by_wire_key(self, key: str) -> Optional[RuntimeSetting]:
-        return self._by_wire.get(key)
 
     def is_hot(self, section: str, key: str) -> bool:
         """Whether a config change takes effect live. Every ``[generation]`` key is hot."""

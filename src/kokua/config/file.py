@@ -19,7 +19,7 @@ import importlib.resources
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from kokua.config import paths as paths
 from kokua.config import table as runtime_settings
@@ -153,12 +153,16 @@ def core_sections() -> frozenset[str]:
     edited. ``config.settings_sources`` rejects such a name at startup.
 
     Derived from the schema and the structured tables rather than hand-listed at the place that checks it,
-    so the reserved set cannot drift from the sections it exists to protect.
+    so the reserved set cannot drift from the sections it exists to protect. ``_REMOVED_KEYS`` is unioned
+    in too: a toolset named e.g. ``tools`` would otherwise pass this check and then hit ``load``'s
+    removed-key branch first regardless, since that branch is checked before the schema -- permanently
+    unparseable behind "[tools] is gone." rather than refused with the settings-collision message.
     """
     return frozenset(
         {section for section, _ in _STARTUP_SCHEMA}
         | {setting.section for setting in runtime_settings.CORE_RUNTIME_SETTINGS}
         | _STRUCTURED_SECTIONS
+        | {section for section, _ in _REMOVED_KEYS}
     )
 
 
@@ -266,7 +270,13 @@ def resolve_path(explicit: Optional[str]) -> tuple[Path, bool]:
     return paths.config_path(), False
 
 
-def load(explicit: Optional[str] = None, *, table, extra_schema: Optional[dict] = None) -> dict[str, Any]:
+def load(
+    explicit: Optional[str] = None,
+    *,
+    table,
+    extra_schema: Optional[dict] = None,
+    declaring_names: Sequence[str] = (),
+) -> dict[str, Any]:
     """Parse the config file into a dict of ``AssistantConfig`` field overrides.
 
     ``table`` is the live :class:`kokua.config.table.SettingsTable`, which carries the hot sections the
@@ -275,6 +285,15 @@ def load(explicit: Optional[str] = None, *, table, extra_schema: Optional[dict] 
 
     A key a toolset owns is returned nested under ``"toolset_settings"`` rather than as a flat field,
     since it has no ``AssistantConfig`` field to be one.
+
+    ``declaring_names`` is every toolset name that may own a section (passed in because ``config`` may
+    not import ``kokua.toolsets``, the module that knows them); when given, the overrides carry a
+    ``"configured_sections"`` entry: the intersection of those names with the file's own top-level
+    section headers. This is a name check on the file's *headers*, not on the parsed key/value overrides
+    above, because a section can be present with every key commented out (the shipped
+    ``config.example.toml``'s ``[planning]`` is exactly that): such a section sets nothing, so it would
+    otherwise leave no trace for the startup warning that a configured-but-undeclared section exists to
+    catch.
 
     The file is required, not optional. Agents live only in it and the assistant cannot run without
     at least one, so "no config" is not a state Kokua can start in; failing here with the command that
@@ -337,4 +356,6 @@ def load(explicit: Optional[str] = None, *, table, extra_schema: Optional[dict] 
                 overrides.setdefault("toolset_settings", {}).setdefault(toolset, {})[setting_key] = coerced
             else:
                 overrides[target] = coerced
+    if declaring_names:
+        overrides["configured_sections"] = tuple(sorted(set(data) & set(declaring_names)))
     return overrides

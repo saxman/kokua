@@ -51,8 +51,9 @@ def _applier(config, table):
 
 
 def _table():
-    """The core table plus a third party's one hot setting. ``widgets`` rather than ``planning``, since the
-    planning flags are still core entries and one TOML key gets one declaration."""
+    """The core table plus a third party's one hot setting. A fictitious ``widgets`` rather than the real
+    ``planning``, which also declares a contributed setting now, so it would work here too -- but a test
+    double keeps this table from changing shape if the shipped toolset's declarations ever do."""
     return SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("verbose", "widgets", bool, toolset="widgets")])
 
 

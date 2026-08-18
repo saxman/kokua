@@ -245,9 +245,12 @@ also keeps two toolsets from claiming one section, and a name that collides with
 core already parses (`assistant`, `email`, `security`, and the rest) is refused at startup rather than
 silently taking over the core setting behind it.
 
-`hot=True` marks a setting the user can change without restarting: it appears in the web settings panel
-and can be written with `update_config`, and the change reaches whatever reads it in the same session.
-Leave `hot` off (the default) for a value read once, with no live surface to offer it --
+`hot=True` marks a setting the user can change without restarting, and the change reaches whatever reads
+it in the same session. Today that means `update_config`, always; the web settings panel only for
+Kokua's own hot settings, since it is hardcoded markup (`web_static/index.html` and `app.js` name each
+of the four `[planning]` keys by hand) rather than something generated from the declared settings --
+rendering a third party's setting there awaits that generalization. Leave `hot` off (the default) for a
+value read once, with no live surface to offer it --
 `[planning].review_rounds` is that case, since a round budget is read once per turn. A `Setting`'s
 `kind` must be `bool`, `int`, or `str`; anything else fails at startup, naming the toolset and the
 unsupported type.

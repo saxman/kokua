@@ -75,9 +75,23 @@ def test_a_toolset_named_after_a_core_section_may_not_declare_settings():
     """A toolset's section is always its own name, and a contributed entry wins the schema merge, so a
     plugin named ``email`` declaring ``host`` would route [email].host into its own bucket and leave
     ``AssistantConfig.email_host`` unset -- the email capability switching itself off in a config nobody
-    edited. Every section the core parses is refused, including the structured tables and the ones only the
-    settings table declares (``display``)."""
-    for reserved in ("email", "display", "assistant", "security", "paths", "logging", "web", "generation", "agents"):
+    edited. Every section the core parses is refused, including the structured tables, the ones only the
+    settings table declares (``display``), and a section a removed key used to live in (``tools``,
+    ``subagents``) -- without which a toolset named ``tools`` would pass this check only to hit
+    ``load``'s "[tools] is gone." branch for every key instead."""
+    for reserved in (
+        "email",
+        "display",
+        "assistant",
+        "security",
+        "paths",
+        "logging",
+        "web",
+        "generation",
+        "agents",
+        "tools",
+        "subagents",
+    ):
         with pytest.raises(ToolsetError, match=rf"\[{reserved}\] is a config.toml section"):
             build_settings_table([_toolset(HOT, name=reserved)])
 
@@ -137,6 +151,34 @@ def test_one_toolset_declaring_a_key_twice_is_refused():
         build_settings_table([_toolset(HOT, Setting("rounds", bool, False, hot=True))])
 
 
+def test_two_toolsets_sharing_a_name_with_colliding_hot_keys_is_refused_by_name():
+    """Without this check, the collision would only surface as a bare ``ValueError`` out of
+    ``SettingsTable.__init__`` (a colliding location), which ``cli.main`` does not catch as a
+    ``ToolsetError`` and so would print as a traceback instead of naming the mistake."""
+    first = _toolset(HOT, name="planning")
+    second = _toolset(Setting("rounds", bool, False, hot=True), name="planning")
+    with pytest.raises(ToolsetError, match="two toolsets are both named 'planning'"):
+        build_settings_table([first, second])
+
+
+def test_two_toolsets_sharing_a_name_with_non_colliding_cold_keys_still_merge_and_are_refused():
+    """Even when the two declare different keys, letting both through would merge them into one
+    ``[planning]`` bucket as if a single toolset had declared every key -- refused the same way as an
+    outright key collision, at the same seam, before either bucket is built."""
+    first = _toolset(COLD, name="planning")
+    second = _toolset(Setting("other", str, "x"), name="planning")
+    with pytest.raises(ToolsetError, match="two toolsets are both named 'planning'"):
+        startup_schema([first, second])
+
+
+def test_a_dotted_toolset_name_is_refused():
+    """``config.file.load`` routes a toolset's key by splitting its schema target on the first '.', so a
+    dotted toolset name would silently file a value under the wrong bucket instead of the one seeding
+    fills."""
+    with pytest.raises(ToolsetError, match=r"toolset 'my\.pack' may not contain '\.'"):
+        build_settings_table([_toolset(HOT, name="my.pack")])
+
+
 def test_kokuas_core_toolsets_are_a_declaring_source():
     from kokua.toolsets.core import CORE_TOOLSETS
 
@@ -160,6 +202,32 @@ def test_a_declared_section_parses_and_is_seeded_and_recorded_as_configured(monk
 
     assert config.toolset_settings["widgets"] == {"rounds": 5, "endpoint": "https://set/by-hand"}
     assert config.configured_sections == ("widgets",)
+
+
+def test_a_bare_section_header_with_no_keys_still_counts_as_configured(monkeypatch):
+    """A user who drops a toolset from ``tools`` but leaves its section header untouched -- every key
+    commented out, exactly how the shipped ``config.example.toml`` ships ``[planning]`` -- must still
+    trip the configured-but-undeclared warning. With no keys set, parsing the section produces no
+    ``toolset_settings`` entry at all, so the check has to look at the file's own section names, not at
+    what got parsed out of them."""
+    monkeypatch.setattr(settings_sources, "declaring_toolsets", lambda: [_toolset(HOT, COLD)])
+    _write_config('[widgets]\n# rounds = 5\n# endpoint = "https://set/by-hand"\n')
+
+    config = _resolve()
+
+    assert config.toolset_settings["widgets"] == {"rounds": HOT.default, "endpoint": COLD.default}
+    assert config.configured_sections == ("widgets",)
+
+
+def test_the_shipped_planning_section_with_every_key_commented_out_is_still_configured():
+    """The real-world trigger for the warning above, with no monkeypatching: the shipped example leaves
+    ``[planning]`` with every key commented out, and dropping "planning" from ``tools`` while leaving that
+    header alone must not go unreported."""
+    _write_config("[planning]\n# every key commented out, as the shipped example ships\n")
+
+    config = _resolve()
+
+    assert config.configured_sections == ("planning",)
 
 
 def test_a_wrong_typed_cold_declaration_is_rejected(monkeypatch):

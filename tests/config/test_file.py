@@ -105,6 +105,15 @@ def test_bool_rejected_for_numeric_field():
         settings.load(table=core_table())
 
 
+def test_core_sections_includes_the_removed_key_sections():
+    """A toolset named after a removed section (``tools``, the old subagent config) would otherwise pass
+    the reserved-name check in ``config.settings_sources`` only to hit ``load``'s removed-key branch
+    first, which runs before the schema and answers "[tools] is gone." for every key in the section --
+    permanently unparseable rather than refused with the settings-collision message that names the fix."""
+    assert "tools" in settings.core_sections()
+    assert "subagents" in settings.core_sections()
+
+
 def test_security_confirm_tools_from_file():
     _write_config('[security]\nconfirm_tools = ["add_skill_script"]\n')
     assert _resolve().confirm_tools == ["add_skill_script"]

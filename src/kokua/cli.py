@@ -22,7 +22,7 @@ from . import plugins
 from .aimu_compat import AimuVersionError, require_aimu
 from kokua.config import file as settings
 from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
-from kokua.config.settings_sources import build_settings_table, seed_toolset_defaults, startup_schema
+from kokua.config import settings_sources
 from kokua.config.store import disambiguate_name, name_from_url
 
 # Safe at module level, unlike kokua.toolsets.agents below: `from . import plugins` above already imports
@@ -190,14 +190,30 @@ def resolve_config(args: argparse.Namespace) -> AssistantConfig:
     whenever plugins are switched off, which is a worse failure than the capability simply being absent.
     """
     config_path, _ = settings.resolve_path(args.config)
-    table = build_settings_table()
-    from_file = settings.load(args.config, table=table, extra_schema=startup_schema())
-    # Captured before seeding, which fills every declared key and so erases the difference between a
-    # section the user wrote and one Kokua defaulted.
-    configured = tuple(sorted(from_file.get("toolset_settings", {})))
+    table = settings_sources.build_settings_table()
+    # Every name a section header in the file could belong to, so `load` can report one even when the
+    # section sets no keys (every key commented out, as the shipped example's [planning] ships) -- a
+    # toolset with no settings can never own a section, so it is excluded here rather than left for
+    # `load` to always find an empty intersection against. Called through the module (not a name bound
+    # at import time) for the same reason `build_settings_table` and `startup_schema` are below: a test
+    # that monkeypatches `settings_sources.declaring_toolsets` has to reach every call site here, and a
+    # name captured by `from ... import` at module load would keep pointing at the original.
+    section_owners = tuple(
+        sorted(toolset.name for toolset in settings_sources.declaring_toolsets() if toolset.settings)
+    )
+    from_file = settings.load(
+        args.config,
+        table=table,
+        extra_schema=settings_sources.startup_schema(),
+        declaring_names=section_owners,
+    )
+    # Popped rather than left in `from_file`, which is about to be spread into `overrides`: `load` and
+    # this function would otherwise both hand `configured_sections` to `AssistantConfig`, one via
+    # **overrides and one by name, which raises "multiple values for keyword argument".
+    configured = from_file.pop("configured_sections", ())
     overrides = {"config_path": config_path, **from_file, **_cli_overrides(args)}
     config = AssistantConfig(**overrides, configured_sections=configured)
-    seed_toolset_defaults(config)
+    settings_sources.seed_toolset_defaults(config)
     return config
 
 

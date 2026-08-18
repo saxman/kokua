@@ -8,6 +8,7 @@ from aimu.aio.channels.base import ChannelMessage
 from aimu.models import StreamChunk, StreamingContentType
 
 from kokua.config import AssistantConfig
+from kokua.config.table import RuntimeSetting
 from kokua.core.assistant import Assistant
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
@@ -171,3 +172,44 @@ async def test_a_workflow_reading_an_undeclared_setting_fails_loudly(tmp_path):
     )
 
     assert "never_declared" in seen["error"] and "settings" in seen["error"]
+
+
+async def test_a_hot_contributed_setting_written_mid_turn_reaches_the_same_context(tmp_path):
+    """``SettingsView`` wraps ``config.toolset_settings[<name>]`` in place rather than copying it, so a
+    write landing while a turn is already running -- the same mutation ``SettingsApplier.apply`` performs
+    per hot setting, via ``RuntimeSetting.write`` -- is visible on the next read of ``ctx.settings``, with
+    no need to rebuild the context. That aliasing is currently the only thing making a live settings
+    change reach an in-flight turn, and nothing else here would notice a refactor that snapshotted the
+    bucket into the view instead."""
+    captured = {}
+
+    class _Peek:
+        def __init__(self, ctx):
+            self.ctx = ctx
+
+        async def run(self, task, generate_kwargs=None, stream=False, images=None):
+            return "ok"
+
+        @property
+        def messages(self):
+            return {}
+
+        async def run_turn(self):
+            captured["before"] = self.ctx.settings.review_rounds
+            # Applied directly with RuntimeSetting.write, not through SettingsApplier.apply: that path
+            # takes an exclusive gate hold, which this turn already holds, and would deadlock against it.
+            RuntimeSetting("review_rounds", "planning", int, toolset="planning").write(
+                self.ctx.config, 9, lambda field, value: None
+            )
+            captured["after"] = self.ctx.settings.review_rounds
+            return WorkflowResult(committed=False)
+
+    config = _config(tmp_path, toolset_settings={"planning": {"review_rounds": 2}})
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient(["unused"]))
+    peeking = Workflow(name="planning", description="P.", command="plan", usage="/plan <t>", build=_Peek)
+
+    await assistant._handle(
+        ChannelMessage(text="x", channel="fake"), conversation_id=assistant._active_id, workflow=peeking
+    )
+
+    assert captured == {"before": 2, "after": 9}
