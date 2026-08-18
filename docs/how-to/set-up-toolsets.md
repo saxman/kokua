@@ -235,6 +235,30 @@ Four things to know about `build`:
 - **`guidance` is optional and appended to every agent that declares you**, so write it as instructions
   that make sense wherever the toolset lands, not as a description of one agent's job.
 
+### Own a config section
+
+A toolset can also own a whole `[<name>]` section of `config.toml`, by declaring
+`settings=(Setting(key, kind, default, hot=...), ...)` on itself, the way
+[`toolsets/planning.py`](../../src/kokua/toolsets/planning.py) owns `[planning]`. The section is never
+named separately: it is always the toolset's own name, so the namespace's existing duplicate-name check
+also keeps two toolsets from claiming one section, and a name that collides with a section Kokua's own
+core already parses (`assistant`, `email`, `security`, and the rest) is refused at startup rather than
+silently taking over the core setting behind it.
+
+`hot=True` marks a setting the user can change without restarting: it appears in the web settings panel
+and can be written with `update_config`, and the change reaches whatever reads it in the same session.
+Leave `hot` off (the default) for a value read once, with no live surface to offer it --
+`[planning].review_rounds` is that case, since a round budget is read once per turn. A `Setting`'s
+`kind` must be `bool`, `int`, or `str`; anything else fails at startup, naming the toolset and the
+unsupported type.
+
+How you read a declared value back depends on what you are writing. A workflow gets
+`WorkflowContext.settings`, attribute access over its carrying toolset's section
+(`ctx.settings.review_rounds`), always complete because every declared default is seeded before any
+workflow or toolset runs. A plain toolset's `build(ctx)` has no view of its own that way -- a
+`ToolsetContext` is one agent's handle onto the tools it builds, not onto one toolset's settings -- so
+it reads `ctx.config.toolset_settings["<name>"]` directly, the same dict a workflow's view wraps.
+
 ### Or carry a workflow instead of tools
 
 Set `workflow=` on your `Toolset` and `build` can return no tools at all: the toolset exists solely to
@@ -252,8 +276,8 @@ reload (a runner that closes over `ctx.agent` and calls it directly is the excep
 `_drive_base_tier` in [`core/turns.py`](../../src/kokua/core/turns.py)). Reaching the model as a
 callable tool via `AsyncRunner.as_tool()` needs your runner to actually *inherit* `aio.AsyncRunner`, not
 merely match its shape -- `as_tool()` is a concrete method the base class provides, not a name Kokua
-looks up. And `WorkflowContext.settings` is always `None` today: it is reserved for the carrying
-toolset's own configuration section, which a future release will fill in. See
+looks up. And `WorkflowContext.settings` is attribute access over the carrying toolset's own `[<name>]`
+section -- see [own a config section](#own-a-config-section) above for how to declare what is in it. See
 [`workflows/protocol.py`](../../src/kokua/workflows/protocol.py) for the full contract.
 
 Kokua's own two toolsets register exactly this way in its

@@ -66,6 +66,10 @@ def declaring_toolsets() -> list:
     Discovery is not gated on ``load_plugins``: reading an entry point's declaration executes no
     plugin behavior, and a config file mentioning a plugin's section must stay parseable either way.
     """
+    # Deferred rather than module-level: toolsets/config.py imports this module at module scope (for
+    # startup_schema()), and toolsets/core.py imports toolsets/config.py, so a module-level import of
+    # toolsets.core here would close that loop and break `import kokua.toolsets.core` on a
+    # partially-initialized module.
     from kokua.plugins import discover_toolsets
     from kokua.toolsets.core import CORE_TOOLSETS
 

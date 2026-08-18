@@ -347,9 +347,26 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   The rich tier (a runner that also implements `run_turn()`) gets the channel, the human-decision
   slot, and control of the transcript instead, which is what lets deep planning persist a planned turn
   as a plain user/assistant pair.
-- `AssistantConfig` is unchanged in this release: planning's toggles (`plan_review`,
-  `plan_review_agent`, `result_review`, `review_rounds`, `show_reasoning`) still live on it directly.
-  Moving workflow-owned settings into their own table is the next release's work.
+- **A toolset can own a whole `config.toml` section.** Declaring `settings=(Setting(key, kind,
+  default, hot=...), ...)` on a `Toolset` gives it a `[<name>]` section -- always named after the
+  toolset itself, so the namespace's existing duplicate-name check also keeps two toolsets from
+  claiming one section, and a name colliding with a section Kokua's own core already parses is refused
+  at startup. `hot=True` is what makes a setting reach the web panel and `update_config` live; a cold
+  one is a startup-only key like any other. Deep planning is the first user: `toolsets/planning.py`
+  declares `[planning]`'s five keys (`plan_review`, `plan_review_agent`, `result_review`,
+  `show_reasoning` hot; `review_rounds` cold), and a workflow reads its own section as attributes
+  through `WorkflowContext.settings`.
+- **Breaking for anything importing the old fields.** `AssistantConfig.plan_review`,
+  `plan_review_agent`, `result_review`, `review_rounds`, and `show_reasoning` are gone, replaced by
+  `config.toolset_settings["planning"][...]`. `config.toml` itself is unchanged -- the `[planning]`
+  section still parses and still means the same thing, so no user action is needed -- but code that
+  read those attributes directly has to change.
+- **The settings panel namespaces a contributed setting's key** (`planning.plan_review`) to keep two
+  toolsets from colliding in the one flat payload; Kokua's own core settings stay bare.
+- **Startup warns about a configured-but-undeclared toolset.** A `config.toml` section belonging to a
+  toolset no agent's `tools` names is now its own warning, distinct from the provisioned-toolset
+  warning below: the section still parses and seeds its declared defaults, but nothing reads them and
+  any command the toolset offers does not exist.
 
 ### Deep planning and adversarial review
 
@@ -415,10 +432,12 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   plugins, and reads the config file first because the registry depends on it. The plugin contract renamed
   with the concept: `ToolPack` is `Toolset` (with `build(ctx)` in place of `build(config)`), the
   entry-point group `kokua.tools` is `kokua.toolsets`, and `src/kokua/toolpacks/` is `src/kokua/toolsets/`.
-- **One runtime-settings table.** `config/table.py`'s `RUNTIME_SETTINGS` is the single declaration of
-  what can change without a restart, driving the TOML schema, the panel sanitizer, the hot-apply set,
-  the live-apply loop, the channel mirroring, and the persist path at once. Adding a setting is one
-  entry, enforced by tests.
+- **One runtime-settings table.** `config/table.py`'s `SettingsTable` -- built at startup from
+  `CORE_RUNTIME_SETTINGS` plus every installed toolset's own hot `Setting`s -- is the single
+  declaration of what can change without a restart, driving the TOML schema, the panel sanitizer, the
+  hot-apply set, the live-apply loop, the channel mirroring, and the persist path at once. Adding one of
+  Kokua's own is one `CORE_RUNTIME_SETTINGS` entry; adding a toolset's is one `Setting` on the toolset
+  and nothing else. Both are enforced by tests.
 - **The assistant can inspect and repair its own configuration**: `read_config` / `update_config`.
   `update_config` validates and coerces the value, applies hot-appliable keys immediately and persists
   only after a successful apply (so a bad model is not saved), and reports "restart required" for

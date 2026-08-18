@@ -80,12 +80,13 @@ each claim, is in [docs/explanation/design-principles.md](docs/explanation/desig
    `activate_skill`, and each `{skill}__{stem}` script tool whether or not it declares the `skills`
    toolset, which only adds `author_skill` / `add_skill_script`. A spawned worker is a plain `aio.Agent`
    and gets none of it.)
-3. **`config.toml` is the single source of settings, and the app writes it.** No parallel store. A
-   runtime-mutable setting is one entry in `config/table.py`'s `RUNTIME_SETTINGS`, which drives the
-   schema, the sanitizer, the hot-apply set, the live-apply loop, and the persist path at once.
-   `[agents.*]` is hand-edit only (locked by section prefix in `config/store.py`'s `is_locked`), because
-   `update_config` is a tool the assistant holds and a writable agent table would let it widen its own
-   reach.
+3. **`config.toml` is the single source of settings, and the app writes it.** No parallel store. Kokua's
+   own runtime-mutable settings are one entry each in `config/table.py`'s `CORE_RUNTIME_SETTINGS`; a
+   toolset's are one `Setting` on the toolset itself, in its own `[<name>]` section. `SettingsTable`,
+   built at startup from both, is what still drives the schema, the sanitizer, the hot-apply set, the
+   live-apply loop, and the persist path from one place. `[agents.*]` is hand-edit only (locked by
+   section prefix in `config/store.py`'s `is_locked`), because `update_config` is a tool the assistant
+   holds and a writable agent table would let it widen its own reach.
 4. **All state under one directory the user owns.** `$KOKUA_HOME`, default `~/.kokua`. Every leaf
    below `data/` is a derived `AssistantConfig` property, never a new function in `config/paths.py`.
 5. **A single user, one process, with concurrency rules written down.** The five turn invariants live
@@ -112,7 +113,9 @@ src/kokua/
   core/         assistant (composition root + serve loop), conversations, turns, interaction,
                 settings_runtime, diagnostics, build, agent_registry, turn_gate, turn_registry,
                 messages, errors, transcripts
-  config/       schema, paths, file, store (writes + write policy), table
+  config/       schema, paths, file, store (writes + write policy), table, settings_sources (joins a
+                toolset's declared settings into the table; the one module under config/ that imports
+                upward, so the rest of the layer stays at the bottom)
   workflows/    protocol (Workflow, WorkflowContext, WorkflowResult, the two tiers), critics
                 (the shared independent reviewer), planning/ (the /plan workflow)
   mcp/          servers (connect, attach, add, remove), auth
@@ -186,7 +189,11 @@ the tool surface rather than the domain, which is why `_build_schedule` lives in
 Two dependency rules fall out of this and are worth stating: `config/` is the bottom layer and imports
 nothing above it (which is why `name_from_url` lives in `config/store.py`, not `mcp/servers.py`), and a
 `toolsets/` module annotating a `core/` type imports it under `TYPE_CHECKING`, since `core/build.py`
-reaches `toolsets/` and a real import would close the cycle.
+reaches `toolsets/` and a real import would close the cycle. `config/settings_sources.py` is the one
+exception to the first rule: it reaches `toolsets.core` to collect what the installed toolsets declared,
+and does so inside the function that needs it rather than at module scope, because `toolsets/config.py`
+imports `settings_sources` at module level to build its cold-key schema -- hoisting the upward import
+would close that loop and break `import kokua.toolsets.core` on a partially-initialized module.
 
 Note the convention is only half the answer: about half the tools the shipped entry agent holds come
 from AIMU and are not in this repo at all, which is why

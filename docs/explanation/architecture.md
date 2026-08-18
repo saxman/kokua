@@ -46,7 +46,10 @@ src/kokua/
     paths.py       the three locations that must resolve before config.toml can be read
     file.py        TOML discovery, parsing, schema validation
     store.py       comment-preserving tomlkit writes, the write policy, and apply_setting
-    table.py       RUNTIME_SETTINGS: the one declaration of what is changeable at runtime
+    table.py       SettingsTable, built from CORE_RUNTIME_SETTINGS plus every toolset's declared hot
+                   settings: the one declaration of what is changeable at runtime
+    settings_sources.py  joins a toolset's declared settings into the table; the one module under
+                   config/ that imports upward, so the rest of the layer stays at the bottom
 
   workflows/     protocol.py (Workflow, WorkflowContext, WorkflowResult, is_rich), critics.py (the
                  shared context-free reviewer), planning/ (runner.py's PlanningWorkflow, prompts.py,
@@ -287,9 +290,17 @@ orchestrator's `messages` would be shared across concurrent calls.
 ## Configuration
 
 Precedence is **CLI flag > TOML config file > built-in default**. `config/schema.py` holds
-`AssistantConfig` (a plain dataclass, with leaf paths derived from `data_dir`); `config/file.py` finds
-and parses the TOML into validated overrides; `cli.resolve_config` merges the file under the CLI
-flags. Flag defaults are the `None` sentinel, so an unspecified flag defers to the file.
+`AssistantConfig` (a plain dataclass, with leaf paths derived from `data_dir`). `cli.resolve_config`
+builds the settings table first (`config.settings_sources.build_settings_table()`, over the installed
+toolsets), parses the TOML file against that table (`config/file.py`'s `load`, which needs it to know
+which sections are runtime-settable and which of a toolset's remaining keys are merely cold), merges the
+result under the CLI flags into the constructed `AssistantConfig`, and only then seeds every declared
+setting's default onto it (`settings_sources.seed_toolset_defaults`) for whatever the file left unset.
+Building the table is deliberately not gated on `[assistant].load_plugins`: reading a toolset's
+declaration runs no plugin behavior, and gating it would make a config file naming a plugin's section
+fail to parse whenever plugins happen to be off, which is a worse failure than the plugin's capability
+simply being unavailable. Flag defaults are the `None` sentinel, so an unspecified flag defers to the
+file.
 
 The file itself is **required**: `config/file.py::load` raises rather than returning no overrides when
 it is missing. Agents live only in `[agents.*]` and the assistant cannot function without at least one,
@@ -310,7 +321,9 @@ settings panel, the `add_mcp_server`/`remove_mcp_server` tools, and the assistan
 enumerated in advance, and applies hot-appliable keys live.
 
 Which settings are hot is not a list maintained by hand in several places: it is
-`config/table.py`'s `RUNTIME_SETTINGS`, and every consumer loops over it.
+`config/table.py`'s `SettingsTable`, built once at startup from `CORE_RUNTIME_SETTINGS` plus every
+toolset's own hot `Setting`s, and every consumer -- the schema, the panel sanitizer, the live-apply
+loop, the channel mirroring, and the persist path -- loops over that one instance.
 
 ## State
 
@@ -369,7 +382,8 @@ subclasses `aio.AsyncRunner` for the `as_tool()` reason above, even though nothi
 to the model as a tool. `/plan` drafts a plan, optionally has an independent reviewer critique it and
 a human approve it, executes, and optionally reviews the result. There is one pipeline; how much of
 its work is shown is a `Presentation` value with two instances, `SUMMARY` and `VERBOSE` (the latter
-selected by `show_reasoning` on a channel that can render phase headers). The reviewer itself is
+selected by the `planning` toolset's own `show_reasoning` setting, read through `ctx.settings`, on a
+channel that can render phase headers). The reviewer itself is
 generic and workflow-independent: `workflows/critics.py` runs a fresh, context-free agent over a
 curated verification toolset and extracts a typed `Verdict`; `workflows/planning/critics.py` supplies
 only the two prompts (`review_plan`, `review_result`) that make it deep planning's own standard rather

@@ -60,10 +60,11 @@ def make_config_tools(
         """Change one setting in config.toml, e.g. section="email", key="host", value="smtp.gmail.com".
 
         Pass the value as a string; it is coerced to the setting's real type (numbers, true/false, and
-        comma-separated lists are understood). Setting the model, a generation parameter (temperature,
-        max_tokens, ...), or a display or planning flag takes effect immediately in this session; any
-        other setting is saved and takes effect the next time Kokua restarts (the result says which). A
-        few security-critical keys cannot be changed here and must be hand-edited in the file.
+        comma-separated lists are understood). A setting marked hot -- the model, a generation parameter
+        (temperature, max_tokens, ...), or any other setting flagged to apply live -- takes effect
+        immediately in this session; any other setting is saved and takes effect the next time Kokua
+        restarts (the result says which). A few security-critical keys cannot be changed here and must
+        be hand-edited in the file.
         """
         try:
             applied = await config_store.apply_setting(
