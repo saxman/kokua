@@ -98,7 +98,7 @@ else.
 *How this cashes out:* [`config/store.py`](../../src/kokua/config/store.py) does comment-preserving
 `tomlkit` writes; three writers (the web settings panel, `add_mcp_server`, and the assistant's own
 `update_config` tool) land in that one file. A `runtime-settings.json` store used to exist and was
-retired in favour of `[generation]`. Four things in the file are hand-edit only, refused by
+retired in favour of the file itself. Four things in the file are hand-edit only, refused by
 `update_config` even behind the approval prompt: `[security] confirm_tools` (the gate itself),
 `[email] to` (the locked recipient), `[paths] data_dir` (where all state lives), and the whole
 `[agents.*]` section. That last one is locked by section prefix rather than by a key entry, since agent

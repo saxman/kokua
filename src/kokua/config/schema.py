@@ -87,11 +87,6 @@ class AssistantConfig:
     email_to: Optional[str] = None  # the ONLY recipient the tool will ever send to
     # True -> SMTP_SSL (implicit TLS, usually port 465); False -> plain connect + STARTTLS (usually 587).
     email_use_ssl: bool = False
-    # Model generation kwargs from the [generation] TOML section, layered over the provider's built-in
-    # defaults. The web settings panel and update_config change these at runtime by writing back to
-    # config.toml, so this is the single effective layer. Kept as a plain dict so provider-specific keys
-    # pass through untouched.
-    generation: dict = field(default_factory=dict)
     # Load toolset plugins discovered via the "kokua.toolsets" entry-point group.
     load_plugins: bool = True
     # Every agent, keyed by name, read whole from [agents.*]. Nothing is defaulted in code: an agent's

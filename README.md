@@ -35,7 +35,7 @@ The practical consequence: the assistant core is a few hundred lines that knows 
 
 ## Install
 
-Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.13.1 or newer.
+Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.16.0 or newer.
 
 ```bash
 uv sync --all-extras --no-sources        # AIMU from PyPI; what you want to just run Kokua
@@ -50,7 +50,7 @@ The `web` extra (included in `--all-extras`, or `pip install '.[web]'`) adds the
 > uv sync --all-extras                        # installs ../aimu editable; picks up your edits live
 > ```
 >
-> The `aimu>=0.13.1` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
+> The `aimu>=0.16.0` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
 
 ## Quick start
 
@@ -74,7 +74,7 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 - **Tool calls show their results.** A tool card carries what the call returned as well as its arguments, in a nested foldable labeled with the result's size. It fills on first open and clamps long output behind a "show all" button, as plain text rather than markdown, since a tool result is untrusted. Results show on live cards, on a background turn's catch-up, inside a sub-agent's card, and on reload -- a stored call is rejoined to its result by `tool_call_id`, so a replayed card shows what the live one did.
 - **Replayable transcripts.** Reloading replays the prior conversation, including reasoning and tool calls when `show_thinking` / `show_tools` are on. Auxiliary blocks (thinking, tool calls, phases, sub-agent cards, drafted plans) render collapsed behind a one-line header carrying the call, its condensed arguments, and a result size; messages and prompts stay open. Every row has a localized datetime caption, revealed on hover, that survives reloads.
 - **Safe rendering.** Replies render as GitHub-flavored markdown once a turn completes, via vendored `marked` + `DOMPurify` (no CDN), so model or tool output cannot inject scripts. LaTeX (`$...$`, `$$...$$`) is typeset with vendored KaTeX *after* sanitization, with `trust` disabled.
-- **[Runtime settings panel](src/kokua/config.example.toml).** The gear button changes the model, the generation parameters (`temperature`, `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), and the display prefs mid-session. Changes apply on the next turn and are written back to `config.toml`, so they survive restarts. Leave a field blank for the provider default. Also holds an auto/light/dark theme selector, applied before first paint.
+- **[Runtime settings panel](src/kokua/config.example.toml).** The gear button changes the model and the display prefs mid-session. Changes apply on the next turn and are written back to `config.toml`, so they survive restarts. Sampling parameters are not here: AIMU layers a model card's tuned profile under anything a caller sets, so a Kokua-side override only shadowed the card. Also holds an auto/light/dark theme selector, applied before first paint.
 
 ### Capability
 

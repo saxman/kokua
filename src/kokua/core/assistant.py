@@ -212,9 +212,7 @@ class Assistant:
             def raw_factory(conversation_id: str):
                 return build_model_client(config, entry_agent_system_message(config, state))
 
-        # Wrap the raw factory so every conversation's client carries the effective generation kwargs
-        # the active agent has, not bare provider defaults.
-        assistant._settings.layered_factory(raw_factory)
+        assistant._settings.set_client_factory(raw_factory)
 
         # Fan a global tool mutation (MCP add/remove) out across every live conversation's agent. Reads
         # the registry lazily: it is set just below and only ever called at runtime (add/remove) or by the
@@ -281,8 +279,7 @@ class Assistant:
                 config.entry_agent,
             )
 
-        # Build the active conversation's agent (its client is layered by the factory, which also
-        # snapshots the provider base for later re-layering).
+        # Build the active conversation's agent.
         assistant._registry.get(assistant._active_id)
 
         state.tasks.arm_all()

@@ -2,7 +2,7 @@
 
 Turns are "readers": many run concurrently, but at most one per conversation (they share that
 conversation's agent + message list, so same-conversation turns must serialize). Config mutations
-(model switch, generation-settings changes) are the "writer": they touch every agent, so they run
+(a model switch, or any other hot settings change) are the "writer": they touch every agent, so they run
 exclusively, waiting for in-flight turns to drain and blocking new ones until they finish.
 
 Writer-preferring: once an exclusive hold is waiting, new turns queue behind it so a steady stream of

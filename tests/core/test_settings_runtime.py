@@ -85,13 +85,22 @@ def test_the_panel_payload_carries_a_contributed_setting_namespaced(tmp_path: Pa
     assert current["widgets.verbose"] is True
 
 
-async def test_boot_applies_config_generation_and_flags(tmp_path):
-    # config.toml is now the single source: its [generation] and [display] values apply at boot.
-    cfg = _config(tmp_path, generation={"temperature": 0.4, "max_tokens": 500}, show_tools=False)
+async def test_boot_applies_config_flags(tmp_path):
+    # config.toml is the single source: its [display] values apply at boot.
+    cfg = _config(tmp_path, show_tools=False)
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
-    assert client.default_generate_kwargs == {"temperature": 0.4, "max_tokens": 500}
     assert assistant._config.show_tools is False
+
+
+async def test_boot_leaves_sampling_parameters_to_aimu(tmp_path):
+    """Kokua no longer writes ``default_generate_kwargs``, so AIMU's own tier chain decides a request.
+
+    Writing it shadowed the model card's tuned profile, which AIMU layers underneath that tier.
+    """
+    client = MockAsyncModelClient([])
+    await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+    assert client.default_generate_kwargs == {}
 
 
 async def test_boot_does_not_write_config(tmp_path):
@@ -108,11 +117,9 @@ async def test_apply_settings_updates_and_persists_to_config(tmp_path):
     cfg = _config(tmp_path)
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
-    await assistant.apply_settings({"generate_kwargs": {"temperature": 0.5}, "show_tools": False})
-    assert client.default_generate_kwargs["temperature"] == 0.5
+    await assistant.apply_settings({"show_tools": False})
     assert assistant._config.show_tools is False
     saved = settings.load(str(cfg.config_path), table=core_table())
-    assert saved["generation"]["temperature"] == 0.5
     assert saved["show_tools"] is False
 
 
@@ -144,7 +151,7 @@ async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
             return f"{current or ''}-changed"
         return not current
 
-    payload = {"generate_kwargs": {}}
+    payload: dict = {}
     expected = {}
     for setting in table.settings:
         if setting.wire_key == "model":
@@ -162,16 +169,15 @@ async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
         )
 
 
-async def test_update_config_tool_applies_generation_live_and_persists(tmp_path):
+async def test_update_config_tool_applies_a_hot_key_live_and_persists(tmp_path):
     from kokua.config import file as settings
 
     cfg = _config(tmp_path)
-    client = MockAsyncModelClient([])
-    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
     update = next(t for t in assistant._agent.tools if t.__name__ == "update_config")
-    result = await update(section="generation", key="temperature", value="0.7")
-    assert client.default_generate_kwargs["temperature"] == 0.7  # applied to the live session
-    assert settings.load(str(cfg.config_path), table=core_table())["generation"]["temperature"] == 0.7  # persisted
+    result = await update(section="display", key="show_tools", value="false")
+    assert assistant._config.show_tools is False  # applied to the live session
+    assert settings.load(str(cfg.config_path), table=core_table())["show_tools"] is False  # persisted
     assert "restart" not in result.lower()
 
 
@@ -196,17 +202,6 @@ async def test_update_config_tool_refuses_blocklisted_key(tmp_path):
     assert "hand-edit" in result.lower()
 
 
-async def test_apply_settings_cleared_field_reverts_to_provider_default(tmp_path):
-    # With no separate runtime layer, clearing a generation kwarg removes it from config entirely.
-    cfg = _config(tmp_path, generation={"temperature": 0.2})
-    client = MockAsyncModelClient([])
-    assistant = await Assistant.create(cfg, FakeChannel(), client=client)
-    await assistant.apply_settings({"generate_kwargs": {"temperature": 0.9}})
-    assert client.default_generate_kwargs["temperature"] == 0.9
-    await assistant.apply_settings({"generate_kwargs": {}})  # cleared -> falls back to the provider base
-    assert "temperature" not in client.default_generate_kwargs
-
-
 async def test_apply_settings_switches_model(tmp_path, monkeypatch):
     first = MockAsyncModelClient(["hi"])
     assistant = await Assistant.create(_config(tmp_path, model="m1"), FakeChannel(), client=first)
@@ -217,7 +212,7 @@ async def test_apply_settings_switches_model(tmp_path, monkeypatch):
     second = MockAsyncModelClient([])
     monkeypatch.setattr("kokua.core.assistant.aio.client", lambda *a, **k: second)
 
-    await assistant.apply_settings({"model": "m2", "generate_kwargs": {}})
+    await assistant.apply_settings({"model": "m2"})
 
     assert assistant._agent.model_client is second
     assert assistant._config.model == "m2"
@@ -228,11 +223,10 @@ async def test_apply_settings_switches_model(tmp_path, monkeypatch):
 async def test_current_settings_reports_effective(tmp_path):
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(_config(tmp_path, model="m1"), FakeChannel(), client=client)
-    await assistant.apply_settings({"generate_kwargs": {"temperature": 0.7}})
     s = assistant.current_settings()
     assert s["model"] == "m1"
-    assert s["generate_kwargs"]["temperature"] == 0.7
     assert "show_thinking" in s and "show_tools" in s
+    assert "generate_kwargs" not in s  # sampling is AIMU's, not a panel field
 
 
 async def test_model_switch_applies_to_all_live_agents(tmp_path, monkeypatch):
@@ -256,15 +250,17 @@ async def test_model_switch_applies_to_all_live_agents(tmp_path, monkeypatch):
     assert built.count("anthropic:claude-x") == len(assistant._registry.live_agents())
 
 
-async def test_new_conversation_agent_carries_layered_generate_kwargs(tmp_path):
-    # A lazily-built conversation's client must carry the same effective generation kwargs the active
-    # agent has (provider defaults < config.generation < runtime override), not bare provider defaults.
-    cfg = _config(tmp_path, generation={"temperature": 0.2})
-    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+async def test_new_conversation_agent_gets_an_untouched_client(tmp_path):
+    """A lazily-built conversation's client reaches the agent as the factory made it.
+
+    Kokua used to rewrite ``default_generate_kwargs`` on every client the factory returned; nothing
+    layers onto it now, so AIMU's own tier chain applies to a new conversation as it does to the first.
+    """
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([])
+    )
     new_id = await assistant.new_conversation()
-    new_agent = assistant._registry.get(new_id)
-    assert new_agent.model_client.default_generate_kwargs.get("temperature") == 0.2
-    assert assistant.current_settings()["generate_kwargs"].get("temperature") == 0.2
+    assert assistant._registry.get(new_id).model_client.default_generate_kwargs == {}
 
 
 async def test_create_wraps_unbuildable_client_as_model_client_error(tmp_path, monkeypatch):

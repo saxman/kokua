@@ -128,21 +128,16 @@ def test_planning_flags_from_file():
     assert section["review_rounds"] == 2  # seeded from the declared default
 
 
-def test_generation_section_collects_into_dict():
-    _write_config("[generation]\ntemperature = 0.3\nmax_tokens = 2048\n")
-    assert _resolve().generation == {"temperature": 0.3, "max_tokens": 2048}
-
-
-def test_generation_unknown_key_raises():
-    _write_config("[generation]\nbogus = 1\ntemperature = 0.5\n")
-    with pytest.raises(settings.ConfigError, match=r"unknown config key \[generation\].bogus"):
+def test_a_stale_generation_section_is_just_an_unknown_key():
+    """[generation] is no longer a section the core parses, so it gets no special handling."""
+    _write_config("[generation]\ntemperature = 0.3\n")
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[generation\].temperature"):
         settings.load(table=core_table())
 
 
-def test_generation_type_mismatch_raises():
-    _write_config('[generation]\ntemperature = "hot"\n')
-    with pytest.raises(settings.ConfigError, match=r"\[generation\].temperature must be a number"):
-        settings.load(table=core_table())
+def test_generation_is_no_longer_a_reserved_section_name():
+    """Nothing in the core owns the name now, so a toolset is free to claim it."""
+    assert "generation" not in settings.core_sections()
 
 
 def test_data_dir_override_redirects_leaf_paths(tmp_path):
@@ -278,10 +273,9 @@ def test_coerce_config_string_list():
     ]
 
 
-def test_coerce_config_string_generation_range_checked():
-    assert settings.coerce_config_string("generation", "temperature", "0.3", table=core_table()) == 0.3
-    with pytest.raises(settings.ConfigError, match="temperature"):
-        settings.coerce_config_string("generation", "temperature", "9", table=core_table())  # above the 2.0 max
+def test_coerce_config_string_refuses_a_generation_key():
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[generation\].temperature"):
+        settings.coerce_config_string("generation", "temperature", "0.3", table=core_table())
 
 
 def test_coerce_config_string_bad_int_raises():

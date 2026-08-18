@@ -43,21 +43,21 @@ def test_a_missing_aimu_is_reported_as_such(monkeypatch):
 
 def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
     """The floor moves with the capabilities Kokua uses, so the previous release must fail."""
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.1")
-    with pytest.raises(AimuVersionError, match="0.14.1"):
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.15.0")
+    with pytest.raises(AimuVersionError, match="0.15.0"):
         require_aimu()
 
 
 def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch):
     """An editable checkout's version says what its branch claims, not what its code contains, so a
     sibling on an older branch can report the floor while missing the surface behind it."""
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.2")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.16.0")
     monkeypatch.setattr(
         aimu_compat.importlib,
         "import_module",
-        lambda name: SimpleNamespace(__file__="/somewhere/aimu/agents/__init__.py"),
+        lambda name: SimpleNamespace(__file__="/somewhere/aimu/aio/__init__.py"),
     )
-    with pytest.raises(AimuVersionError, match="TruncatedTurnError"):
+    with pytest.raises(AimuVersionError, match="ContextOverflowError"):
         require_aimu()
 
 
@@ -69,7 +69,7 @@ def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
         def __init__(self, skill_dirs=None):
             pass
 
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.2")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.16.0")
     monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "SkillManager")
     monkeypatch.setattr(aimu_compat, "_PROBE_PARAMETER", "include")
     monkeypatch.setattr(
@@ -87,7 +87,7 @@ def test_an_unimportable_aimu_carries_the_import_error(monkeypatch):
     def broken(name):
         raise ImportError("no module named aimu.agents")
 
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.14.2")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.16.0")
     monkeypatch.setattr(aimu_compat.importlib, "import_module", broken)
     with pytest.raises(AimuVersionError, match="no module named aimu.agents"):
         require_aimu()

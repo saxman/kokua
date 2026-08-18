@@ -42,11 +42,11 @@ def test_set_value_creates_missing_section(tmp_path):
     assert _read(path)["assistant"]["model"] == "m"
 
 
-def test_set_value_writes_nested_generation_key(tmp_path):
+def test_set_value_writes_a_float_into_a_missing_section(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("", encoding="utf-8")
-    config_store.set_value(path, "generation", "temperature", 0.3)
-    assert _read(path)["generation"]["temperature"] == 0.3
+    config_store.set_value(path, "widgets", "ratio", 0.3)
+    assert _read(path)["widgets"]["ratio"] == 0.3
 
 
 def test_unset_value_removes_key(tmp_path):
@@ -234,10 +234,10 @@ async def test_apply_setting_applies_a_hot_setting_before_persisting_it(tmp_path
         applied.append((section, key, value))
 
     path = tmp_path / "config.toml"
-    result = await config_store.apply_setting(path, "generation", "temperature", "0.3", apply_hot, table=core_table())
+    result = await config_store.apply_setting(path, "display", "show_tools", "false", apply_hot, table=core_table())
 
-    assert result.hot is True and applied == [("generation", "temperature", 0.3)]
-    assert _read(path)["generation"]["temperature"] == 0.3
+    assert result.hot is True and applied == [("display", "show_tools", False)]
+    assert _read(path)["display"]["show_tools"] is False
 
 
 async def test_apply_setting_does_not_persist_a_hot_setting_that_failed_to_apply(tmp_path):

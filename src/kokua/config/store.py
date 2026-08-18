@@ -240,8 +240,8 @@ async def apply_setting(
 ) -> AppliedSetting:
     """Coerce, apply, and persist one setting. Raises rather than reporting.
 
-    A hot-appliable change (model, generation kwargs, and whatever the installed toolsets declared as
-    hot) is applied to the live session BEFORE it is written, so a value that fails to apply -- an
+    A hot-appliable change (the model, the display flags, and whatever the installed toolsets declared
+    as hot) is applied to the live session BEFORE it is written, so a value that fails to apply -- an
     invalid model, say -- is not persisted and left to break the next startup. That ordering is the whole
     reason this is one function rather than a coerce call and a write call at the call site.
 

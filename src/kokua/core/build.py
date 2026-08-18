@@ -79,9 +79,9 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
     a sibling's by accident. Toolsets are selected once and the same list feeds both the system message
     and the built tools, so the two can never resolve a different toolset for the same declared names.
 
-    ``client`` lets a caller that already has one (``make_agent_builder``, whose factory layers
-    per-conversation generation kwargs onto it, and tests that inject a mock client so the suite runs
-    without a model) skip resolving a second, unused one from ``config``; omitting it resolves the
+    ``client`` lets a caller that already has one (``make_agent_builder``, and tests that inject a mock
+    client so the suite runs without a model) skip resolving a second, unused one from ``config``;
+    omitting it resolves the
     model straight from ``config``. Only that second path assembles and applies a system message: an
     injected client already carries whatever system its own caller built it with, so computing one here
     and overwriting it would defeat the injection.

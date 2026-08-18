@@ -1,7 +1,7 @@
 """The table of runtime-mutable settings, and the sanitizer for the settings panel.
 
 A *runtime* setting is one the user can change without restarting: the model, the display flags, the
-planning flags, the generation kwargs, and whatever a toolset declared as hot. Everything else in
+planning flags, and whatever a toolset declared as hot. Everything else in
 ``config.toml`` is startup-only and is declared in ``config.file._STARTUP_SCHEMA`` instead.
 
 The table is the single declaration of that set. It drives, in one place, what used to be repeated
@@ -20,11 +20,11 @@ A runtime setting may be Kokua's own or a toolset's, and the two are added diffe
 :class:`SettingsTable` is therefore an instance rather than module state, since which settings exist is
 not known until the installed toolsets are.
 
-Generation kwargs are a separate table because they are not one-field-per-setting: they all land in
-the single ``AssistantConfig.generation`` dict, and they are range-checked rather than type-flagged.
-Only kwargs the user actually set survive sanitizing (blanks are dropped), so an unsupported key with
-a default value is never injected into a provider call (e.g. Anthropic rejects ``presence_penalty`` /
-``repetition_penalty``; AIMU drops ``top_p`` / ``top_k`` for thinking models).
+Sampling parameters are deliberately absent. AIMU resolves them itself, lowest precedence first: the
+client's own fallbacks, then the model card's tuned profile, then ``client.default_generate_kwargs``,
+then the per-call dict. Kokua used to write the third tier from a ``[generation]`` section, which
+duplicated the chain and shadowed the card; it no longer does, so a model's own tuned profile is what
+reaches a request.
 """
 
 from __future__ import annotations
@@ -115,48 +115,6 @@ CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = (
 )
 
 
-@dataclass(frozen=True)
-class GenerationSetting:
-    """One model generation kwarg the panel exposes, with its inclusive bounds.
-
-    A ``None`` bound is unbounded on that side. Values of the wrong type or outside the range are
-    dropped by ``sanitize`` rather than clamped, so a junk value never reaches a provider call.
-    """
-
-    field: str
-    kind: type
-    lo: Optional[float] = None
-    hi: Optional[float] = None
-
-
-# In panel display order.
-GENERATION_SETTINGS: tuple[GenerationSetting, ...] = (
-    GenerationSetting("temperature", float, 0.0, 2.0),
-    GenerationSetting("max_tokens", int, 1, None),
-    GenerationSetting("top_p", float, 0.0, 1.0),
-    GenerationSetting("top_k", int, 0, None),
-    GenerationSetting("presence_penalty", float, -2.0, 2.0),
-    GenerationSetting("repetition_penalty", float, 0.0, 2.0),
-)
-
-GENERATION_KEYS: tuple[str, ...] = tuple(setting.field for setting in GENERATION_SETTINGS)
-
-
-def _coerce_generation(value: Any, setting: GenerationSetting) -> Optional[Any]:
-    """Coerce ``value`` to the setting's type within its bounds; return None to drop it."""
-    if value is None or isinstance(value, bool):  # bool is an int subclass; never a numeric kwarg
-        return None
-    try:
-        coerced = setting.kind(value)
-    except (TypeError, ValueError):
-        return None
-    if setting.lo is not None and coerced < setting.lo:
-        return None
-    if setting.hi is not None and coerced > setting.hi:
-        return None
-    return coerced
-
-
 def _coerce_runtime(value: Any, setting: RuntimeSetting) -> Optional[Any]:
     """Coerce a panel value for a runtime setting; return None to drop it."""
     if setting.kind is bool:
@@ -218,8 +176,8 @@ class SettingsTable:
         return self._by_field.get(field)
 
     def is_hot(self, section: str, key: str) -> bool:
-        """Whether a config change takes effect live. Every ``[generation]`` key is hot."""
-        return section == "generation" or (section, key) in self._by_toml
+        """Whether a config change takes effect live: being in this table is what makes a setting hot."""
+        return (section, key) in self._by_toml
 
     def toml_schema(self) -> dict:
         """These settings as ``config.file`` schema entries: ``(section, key) -> (field, types, label, convert)``.
@@ -230,11 +188,10 @@ class SettingsTable:
         return {(s.section, s.toml_key): (s.wire_key, (s.kind,), s.label, None) for s in self.settings}
 
     def sanitize(self, raw: dict) -> dict:
-        """Keep only known keys, coerce types, drop None / out-of-range / junk.
+        """Keep only known keys, coerce types, drop None / junk.
 
-        Accepts the panel's wire shape (one key per setting's ``wire_key``, plus ``generate_kwargs``) and
-        returns the same shape with only the values that survived validation. ``generate_kwargs`` is
-        always present, holding only the parameters the user actually set.
+        Accepts the panel's wire shape (one key per setting's ``wire_key``) and returns the same shape
+        with only the values that survived validation.
         """
         result: dict = {}
         for setting in self.settings:
@@ -243,15 +200,4 @@ class SettingsTable:
             coerced = _coerce_runtime(raw[setting.wire_key], setting)
             if coerced is not None:
                 result[setting.wire_key] = coerced
-
-        incoming = raw.get("generate_kwargs")
-        generate_kwargs: dict = {}
-        if isinstance(incoming, dict):
-            for gen in GENERATION_SETTINGS:
-                if gen.field not in incoming:
-                    continue
-                coerced = _coerce_generation(incoming[gen.field], gen)
-                if coerced is not None:
-                    generate_kwargs[gen.field] = coerced
-        result["generate_kwargs"] = generate_kwargs
         return result

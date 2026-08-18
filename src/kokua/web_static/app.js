@@ -294,7 +294,6 @@ const settingsBtn = document.getElementById("settings-btn");
 const settingsModal = document.getElementById("settings-modal");
 const settingsForm = document.getElementById("settings-form");
 const settingsCancel = document.getElementById("settings-cancel");
-const GEN_KEYS = ["temperature", "max_tokens", "top_p", "top_k", "presence_penalty", "repetition_penalty"];
 
 function openSettings() {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "get_settings" }));
@@ -303,7 +302,7 @@ function openSettings() {
 }
 function closeSettings() { settingsModal.classList.add("hidden"); }
 
-// Fill the form from a server settings frame. A blank generation field means "use the default".
+// Fill the form from a server settings frame.
 function populateSettings(values) {
   document.getElementById("set-model").value = values.model || "";
   document.getElementById("set-show_thinking").checked = !!values.show_thinking;
@@ -312,11 +311,6 @@ function populateSettings(values) {
   document.getElementById("set-plan_review_agent").checked = !!values["planning.plan_review_agent"];
   document.getElementById("set-result_review").checked = !!values["planning.result_review"];
   document.getElementById("set-show_reasoning").checked = !!values["planning.show_reasoning"];
-  const gk = values.generate_kwargs || {};
-  for (const key of GEN_KEYS) {
-    const el = document.getElementById("gen-" + key);
-    el.value = (gk[key] === undefined || gk[key] === null) ? "" : gk[key];
-  }
 }
 
 settingsBtn.addEventListener("click", openSettings);
@@ -325,13 +319,6 @@ settingsModal.addEventListener("click", (e) => { if (e.target === settingsModal)
 
 settingsForm.addEventListener("submit", (e) => {
   e.preventDefault();
-  const generate_kwargs = {};
-  for (const key of GEN_KEYS) {
-    const raw = document.getElementById("gen-" + key).value.trim();
-    if (raw === "") continue;  // omit blanks so unset kwargs fall back to the default
-    const n = Number(raw);
-    if (Number.isFinite(n)) generate_kwargs[key] = n;
-  }
   const values = {
     model: document.getElementById("set-model").value.trim(),
     show_thinking: document.getElementById("set-show_thinking").checked,
@@ -340,7 +327,6 @@ settingsForm.addEventListener("submit", (e) => {
     "planning.plan_review_agent": document.getElementById("set-plan_review_agent").checked,
     "planning.result_review": document.getElementById("set-result_review").checked,
     "planning.show_reasoning": document.getElementById("set-show_reasoning").checked,
-    generate_kwargs,
   };
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "settings", values }));
   applyThemeChoice(document.getElementById("set-theme").value);  // client-side; not sent to the server

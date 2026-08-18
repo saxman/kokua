@@ -15,8 +15,6 @@ from kokua.config import AssistantConfig
 from kokua.config import file as settings
 from kokua.config.table import (
     CORE_RUNTIME_SETTINGS,
-    GENERATION_KEYS,
-    GENERATION_SETTINGS,
     RuntimeSetting,
     SettingsTable,
 )
@@ -64,7 +62,6 @@ def test_sanitize_accepts_both_wire_shapes_and_drops_junk():
     assert cleaned["widgets.verbose"] is True
     assert "widgets.rounds" not in cleaned
     assert "unknown" not in cleaned
-    assert cleaned["generate_kwargs"] == {}
 
 
 def test_a_contributed_setting_reads_and_writes_the_toolset_bucket():
@@ -148,29 +145,12 @@ def test_every_core_runtime_setting_is_documented_under_its_own_section():
         assert (setting.section, setting.toml_key) in documented, (
             f"[{setting.section}].{setting.toml_key} is not documented in config.example.toml"
         )
-    for generation in GENERATION_SETTINGS:
-        assert ("generation", generation.field) in documented, (
-            f"[generation].{generation.field} is not documented in config.example.toml"
-        )
 
 
-def test_generation_keys_match_the_generation_table():
-    assert GENERATION_KEYS == tuple(s.field for s in GENERATION_SETTINGS)
-
-
-def test_sanitize_drops_unknown_and_coerces_types():
-    result = _table().sanitize({"generate_kwargs": {"temperature": "0.5", "max_tokens": 10, "bogus": 1}})
-    assert result["generate_kwargs"] == {"temperature": 0.5, "max_tokens": 10}
-
-
-def test_sanitize_drops_out_of_range_and_none():
-    result = _table().sanitize({"generate_kwargs": {"temperature": 5.0, "top_p": 0.9, "top_k": None}})
-    assert result["generate_kwargs"] == {"top_p": 0.9}  # temperature out of [0,2], top_k None
-
-
-def test_sanitize_rejects_bools_for_numeric_kwargs():
-    result = _table().sanitize({"generate_kwargs": {"temperature": True}})
-    assert result["generate_kwargs"] == {}
+def test_sanitize_drops_a_key_no_setting_declares():
+    """Sampling parameters are the concrete case: they were wire keys once, and are not settings now."""
+    result = _table().sanitize({"model": "anthropic:x", "temperature": 0.5, "generate_kwargs": {"top_p": 1}})
+    assert result == {"model": "anthropic:x"}
 
 
 def test_sanitize_model_and_flags():
@@ -184,5 +164,5 @@ def test_sanitize_blank_model_omitted():
     assert "model" not in _table().sanitize({"model": "   "})
 
 
-def test_sanitize_always_has_generate_kwargs():
-    assert _table().sanitize({}) == {"generate_kwargs": {}}
+def test_sanitize_of_nothing_is_empty():
+    assert _table().sanitize({}) == {}

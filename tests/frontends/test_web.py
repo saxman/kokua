@@ -170,7 +170,7 @@ async def test_web_channel_send_conversations_emits_frame():
 async def test_web_channel_send_settings_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
-    values = {"model": "m1", "show_thinking": True, "show_tools": False, "generate_kwargs": {"temperature": 0.3}}
+    values = {"model": "m1", "show_thinking": True, "show_tools": False}
     await channel.send_settings(values)
     assert ws.frames == [{"type": "settings", "values": values}]
 
@@ -905,7 +905,7 @@ def test_ws_sends_settings_on_connect(tmp_path):
     app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
     with TestClient(app).websocket_connect("/ws") as ws:
         frame = _drain_until(ws, "settings")
-    assert "generate_kwargs" in frame["values"]
+    assert "show_thinking" in frame["values"]
     assert "show_thinking" in frame["values"] and "show_tools" in frame["values"]
 
 
@@ -920,11 +920,9 @@ def test_ws_get_and_apply_settings(tmp_path):
         ws.send_text(json.dumps({"type": "get_settings"}))
         _drain_until(ws, "settings")
         # Apply a kwargs + display change (no model switch, so no real client is built).
-        ws.send_text(
-            json.dumps({"type": "settings", "values": {"generate_kwargs": {"temperature": 0.6}, "show_tools": False}})
-        )
+        ws.send_text(json.dumps({"type": "settings", "values": {"show_thinking": False, "show_tools": False}}))
         echoed = _drain_until(ws, "settings")
-    assert echoed["values"]["generate_kwargs"]["temperature"] == 0.6
+    assert echoed["values"]["show_thinking"] is False
     assert echoed["values"]["show_tools"] is False
 
 

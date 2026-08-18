@@ -87,7 +87,6 @@ def test_a_toolset_named_after_a_core_section_may_not_declare_settings():
         "paths",
         "logging",
         "web",
-        "generation",
         "agents",
         "tools",
         "subagents",

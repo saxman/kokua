@@ -140,7 +140,7 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
 
 # The tables ``load`` parses itself, key by key, rather than through the flat schema above: each has its
 # own branch in ``load`` because it maps to one dict/list field or a nested table, not to one field per key.
-_STRUCTURED_SECTIONS = frozenset({"generation", "subagents", "agents", "mcp"})
+_STRUCTURED_SECTIONS = frozenset({"subagents", "agents", "mcp"})
 
 
 def core_sections() -> frozenset[str]:
@@ -226,17 +226,6 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
     see and the tool answers "unknown config key" for a key sitting in the user's file. It is passed in,
     never imported, because ``config`` is the bottom layer and cannot reach the installed toolsets.
     """
-    if section == "generation":
-        if key not in runtime_settings.GENERATION_KEYS:
-            raise ConfigError(f"unknown config key [generation].{key}")
-        try:
-            number = float(raw)
-        except ValueError:
-            raise ConfigError(f"[generation].{key} must be a number, got {raw!r}")
-        cleaned = table.sanitize({"generate_kwargs": {key: number}})["generate_kwargs"]
-        if key not in cleaned:
-            raise ConfigError(f"[generation].{key} is out of the allowed range")
-        return cleaned[key]
     if section in ("subagents", "agents", "mcp"):
         raise ConfigError(f"[{section}] has no scalar keys editable with update_config")
     spec = build_schema(table, extra_schema).get((section, key))
@@ -313,17 +302,6 @@ def load(
             raise ConfigError(f"top-level config key {section!r} is not a [section] table")
         if (section, None) in _REMOVED_KEYS:
             raise ConfigError(_REMOVED_KEYS[(section, None)])
-        # The [generation] table maps to the single `generation` dict field (one key per generation
-        # kwarg) rather than the usual one-key-one-field schema entries, so handle it separately.
-        # Types are checked loudly here; range validation is left to the settings table's sanitizer.
-        if section == "generation":
-            for key, value in entries.items():
-                if key not in runtime_settings.GENERATION_KEYS:
-                    raise ConfigError(f"unknown config key [generation].{key}")
-                if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise ConfigError(f"[generation].{key} must be a number, got {type(value).__name__}")
-                overrides.setdefault("generation", {})[key] = value
-            continue
         # [subagents] no longer holds anything live: `concurrent` moved to [assistant].concurrent_tools,
         # and `roles` moved to [agents.<name>], so both keys are checked against the removed-key table.
         if section == "subagents":
@@ -335,12 +313,12 @@ def load(
                 raise ConfigError(f"unknown config key [subagents].{key}")
             continue
         # The [agents] table holds one sub-table per agent, each parsed into an AgentConfig, so it is
-        # handled specially like [generation]/[mcp] rather than via the schema's flat one-key-one-target map.
+        # handled specially like [subagents]/[mcp] rather than via the schema's flat one-key-one-target map.
         if section == "agents":
             overrides["agents"] = {name: _parse_agent(name, spec) for name, spec in entries.items()}
             continue
         # The [mcp] table holds a [[mcp.server]] array of tables (each url + optional token_env),
-        # not flat scalar keys, so it is handled specially like [subagents]/[generation].
+        # not flat scalar keys, so it is handled specially like [subagents]/[agents].
         if section == "mcp":
             for key, value in entries.items():
                 if key != "server":

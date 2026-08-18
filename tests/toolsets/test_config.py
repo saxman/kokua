@@ -53,9 +53,9 @@ async def test_update_config_hot_key_applies_live(tmp_path):
         applied.append((section, key, value))
 
     path, _, update_config = _tools(tmp_path, apply_hot)
-    result = await update_config("generation", "temperature", "0.3")
-    assert _read(path)["generation"]["temperature"] == 0.3
-    assert applied == [("generation", "temperature", 0.3)]
+    result = await update_config("display", "show_tools", "false")
+    assert _read(path)["display"]["show_tools"] is False
+    assert applied == [("display", "show_tools", False)]
     assert "restart" not in result.lower()
 
 

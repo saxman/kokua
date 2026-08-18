@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.14.2 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.16.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -101,12 +101,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.14.2 or newer
   - **Agent-loop continuations are distinguished from user input.** The loop injects its own turns as
     `user`-role messages; these render as a dim `continuation` row showing the injected prompt rather
     than as the user's own turn. A proactive message keeps its uppercase label.
-  - **A settings panel** (gear button) changes the model, the generation kwargs (`temperature`,
-    `max_tokens`, `top_p`, `top_k`, `presence_penalty`, `repetition_penalty`), the display preferences,
-    the planning toggles, and the theme at runtime. Server-backed changes take effect on the next turn
-    and persist to `config.toml`; switching the model rebuilds the client and carries the conversation
-    over. Provider support varies: thinking models ignore `top_p` / `top_k` and force `temperature`, and
-    Anthropic does not support the penalty parameters.
+  - **A settings panel** (gear button) changes the model, the display preferences, the planning toggles,
+    and the theme at runtime. Server-backed changes take effect on the next turn and persist to
+    `config.toml`; switching the model rebuilds the client and carries the conversation over.
+  - **Sampling parameters are AIMU's, not a Kokua setting.** There is no `[generation]` section and no
+    generation fields in the panel. AIMU 0.16.0 resolves generation kwargs through one precedence chain
+    (the client's fallbacks, then the model card's tuned profile, then `client.default_generate_kwargs`,
+    then the per-call dict), and Kokua writing that third tier from config duplicated the chain while
+    shadowing the card: a model whose card specifies a tuned `temperature` / `top_p` / `top_k` / `min_p`
+    lost it to whatever the panel had. `[generation]` gets no special handling on the way out: it is now
+    an unrecognized section, so a stale one left in a `config.toml` fails to load the way any unknown key
+    does, and deleting it is the fix.
   - Reloading the page replays the prior conversation, including reasoning and tool calls when
     `show_thinking` / `show_tools` are on.
 
@@ -541,12 +546,15 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.13.1`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.16.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
   claims, not what its code contains -- and names both fixes: update the sibling, or
-  `uv sync --no-sources` to take AIMU from PyPI instead.
+  `uv sync --no-sources` to take AIMU from PyPI instead. The probe is `aimu.aio.ContextOverflowError`,
+  the newest surface Kokua leans on: without it an over-long Ollama request returns a raw 500 whose
+  wording names a missing user turn rather than the overflow that trimmed it away, and a delegating agent
+  reads that as transient and re-runs the same over-long task.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.
