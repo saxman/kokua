@@ -224,6 +224,44 @@ def test_unreferenced_toolsets_does_not_report_a_declared_plugin(monkeypatch):
     assert unreferenced_toolsets(config, registry) == []
 
 
+def test_a_configured_section_for_an_undeclared_toolset_is_reported():
+    from tests.channels import example_agents
+    from kokua.toolsets.agents import configured_but_undeclared
+
+    agents = example_agents()
+    agents["assistant"].tools = ["time"]
+    config = AssistantConfig(agents=agents, entry_agent="assistant", configured_sections=("planning",))
+
+    assert configured_but_undeclared(config) == ["planning"]
+
+
+def test_a_configured_section_for_a_declared_toolset_is_not_reported():
+    from tests.channels import example_agents
+    from kokua.toolsets.agents import configured_but_undeclared
+
+    agents = example_agents()
+    agents["assistant"].tools = ["planning"]
+    config = AssistantConfig(agents=agents, entry_agent="assistant", configured_sections=("planning",))
+
+    assert configured_but_undeclared(config) == []
+
+
+def test_a_defaulted_section_the_file_never_had_is_not_reported():
+    """`toolset_settings` carries a bucket for every declared setting once seeding has run, so a
+    section that was only ever defaulted (never in configured_sections) must not be reported even
+    though it appears here."""
+    from tests.channels import example_agents
+    from kokua.toolsets.agents import configured_but_undeclared
+
+    agents = example_agents()
+    agents["assistant"].tools = ["time"]
+    config = AssistantConfig(
+        agents=agents, entry_agent="assistant", toolset_settings={"planning": {"plan_review": False}}
+    )
+
+    assert configured_but_undeclared(config) == []
+
+
 def test_a_diamond_shaped_graph_passes():
     """Two agents delegating to a shared target is not a cycle: the DFS must mark a finished node
     ``done`` so revisiting it through a second path does not re-walk it or read as a cycle."""

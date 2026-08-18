@@ -153,6 +153,7 @@ class Assistant:
         # that cycle.
         from kokua.toolsets.agents import (
             build_command_map,
+            configured_but_undeclared,
             undeclared_workflow_commands,
             unreferenced_toolsets,
             validated_registry,
@@ -263,6 +264,15 @@ class Assistant:
             logger.warning(
                 "Toolset %r is provisioned but no [agents.*] table names it in `tools`, so it reaches no agent.",
                 name,
+            )
+        for name in configured_but_undeclared(config):
+            logger.warning(
+                "config.toml has a [%s] section, but no agent declares the %r toolset, so its settings are "
+                "not read and any command it offers does not exist. Add %r to [agents.%s].tools.",
+                name,
+                name,
+                name,
+                config.entry_agent,
             )
 
         # Build the active conversation's agent (its client is layered by the factory, which also

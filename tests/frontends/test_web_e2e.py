@@ -325,6 +325,40 @@ def test_sidebar_row_shows_the_conversation_age(page, live_server):
     expect(row.locator(".conv-age")).to_have_text("Aug 10")
 
 
+# --- Settings panel -------------------------------------------------------------------------------
+
+
+def test_settings_panel_planning_checkbox_round_trips(page, live_server):
+    """A toolset-contributed setting's wire key is namespaced (`planning.plan_review`), not the bare
+    checkbox id (`set-plan_review`): this is the one automated guard on that wire format, since
+    `test_web.py` only exercises the server side against a fake socket and can't catch app.js reading
+    or writing the wrong key. Toggling the checkbox, saving, and reloading would silently do nothing
+    (the checkbox would render unchecked again) if app.js still spoke the flat `plan_review` key the
+    core settings (`show_thinking`, `show_tools`) keep."""
+    captured: list = []
+    url = live_server(delay=0.0, seed=captured.append)
+    _open(page, url)
+
+    page.click("#settings-btn")
+    checkbox = page.locator("#set-plan_review")
+    expect(checkbox).to_be_visible()
+    expect(checkbox).not_to_be_checked()
+
+    checkbox.check()
+    page.locator("#settings-form button[type=submit]").click()
+    expect(page.locator("#settings-modal")).to_be_hidden()
+
+    # Reload and re-open: a fresh `get_settings` round trip must reflect what was saved.
+    page.reload()
+    page.wait_for_selector("#conv-list li")
+    page.click("#settings-btn")
+    expect(page.locator("#set-plan_review")).to_be_checked()
+
+    written = captured[0].config_path.read_text(encoding="utf-8")
+    assert "[planning]" in written
+    assert "plan_review = true" in written
+
+
 def test_working_indicator_on_switch_into_running(page, live_server):
     """Switching back into a conversation whose turn is still running shows the 'working' indicator,
     which clears once that turn completes."""

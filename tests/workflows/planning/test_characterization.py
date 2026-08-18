@@ -78,7 +78,7 @@ class RecordingChannel(Channel):
 
 def _planning(**overrides) -> dict[str, dict]:
     """This module's ``[planning]`` section: one replan/revise round, plus the flags a test sets."""
-    return planning_settings(review_rounds=1, **overrides)
+    return planning_settings(**{"review_rounds": 1, **overrides})
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:

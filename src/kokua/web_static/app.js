@@ -312,10 +312,10 @@ function populateSettings(values) {
   document.getElementById("set-model").value = values.model || "";
   document.getElementById("set-show_thinking").checked = !!values.show_thinking;
   document.getElementById("set-show_tools").checked = !!values.show_tools;
-  document.getElementById("set-plan_review").checked = !!values.plan_review;
-  document.getElementById("set-plan_review_agent").checked = !!values.plan_review_agent;
-  document.getElementById("set-result_review").checked = !!values.result_review;
-  document.getElementById("set-show_reasoning").checked = !!values.show_reasoning;
+  document.getElementById("set-plan_review").checked = !!values["planning.plan_review"];
+  document.getElementById("set-plan_review_agent").checked = !!values["planning.plan_review_agent"];
+  document.getElementById("set-result_review").checked = !!values["planning.result_review"];
+  document.getElementById("set-show_reasoning").checked = !!values["planning.show_reasoning"];
   const gk = values.generate_kwargs || {};
   for (const key of GEN_KEYS) {
     const el = document.getElementById("gen-" + key);
@@ -340,10 +340,10 @@ settingsForm.addEventListener("submit", (e) => {
     model: document.getElementById("set-model").value.trim(),
     show_thinking: document.getElementById("set-show_thinking").checked,
     show_tools: document.getElementById("set-show_tools").checked,
-    plan_review: document.getElementById("set-plan_review").checked,
-    plan_review_agent: document.getElementById("set-plan_review_agent").checked,
-    result_review: document.getElementById("set-result_review").checked,
-    show_reasoning: document.getElementById("set-show_reasoning").checked,
+    "planning.plan_review": document.getElementById("set-plan_review").checked,
+    "planning.plan_review_agent": document.getElementById("set-plan_review_agent").checked,
+    "planning.result_review": document.getElementById("set-result_review").checked,
+    "planning.show_reasoning": document.getElementById("set-show_reasoning").checked,
     generate_kwargs,
   };
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "settings", values }));

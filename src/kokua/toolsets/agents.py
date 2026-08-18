@@ -287,6 +287,10 @@ def undeclared_workflow_commands(config: AssistantConfig, registry: ToolsetRegis
     toggle sends ``"/plan <task>"`` over the socket regardless of what ``[agents.*].tools`` says -- so
     the serve loop needs to recognize the word even though no declared toolset claims it, to answer
     with what config change would grant it instead of running a plain turn on the literal command text.
+
+    Not to be confused with :func:`configured_but_undeclared`, which shares only the word "undeclared":
+    that one checks every agent's tools (a toolset a worker holds is still declared) and looks at config
+    sections rather than commands, and fires once at startup rather than on an incoming channel message.
     """
     declared = set(config.agents[config.entry_agent].tools)
     return {
@@ -294,6 +298,32 @@ def undeclared_workflow_commands(config: AssistantConfig, registry: ToolsetRegis
         for toolset_name, workflow in workflows_of(list(registry.values()))
         if toolset_name not in declared
     }
+
+
+def configured_but_undeclared(config: AssistantConfig) -> list[str]:
+    """Every ``config.toml`` section a toolset owns that no agent's ``tools`` names, for a startup
+    warning about the config file rather than about anything typed at the channel.
+
+    Not to be confused with :func:`undeclared_workflow_commands`, a sibling that answers a different
+    question: that one checks only the *entry* agent's tools (only it ever receives a channel command)
+    and looks at *commands* an installed toolset's workflow offers, so the serve loop can still
+    recognize ``/plan`` typed at it and name the fix instead of running a plain turn on the literal
+    text. This one checks every agent's tools and looks at *config sections*, so a warning can fire the
+    moment the assistant starts, before anyone has typed anything: writing ``[planning]`` and leaving
+    ``planning`` out of every ``[agents.*].tools`` means its settings are read by nobody, which is
+    otherwise silent until someone notices the checkboxes doing nothing.
+
+    Checked against every agent's tools, not just the entry agent's: a section belongs to whichever
+    toolset owns it regardless of which agent holds that toolset, so a worker-only declaration still
+    counts as declared.
+
+    Reads ``configured_sections`` rather than ``toolset_settings``: seeding fills a bucket for every
+    toolset's declared default whether or not the file had a section for it, so ``toolset_settings``
+    cannot tell "the user wrote this" from "Kokua defaulted it" -- exactly the distinction this warning
+    needs, since a defaulted section nobody wrote is not a mistake worth reporting.
+    """
+    declared = {name for agent in config.agents.values() for name in agent.tools}
+    return sorted(name for name in config.configured_sections if name not in declared)
 
 
 def _reject_cycles(config: AssistantConfig) -> None:
