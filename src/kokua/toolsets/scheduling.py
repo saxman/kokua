@@ -22,13 +22,13 @@ from kokua.scheduling.tasks import (
     STATUS_INVALID,
     STATUS_PAST,
     DuplicateName,
-    InvalidTarget,
+    InvalidRetention,
     ScheduleInvalid,
     SchedulePast,
     TaskNotFound,
     TaskService,
 )
-from kokua.toolsets.registry import Toolset
+from kokua.toolsets.registry import Setting, Toolset
 
 PROMPT_PREVIEW_CHARS = 60
 
@@ -94,6 +94,25 @@ def _next_fire_text(status: str, seconds: Optional[float]) -> str:
     return _STATUS_TEXT.get(status, f"~{int(seconds or 0)}s")
 
 
+#: How many conversations a task keeps when it names no cap of its own, and the default the
+#: ``[scheduling]`` setting ships with. Enough to compare the last few runs without a task that fires
+#: every minute filling the sidebar.
+DEFAULT_MAX_TASK_CONVERSATIONS = 3
+
+
+def _keep_text(own: Optional[int], default: Optional[int] = None) -> str:
+    """How a task's retention cap reads: its own value, or the default it inherits, marked as such."""
+    if own is None and default is None:
+        return "default"
+    if own is None:
+        return f"{default} (default)"
+    return "unlimited" if own == 0 else str(own)
+
+
+def _bad_retention(exc: InvalidRetention) -> str:
+    return f"max_conversations must be 0 (unlimited) or more; got {exc.value!r}."
+
+
 def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
     """Build the schedule/read/edit/cancel agent tools over a live :class:`TaskService`."""
 
@@ -106,7 +125,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         interval_seconds: Optional[float] = None,
         weekday: Optional[str] = None,
         name: Optional[str] = None,
-        target: Literal["active", "new", "task", "latest"] = "active",
+        max_conversations: Optional[int] = None,
     ) -> str:
         """Schedule a task that runs an unprompted assistant turn with the given prompt when it is due.
 
@@ -118,22 +137,22 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
             interval_seconds: For "interval", the number of seconds between runs (>= 1).
             weekday: For "weekly", one of mon/tue/wed/thu/fri/sat/sun.
             name: Optional unique handle to cancel the task later.
-            target: Where each firing runs. "active" (default) uses the currently-viewed conversation.
-                "new" runs each firing in its own fresh conversation and keeps them all. "latest" also
-                runs in a fresh conversation but deletes the one before it, so the task keeps only its
-                most recent run -- use it for a task that fires often and whose old runs are noise.
-                "task" gives the task one dedicated conversation, created on the first firing and
-                reused on every later firing so it builds on its own history.
+            max_conversations: How many of this task's conversations to keep. Every firing runs in its
+                own conversation; once there are more than this, the oldest are deleted. 1 means each
+                run replaces the one before it, which suits a task that fires often and whose old runs
+                are noise. 0 keeps every run forever. Omit it to follow the configured default.
         """
         try:
             schedule = _build_schedule(schedule_type, time_of_day, at_datetime, interval_seconds, weekday)
-            record, delay = tasks.create(prompt, schedule, name=name, target=target)
+            record, delay = tasks.create(prompt, schedule, name=name, max_conversations=max_conversations)
         except ScheduleInvalid as exc:
             return f"Invalid schedule: {exc}"
         except SchedulePast:
             return "That time is in the past; choose a future time."
         except DuplicateName as exc:
             return f"A task named {exc.name!r} already exists; cancel it first or use a different name."
+        except InvalidRetention as exc:
+            return _bad_retention(exc)
         return f"Scheduled task {_handle(record)}; first run in ~{int(delay)}s."
 
     @tool
@@ -158,7 +177,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
             lines.append(
                 f"- {item['id']} [{item['name'] or 'unnamed'}] {item['schedule']} "
                 f"next {_next_fire_text(item['status'], item['next_fire_seconds'])} "
-                f"target={item['target']}: {preview}"
+                f"keep={_keep_text(item['max_conversations'])}: {preview}"
             )
         if truncated_any:
             lines.append("(prompts truncated; call get_scheduled_task for the full text before editing one)")
@@ -182,12 +201,10 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
             f"enabled: {record.get('enabled', True)}",
             f"schedule: {record['schedule']}",
             f"next fire: {_next_fire_text(status, seconds)}",
-            f"target: {record.get('target') or 'active'}",
+            f"keep: {_keep_text(record.get('max_conversations'), tasks.default_max_conversations())}",
             f"created_at: {record.get('created_at', 'unknown')}",
             f"prompt: {record['prompt']}",
         ]
-        if record.get("session_id"):
-            lines.insert(-1, f"conversation: {record['session_id']}")
         return "\n".join(lines)
 
     @tool
@@ -200,7 +217,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         interval_seconds: Optional[float] = None,
         weekday: Optional[str] = None,
         name: Optional[str] = None,
-        target: Optional[Literal["active", "new", "task", "latest"]] = None,
+        max_conversations: Optional[int] = None,
     ) -> str:
         """Edit an existing scheduled task in place, keeping its id, history, and any fields you omit.
 
@@ -218,7 +235,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
             interval_seconds: For "interval", the number of seconds between runs (>= 1).
             weekday: For "weekly", one of mon/tue/wed/thu/fri/sat/sun.
             name: A new unique handle for the task.
-            target: Where each firing runs; see ``schedule_task``.
+            max_conversations: How many of this task's conversations to keep; see ``schedule_task``.
         """
         schedule_args = {
             "schedule_type": schedule_type,
@@ -236,7 +253,9 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
                 current = _flatten_schedule(tasks.get(id_or_name)["schedule"])
                 merged = {key: (value if value is not None else current[key]) for key, value in schedule_args.items()}
                 schedule = _build_schedule(**merged)
-            record, changed = tasks.update(id_or_name, prompt=prompt, schedule=schedule, name=name, target=target)
+            record, changed = tasks.update(
+                id_or_name, prompt=prompt, schedule=schedule, name=name, max_conversations=max_conversations
+            )
         except TaskNotFound:
             return _unknown(id_or_name)
         except ScheduleInvalid as exc:
@@ -245,8 +264,8 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
             return "That time is in the past; choose a future time."
         except DuplicateName as exc:
             return f"A task named {exc.name!r} already exists; choose a different name."
-        except InvalidTarget as exc:
-            return f"target must be one of active, new, task, latest; got {exc.target!r}."
+        except InvalidRetention as exc:
+            return _bad_retention(exc)
 
         if not changed:
             return f"Nothing to update on scheduled task {_handle(record)}."
@@ -297,21 +316,18 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
     async def run_scheduled_task(id_or_name: str) -> str:
         """Run an existing scheduled task now, without changing its schedule.
 
-        Reproduces exactly what the task's next scheduled firing would do (honoring its ``target``;
-        gated tools are auto-denied as they would be for an unattended firing), so you can verify how
-        the task behaves. A ``target="task"`` run writes into (and, on the first run, creates and
-        remembers) the task's dedicated conversation; a ``target="latest"`` run replaces the previous
-        run's conversation, deleting it once this one finishes. The task's output arrives as a separate message
-        shortly after, not as this tool's return value. Works on a disabled task too.
+        Reproduces exactly what the task's next scheduled firing would do (a conversation of its own,
+        its retention cap applied afterwards, and gated tools auto-denied as they would be for an
+        unattended firing), so you can verify how the task behaves. The task's output arrives as a
+        separate message shortly after, not as this tool's return value. Works on a disabled task too.
         """
         try:
             record = tasks.run_now(id_or_name)
         except TaskNotFound:
             return _unknown(id_or_name)
         handle = _handle(record)
-        suffix = " in a new conversation" if (record.get("target") or "active") in ("new", "task", "latest") else ""
         note = " (note: this task is disabled)" if not record.get("enabled", True) else ""
-        return f"Running task {handle} now; its output will appear shortly{suffix}.{note}"
+        return f"Running task {handle} now; its output will appear shortly in a new conversation.{note}"
 
     return [
         schedule_task,
@@ -325,9 +341,17 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
     ]
 
 
+#: The ``[scheduling]`` section of config.toml. Hot because ``update_config`` should be able to change
+#: it mid-session: ``TaskService`` reads it at fire time rather than caching it, so the next firing
+#: follows the new value. It has no settings-panel input, whose fields are written by hand.
+SCHEDULING_SETTINGS: tuple[Setting, ...] = (
+    Setting("max_task_conversations", int, DEFAULT_MAX_TASK_CONVERSATIONS, hot=True),
+)
+
 TOOLSET = Toolset(
     name="scheduling",
     description="Schedule, list, edit, and cancel recurring or one-off proactive tasks.",
     build=lambda ctx: make_scheduling_tools(ctx.state.tasks),
+    settings=SCHEDULING_SETTINGS,
     cross_cutting=True,
 )

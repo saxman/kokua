@@ -67,14 +67,10 @@ function selectConversation(id) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "select", id }));
 }
 
-// A conversation belongs to a task if that task minted it (`task_id`, stamped at mint time) or if it
-// is the dedicated conversation a target="task" record remembers (`session_id`, the only link for a
-// conversation minted before task_id was recorded).
+// A conversation belongs to a task if that task minted it (`task_id`, stamped at mint time). A
+// conversation minted before task_id was recorded carries no link and stays in the chat list.
 function conversationsOfTask(task) {
-  return lastConversations.filter(
-    (conv) =>
-      (conv.task_id && conv.task_id === task.id) || (task.session_id && conv.id === task.session_id)
-  );
+  return lastConversations.filter((conv) => conv.task_id && conv.task_id === task.id);
 }
 
 // Ids nested under a task that is *currently in the list*. Deleting a task therefore returns its

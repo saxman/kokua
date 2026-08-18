@@ -424,14 +424,25 @@ Grouping a task's conversations under it happens **on the page**, not in the cor
 optional and `update_scheduled_task` can change it) and `ConversationBook.list()` projects it, but nothing
 is filtered there -- the agent's read-only conversation tools walk `sessions()` and still see every
 conversation. The page nests a conversation under a task when its `task_id` matches a task *currently in
-the list*, or when it is the `session_id` a `target="task"` record remembers (the only link for a
-conversation minted before `task_id` was recorded, and the one a `target="latest"` record is about to
-replace). Requiring the task to be present is what makes
+the list*. Requiring the task to be present is what makes
 deleting a task return its conversations to the chat list instead of hiding them: keying on `task_id`
 alone would leave an orphan unreachable from the sidebar. Because the nesting is client-side, a firing's
 new conversation appears under its task with no task re-fetch -- `TurnRunner.proactive` already pushes the
 conversation list. The reverse is not true: a task the model schedules or cancels mid-chat does not push a
 `tasks` frame, which is what the section's refresh button is for.
+
+**Retention.** Every firing mints its own conversation, and a task's `max_conversations` decides how
+many survive: `1` replaces the previous run, `0` keeps them all, and a record with no cap of its own
+inherits `[scheduling] max_task_conversations` (3), resolved by `TaskService` at fire time so a settings
+change reaches the next firing. The prune itself lives in `TurnRunner`, beside the run it follows: it
+asks `ConversationBook.sessions_for_task` for the task's conversations oldest-first (by `created_at`,
+so a late turn touching an older run cannot make it look newest) and deletes past the cap, never the
+conversation this firing just wrote. It runs only after a successful run and outside the turn's gate
+hold, since the delete takes the gate exclusively, and swallows failures the way the run itself does
+(invariant 6): a user who deleted a run by hand must not stop the task firing. That the cap is enforced
+at a firing rather than at an edit is what makes lowering one non-destructive and leaves a disabled task
+whole. This is also why the record needs no `session_id`: nothing reuses a conversation, so a firing
+writes nothing back to the registry.
 
 A `tool` frame carries what the call returned as well as what it was asked to do (`response`, added to
 AIMU's base frame), because AIMU yields `TOOL_CALLING` only once the call has been dispatched. An error,

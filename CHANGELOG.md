@@ -289,18 +289,20 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   (pause without losing the task), and `run_scheduled_task` (run one now, reproducing a real firing, so
   a task can be dry-run before it is due).
 - `update_scheduled_task` edits any subset of a task's fields in place, keeping its id, `created_at`,
-  and dedicated conversation, and re-deriving the schedule fields you omit, so changing a weekly task's
+  and retention cap, and re-deriving the schedule fields you omit, so changing a weekly task's
   time keeps its day. It re-arms only when the schedule actually changes, so editing a prompt never
   restarts an interval countdown, and it rejects an invalid schedule, a past one-shot, or a name another
   task holds without writing anything.
-- A per-task `target` selects where each firing runs: `active` (the currently-viewed conversation),
-  `new` (a fresh conversation per firing, all kept), `latest` (a fresh conversation per firing, deleting
-  the one before it so the task keeps only its most recent run), or `task` (one dedicated conversation,
-  created on the first firing and reused after, so the task builds on its own history; a deleted one is
-  recreated). `latest` deletes only *after* its own run succeeds, so a firing that errors leaves the last
-  good run to read, and a run the user already deleted is not an error. Moving a task onto `latest`
-  clears the conversation it remembers, so the switch cannot make the next firing destroy the history the
-  task accumulated under `task`.
+- **Every firing runs in its own conversation**, stamped with the task's id, and a per-task
+  `max_conversations` says how many of them survive: `1` means each run replaces the one before it,
+  `0` keeps every run forever, and a task that names no cap follows `[scheduling]
+  max_task_conversations` (default 3), read at fire time so a change reaches the next firing without a
+  restart. Pruning happens only *after* a firing succeeds and never touches the conversation that
+  firing just wrote, so a run that errors leaves the previous ones to read, and a run the user already
+  deleted is not an error. Lowering a cap deletes nothing until the task next fires, so an edit is not
+  destructive and a disabled task keeps everything. A channel with no conversation list (the CLI) has
+  nowhere to put a minted conversation, so there a firing runs in the one being viewed and prunes
+  nothing.
 - A failing firing is reported and swallowed rather than propagating into the scheduler, which has no
   handler of its own.
 - **A tasks section in the web sidebar**, below the conversation list, showing each task's name,

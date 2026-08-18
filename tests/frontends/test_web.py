@@ -938,7 +938,7 @@ def _seed_task(config, task_id="t1", name="brief", enabled=True):
             "name": name,
             "prompt": "summarize inbox",
             "schedule": {"type": "interval", "seconds": 3600},
-            "target": "task",
+            "max_conversations": 2,
             "created_at": "2026-08-01T00:00:00",
             "enabled": enabled,
         },
@@ -956,6 +956,8 @@ def test_ws_sends_tasks_on_connect(tmp_path):
         frame = _drain_until(ws, "tasks")
     assert [item["id"] for item in frame["items"]] == ["t1"]
     assert frame["items"][0]["name"] == "brief" and frame["items"][0]["enabled"] is True
+    # The wire shape the sidebar reads: a task's retention cap, and no dead conversation key.
+    assert frame["items"][0]["max_conversations"] == 2 and "session_id" not in frame["items"][0]
 
 
 def test_ws_get_tasks_returns_the_registry(tmp_path):

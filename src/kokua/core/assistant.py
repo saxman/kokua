@@ -533,11 +533,8 @@ class Assistant:
         self,
         prompt: str,
         *,
-        target: str = "active",
         task_name: Optional[str] = None,
-        session_id: Optional[str] = None,
         task_id: Optional[str] = None,
-    ) -> Optional[str]:
-        return await self._turns.proactive(
-            prompt, target=target, task_name=task_name, session_id=session_id, task_id=task_id
-        )
+        max_conversations: int = 0,
+    ) -> None:
+        await self._turns.proactive(prompt, task_name=task_name, task_id=task_id, max_conversations=max_conversations)

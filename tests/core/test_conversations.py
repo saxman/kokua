@@ -367,3 +367,24 @@ def test_resolve_accepts_a_unique_prefix_but_not_an_ambiguous_or_short_one(tmp_p
     assert book.resolve("abcdef") is None  # ambiguous
     assert book.resolve("zzz") is None  # shorter than ID_PREFIX_MIN
     assert book.resolve("") is None
+
+
+async def test_sessions_for_task_returns_only_that_tasks_conversations_oldest_first(tmp_path):
+    """Retention prunes a task's own conversations in the order they were minted, so the book owns
+    both the filter and the ``created_at`` ordering rather than each caller re-deriving them."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    book = assistant._book
+
+    first = book.new_session(title="run 1", task_id="task-1")
+    second = book.new_session(title="run 2", task_id="task-1")
+    book.new_session(title="elsewhere", task_id="task-2")
+    book.new_session(title="mine")
+    first.metadata["created_at"] = "2026-01-01T00:00:00"
+    second.metadata["created_at"] = "2026-01-02T00:00:00"
+    book.save(first)
+    book.save(second)
+
+    # A later turn on the older conversation must not reorder it: minting order is what counts.
+    book.touch(first)
+
+    assert [s.key for s in book.sessions_for_task("task-1")] == [first.key, second.key]

@@ -131,21 +131,33 @@ async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
     def unmirrored(name, default):
         return default
 
-    # A value that differs from the default for every entry, so a no-op write can't pass.
+    def changed(setting):
+        """A value of the setting's own type that differs from what it holds, so a no-op can't pass.
+
+        Typed per kind rather than ``not current``: the sanitizer drops a bool handed to an int
+        setting, which would look like a setting that failed to persist.
+        """
+        current = setting.read(cfg, unmirrored)
+        if setting.kind is int:
+            return (current or 0) + 7
+        if setting.kind is str:
+            return f"{current or ''}-changed"
+        return not current
+
     payload = {"generate_kwargs": {}}
     expected = {}
     for setting in table.settings:
         if setting.wire_key == "model":
             continue  # switching the model rebuilds the client; covered by its own test
-        expected[setting] = not setting.read(cfg, unmirrored)
+        expected[setting] = changed(setting)
         payload[setting.wire_key] = expected[setting]
 
     await assistant.apply_settings(payload)
 
     written = tomllib.loads(cfg.config_path.read_text(encoding="utf-8"))
     for setting, value in expected.items():
-        assert setting.read(cfg, unmirrored) is value, f"{setting.wire_key} was not applied to the live config"
-        assert written[setting.section][setting.toml_key] is value, (
+        assert setting.read(cfg, unmirrored) == value, f"{setting.wire_key} was not applied to the live config"
+        assert written[setting.section][setting.toml_key] == value, (
             f"[{setting.section}].{setting.toml_key} did not persist to config.toml"
         )
 

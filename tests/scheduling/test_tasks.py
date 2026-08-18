@@ -26,24 +26,22 @@ class FakeScheduler:
         return self.jobs.pop(name, None) is not None
 
 
-async def _noop_fire(prompt, *, target="active", task_name=None, session_id=None, task_id=None):
-    _noop_fire.calls.append((prompt, target, task_name, session_id))
+async def _noop_fire(prompt, *, task_name=None, task_id=None, max_conversations=0):
+    _noop_fire.calls.append((prompt, task_name, max_conversations))
     _noop_fire.task_ids.append(task_id)
-    return _noop_fire.return_key
 
 
 _noop_fire.calls = []
 _noop_fire.task_ids = []
-_noop_fire.return_key = None
 
 EVERY_MINUTE = {"type": "interval", "seconds": 60}
 DAILY_NINE = {"type": "daily", "at": "09:00"}
 
 
-def _make(tmp_path, fire=_noop_fire):
+def _make(tmp_path, fire=_noop_fire, default_max=0):
     scheduler = FakeScheduler()
     path = tmp_path / "scheduled_tasks.json"
-    return scheduler, path, TaskService(scheduler, path, fire)
+    return scheduler, path, TaskService(scheduler, path, fire, default_max_conversations=lambda: default_max)
 
 
 def test_create_persists_and_arms(tmp_path):
@@ -52,18 +50,25 @@ def test_create_persists_and_arms(tmp_path):
     record, delay = tasks.create("do it", DAILY_NINE, name="brief")
 
     stored = scheduling.load(path)
-    assert len(stored) == 1 and stored[0]["name"] == "brief" and stored[0]["target"] == "active"
+    assert len(stored) == 1 and stored[0]["name"] == "brief" and stored[0]["max_conversations"] is None
     assert stored[0]["schedule"] == DAILY_NINE
     assert record["id"] in scheduler.jobs and delay > 0
 
 
-def test_create_with_task_target_leaves_the_session_id_for_the_first_firing(tmp_path):
+def test_create_records_an_explicit_retention_cap(tmp_path):
     scheduler, path, tasks = _make(tmp_path)
 
-    tasks.create("digest", DAILY_NINE, name="d", target="task")
+    tasks.create("digest", DAILY_NINE, name="d", max_conversations=1)
 
-    record = scheduling.load(path)[0]
-    assert record["target"] == "task" and record["session_id"] == ""
+    assert scheduling.load(path)[0]["max_conversations"] == 1
+
+
+def test_create_rejects_a_negative_retention_cap_and_writes_nothing(tmp_path):
+    scheduler, path, tasks = _make(tmp_path)
+
+    with pytest.raises(scheduling.InvalidRetention):
+        tasks.create("digest", DAILY_NINE, name="d", max_conversations=-1)
+    assert scheduling.load(path) == []
 
 
 def test_create_rejects_a_bad_schedule_and_writes_nothing(tmp_path):
@@ -118,13 +123,13 @@ def test_cancel_removes_the_record_and_the_job(tmp_path):
 def test_list_returns_fields_rather_than_prose(tmp_path):
     """The web sidebar needs fields; the prose listing is the toolset's job."""
     scheduler, path, tasks = _make(tmp_path)
-    record, _ = tasks.create("summarize inbox", DAILY_NINE, name="brief", target="task")
+    record, _ = tasks.create("summarize inbox", DAILY_NINE, name="brief", max_conversations=2)
 
     (item,) = tasks.list()
 
     assert item["id"] == record["id"] and item["name"] == "brief"
     assert item["prompt"] == "summarize inbox" and item["schedule"] == DAILY_NINE
-    assert item["target"] == "task" and item["enabled"] is True
+    assert item["max_conversations"] == 2 and item["enabled"] is True
     assert item["status"] == "pending"
 
 
@@ -219,7 +224,7 @@ def test_run_now_leaves_the_armed_job_alone(tmp_path):
 async def test_fire_passes_the_task_id_so_its_conversation_can_be_grouped(tmp_path):
     _noop_fire.calls, _noop_fire.task_ids = [], []
     scheduler, path, tasks = _make(tmp_path)
-    record, _ = tasks.create("ping", EVERY_MINUTE, name="r", target="new")
+    record, _ = tasks.create("ping", EVERY_MINUTE, name="r")
 
     _delay, job = scheduler.jobs[record["id"]]
     await job()
@@ -230,12 +235,12 @@ async def test_fire_passes_the_task_id_so_its_conversation_can_be_grouped(tmp_pa
 async def test_fire_rearms_a_recurring_task(tmp_path):
     _noop_fire.calls = []
     scheduler, path, tasks = _make(tmp_path)
-    record, _ = tasks.create("ping", EVERY_MINUTE, name="r", target="new")
+    record, _ = tasks.create("ping", EVERY_MINUTE, name="r")
 
     _delay, job = scheduler.jobs[record["id"]]
     await job()
 
-    assert _noop_fire.calls == [("ping", "new", "r", None)]
+    assert _noop_fire.calls == [("ping", "r", 0)]
     assert record["id"] in scheduler.jobs and scheduling.load(path)
 
 
@@ -249,78 +254,79 @@ async def test_fire_drops_a_one_shot(tmp_path):
     assert scheduling.load(path) == []
 
 
-async def test_fire_with_task_target_persists_and_reuses_the_returned_session_id(tmp_path):
+async def test_fire_passes_the_records_own_retention_cap(tmp_path):
     _noop_fire.calls = []
-    _noop_fire.return_key = "sess-123"
-    try:
-        scheduler, path, tasks = _make(tmp_path)
-        record, _ = tasks.create("digest", EVERY_MINUTE, name="d", target="task")
-        _delay, job = scheduler.jobs[record["id"]]
+    scheduler, path, tasks = _make(tmp_path, default_max=3)
+    record, _ = tasks.create("digest", EVERY_MINUTE, name="d", max_conversations=1)
 
-        await job()  # first firing: fire() returns the newly-created conversation key
-        assert _noop_fire.calls == [("digest", "task", "d", None)]
-        assert scheduling.load(path)[0]["session_id"] == "sess-123"
+    _delay, job = scheduler.jobs[record["id"]]
+    await job()
 
-        await job()  # second firing: the remembered key is passed in for reuse
-        assert _noop_fire.calls[-1] == ("digest", "task", "d", "sess-123")
-    finally:
-        _noop_fire.return_key = None
+    assert _noop_fire.calls == [("digest", "d", 1)]
 
 
-async def test_fire_with_new_target_never_remembers_a_session_id(tmp_path):
+async def test_fire_falls_back_to_the_configured_default_cap(tmp_path):
+    """A record with no cap of its own inherits the default, read at fire time so a settings change
+    reaches the next firing without a restart."""
     _noop_fire.calls = []
-    _noop_fire.return_key = "ephemeral"
-    try:
-        scheduler, path, tasks = _make(tmp_path)
-        record, _ = tasks.create("ping", EVERY_MINUTE, name="n", target="new")
-        _delay, job = scheduler.jobs[record["id"]]
-        await job()
-        assert scheduling.load(path)[0].get("session_id", "") == ""
-    finally:
-        _noop_fire.return_key = None
+    default = [3]
+    scheduler = FakeScheduler()
+    path = tmp_path / "scheduled_tasks.json"
+    tasks = TaskService(scheduler, path, _noop_fire, default_max_conversations=lambda: default[0])
+    record, _ = tasks.create("digest", EVERY_MINUTE, name="d")
+
+    _delay, job = scheduler.jobs[record["id"]]
+    await job()
+    assert _noop_fire.calls[-1] == ("digest", "d", 3)
+
+    default[0] = 5
+    await job()
+    assert _noop_fire.calls[-1] == ("digest", "d", 5)
 
 
-async def test_fire_with_latest_target_remembers_the_key_it_will_replace(tmp_path):
-    """ "latest" needs the same write-back "task" does, for the opposite reason: not to reuse the
-    conversation next time but to know which one to delete."""
+async def test_fire_reads_an_explicit_zero_as_unlimited_rather_than_as_unset(tmp_path):
     _noop_fire.calls = []
-    _noop_fire.return_key = "run-1"
-    try:
-        scheduler, path, tasks = _make(tmp_path)
-        record, _ = tasks.create("digest", EVERY_MINUTE, name="l", target="latest")
-        _delay, job = scheduler.jobs[record["id"]]
+    scheduler, path, tasks = _make(tmp_path, default_max=3)
+    record, _ = tasks.create("digest", EVERY_MINUTE, name="d", max_conversations=0)
 
-        await job()
-        assert _noop_fire.calls == [("digest", "latest", "l", None)]
-        assert scheduling.load(path)[0]["session_id"] == "run-1"
+    _delay, job = scheduler.jobs[record["id"]]
+    await job()
 
-        _noop_fire.return_key = "run-2"
-        await job()
-        assert _noop_fire.calls[-1] == ("digest", "latest", "l", "run-1")  # handed the one to replace
-        assert scheduling.load(path)[0]["session_id"] == "run-2"
-    finally:
-        _noop_fire.return_key = None
+    assert _noop_fire.calls == [("digest", "d", 0)]
 
 
-async def test_fire_skips_the_session_writeback_if_cancelled_during_the_run(tmp_path):
-    _noop_fire.return_key = "sess-late"
+async def test_fire_writes_nothing_back_to_the_registry(tmp_path):
+    """Nothing reuses a conversation any more, so a firing has no reason to touch the record. A
+    write-back is what used to risk resurrecting a task the user cancelled mid-run."""
+    scheduler, path, tasks = _make(tmp_path)
+    record, _ = tasks.create("digest", EVERY_MINUTE, name="d")
+    before = path.read_text(encoding="utf-8")
 
-    async def cancelling_fire(prompt, *, target="active", task_name=None, session_id=None, task_id=None):
-        scheduling.remove(path, scheduling.load(path)[0]["id"])  # user cancelled mid-run
-        return _noop_fire.return_key
+    _delay, job = scheduler.jobs[record["id"]]
+    await job()
 
-    try:
-        scheduler, path, tasks = _make(tmp_path, fire=cancelling_fire)
-        record, _ = tasks.create("digest", EVERY_MINUTE, name="c", target="task")
-        _delay, job = scheduler.jobs[record["id"]]
-        await job()
-        assert scheduling.load(path) == []  # not resurrected by the write-back
-    finally:
-        _noop_fire.return_key = None
+    assert path.read_text(encoding="utf-8") == before
+
+
+async def test_fire_ignores_the_target_and_session_id_of_a_pre_retention_record(tmp_path):
+    """Registry records written before retention still carry a ``target`` and a ``session_id``. Both
+    are dead fields: the firing mints its own conversation and inherits the default cap."""
+    _noop_fire.calls = []
+    scheduler, path, tasks = _make(tmp_path, default_max=3)
+    record, _ = tasks.create("digest", EVERY_MINUTE, name="d")
+    stored = scheduling.load(path)[0]
+    stored.update({"target": "task", "session_id": "sess-legacy"})
+    stored.pop("max_conversations")
+    scheduling.add(path, stored)
+
+    _delay, job = scheduler.jobs[record["id"]]
+    await job()
+
+    assert _noop_fire.calls == [("digest", "d", 3)]
 
 
 async def test_fire_skips_the_rearm_if_cancelled_during_the_run(tmp_path):
-    async def cancelling_fire(prompt, *, target="active", task_name=None, session_id=None, task_id=None):
+    async def cancelling_fire(prompt, *, task_name=None, task_id=None, max_conversations=0):
         scheduling.remove(path, scheduling.load(path)[0]["id"])
 
     scheduler, path, tasks = _make(tmp_path, fire=cancelling_fire)
@@ -332,7 +338,7 @@ async def test_fire_skips_the_rearm_if_cancelled_during_the_run(tmp_path):
 
 
 async def test_fire_skips_the_rearm_if_disabled_during_the_run(tmp_path):
-    async def disabling_fire(prompt, *, target="active", task_name=None, session_id=None, task_id=None):
+    async def disabling_fire(prompt, *, task_name=None, task_id=None, max_conversations=0):
         record = scheduling.load(path)[0]
         record["enabled"] = False
         scheduling.add(path, record)  # user disabled mid-run
@@ -356,7 +362,7 @@ async def test_run_now_fires_without_disturbing_the_schedule(tmp_path):
     _delay, job = scheduler.jobs[f"run-now:{record['id']}"]
     await job()
 
-    assert _noop_fire.calls == [("ping", "active", "r", None)]
+    assert _noop_fire.calls == [("ping", "r", 0)]
     assert scheduler.at_count[record["id"]] == 1  # real job armed once
     assert scheduling.load(path) == before
 
@@ -372,25 +378,17 @@ async def test_run_now_keeps_a_one_shot(tmp_path):
     assert scheduling.load(path)  # not dropped by a manual run
 
 
-async def test_run_now_with_task_target_persists_and_reuses_the_session_id(tmp_path):
+async def test_run_now_fires_with_the_same_retention_cap_a_schedule_would(tmp_path):
+    """A manual run reproduces exactly what the next scheduled firing would do, pruning included."""
     _noop_fire.calls = []
-    _noop_fire.return_key = "sess-run"
-    try:
-        scheduler, path, tasks = _make(tmp_path)
-        record, _ = tasks.create("digest", EVERY_MINUTE, name="d", target="task")
+    scheduler, path, tasks = _make(tmp_path, default_max=3)
+    record, _ = tasks.create("digest", EVERY_MINUTE, name="d", max_conversations=2)
 
-        tasks.run_now("d")
-        _delay, job = scheduler.jobs[f"run-now:{record['id']}"]
-        await job()
-        assert _noop_fire.calls[-1] == ("digest", "task", "d", None)
-        assert scheduling.load(path)[0]["session_id"] == "sess-run"
+    tasks.run_now("d")
+    _delay, job = scheduler.jobs[f"run-now:{record['id']}"]
+    await job()
 
-        tasks.run_now("d")
-        _delay, job = scheduler.jobs[f"run-now:{record['id']}"]
-        await job()
-        assert _noop_fire.calls[-1] == ("digest", "task", "d", "sess-run")
-    finally:
-        _noop_fire.return_key = None
+    assert _noop_fire.calls[-1] == ("digest", "d", 2)
 
 
 async def test_run_now_skips_the_firing_if_cancelled_before_it_runs(tmp_path):
@@ -446,7 +444,7 @@ def test_arm_all_arms_the_live_and_drops_a_past_due_one_shot(tmp_path):
 
 def test_update_keeps_identity_and_untouched_fields(tmp_path):
     scheduler, path, tasks = _make(tmp_path)
-    before, _ = tasks.create("old", DAILY_NINE, name="news", target="task")
+    before, _ = tasks.create("old", DAILY_NINE, name="news", max_conversations=2)
 
     record, changed = tasks.update("news", prompt="new and longer")
 
@@ -454,7 +452,7 @@ def test_update_keeps_identity_and_untouched_fields(tmp_path):
     stored = scheduling.load(path)[0]
     assert stored["prompt"] == "new and longer"
     assert stored["id"] == before["id"] and stored["created_at"] == before["created_at"]
-    assert stored["schedule"] == DAILY_NINE and stored["target"] == "task"
+    assert stored["schedule"] == DAILY_NINE and stored["max_conversations"] == 2
 
 
 def test_update_of_a_prompt_does_not_restart_the_countdown(tmp_path):
@@ -511,12 +509,12 @@ def test_update_rejects_a_duplicate_name_but_allows_the_current_one(tmp_path):
     assert changed == ["prompt"]
 
 
-def test_update_rejects_an_unknown_target(tmp_path):
+def test_update_rejects_a_negative_retention_cap(tmp_path):
     scheduler, path, tasks = _make(tmp_path)
     tasks.create("p", EVERY_MINUTE, name="t")
 
-    with pytest.raises(scheduling.InvalidTarget):
-        tasks.update("t", target="elsewhere")
+    with pytest.raises(scheduling.InvalidRetention):
+        tasks.update("t", max_conversations=-2)
 
 
 def test_update_never_arms_a_disabled_task(tmp_path):
@@ -530,35 +528,25 @@ def test_update_never_arms_a_disabled_task(tmp_path):
     assert scheduling.load(path)[0]["schedule"] == {"type": "daily", "at": "10:00"}
 
 
-def test_update_of_the_target_keeps_the_dedicated_conversation(tmp_path):
+def test_update_of_the_retention_cap_is_a_reported_change(tmp_path):
     scheduler, path, tasks = _make(tmp_path)
-    tasks.create("p", EVERY_MINUTE, name="t", target="task")
-    record = scheduling.load(path)[0]
-    record["session_id"] = "sess-1"
-    scheduling.add(path, record)
+    tasks.create("p", EVERY_MINUTE, name="t", max_conversations=3)
 
-    tasks.update("t", target="new")
+    _record, changed = tasks.update("t", max_conversations=1)
 
-    stored = scheduling.load(path)[0]
-    assert stored["target"] == "new"
-    assert stored["session_id"] == "sess-1"  # reused if the target flips back
+    assert changed == ["max_conversations"]
+    assert scheduling.load(path)[0]["max_conversations"] == 1
 
 
-def test_update_onto_the_latest_target_forgets_the_conversation_it_would_replace(tmp_path):
-    """Moving a task onto "latest" must not make its next firing delete the history the task built up
-    under "task". The remembered key is what "latest" replaces, so switching clears it and the first
-    firing on the new target replaces nothing."""
+def test_update_can_set_an_unlimited_cap(tmp_path):
+    """Zero is a real value, not "leave it alone": a task can be moved off a cap it was created with."""
     scheduler, path, tasks = _make(tmp_path)
-    tasks.create("p", EVERY_MINUTE, name="t", target="task")
-    record = scheduling.load(path)[0]
-    record["session_id"] = "long-history"
-    scheduling.add(path, record)
+    tasks.create("p", EVERY_MINUTE, name="t", max_conversations=1)
 
-    tasks.update("t", target="latest")
+    _record, changed = tasks.update("t", max_conversations=0)
 
-    stored = scheduling.load(path)[0]
-    assert stored["target"] == "latest"
-    assert stored["session_id"] == ""
+    assert changed == ["max_conversations"]
+    assert scheduling.load(path)[0]["max_conversations"] == 0
 
 
 def test_update_with_nothing_to_change_is_a_no_op(tmp_path):

@@ -92,9 +92,9 @@ async def test_proactive_reports_a_turn_the_model_had_no_room_to_finish(tmp_path
 
 
 async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path):
-    """A target="active" proactive run auto-denies a gated tool even when it fires on the CURRENTLY
-    VIEWED conversation (where streaming_conversation == _active_id would otherwise look foreground and
-    wrongly prompt). Unattended turns must never prompt."""
+    """A firing that fell back to the viewed conversation (a channel with no conversation list)
+    auto-denies a gated tool, even though streaming_conversation == _active_id would otherwise look
+    foreground and wrongly prompt. Unattended turns must never prompt."""
     cfg = _config(tmp_path, confirm_tools=["update_config"])
     client = _RequestsToolOnce("update_config", {"section": "display", "key": "show_tools", "value": "false"})
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
@@ -108,13 +108,13 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
 
 
 async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
-    """The target="new" path (fresh conversation, never the viewed one) also auto-denies."""
+    """The minted-conversation path (never the viewed one) also auto-denies."""
     cfg = _config(tmp_path, confirm_tools=["update_config"])
     client = _RequestsToolOnce("update_config", {"section": "display", "key": "show_tools", "value": "false"})
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: client)
 
-    await asyncio.wait_for(assistant._proactive("do it", target="new", task_name="t"), timeout=2.0)
+    await asyncio.wait_for(assistant._proactive("do it", task_name="t"), timeout=2.0)
 
     denied = [m for m in client.messages if m.get("role") == "tool"]
     assert denied and denied[-1]["content"] == "Tool 'update_config' was not approved."
@@ -384,7 +384,7 @@ async def test_proactive_new_session_runs_in_fresh_conversation(tmp_path):
     active_key = assistant._session.key
     active_len = len(assistant._session.messages)
 
-    await assistant._proactive("run the report", target="new", task_name="report")
+    await assistant._proactive("run the report", task_name="report")
 
     # Active conversation is restored and untouched.
     assert assistant._session.key == active_key
@@ -402,39 +402,37 @@ async def test_proactive_new_session_runs_in_fresh_conversation(tmp_path):
 
 
 async def test_proactive_stamps_minted_conversation_with_its_task_id(tmp_path):
-    """Every conversation a task mints records which task minted it, for both "new" and "task"
-    targets. A "new" task has no session_id to link by, so without this stamp its firings would be
-    indistinguishable from conversations the user started."""
+    """Every conversation a task mints records which task minted it. Without the stamp a task's
+    firings would be indistinguishable from conversations the user started, and retention would have
+    nothing to prune by."""
     assistant = await Assistant.create(
         _config(tmp_path), _ConvCapturingChannel(), client_factory=lambda cid: MockAsyncModelClient(["out"])
     )
 
-    new_key = await assistant._proactive("run it", target="new", task_name="report", task_id="task-1")
-    task_key = await assistant._proactive("run it", target="task", task_name="digest", task_id="task-2")
+    await assistant._proactive("run it", task_name="report", task_id="task-1")
+    await assistant._proactive("run it", task_name="digest", task_id="task-2")
 
-    assert assistant._store.get(new_key).metadata["task_id"] == "task-1"
-    assert assistant._store.get(task_key).metadata["task_id"] == "task-2"
+    assert [s.metadata["title"] for s in assistant._book.sessions_for_task("task-1")] == ["report"]
+    assert [s.metadata["title"] for s in assistant._book.sessions_for_task("task-2")] == ["digest"]
 
 
-async def test_proactive_active_target_stamps_nothing(tmp_path):
-    """A target="active" firing runs in the conversation the user is already viewing, so it must not
-    claim that conversation for the task."""
-    assistant = await Assistant.create(
-        _config(tmp_path), _ConvCapturingChannel(), client_factory=lambda cid: MockAsyncModelClient(["out"])
-    )
+async def test_proactive_stamps_nothing_when_it_falls_back_to_the_viewed_conversation(tmp_path):
+    """A firing with nowhere of its own to run uses the conversation the user is already viewing, so
+    it must not claim that conversation for the task."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["out"]))
 
-    await assistant._proactive("run it", target="active", task_name="report", task_id="task-1")
+    await assistant._proactive("run it", task_name="report", task_id="task-1")
 
     assert "task_id" not in assistant._store.get(assistant._active_id).metadata
 
 
-async def test_proactive_new_session_degrades_on_single_conversation_channel(tmp_path):
+async def test_proactive_degrades_on_single_conversation_channel(tmp_path):
     channel = FakeChannel()  # no send_conversations
     client = MockAsyncModelClient(["task output"])
     assistant = await Assistant.create(_config(tmp_path), channel, client=client)
     active_key = assistant._session.key
 
-    await assistant._proactive("run the report", target="new", task_name="report")
+    await assistant._proactive("run the report", task_name="report")
 
     # No extra conversation; ran in place and pushed the reply.
     assert assistant._store.list_keys() == [active_key]
@@ -461,7 +459,7 @@ async def test_proactive_new_session_holds_at_most_one_gate_turn(tmp_path):
         _config(tmp_path), channel, client_factory=lambda cid: _RecordingClient(["task output"])
     )
 
-    await assistant._proactive("run the report", target="new", task_name="report")
+    await assistant._proactive("run the report", task_name="report")
 
     assert observed == [1]  # exactly one gate hold was active while the new session's turn ran
     assert assistant._gate.active_turns() == 0  # and none left over afterward
@@ -505,7 +503,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
     )
     viewed = assistant._active_id
 
-    await assistant._proactive("run the report", target="new", task_name="report")
+    await assistant._proactive("run the report", task_name="report")
 
     # Mid-run, the viewed conversation was never hijacked, and the run's own streaming context is a
     # *different* conversation than the viewed one -- the precondition for _approve to auto-deny.
@@ -522,91 +520,110 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
     assert assistant._active_id == viewed
 
 
-async def test_proactive_task_target_reuses_created_conversation(tmp_path):
+async def test_proactive_prunes_the_tasks_conversations_past_its_cap_oldest_first(tmp_path):
+    """The point of a cap: a task that fires often keeps its most recent runs and nothing older,
+    without the user deleting the pile by hand."""
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(
-        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out1", "out2"])
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out"])
     )
     active_key = assistant._active_id
 
-    first_key = await assistant._proactive("first run", target="task", task_name="digest")
-    assert first_key is not None and first_key != active_key
-    keys_after_first = set(assistant._store.list_keys())
+    kept: list[str] = []
+    for _ in range(3):
+        await assistant._proactive("run", task_name="digest", task_id="t1", max_conversations=2)
+        kept = [session.key for session in assistant._book.sessions_for_task("t1")]
 
-    second_key = await assistant._proactive("second run", target="task", task_name="digest", session_id=first_key)
-
-    assert second_key == first_key  # reused, not a fresh conversation
-    assert set(assistant._store.list_keys()) == keys_after_first  # no new conversation created
-    contents = [m.get("content") for m in assistant._store.get(first_key).messages]
-    assert "out1" in contents and "out2" in contents  # both firings' replies accumulate
-    assert "first run" in contents and "second run" in contents
-    assert assistant._active_id == active_key  # viewed conversation untouched
-
-
-async def test_proactive_task_target_recreates_when_conversation_deleted(tmp_path):
-    channel = _ConvCapturingChannel()
-    assistant = await Assistant.create(
-        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out1", "out2"])
-    )
-    first_key = await assistant._proactive("first", target="task", task_name="digest")
-    assistant._store.delete(first_key)
-    assistant._registry.discard(first_key)
-
-    second_key = await assistant._proactive("second", target="task", task_name="digest", session_id=first_key)
-
-    assert second_key and second_key != first_key  # stale id not resurrected as an empty session
-    assert first_key not in assistant._store.list_keys()
-    assert second_key in assistant._store.list_keys()
-
-
-async def test_proactive_latest_target_replaces_the_conversation_it_remembers(tmp_path):
-    """The point of "latest": a task that fires often keeps its most recent run and nothing older,
-    without the user deleting the pile by hand. Unlike "task" it never writes into the remembered
-    conversation -- it mints a fresh one and drops the old."""
-    channel = _ConvCapturingChannel()
-    assistant = await Assistant.create(
-        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out1", "out2"])
-    )
-    active_key = assistant._active_id
-
-    first_key = await assistant._proactive("first run", target="latest", task_name="digest")
-    assert first_key is not None and first_key != active_key
-    assert first_key in assistant._store.list_keys()  # nothing to replace on the first firing
-
-    second_key = await assistant._proactive("second", target="latest", task_name="digest", session_id=first_key)
-
-    assert second_key and second_key != first_key  # a fresh conversation, not the remembered one
-    assert first_key not in assistant._store.list_keys()  # ...and the one it replaced is gone
-    assert second_key in assistant._store.list_keys()
+    assert len(kept) == 2  # the third firing dropped the first run
+    assert all(key in assistant._store.list_keys() for key in kept)
     assert active_key in assistant._store.list_keys()  # the user's own conversation is untouched
 
 
-async def test_proactive_latest_target_keeps_the_previous_run_when_the_new_one_fails(tmp_path):
-    """Deleting only after the run succeeds is what keeps a failed firing from leaving nothing to
+async def test_proactive_at_a_cap_of_one_replaces_the_previous_run(tmp_path):
+    """A cap of one is the old "latest" behavior: each firing mints a conversation and the one before
+    it goes, never the one this firing just used."""
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out"])
+    )
+
+    await assistant._proactive("first run", task_name="digest", task_id="t1", max_conversations=1)
+    first_key = assistant._book.sessions_for_task("t1")[0].key
+    await assistant._proactive("second run", task_name="digest", task_id="t1", max_conversations=1)
+
+    kept = [session.key for session in assistant._book.sessions_for_task("t1")]
+    assert len(kept) == 1 and kept[0] != first_key
+    assert first_key not in assistant._store.list_keys()
+    assert kept[0] in assistant._store.list_keys()
+
+
+async def test_proactive_with_an_unlimited_cap_keeps_every_run(tmp_path):
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out"])
+    )
+
+    for _ in range(3):
+        await assistant._proactive("run", task_name="digest", task_id="t1", max_conversations=0)
+
+    assert len(assistant._book.sessions_for_task("t1")) == 3
+
+
+async def test_proactive_keeps_the_previous_run_when_the_new_one_fails(tmp_path):
+    """Pruning only after the run succeeds is what keeps a failed firing from leaving nothing to
     read: the last good run has to outlive a bad one."""
     channel = _ConvCapturingChannel()
     clients = iter([MockAsyncModelClient(["out1"]), _FailingClient([])])
     assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: next(clients))
 
-    first_key = await assistant._proactive("first run", target="latest", task_name="digest")
-    await assistant._proactive("second", target="latest", task_name="digest", session_id=first_key)
+    await assistant._proactive("first run", task_name="digest", task_id="t1", max_conversations=1)
+    first_key = assistant._book.sessions_for_task("t1")[0].key
+    await assistant._proactive("second run", task_name="digest", task_id="t1", max_conversations=1)
 
     assert first_key in assistant._store.list_keys()  # the last good run survived the failure
 
 
-async def test_proactive_latest_target_tolerates_an_already_deleted_conversation(tmp_path):
-    """The user can delete a run themselves between firings, so the replace must not be the thing
-    that takes down the scheduler job (invariant 6)."""
+async def test_proactive_tolerates_a_run_the_user_already_deleted(tmp_path):
+    """The user can delete a run themselves between firings, so pruning must not be the thing that
+    takes down the scheduler job (invariant 6)."""
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(
-        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out1", "out2"])
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out"])
     )
-    first_key = await assistant._proactive("first", target="latest", task_name="digest")
-    await assistant.delete_conversation(first_key)
+    await assistant._proactive("first", task_name="digest", task_id="t1", max_conversations=1)
+    await assistant.delete_conversation(assistant._book.sessions_for_task("t1")[0].key)
 
-    second_key = await assistant._proactive("second", target="latest", task_name="digest", session_id=first_key)
+    await assistant._proactive("second", task_name="digest", task_id="t1", max_conversations=1)
 
-    assert second_key and second_key in assistant._store.list_keys()
+    kept = assistant._book.sessions_for_task("t1")
+    assert len(kept) == 1 and kept[0].key in assistant._store.list_keys()
+
+
+async def test_proactive_prunes_only_the_conversations_of_the_task_that_fired(tmp_path):
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["out"])
+    )
+    await assistant._proactive("other task", task_name="other", task_id="t2", max_conversations=1)
+    other_key = assistant._book.sessions_for_task("t2")[0].key
+
+    for _ in range(2):
+        await assistant._proactive("mine", task_name="digest", task_id="t1", max_conversations=1)
+
+    assert other_key in assistant._store.list_keys()
+
+
+async def test_proactive_prunes_nothing_when_it_falls_back_to_the_viewed_conversation(tmp_path):
+    """A channel with no conversation list mints nothing, so the task owns nothing to prune -- and the
+    conversation it ran in belongs to the user, who must not lose it to a cap."""
+    channel = FakeChannel()  # no send_conversations
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["out1", "out2"]))
+    active_key = assistant._active_id
+
+    for _ in range(2):
+        await assistant._proactive("run", task_name="digest", task_id="t1", max_conversations=1)
+
+    assert assistant._store.list_keys() == [active_key]
 
 
 class _FailingClient(MockAsyncModelClient):
@@ -619,34 +636,27 @@ class _FailingClient(MockAsyncModelClient):
         raise RuntimeError("model exploded")
 
 
-async def test_proactive_task_target_surfaces_errors_and_still_returns_its_key(tmp_path):
+async def test_proactive_surfaces_errors_and_keeps_the_conversation_it_minted(tmp_path):
     """A failing scheduled firing must not escape into the scheduler job, which has no handler.
 
-    Before the proactive paths were unified, only target="active" had error handling: the
-    "new"/"task" branch returned early, past _proactive's handlers, so a model error propagated into
-    scheduling._fire_job and would take the scheduler down. It also skipped _remember_session, so a
-    task whose first firing failed forgot the conversation it had just minted and created another one
-    on every later firing.
+    Before the proactive paths were unified, only the run-in-place path had error handling: the
+    minting branch returned early, past _proactive's handlers, so a model error propagated into
+    scheduling._fire_job and would take the scheduler down. The conversation the failed firing minted
+    stays, so there is something to read that says what went wrong.
     """
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: _FailingClient([]))
     active_key = assistant._active_id
 
-    key = await assistant._proactive("do it", target="task", task_name="digest")
+    await assistant._proactive("do it", task_name="digest", task_id="t1")
 
-    assert key is not None and key != active_key  # the key is returned despite the failure...
-    assert key in assistant._store.list_keys()  # ...and names a real conversation to reuse
+    kept = assistant._book.sessions_for_task("t1")
+    assert len(kept) == 1 and kept[0].key != active_key
     assert any("failed" in str(text) for text in channel.sent)  # the user is told
     assert assistant._active_id == active_key  # the viewed conversation is untouched
 
-    # The next firing reuses that conversation instead of minting a second one.
-    before = set(assistant._store.list_keys())
-    again = await assistant._proactive("do it", target="task", task_name="digest", session_id=key)
-    assert again == key
-    assert set(assistant._store.list_keys()) == before
 
-
-async def test_proactive_active_target_surfaces_errors(tmp_path):
+async def test_proactive_surfaces_errors_on_the_fallback_path(tmp_path):
     channel = FakeChannel()
     assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: _FailingClient([]))
     assert await assistant._proactive("do it") is None  # swallowed, not raised
@@ -1228,7 +1238,7 @@ async def test_an_unattended_turn_opens_a_catch_up_record_for_the_conversation_i
     )
     active_id = assistant._active_id
 
-    await assistant._proactive("run the report", target="new", task_name="report")
+    await assistant._proactive("run the report", task_name="report")
 
     task_id = next(key for key in assistant._store.list_keys() if key != active_id)
     assert ("begin", task_id, "run the report") in channel.calls

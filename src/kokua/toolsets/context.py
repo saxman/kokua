@@ -210,8 +210,19 @@ class LiveState:
         scheduling toolset, since a persisted task must still fire.
         """
         from kokua.scheduling import TaskService
+        from kokua.toolsets.scheduling import DEFAULT_MAX_TASK_CONVERSATIONS
 
-        return TaskService(self.scheduler, self.config.scheduled_tasks_path, self.proactive)
+        return TaskService(
+            self.scheduler,
+            self.config.scheduled_tasks_path,
+            self.proactive,
+            # A lambda rather than the value: read at fire time, so a change to the setting reaches the
+            # next firing. The fallback covers a config built without ``resolve_config``, which is the
+            # only thing that seeds a section for every declared toolset.
+            default_max_conversations=lambda: self.config.toolset_settings.get("scheduling", {}).get(
+                "max_task_conversations", DEFAULT_MAX_TASK_CONVERSATIONS
+            ),
+        )
 
 
 @dataclass(frozen=True)

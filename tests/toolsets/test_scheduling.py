@@ -13,7 +13,7 @@ from tests.scheduling.test_tasks import FakeScheduler, _noop_fire
 def _make(tmp_path):
     scheduler = FakeScheduler()
     path = tmp_path / "scheduled_tasks.json"
-    tasks = TaskService(scheduler, path, _noop_fire)
+    tasks = TaskService(scheduler, path, _noop_fire, default_max_conversations=lambda: 3)
     return scheduler, path, {fn.__name__: fn for fn in make_scheduling_tools(tasks)}
 
 
@@ -64,10 +64,10 @@ async def test_list_scheduled_tasks(tmp_path):
     scheduler, path, tools = _make(tmp_path)
     assert "No scheduled tasks" in await tools["list_scheduled_tasks"]()
 
-    await tools["schedule_task"]("summarize inbox", "daily", time_of_day="09:00", name="brief", target="task")
+    await tools["schedule_task"]("summarize inbox", "daily", time_of_day="09:00", name="brief", max_conversations=1)
 
     listing = await tools["list_scheduled_tasks"]()
-    assert "brief" in listing and "summarize inbox" in listing and "target=task" in listing
+    assert "brief" in listing and "summarize inbox" in listing and "keep=1" in listing
 
 
 async def test_list_shows_a_disabled_task_as_disabled(tmp_path):
@@ -94,12 +94,12 @@ async def test_list_marks_a_truncated_prompt(tmp_path):
 async def test_get_scheduled_task_returns_the_whole_prompt(tmp_path):
     # Editing a task requires reading its current prompt; the listing's preview is not enough.
     scheduler, path, tools = _make(tmp_path)
-    await tools["schedule_task"](LONG_PROMPT, "daily", time_of_day="09:00", name="news", target="task")
+    await tools["schedule_task"](LONG_PROMPT, "daily", time_of_day="09:00", name="news", max_conversations=2)
 
     out = await tools["get_scheduled_task"]("news")
 
     assert LONG_PROMPT in out
-    assert "news" in out and "daily" in out and "target: task" in out
+    assert "news" in out and "daily" in out and "keep: 2" in out
 
 
 # -- editing ---------------------------------------------------------------------------------------
@@ -203,36 +203,33 @@ async def test_enable_and_disable_report_an_unknown_handle(tmp_path):
 
 
 async def test_run_scheduled_task_says_where_the_output_will_appear(tmp_path):
+    """Every firing runs in its own conversation, so the model has to be told the output is not
+    coming back as this tool's return value."""
     scheduler, path, tools = _make(tmp_path)
-    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r", target="new")
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="r")
 
     out = await tools["run_scheduled_task"]("r")
 
     assert "now" in out.lower() and "r" in out and "new conversation" in out.lower()
 
 
-async def test_run_scheduled_task_says_where_a_latest_targets_output_will_appear(tmp_path):
-    """ "latest" runs in a fresh conversation like "new", so the model must be told the same thing:
-    the output is not coming back as this tool's return value."""
+async def test_schedule_task_reports_a_negative_retention_cap(tmp_path):
     scheduler, path, tools = _make(tmp_path)
-    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="l", target="latest")
 
-    out = await tools["run_scheduled_task"]("l")
+    out = await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="t", max_conversations=-1)
 
-    assert "new conversation" in out.lower()
+    assert "-1" in out and "0" in out and scheduling.load(path) == []
 
 
-async def test_update_naming_an_unknown_target_lists_the_ones_that_exist(tmp_path):
-    """The model picks a target from this sentence when it gets one wrong, so the list has to be
-    complete -- an omitted target is one the model will not offer the user."""
+async def test_get_scheduled_task_marks_an_inherited_cap_as_the_default(tmp_path):
+    """A task that never chose a cap follows the configured default, and the model has to be able to
+    tell that apart from one pinned to the same number."""
     scheduler, path, tools = _make(tmp_path)
     await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="t")
 
-    out = await tools["update_scheduled_task"]("t", target="elsewhere")
+    out = await tools["get_scheduled_task"]("t")
 
-    assert "elsewhere" in out
-    for known in ("active", "new", "task", "latest"):
-        assert known in out
+    assert "keep: 3 (default)" in out
 
 
 async def test_run_scheduled_task_notes_a_disabled_task_and_still_runs_it(tmp_path):

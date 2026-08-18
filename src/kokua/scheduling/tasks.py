@@ -23,11 +23,9 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from .recurrence import next_fire
-from .registry import record_target, add, find, load, remove
+from .registry import add, find, load, remove
 
 logger = logging.getLogger(__name__)
-
-TARGETS = ("active", "new", "task", "latest")
 
 # What a task's next firing is, when there is no countdown to give. Rendered separately by each
 # presentation layer, so the wording can differ between the sidebar and a tool result.
@@ -65,12 +63,12 @@ class DuplicateName(TaskError):
         self.name = name
 
 
-class InvalidTarget(TaskError):
-    """A target outside :data:`TARGETS`. Carries the offending value."""
+class InvalidRetention(TaskError):
+    """A retention cap below zero, which has no meaning. Carries the offending value."""
 
-    def __init__(self, target: object):
-        super().__init__(target)
-        self.target = target
+    def __init__(self, value: object):
+        super().__init__(value)
+        self.value = value
 
 
 @dataclass(frozen=True)
@@ -92,15 +90,19 @@ class TaskService:
     """Every scheduled-task operation, bound to a live ``Scheduler`` and a proactive-turn callback.
 
     ``fire`` is the assistant's proactive-turn entry point, called as
-    ``await fire(prompt, target=..., task_name=..., session_id=..., task_id=...)`` when a task is due;
-    for a ``target="task"`` firing it returns the conversation key it used, which is persisted back onto
-    the record so the next firing reuses it. ``task_id`` is passed so a conversation the firing mints
-    records which task minted it.
+    ``await fire(prompt, task_name=..., task_id=..., max_conversations=...)`` when a task is due.
+    ``task_id`` is passed so the conversation the firing mints records which task minted it, which is
+    both how a front end groups a task's runs and how retention knows which conversations to prune.
+
+    ``default_max_conversations`` is read at fire time rather than captured, so a change to the
+    ``[scheduling]`` setting behind it reaches the next firing without a restart. A callable rather
+    than the config object keeps this subsystem free of any dependency on the config layer.
     """
 
     scheduler: object
     registry_path: Path
     fire: Callable[..., Awaitable[None]]
+    default_max_conversations: Callable[[], int] = lambda: 0
 
     # -- reading ---------------------------------------------------------------------------------
 
@@ -140,8 +142,8 @@ class TaskService:
     def list(self) -> list[dict]:
         """Every task as fields, with its ``status`` and ``next_fire_seconds`` derived once.
 
-        ``session_id`` is included because it is the only link to the conversation of a
-        ``target="task"`` task created before conversations recorded their ``task_id``.
+        ``max_conversations`` is the record's own cap, ``None`` when it inherits the configured
+        default; the effective value is resolved at fire time, not here.
         """
         now = datetime.now()
         items = []
@@ -153,10 +155,9 @@ class TaskService:
                     "name": record.get("name"),
                     "prompt": record["prompt"],
                     "schedule": record["schedule"],
-                    "target": record_target(record),
+                    "max_conversations": record.get("max_conversations"),
                     "enabled": record.get("enabled", True),
                     "created_at": record.get("created_at", ""),
-                    "session_id": record.get("session_id") or None,
                     "status": status,
                     "next_fire_seconds": seconds,
                 }
@@ -173,18 +174,6 @@ class TaskService:
         self.scheduler.at(delay, functools.partial(self._fire, record["id"], rearm=True), name=record["id"])
         return delay
 
-    def _remember_session(self, task_id: str, target: str, used_key) -> None:
-        # Persist the conversation key a firing used, for the two targets that need it next time:
-        # "task" reuses it, and "latest" deletes it. Re-read the registry so a cancel/delete during
-        # the run wins (mirrors the re-arm guard): a write-back must never resurrect a record the
-        # user removed mid-run.
-        if target not in ("task", "latest") or not used_key:
-            return
-        current = self._lookup(task_id)
-        if current is not None and current.get("session_id") != used_key:
-            current["session_id"] = used_key
-            add(self.registry_path, current)
-
     async def _fire(self, task_id: str, *, rearm: bool) -> None:
         """Run a task's prompt through the proactive path, as a scheduled firing would.
 
@@ -194,16 +183,13 @@ class TaskService:
         record = self._lookup(task_id)
         if record is None:  # cancelled between arming and firing
             return
-        target = record_target(record)
         try:
-            used_key = await self.fire(
+            await self.fire(
                 record["prompt"],
-                target=target,
                 task_name=record.get("name"),
-                session_id=record.get("session_id") or None,
                 task_id=task_id,
+                max_conversations=self._retention(record),
             )
-            self._remember_session(task_id, target, used_key)
         finally:
             if rearm:
                 # Re-read the registry: a cancel during the run (which removes the record) must win
@@ -226,6 +212,19 @@ class TaskService:
 
     # -- mutating --------------------------------------------------------------------------------
 
+    def _retention(self, record: dict) -> int:
+        """How many conversations this task keeps: its own cap, or the configured default.
+
+        ``0`` is a real value (unlimited), so an absent key is the only thing that inherits.
+        """
+        own = record.get("max_conversations")
+        return self.default_max_conversations() if own is None else int(own)
+
+    @staticmethod
+    def _validate_retention(value: Optional[int]) -> None:
+        if value is not None and value < 0:
+            raise InvalidRetention(value)
+
     def _validate(self, schedule: dict) -> float:
         """The delay a schedule resolves to, rejecting one that cannot be armed."""
         try:
@@ -242,14 +241,19 @@ class TaskService:
         schedule: dict,
         *,
         name: Optional[str] = None,
-        target: str = "active",
+        max_conversations: Optional[int] = None,
     ) -> tuple[dict, float]:
         """Persist and arm a new task. Returns ``(record, seconds until its first firing)``.
 
-        Raises :class:`ScheduleInvalid`, :class:`SchedulePast`, or :class:`DuplicateName`, each before
-        anything is written, so a rejected call leaves the registry untouched.
+        ``max_conversations`` left as ``None`` inherits the configured default at fire time, so a task
+        created before the default changed follows the new one.
+
+        Raises :class:`ScheduleInvalid`, :class:`SchedulePast`, :class:`DuplicateName`, or
+        :class:`InvalidRetention`, each before anything is written, so a rejected call leaves the
+        registry untouched.
         """
         delay = self._validate(schedule)
+        self._validate_retention(max_conversations)
         if name and find(load(self.registry_path), name) is not None:
             raise DuplicateName(name)
         record = {
@@ -257,8 +261,7 @@ class TaskService:
             "name": name,
             "prompt": prompt,
             "schedule": schedule,
-            "target": target,
-            "session_id": "",  # populated on the first firing when target == "task"
+            "max_conversations": max_conversations,
             "created_at": datetime.now().isoformat(),
             "enabled": True,
         }
@@ -273,7 +276,7 @@ class TaskService:
         prompt: Optional[str] = None,
         schedule: Optional[dict] = None,
         name: Optional[str] = None,
-        target: Optional[str] = None,
+        max_conversations: Optional[int] = None,
     ) -> tuple[dict, list[str]]:
         """Edit a task in place, keeping its id, history, and every field left as ``None``.
 
@@ -284,6 +287,7 @@ class TaskService:
         Every rejection is raised before the first mutation, so a partially valid edit applies nothing.
         """
         record = self._require(id_or_name)
+        self._validate_retention(max_conversations)
         changed: list[str] = []
 
         merged = record["schedule"]
@@ -303,18 +307,9 @@ class TaskService:
         if prompt is not None and prompt != record["prompt"]:
             record["prompt"] = prompt
             changed.append("prompt")
-        if target is not None:
-            if target not in TARGETS:
-                raise InvalidTarget(target)
-            if target != record_target(record):
-                # The dedicated conversation is kept even when the target moves off "task", so flipping
-                # back resumes that history instead of minting a second one. Moving *onto* "latest" is
-                # the exception: there the remembered key is what the next firing deletes, so keeping it
-                # would make the switch quietly destroy the history the task built up under "task".
-                if target == "latest":
-                    record["session_id"] = ""
-                record["target"] = target
-                changed.append("target")
+        if max_conversations is not None and max_conversations != record.get("max_conversations"):
+            record["max_conversations"] = max_conversations
+            changed.append("max_conversations")
 
         if not changed:
             return record, changed

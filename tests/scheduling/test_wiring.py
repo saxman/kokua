@@ -31,7 +31,7 @@ async def test_list_tasks_reports_the_persisted_registry(tmp_path):
             "name": "brief",
             "prompt": "summarize inbox",
             "schedule": {"type": "interval", "seconds": 3600},
-            "target": "task",
+            "max_conversations": 1,
             "created_at": "2026-08-01T00:00:00",
             "enabled": True,
         },
@@ -97,3 +97,27 @@ async def test_create_arms_persisted_tasks_and_drops_past_once(tmp_path):
     await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
     # Past-due one-shot was dropped during boot arming.
     assert scheduling.load(cfg.scheduled_tasks_path) == []
+
+
+async def test_the_configured_default_cap_reaches_the_task_service(tmp_path):
+    """The default is read at fire time, not captured at construction, so a settings change reaches
+    the next firing without a restart."""
+    from tests.channels import planning_settings
+
+    cfg = _config(tmp_path, toolset_settings={**planning_settings(), "scheduling": {"max_task_conversations": 2}})
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert assistant._state.tasks.default_max_conversations() == 2
+
+    cfg.toolset_settings["scheduling"]["max_task_conversations"] = 5
+    assert assistant._state.tasks.default_max_conversations() == 5
+
+
+async def test_a_config_without_a_scheduling_section_falls_back_to_the_declared_default(tmp_path):
+    """Only ``resolve_config`` seeds a section for every declared toolset, so a config built any other
+    way must still produce the cap the toolset declares rather than an unlimited one."""
+    from kokua.toolsets.scheduling import DEFAULT_MAX_TASK_CONVERSATIONS
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert assistant._state.tasks.default_max_conversations() == DEFAULT_MAX_TASK_CONVERSATIONS

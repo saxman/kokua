@@ -691,7 +691,7 @@ def _seed_task_and_conversations(config, *, task_id="t1", enabled=True, with_tas
                 "name": "morning-brief",
                 "prompt": "Summarize my calendar and unread mail.",
                 "schedule": {"type": "daily", "at": "07:00"},
-                "target": "new",
+                "max_conversations": 0,
                 "created_at": "2026-08-01T00:00:00",
                 "enabled": enabled,
             },

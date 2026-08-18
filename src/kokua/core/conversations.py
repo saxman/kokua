@@ -169,6 +169,18 @@ class ConversationBook:
         sessions.sort(key=lambda session: session.metadata.get("updated_at", ""), reverse=True)
         return sessions
 
+    def sessions_for_task(self, task_id: str) -> list[Session]:
+        """The conversations a scheduled task minted, oldest first.
+
+        Ordered by ``created_at`` rather than the ``updated_at`` :meth:`sessions` uses: retention
+        prunes a task's runs in the order they were minted, and a late turn or edit touching an older
+        run must not make it look like the newest one. ``updated_at`` then the key break a tie, so a
+        session stored before conversations recorded ``created_at`` still sorts deterministically.
+        """
+        owned = [s for s in self.sessions() if s.metadata.get("task_id") == task_id]
+        owned.sort(key=lambda s: (s.metadata.get("created_at", ""), s.metadata.get("updated_at", ""), s.key))
+        return owned
+
     def list(self) -> list[dict]:
         """All conversations as {id, title, updated_at, active, task_id}, most-recently-updated first.
 

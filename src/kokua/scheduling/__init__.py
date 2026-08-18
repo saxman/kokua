@@ -4,11 +4,11 @@ The agent tools that drive this live in ``kokua.toolsets.scheduling``; nothing h
 """
 
 from .recurrence import WEEKDAYS, next_fire
-from .registry import add, find, load, record_target, remove
+from .registry import add, find, load, remove
 from .tasks import (
     DuplicateName,
     EnabledResult,
-    InvalidTarget,
+    InvalidRetention,
     ScheduleInvalid,
     SchedulePast,
     TaskError,
@@ -23,7 +23,6 @@ __all__ = [
     "add",
     "remove",
     "find",
-    "record_target",
     "TaskService",
     "EnabledResult",
     "TaskError",
@@ -31,5 +30,5 @@ __all__ = [
     "ScheduleInvalid",
     "SchedulePast",
     "DuplicateName",
-    "InvalidTarget",
+    "InvalidRetention",
 ]

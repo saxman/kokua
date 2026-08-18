@@ -139,8 +139,9 @@ class HumanGate:
         """Tool-approval gate run before each tool call (published to the model client per run).
 
         Ungated tools pass. A proactive/scheduled turn always auto-denies a gated tool: it is
-        unattended, so nobody is watching to confirm, and a ``target="active"`` scheduled task would
-        otherwise look foreground (its turn conversation equals the viewed one) and wrongly prompt.
+        unattended, so nobody is watching to confirm, and a firing that fell back to the viewed
+        conversation would otherwise look foreground (its turn conversation equals the viewed one) and
+        wrongly prompt.
         Otherwise a reactive turn is approved only if its conversation is the one the user is
         currently viewing; a turn backgrounded by a switch auto-denies. Otherwise prompt over the
         channel and await the answer, which the serve loop routes here.

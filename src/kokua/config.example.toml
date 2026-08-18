@@ -187,6 +187,14 @@ level = "INFO"
 # to = "you@example.com"        # the ONLY address the assistant can send to
 # use_ssl = false               # false -> STARTTLS on connect; true -> implicit TLS (SMTP_SSL)
 
+[scheduling]
+# How many conversations a scheduled task keeps. Every firing runs in its own conversation; once a task
+# has more than this, its oldest are deleted after the next firing succeeds. 1 means each run replaces
+# the one before it; 0 keeps every run forever. A task can override this for itself (the
+# `max_conversations` argument of `schedule_task`), and this is what the ones that do not follow.
+# Like [planning] below, this section exists because the `scheduling` toolset declares it.
+# max_task_conversations = 3
+
 [planning]
 # Deep planning is a toolset: [agents.<name>].tools must list "planning" for the "/plan <task>" command
 # (and the web UI's Plan toggle) to exist at all. It drafts an explicit plan (which tools/skills/MCP
