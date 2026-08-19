@@ -480,16 +480,44 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   workflow's independent reviewers run at the `[assistant]` effort too, being no agent's table.
   Two caveats it is worth knowing: a level is advisory on a model whose card declares no effort-level
   support (AIMU warns once and reasoning is still on), and `false` additionally selects a card's
-  instruct-mode sampling profile where it declares one -- only the Qwen 3.5/3.6/3.8 cards today, and
-  since Kokua sets no sampling parameter of its own, on those models nothing here can pin it back.
+  instruct-mode sampling profile where it declares one -- only the Qwen 3.5/3.6/3.8 cards today. A
+  generation parameter set below still applies over that profile; it is only a parameter nobody set that
+  the profile switch decides outright.
   Needs `aimu>=0.17.0`, which added the `agent_types` spec key the per-worker half rides on. An AIMU that
   predates it ignores an unknown spec key silently, so a per-worker effort would simply not apply with
   nothing raised; that release also closes a spec's keys to a published `SUBAGENT_SPEC_KEYS`, which is
   what the startup preflight now probes, since the key itself is a dict entry no probe can see.
-- **`/diag` names the models and the reasoning effort in play**: the entry agent's first, then each agent
-  that declares its own. Neither has a panel field and both are read only at startup, so this is where a
-  running session says what they are. With nothing declared, the model line reports what AIMU resolved
-  onto the live client, and the thinking line is omitted rather than reading "unset" on every `/diag`.
+- **A default tier of generation parameters, with per-key overrides.** `[assistant.generation]` sets
+  `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`, `repetition_penalty`, `max_tokens`, and
+  `context_length` for every agent; an agent's own `[agents.<name>.generation]` overrides it **per key**,
+  so naming only `temperature` still inherits the default's `context_length` rather than replacing the
+  whole table. `AssistantConfig.generation_for(name)` is the single resolution, per agent and never
+  inherited down the delegation graph, and it is empty by default -- the normal case, since a key this
+  never sets stays absent from the request and a model card's own tuned sampling profile is what answers
+  instead. The result reaches three places: the entry agent's client (`build_model_client`), each
+  spawned worker's spec (the *resolved* value, like `thinking`, so an undeclared worker still inherits
+  the default rather than skipping it), and the two planning reviewers, which get the `[assistant]` tier
+  only, being no agent's own table. Startup-only with no panel field, like the model and the effort, and
+  `[assistant.generation]` is the first dotted sub-table `config/file.py`'s section loader handles, which
+  is what lets a schema entry per parameter serve it instead of the flat-key loop reading it as one
+  `[assistant]` key holding a table.
+  Two things worth knowing about the parameters themselves: `max_tokens` caps *generated* tokens while
+  `context_length` sizes the whole window prompt and output share, so a 32768 window with a 4096 cap
+  leaves roughly 28k for the system prompt, the tool block, and history -- and AIMU's own weakest tier
+  sets `max_tokens = 1024` on Anthropic, the OpenAI-compatible family, and llama.cpp, which is low for a
+  turn carrying tool results. A parameter a backend cannot take is dropped with a warning naming the
+  remedy: Ollama's SDK has no `min_p`, the Anthropic API has no penalties, and only Ollama's native API
+  sizes the context window per request.
+  Needs `aimu>=0.18.0` for the per-agent half, which added the `generate_kwargs` key to the `agent_types`
+  spec; an AIMU that predates it ignores the unknown key silently, so 0.18.0 replaces the 0.17.0 floor
+  above rather than sitting alongside it. This is a breaking change.
+- **`/diag` names the models, the reasoning effort, and the generation parameters in play**: the entry
+  agent's first, then each agent that declares its own. None has a panel field and all are read only at
+  startup, so this is where a running session says what they are. With nothing declared, the model line
+  reports what AIMU resolved onto the live client, and the thinking and generation lines are omitted
+  rather than reading "unset" on every `/diag`; an agent that overrides the default generation tier shows
+  only the keys it declares, not the merged result, since what a table declares is what a reader checks
+  against the file.
 - **A stored conversation says which model produced its output, and how hard it thought.** Each turn
   records the model that answered it under `metadata.model.<user_index>` and its reasoning effort under
   `metadata.thinking.<user_index>`, and each sub-agent card carries its own worker's pair, so a

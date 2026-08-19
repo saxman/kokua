@@ -131,3 +131,28 @@ async def test_diag_reports_a_default_of_off_with_no_overrides(tmp_path):
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
 
     assert "- thinking: off" in assistant._diag_report()
+
+
+async def test_diag_reports_the_generation_parameters_each_agent_runs_with(tmp_path):
+    """Startup-only with no panel field, exactly like the model and the effort, so /diag is the only
+    place a running session says what it is sampling at."""
+    from tests.channels import FakeChannel, example_agents
+
+    agents = example_agents()
+    agents["researcher"].generation = {"temperature": 0.2}
+    config = _config(tmp_path, generation={"temperature": 0.7, "context_length": 32768}, agents=agents)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert (
+        "- generation: context_length=32768, temperature=0.7 | researcher: temperature=0.2" in assistant._diag_report()
+    )
+
+
+async def test_diag_omits_the_generation_line_when_nothing_is_declared(tmp_path):
+    """The common case is every parameter at the model card's own value, so a line saying so is noise."""
+    from tests.channels import FakeChannel
+
+    config = _config(tmp_path)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert "generation:" not in assistant._diag_report()

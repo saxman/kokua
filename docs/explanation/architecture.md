@@ -359,17 +359,67 @@ level. What differs:
    wrappers thread `config.thinking` to it. A reviewer is not an `[agents.*]` agent, so the `[assistant]`
    tier is the only one it has -- exactly as it is for the model it already ran on.
 
-One consequence worth knowing, since Kokua otherwise sets no sampling parameter at all: `false` also
-selects a model card's instruct-mode sampling profile where the card declares one (`select_profile` in
-AIMU). Only the Qwen 3.5/3.6/3.8 cards do today; every other model has a single profile and is
-unaffected. Kokua populates neither tier above the card, so on those four models the switch is the
-effective sampling and nothing in Kokua can pin it back.
+One consequence worth knowing: `false` also selects a model card's instruct-mode sampling profile where
+the card declares one (`select_profile` in AIMU). Only the Qwen 3.5/3.6/3.8 cards do today; every other
+model has a single profile and is unaffected. Any key `[assistant.generation]` or an agent's own
+`[agents.<name>.generation]` sets still applies over that profile -- it is a tier above whichever profile
+`select_profile` picked, not a replacement for the mechanism -- so it is only a parameter nobody set that
+the profile switch decides outright.
 
-The per-agent half needs `aimu>=0.18.0`, which added the `generate_kwargs` key to the `agent_types` spec.
+The per-agent half needs `aimu>=0.17.0`, which added the `"thinking"` key to the `agent_types` spec.
 An AIMU that predates it ignores an unknown spec key in silence, so a per-worker effort would simply not
 apply with nothing raised -- and a dict key is invisible to both a name lookup and a signature check. The
 same release closes a spec's keys to a published set (`SUBAGENT_SPEC_KEYS`), which is what the startup
 probe checks instead: a symbol, and the set the depended-on key belongs to. See `kokua.aimu_compat`.
+
+### Generation parameters
+
+`[assistant.generation]` sets `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`,
+`repetition_penalty`, `max_tokens`, and `context_length` for every agent; an agent's own
+`[agents.<name>.generation]` overrides it **per key**, not as a whole-table replacement, so an agent
+naming only `temperature` still inherits the default's `context_length`. `AssistantConfig.generation_for(name)`
+is the single resolution -- `{**self.generation, **(agent.generation if agent else {})}` -- and, like
+`model_for` and `thinking_for`, it is per agent and never inherited down the delegation graph. It returns
+an empty dict when nothing is declared anywhere, which is the normal case: a key a config never mentions
+stays absent from the request, so a model card's own tuned sampling profile survives untouched.
+
+Three places apply the result, all of them startup-only reads:
+
+1. **The entry agent's client.** `core.build.build_model_client` sets `client.default_generate_kwargs =
+   config.generation_for(agent_name)` right after construction, layering this tier over whatever profile
+   `select_profile` already chose.
+2. **Each spawned worker's spec.** `build_agent_specs` writes the *resolved* value into
+   `specs[name]["generate_kwargs"]`, not just a declared one, for the same reason `thinking` does: AIMU
+   reads a spec without the key as "no generation parameters", so an undeclared worker would skip the
+   default rather than inherit it. Omitted entirely when nothing resolves, since an empty dict is itself
+   a written tier that would still sit above the card's profile.
+3. **The two planning reviewers.** `workflows/planning/runner.py` threads `config.generation` (not
+   `generation_for`, since a reviewer is no agent's own table) to both the plan-reviewer and the
+   result-reviewer, exactly as it already threads `config.thinking`. `[assistant.generation]` is the only
+   tier a reviewer can have.
+
+The per-agent half needs `aimu>=0.18.0`, which added the `generate_kwargs` key to the `agent_types` spec
+-- a fourth capability the startup probe covers, alongside the name lookup, the signature check, and the
+`"thinking"` key: 0.17.0 published `SUBAGENT_SPEC_KEYS` itself, so the set's existence no longer proves
+this one, and `generate_kwargs`'s membership in it is what `kokua.aimu_compat` checks instead.
+
+Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
+are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
+the whole window the prompt and the output share, so `context_length = 32768` with `max_tokens = 4096`
+leaves roughly 28k for the system prompt, the tool block, and history. And a parameter a backend cannot
+take is dropped by AIMU with a warning naming the remedy -- Ollama's SDK has no `min_p`, the Anthropic API
+has no penalties, and only Ollama's native API sizes the context window per request, so `context_length`
+is a no-op with a warning everywhere else.
+
+`[assistant.generation]` is also the first sub-table `config/file.py`'s `_sections` handles: `tomllib`
+nests a dotted TOML header like `[assistant.generation]` inside `assistant`, so a flat key loop over
+`[assistant]` would read it as one key holding a table rather than as its own section. `_sections`
+re-enters it as `assistant.generation`, which is what lets one schema entry per parameter serve it and
+what makes an unknown key inside it report `[assistant.generation].<key>` rather than a generic
+`[assistant]` type complaint. Read only at startup, like the model and the reasoning effort: there is no
+settings-panel field for it, and `update_config` can write the default tier (a cold key, applying on the
+next start) but not an agent's own `[agents.<name>.generation]`, which stays hand-edit only like the rest
+of `[agents.*]`.
 
 `config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
 comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Three writers: the web
