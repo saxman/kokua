@@ -22,7 +22,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.17.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.18.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -31,7 +31,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.17.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.18.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -52,7 +52,13 @@ Consequences for working in this repo:
   wants -- a checkout carrying it necessarily carries every earlier release's surface too, so nothing is
   lost by moving off `aio.ContextOverflowError`. The probe takes whatever shape its surface has, and a
   *signature* check when that surface is a keyword argument no `getattr` would notice (as
-  `SkillManager(include=...)` was, before this). If you add a Kokua feature needing a newer AIMU, raise
+  `SkillManager(include=...)` was, before this). AIMU 0.18.0 is a fourth, and it moves the probe again
+  without moving the symbol: the capability is `generate_kwargs`, a member of that same
+  `SUBAGENT_SPEC_KEYS`, published one release earlier for the `thinking` key. Once the set itself is a
+  published symbol, its mere presence stops proving anything -- the same gap a name lookup left for a
+  dict key, one level down, inside a set instead of at module scope. So the probe stays on
+  `SUBAGENT_SPEC_KEYS` and gains a third shape, a membership check, alongside the name lookup and the
+  signature check. If you add a Kokua feature needing a newer AIMU, raise
   `MINIMUM_AIMU` and the `pyproject.toml` floor in the same commit, and move the probe to whatever the new
   surface is. When a release genuinely offers no handle a probe can grip, leave the probe where it is and
   say so in `aimu_compat`'s docstring rather than moving it to something it can only pretend to check --

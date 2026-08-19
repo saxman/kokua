@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.17.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.18.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -27,6 +27,12 @@ release probe-able anyway is the other half of it -- closing a spec's keys to a 
 ``SUBAGENT_SPEC_KEYS``, which is a symbol *and* is the set the key Kokua depends on belongs to. Where a
 release offers no such handle, leave the probe where it is and say so here rather than moving it to
 something it could only pretend to check.
+
+A probe takes whichever shape its surface has, and 0.18.0 needed a third: the capability is the
+``"generate_kwargs"`` entry in ``SUBAGENT_SPEC_KEYS``, and the set carrying it shipped one release
+earlier, so the symbol's existence proves nothing and its contents prove everything. Hence a
+membership check, alongside the name lookup and the signature check (as ``SkillManager(include=...)``
+was, before this).
 """
 
 from __future__ import annotations
@@ -36,16 +42,17 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 17, 0)
+MINIMUM_AIMU = (0, 18, 0)
 
-# The newest AIMU surface Kokua depends on: the closed `agent_types` spec key set, which contains the
-# `thinking` key `build_agent_specs` writes for a per-agent reasoning effort. The set is the probe rather
-# than the key because a dict key cannot be looked up on a module -- see the module docstring. Looked up
-# rather than imported, so a miss is a clean message instead of an ImportError here. `None` parameter: a
-# plain name lookup is enough, since the name either exists or the behavior behind it does not.
+# The newest AIMU surface Kokua depends on: the `generate_kwargs` member of the closed `agent_types`
+# spec key set, which `build_agent_specs` writes for a per-agent generation table. The set is the
+# symbol and the key is checked *in* it, because 0.17.0 published the set itself -- so its existence
+# no longer proves anything, where its contents do. `None` for the parameter: a member check answers
+# this capability, and a signature check would be probing the wrong shape.
 _PROBE_MODULE = "aimu.tools.builtin"
 _PROBE_SYMBOL = "SUBAGENT_SPEC_KEYS"
 _PROBE_PARAMETER: Optional[str] = None
+_PROBE_MEMBER: Optional[str] = "generate_kwargs"
 
 
 class AimuVersionError(RuntimeError):
@@ -99,6 +106,13 @@ def require_aimu() -> None:
             _message(
                 f"the AIMU at {where} reports version {installed} but has no {_PROBE_SYMBOL}, "
                 f"so it predates that release"
+            )
+        )
+    if _PROBE_MEMBER is not None and _PROBE_MEMBER not in probed:
+        raise AimuVersionError(
+            _message(
+                f"the AIMU at {where} reports version {installed} but its {_PROBE_SYMBOL} has no "
+                f"{_PROBE_MEMBER!r} entry, so it predates that release"
             )
         )
     if _PROBE_PARAMETER is None:

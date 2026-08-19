@@ -365,7 +365,7 @@ AIMU). Only the Qwen 3.5/3.6/3.8 cards do today; every other model has a single 
 unaffected. Kokua populates neither tier above the card, so on those four models the switch is the
 effective sampling and nothing in Kokua can pin it back.
 
-The per-agent half needs `aimu>=0.17.0`, which added the `"thinking"` key to the `agent_types` spec.
+The per-agent half needs `aimu>=0.18.0`, which added the `generate_kwargs` key to the `agent_types` spec.
 An AIMU that predates it ignores an unknown spec key in silence, so a per-worker effort would simply not
 apply with nothing raised -- and a dict key is invisible to both a name lookup and a signature check. The
 same release closes a spec's keys to a published set (`SUBAGENT_SPEC_KEYS`), which is what the startup
