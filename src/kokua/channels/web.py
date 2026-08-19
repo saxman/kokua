@@ -154,6 +154,7 @@ def conversation_to_frames(
     show_tools: bool,
     subagent: Optional[dict] = None,
     trace: Optional[dict] = None,
+    failure: Optional[dict] = None,
 ) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
@@ -175,11 +176,18 @@ def conversation_to_frames(
       - ``trace``: the full raw verbose trace as ``phase`` + ``reasoning`` items. A traced turn shows
         the raw output instead of reviewer cards, and its trace already ends with the final answer, so
         the committed assistant message for that turn is skipped to avoid showing the answer twice.
+
+    ``failure`` is keyed the same way, but replays at the *end* of its turn rather than after the user
+    bubble: it says why the turn stopped, which only reads correctly after whatever the turn managed to
+    produce. It matters most for a scheduled run, whose error never reached this conversation live -- the
+    status line for a firing goes to whichever conversation the user was viewing at the time.
     """
     subagent = subagent or {}
     trace = trace or {}
+    failure = failure or {}
     items: list[dict] = []
     results = _tool_results_by_call_id(messages)
+    pending_failure: Optional[tuple[str, object]] = None  # (reason, the turn's timestamp)
 
     def add(item: dict, timestamp) -> None:
         # Attach the source message's append-time timestamp (AIMU's inert ``timestamp`` key) so the page
@@ -190,6 +198,20 @@ def conversation_to_frames(
             item["ts"] = timestamp
         items.append(item)
 
+    def flush_failure() -> None:
+        """Close the turn in progress with its recorded reason, if it had one.
+
+        Held until the turn ends rather than emitted where it is read, because the reason belongs after
+        the output it cut short. A turn ends at the next user message or at the end of the transcript,
+        so this is called from both places; a conversation the user carried on in after a failed turn
+        therefore keeps the notice inside that turn instead of trailing it off the bottom.
+        """
+        nonlocal pending_failure
+        if pending_failure is not None:
+            reason, turn_ts = pending_failure
+            pending_failure = None
+            add({"type": "notice", "text": reason}, turn_ts)
+
     for index, message in enumerate(messages):
         role = message.get("role")
         provenance = message.get(PROVENANCE_KEY)
@@ -197,9 +219,14 @@ def conversation_to_frames(
         if role == "user":
             if provenance in _LOOP_PROVENANCE:
                 # A framework-injected continuation/final-answer turn, not user input. Show a loop
-                # marker carrying the injected prompt text (for inspection), not a user bubble.
+                # marker carrying the injected prompt text (for inspection), not a user bubble. It
+                # continues the turn already in progress rather than starting a new one, so it must not
+                # close that turn's failure notice either.
                 add({"type": "loop", "text": _text_of(message.get("content"))}, ts)
                 continue
+            flush_failure()  # whatever turn was in progress ends where this one begins
+            if str(index) in failure:
+                pending_failure = (failure[str(index)], ts)
             text = _text_of(message.get("content"))
             if text:
                 add({"type": "user", "text": text}, ts)
@@ -250,6 +277,7 @@ def conversation_to_frames(
             # reference the user asked to see, so surface it as an image (regardless of show_tools).
             for url in _image_refs_of(message.get("content")):
                 add({"type": "image", "url": url, "from": "assistant"}, ts)
+    flush_failure()  # the last turn ends at the end of the transcript
     return items
 
 
@@ -512,7 +540,8 @@ class WebChannel(BaseWebChannel):
 
         Always sent, even when empty, so switching to a new/empty conversation clears the page.
         ``metadata`` is the active session's metadata; its ``subagent`` map interleaves reviewer cards
-        (non-verbose turns) and its ``trace`` map replays the raw verbose trace (verbose turns).
+        (non-verbose turns), its ``trace`` map replays the raw verbose trace (verbose turns), and its
+        ``failure`` map closes a turn that ended in an error with the reason.
 
         A turn in flight on this conversation contributes its catch-up items (see
         :class:`_CatchUpRecord`) on the end of the same frame. One frame rather than a replay of separate
@@ -526,6 +555,7 @@ class WebChannel(BaseWebChannel):
             show_tools=self.show_tools,
             subagent=meta.get("subagent"),
             trace=meta.get("trace"),
+            failure=meta.get("failure"),
         )
         record = self._catch_up.get(self.active_conversation_id)
         if record is not None:

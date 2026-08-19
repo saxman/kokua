@@ -554,10 +554,19 @@ many survive: `1` replaces the previous run, `0` keeps them all, and a record wi
 inherits `[scheduling] max_task_conversations` (3), resolved by `TaskService` at fire time so a settings
 change reaches the next firing. The prune itself lives in `TurnRunner`, beside the run it follows: it
 asks `ConversationBook.sessions_for_task` for the task's conversations oldest-first (by `created_at`,
-so a late turn touching an older run cannot make it look newest) and deletes past the cap, never the
-conversation this firing just wrote. It runs only after a successful run and outside the turn's gate
-hold, since the delete takes the gate exclusively, and swallows failures the way the run itself does
-(invariant 6): a user who deleted a run by hand must not stop the task firing. That the cap is enforced
+so a late turn touching an older run cannot make it look newest), reorders them so runs holding no
+report come first, and deletes past the cap. It runs after every firing, successful or not, and outside
+the turn's gate hold, since the delete takes the gate exclusively, and swallows failures the way the run
+itself does (invariant 6): a user who deleted a run by hand must not stop the task firing.
+
+That eviction order is what lets the prune run on the failure path at all. Pruning used to be
+success-only, so a task failing on every firing was never pruned and accumulated conversations without
+bound, past a cap that was supposed to cover exactly that. Simply running it on both paths is not enough
+either: at a cap of `1`, an oldest-first eviction would drop the last good report in favour of the
+failure that followed it. So `_holds_no_report` marks a conversation whose turn recorded a failure, or
+which has no messages at all, and those go first. Both halves are needed, because the reason is keyed to
+a turn's user message: a firing that raised before its user turn reached the transcript -- an agent that
+would not build -- has no turn to key one to, and only its empty transcript says so. That the cap is enforced
 at a firing rather than at an edit is what makes lowering one non-destructive and leaves a disabled task
 whole. This is also why the record needs no `session_id`: nothing reuses a conversation, so a firing
 writes nothing back to the registry.
@@ -610,6 +619,21 @@ produces at all, so without a record switching into a running task showed an emp
 spawn's later `append` frames then arrived with no card to update. It opens the record *inside* its gate
 hold rather than beside the turn contextvars, because a firing can queue behind a turn already running on
 that conversation and would otherwise replace a record still standing in for live output.
+
+**A failed firing is persisted too.** `_run_unattended` used to reach `_persist` only where the run
+returned normally, so a firing that raised left the conversation it minted exactly as minted: zero
+messages, `updated_at` still equal to `created_at`, indistinguishable from a conversation that never ran.
+Everything the run had done up to the failure lived only on the in-memory agent and went with the next
+registry eviction. It now holds the error, snapshots the transcript, and re-raises so `proactive` still
+logs the traceback and tells the user. The floor of what survives is the prompt, because a model client
+appends the user turn before it sends the request. The reason goes into `metadata["failure"]`, keyed by
+user-message index like `model` and `trace`, and *not* into `session.messages`: the messages are what this
+conversation's agent rebuilds its context from, so a synthesized assistant turn saying "this failed" would
+come back to the model as its own prior words. `conversation_to_frames` replays it as a `notice` item at
+the *end* of its turn -- held until the next user message or the end of the transcript, so a conversation
+the user carried on in keeps the notice inside the turn it describes. An unattended run needs this most,
+since `_report`'s status line goes to whichever conversation the user was viewing at the time, leaving the
+run's own conversation with no account of why it holds only half a turn.
 
 Planning's reviewer verdicts and a turn's spawned sub-agents share one `subagent` frame type and one
 persisted map (`metadata["subagent"]`); `task` on the create event is what tells the two apart.

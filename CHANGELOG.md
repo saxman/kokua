@@ -306,14 +306,18 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   `max_conversations` says how many of them survive: `1` means each run replaces the one before it,
   `0` keeps every run forever, and a task that names no cap follows `[scheduling]
   max_task_conversations` (default 3), read at fire time so a change reaches the next firing without a
-  restart. Pruning happens only *after* a firing succeeds and never touches the conversation that
-  firing just wrote, so a run that errors leaves the previous ones to read, and a run the user already
-  deleted is not an error. Lowering a cap deletes nothing until the task next fires, so an edit is not
-  destructive and a disabled task keeps everything. A channel with no conversation list (the CLI) has
-  nowhere to put a minted conversation, so there a firing runs in the one being viewed and prunes
-  nothing.
+  restart. Pruning happens after every firing, successful or not, evicting runs that hold no report
+  before ones that do, so a task that keeps failing cannot grow past its cap and a cap of `1` still
+  keeps the last good report rather than the failure that followed it. Lowering a cap deletes nothing
+  until the task next fires, so an edit is not destructive and a disabled task keeps everything. A run
+  the user already deleted is not an error. A channel with no conversation list (the CLI) has nowhere to
+  put a minted conversation, so there a firing runs in the one being viewed and prunes nothing.
 - A failing firing is reported and swallowed rather than propagating into the scheduler, which has no
-  handler of its own.
+  handler of its own. **Its conversation is still persisted as far as the run got** -- at minimum the
+  prompt, since the model client appends the user turn before it sends the request -- with the reason it
+  stopped recorded against that turn and replayed as a notice at the end of it. Without that, a firing
+  that failed left a conversation with nothing in it at all, and the status line explaining why went to
+  whichever conversation the user happened to be viewing.
 - **A tasks section in the web sidebar**, below the conversation list, showing each task's name,
   schedule, and next firing, with disable/enable, run-now, and delete per row. It hides itself entirely
   when there are no tasks, collapses (remembered per browser), and scrolls independently of the

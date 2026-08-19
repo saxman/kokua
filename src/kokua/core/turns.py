@@ -52,7 +52,10 @@ Every rule here was learned from a bug. Read them before changing anything in th
    first turn seeds the system message ahead of the user message). A workflow turn's index cannot come
    from its ``WorkflowResult`` either, since a cancelled or failed run raises instead of returning one,
    so a workflow publishes the index through ``WorkflowContext.publish_user_index`` as it commits and
-   the workflow branch reads ``ctx.user_index`` back in a ``finally``.
+   the workflow branch reads ``ctx.user_index`` back in a ``finally``. The rule binds the unattended
+   path too, which is why ``_run_unattended`` holds a failed run's error rather than letting it
+   propagate: the record and the snapshot have to happen before ``proactive`` reports the failure, and
+   an error on its way out of the gate hold would carry the turn straight past both.
    (Regressions: ``test_a_second_cancellation_during_the_stopped_send_still_records``,
    ``test_a_cancelled_rich_workflow_still_records_its_published_events``,
    ``test_a_failed_rich_workflow_still_records_its_published_events``,
@@ -74,6 +77,7 @@ from typing import Optional
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.aio import ModelConnectionError
 from aimu.aio.channels.base import ChannelMessage
+from aimu.sessions import Session
 
 from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.core.build import model_label
@@ -103,6 +107,21 @@ class ProactiveTarget:
     echo_reply: bool
     announce: Optional[str] = None
     prunes_for_task: Optional[str] = None
+
+
+def _holds_no_report(session: Session) -> bool:
+    """Whether a task's conversation holds nothing the user would keep over another run's output.
+
+    The retention order in :meth:`TurnRunner._prune_task_conversations` reads this: a run that has no
+    report to show is what a cap evicts first, so a task that fails repeatedly cannot cost the user
+    the last firing that actually produced something.
+
+    Two ways to hold nothing, because a recorded failure only covers one of them. The reason is keyed
+    to the turn's user message, so a firing that raised before its user turn reached the transcript --
+    an agent that would not build, a client that failed to construct -- has no turn to key one to. An
+    empty transcript says the same thing on its own.
+    """
+    return bool(session.metadata.get("failure")) or not session.messages
 
 
 class TurnRunner:
@@ -260,10 +279,10 @@ class TurnRunner:
         finally:
             ctx.publish_user_index(resolve_user_index(ctx.agent.model_client.messages, base_len))
 
-    def _record_provenance(self, conversation_id: str, user_index: int) -> None:
-        """Persist what produced this turn: whatever its spawns reported, the model that answered, and
-        the reasoning effort it ran at. Synchronous, so it also runs on the cancelled path where an await
-        could be cut short.
+    def _record_provenance(self, conversation_id: str, user_index: int, failure: Optional[str] = None) -> None:
+        """Persist what produced this turn: whatever its spawns reported, the model that answered, the
+        reasoning effort it ran at, and why it stopped if it ended in an error. Synchronous, so it also
+        runs on the cancelled path where an await could be cut short.
 
         The effort comes from the config rather than the live agent's field, because the two cannot
         disagree (``wire_agent`` sets the field from this same call) and the config is reachable without
@@ -274,6 +293,7 @@ class TurnRunner:
             user_index,
             conversation_id,
             thinking=self._config.thinking_for(self._config.entry_agent),
+            failure=failure,
         )
 
     def _answering_model(self, conversation_id: str) -> str:
@@ -321,7 +341,7 @@ class TurnRunner:
         to the one being viewed and stamps nothing: that conversation belongs to the user.
 
         ``max_conversations`` is how many of this task's conversations survive the firing, ``0``
-        meaning unlimited. Pruning happens only after the run succeeds (see
+        meaning unlimited. Pruning happens whether or not the run succeeded (see
         :meth:`_prune_task_conversations`).
         """
         spec = self._resolve_target(prompt, task_name, task_id)
@@ -329,9 +349,11 @@ class TurnRunner:
             await self._run_unattended(prompt, spec)
         except ModelConnectionError as exc:  # invariant 6
             logger.exception("proactive turn connection error")
+            await self._prune_task_conversations(spec, max_conversations)
             await self._report(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
         except Exception as exc:  # invariant 6
             logger.exception("proactive turn error")
+            await self._prune_task_conversations(spec, max_conversations)
             await self._report(f"A scheduled task failed: {describe_error(exc)}")
         else:
             await self._prune_task_conversations(spec, max_conversations)
@@ -340,23 +362,30 @@ class TurnRunner:
                 await self._report(spec.announce)
 
     async def _prune_task_conversations(self, spec: ProactiveTarget, cap: int) -> None:
-        """Delete the firing task's oldest conversations beyond its cap, once this run is done.
+        """Keep the firing task's newest ``cap`` conversations and delete the rest, once this run is done.
 
-        Called only on the success path, and only after ``_run_unattended`` has returned: the delete
-        takes the conversation gate exclusively, which the turn itself was holding, and dropping older
-        runs before the new one finished would leave a failed firing with nothing to read. The
-        conversation this firing just used is never a candidate, so a cap of 1 replaces the previous
-        run rather than deleting the one it just wrote.
+        Runs on every path, not only where the firing succeeded: a task that fails on every firing was
+        otherwise never pruned at all, and minted an unbounded pile of conversations the cap was there
+        to cover. Always *after* ``_run_unattended`` has returned, though, because the delete takes the
+        conversation gate exclusively and the turn itself was holding it.
+
+        Eviction order is failed runs before successful ones, then oldest before newest, and the
+        conversation this firing just used is a candidate like any other. That ordering is what lets the
+        failure path prune safely: at a cap of 1, evicting strictly oldest-first would drop the last good
+        report in favour of the failure that followed it, so instead the failure is what goes. On the
+        success path the same ordering leaves this firing's own conversation alone (it is the newest, and
+        it did not fail), so a cap of 1 still replaces the previous run rather than the one just written.
 
         Failures are swallowed the way the run's own are (invariant 6): the user may have deleted a
         run themselves between firings, and a task must not stop firing over a conversation nobody has.
         """
         if not spec.prunes_for_task or cap <= 0:
             return
-        owned = [s.key for s in self._book.sessions_for_task(spec.prunes_for_task) if s.key != spec.conversation_id]
-        for key in owned[: max(0, len(owned) - (cap - 1))]:
+        owned = self._book.sessions_for_task(spec.prunes_for_task)  # oldest first
+        owned.sort(key=_holds_no_report, reverse=True)  # stable, so oldest-first survives within each group
+        for session in owned[: max(0, len(owned) - cap)]:
             try:
-                await self._delete_conversation(key)
+                await self._delete_conversation(session.key)
             except Exception:
                 logger.warning("Could not prune a conversation a scheduled task replaced", exc_info=True)
 
@@ -402,21 +431,43 @@ class TurnRunner:
                 # this conversation would otherwise replace that turn's record while it is still needed.
                 self._ui.begin_catch_up(conversation_id, prompt)
                 agent = self._book.agent_for(conversation_id)
-                # Tag every message this unprompted run appends, so replayed history can distinguish
-                # it from a user-driven turn. The agent doesn't reset on run (the system prompt lives
-                # on the client), so the pre-run length is a stable start index for the exchange.
+                # The agent doesn't reset on run (the system prompt lives on the client), so the
+                # pre-run length is a stable start index for the exchange.
                 start = len(agent.model_client.messages)
-                reply = await agent.run(prompt)
+                # A failed run is snapshotted as far as it got, so the conversation the firing minted is
+                # never indistinguishable from one that never ran: the model client appends the user turn
+                # before it sends the request, so even a firing that got no answer has its prompt (and
+                # any completed tool rounds) on the transcript. The error is held rather than allowed to
+                # propagate straight out, so the record and the snapshot below run on every path, and
+                # re-raised afterwards so `proactive` still logs the traceback and tells the user.
+                # Deliberately not a `finally`: `_persist` awaits, and a store failure raised from a
+                # `finally` would replace the run's own error as the reason reported.
+                error: Optional[BaseException] = None
+                failure: Optional[str] = None
+                try:
+                    reply = await agent.run(prompt)
+                    if spec.echo_reply:
+                        await self._ui.send(reply)
+                except ModelConnectionError as exc:
+                    error, failure = exc, f"couldn't reach the model server: {describe_error(exc)}"
+                except Exception as exc:
+                    error, failure = exc, f"failed: {describe_error(exc)}"
                 for message in agent.model_client.messages[start:]:
-                    # setdefault, not assignment: the agent loop tags the turns it injects itself
-                    # (`continuation`, `final_answer`), and those tags are how a transcript tells an
-                    # injected nudge from something the user typed. Overwriting them made every nudge
-                    # replay as a user bubble.
+                    # Tag every message this unprompted run appended, so replayed history can distinguish
+                    # it from a user-driven turn. setdefault, not assignment: the agent loop tags the
+                    # turns it injects itself (`continuation`, `final_answer`), and those tags are how a
+                    # transcript tells an injected nudge from something the user typed. Overwriting them
+                    # made every nudge replay as a user bubble.
                     message.setdefault(PROVENANCE_KEY, PROVENANCE_PROACTIVE)
-                if spec.echo_reply:
-                    await self._ui.send(reply)
-                self._record_provenance(conversation_id, resolve_user_index(agent.model_client.messages, start))
+                # The reason is recorded here rather than left to `_report`, whose status line goes to
+                # whichever conversation the user is viewing rather than to this one. Before the persist,
+                # and synchronously, for invariant 5's reason.
+                self._record_provenance(
+                    conversation_id, resolve_user_index(agent.model_client.messages, start), failure=failure
+                )
                 await self._persist(conversation_id)
+                if error is not None:
+                    raise error
         finally:
             self._book.unpin(conversation_id)
             # Normally already done by `_persist`; this covers a run that raised before reaching it.
