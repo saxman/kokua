@@ -208,3 +208,45 @@ def test_a_spec_omits_thinking_when_nothing_is_declared_anywhere(tmp_path):
     }
     config, state = _state(tmp_path, agents)
     assert "thinking" not in build_agent_specs(config, state, "assistant")["researcher"]
+
+
+def test_a_spec_carries_the_generation_parameters_its_agent_resolves(tmp_path):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"], generation={"temperature": 0.2}),
+    }
+    config, state = _state(tmp_path, agents)
+    config.generation = {"temperature": 0.7, "context_length": 32768}
+    assert build_agent_specs(config, state, "assistant")["researcher"]["generate_kwargs"] == {
+        "temperature": 0.2,
+        "context_length": 32768,
+    }
+
+
+def test_a_spec_carries_the_resolved_generation_default_when_its_agent_declares_nothing(tmp_path):
+    """AIMU reads a missing spec key as "none" rather than falling back, so the resolved value has to
+    be written in or an undeclared worker would skip the default instead of inheriting it."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    config.generation = {"context_length": 32768}
+    assert build_agent_specs(config, state, "assistant")["researcher"]["generate_kwargs"] == {"context_length": 32768}
+
+
+def test_a_spec_omits_generate_kwargs_when_nothing_is_declared_anywhere(tmp_path):
+    """An empty dict is still a written tier, and this tier sits above the model card's own profile."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    assert "generate_kwargs" not in build_agent_specs(config, state, "assistant")["researcher"]
+
+
+def test_every_spec_key_kokua_writes_is_one_aimu_accepts():
+    """AIMU raises on an unrecognized spec key, so a typo here would fail at the first delegation."""
+    from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
+
+    assert {"system_message", "tools", "model", "thinking", "generate_kwargs"} <= SUBAGENT_SPEC_KEYS
