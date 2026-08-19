@@ -316,6 +316,13 @@ def _parse_scalar(section: str, key: str, raw: str, types: tuple[type, ...]) -> 
         raise ConfigError(f"[{section}].{key} must be true or false, got {raw!r}")
     if list in types:
         return [item.strip() for item in raw.split(",") if item.strip()]
+    # Before the int branch, because the float-typed keys declare (int, float) so that TOML's
+    # `temperature = 1` parses: `int in types` alone would refuse "0.7" for a key that accepts it.
+    if float in types:
+        try:
+            return float(raw)
+        except ValueError:
+            raise ConfigError(f"[{section}].{key} must be a number, got {raw!r}")
     if int in types:
         try:
             return int(raw)
@@ -336,7 +343,12 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
     see and the tool answers "unknown config key" for a key sitting in the user's file. It is passed in,
     never imported, because ``config`` is the bottom layer and cannot reach the installed toolsets.
     """
-    if section in ("subagents", "agents", "mcp"):
+    # By prefix, not exact match: an agent's own sub-table ([agents.<name>.generation]) is a dotted
+    # section, and it is hand-edit only for the reason the whole table is -- update_config is a tool
+    # the assistant holds, and a writable agent table would let it widen its own reach.
+    if section == "agents" or section.startswith("agents."):
+        raise ConfigError("[agents.*] is hand-edit only; update_config cannot change an agent's table")
+    if section in ("subagents", "mcp"):
         raise ConfigError(f"[{section}] has no scalar keys editable with update_config")
     spec = build_schema(table, extra_schema).get((section, key))
     if spec is None:

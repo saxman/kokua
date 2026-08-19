@@ -473,3 +473,51 @@ def test_an_unknown_nested_table_names_its_own_section(tmp_path):
     """The expansion is general, so any nested table gets a key error rather than a type complaint."""
     with pytest.raises(settings.ConfigError, match=r"\[assistant.sampling\]"):
         _load_generation(tmp_path, "[assistant.sampling]\ntemperature = 0.7\n")
+
+
+def test_a_generation_float_coerces_from_the_tools_string():
+    """update_config passes every value as a string, and these are the first float-typed keys."""
+    assert settings.coerce_config_string("assistant.generation", "temperature", "0.7", table=core_table()) == 0.7
+
+
+def test_a_generation_integer_coerces_from_the_tools_string():
+    assert settings.coerce_config_string("assistant.generation", "context_length", "32768", table=core_table()) == 32768
+
+
+def test_an_out_of_range_generation_string_is_refused():
+    with pytest.raises(settings.ConfigError, match="temperature"):
+        settings.coerce_config_string("assistant.generation", "temperature", "5", table=core_table())
+
+
+def test_a_non_numeric_generation_string_is_refused():
+    with pytest.raises(settings.ConfigError, match="temperature"):
+        settings.coerce_config_string("assistant.generation", "temperature", "warm", table=core_table())
+
+
+def test_an_agents_generation_table_is_not_editable_with_update_config():
+    """[agents.*] is hand-edit only, and a dotted section must not slip past the exact-match check."""
+    with pytest.raises(settings.ConfigError, match="hand-edit"):
+        settings.coerce_config_string("agents.researcher.generation", "temperature", "0.2", table=core_table())
+
+
+@pytest.mark.parametrize(
+    "key, accepted, rejected",
+    [
+        ("temperature", 2.0, 2.0001),
+        ("top_p", 1.0, 1.0001),
+        ("top_k", 1, 0),
+        ("min_p", 1.0, 1.0001),
+        ("presence_penalty", -2.0, -2.0001),
+        ("repetition_penalty", 0.0001, 0.0),
+        ("max_tokens", 1, 0),
+        ("context_length", 1, 0),
+    ],
+)
+def test_generation_key_accepts_its_inclusive_boundary_and_rejects_just_outside_it(tmp_path, key, accepted, rejected):
+    """Each of the eight generation keys is checked against a range predicate; this pins the exact edge
+    of that range so a `<` written for `<=`, or a wrong bound, fails a test instead of shipping."""
+    overrides = _load_generation(tmp_path, f"[assistant.generation]\n{key} = {accepted}\n")
+    assert overrides["generation"][key] == accepted
+
+    with pytest.raises(settings.ConfigError, match=key):
+        _load_generation(tmp_path, f"[assistant.generation]\n{key} = {rejected}\n")
