@@ -11,9 +11,9 @@ from kokua.core.subagents import SubagentReporter, subagent_events
 from tests.channels import SubagentCapturingChannel
 
 
-def _reporter(model_for=lambda agent_type: None, **flags):
+def _reporter(model_for=lambda agent_type: None, thinking_for=lambda agent_type: None, **flags):
     channel = SubagentCapturingChannel(**flags)
-    return SubagentReporter(ChannelUI(channel), model_for=model_for), channel
+    return SubagentReporter(ChannelUI(channel), model_for=model_for, thinking_for=thinking_for), channel
 
 
 def _collect():
@@ -211,7 +211,11 @@ async def test_a_cancelled_spawn_records_before_it_tries_to_send():
         async def send_subagent(self, event):
             raise asyncio.CancelledError
 
-    reporter = SubagentReporter(ChannelUI(_RefusingChannel()), model_for=lambda agent_type: None)
+    reporter = SubagentReporter(
+        ChannelUI(_RefusingChannel()),
+        model_for=lambda agent_type: None,
+        thinking_for=lambda agent_type: None,
+    )
     events = _collect()
     await reporter.finished("r-1", "partial", asyncio.CancelledError())
     assert events == [{"id": "r-1", "status": "stopped", "append": {"kind": "answer", "text": "partial"}}]
@@ -307,3 +311,27 @@ async def test_a_spawn_with_no_model_configured_anywhere_records_no_model():
     events = _collect()
     await reporter.spawned("researcher-abc", "researcher", "find X")
     assert "model" not in events[0]
+
+
+async def test_a_spawn_records_the_thinking_its_worker_ran_at():
+    """A worker need not reason at the effort that answered the turn, so the card is the only record."""
+    reporter, channel = _reporter(thinking_for=lambda agent_type: "high")
+    events = _collect()
+    await reporter.spawned("s-1", "researcher", "find sources")
+    assert events[0]["thinking"] == "high"
+    assert channel.subagent_frames[0]["thinking"] == "high"
+
+
+async def test_a_spawn_with_reasoning_off_records_that_rather_than_omitting_it():
+    """``False`` is a declaration, so the card guard cannot be a truthiness test."""
+    reporter, channel = _reporter(thinking_for=lambda agent_type: False)
+    events = _collect()
+    await reporter.spawned("s-1", "formatter", "reformat this")
+    assert events[0]["thinking"] is False
+
+
+async def test_a_spawn_with_no_thinking_configured_anywhere_records_none():
+    reporter, channel = _reporter()
+    events = _collect()
+    await reporter.spawned("s-1", "researcher", "find sources")
+    assert "thinking" not in events[0]

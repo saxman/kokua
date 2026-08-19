@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextvars import ContextVar
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from aimu.models import StreamChunk, StreamingContentType
 
@@ -46,24 +46,36 @@ subagent_events: ContextVar[Optional[list[dict]]] = ContextVar("subagent_events"
 class SubagentReporter:
     """Turns one spawn's lifecycle into display frames and recorded events."""
 
-    def __init__(self, ui: ChannelUI, *, model_for: Callable[[Optional[str]], Optional[str]]):
+    def __init__(
+        self,
+        ui: ChannelUI,
+        *,
+        model_for: Callable[[Optional[str]], Optional[str]],
+        thinking_for: Callable[[Optional[str]], Optional[Union[bool, str]]],
+    ):
         self._ui = ui
-        # Resolves a spawn's agent_type to the model it runs on. AIMU's observer callbacks do not carry
-        # one, but Kokua builds the specs, so it is the side that knows.
+        # Resolve a spawn's agent_type to the model it runs on and the reasoning effort it runs at.
+        # AIMU's observer callbacks carry neither, but Kokua builds the specs, so it is the side that knows.
         self._model_for = model_for
+        self._thinking_for = thinking_for
         # Spawns whose generated text has already been streamed, so finished() knows not to send the
         # accumulated text a second time. Discarded on finish, since this one reporter lives as long
         # as the connection and must not grow an entry per spawn ever made.
         self._streamed_answers: set[str] = set()
 
     async def spawned(self, spawn_id: str, agent_type: Optional[str], task: str) -> None:
-        """Open the card, naming the model this worker runs on so the stored conversation says which
-        model produced its answer. The key is omitted when no model is configured anywhere, since AIMU
-        resolves that case at client construction and there is no string to record."""
+        """Open the card, naming the model this worker runs on and the reasoning effort it runs at, so the
+        stored conversation says what produced its answer. ``model`` is omitted when none is configured
+        anywhere, since AIMU resolves that case at client construction and there is no string to record;
+        ``thinking`` is omitted on ``None`` for the same reason, but recorded on ``False``, which is the
+        declaration "do not reason" rather than the absence of one."""
         event = {"id": spawn_id, "role": agent_type or "subagent", "task": task, "status": "running"}
         model = self._model_for(agent_type)
         if model:
             event["model"] = str(model)
+        thinking = self._thinking_for(agent_type)
+        if thinking is not None:
+            event["thinking"] = thinking
         await self._report(event)
 
     async def chunk(self, spawn_id: str, chunk: StreamChunk) -> None:

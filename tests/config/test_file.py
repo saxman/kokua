@@ -362,3 +362,37 @@ def test_a_wrong_typed_contributed_value_is_rejected(tmp_path):
 
     with pytest.raises(settings.ConfigError, match="must be an integer"):
         settings.load(str(path), table=table)
+
+
+def test_assistant_thinking_accepts_a_level_and_a_bool(tmp_path):
+    _write_config('[assistant]\nthinking = "high"\n')
+    assert settings.load(table=core_table())["thinking"] == "high"
+    _write_config("[assistant]\nthinking = false\n")
+    assert settings.load(table=core_table())["thinking"] is False
+    _write_config("[assistant]\nthinking = true\n")
+    assert settings.load(table=core_table())["thinking"] is True
+
+
+def test_assistant_thinking_rejects_an_unknown_level(tmp_path):
+    """A plausible typo: 'xhigh' is Qwen's own effort ceiling, and AIMU raises on it at request time."""
+    _write_config('[assistant]\nthinking = "xhigh"\n')
+    with pytest.raises(settings.ConfigError, match=r"\[assistant\].thinking"):
+        settings.load(table=core_table())
+
+
+def test_assistant_thinking_rejects_a_number(tmp_path):
+    _write_config("[assistant]\nthinking = 2\n")
+    with pytest.raises(settings.ConfigError, match=r"\[assistant\].thinking"):
+        settings.load(table=core_table())
+
+
+def test_coerce_config_string_thinking_takes_a_level_or_a_bool():
+    """The union type must not be read as bool-only, which is what `bool in types` alone would do."""
+    assert settings.coerce_config_string("assistant", "thinking", "high", table=core_table()) == "high"
+    assert settings.coerce_config_string("assistant", "thinking", "false", table=core_table()) is False
+    assert settings.coerce_config_string("assistant", "thinking", "true", table=core_table()) is True
+
+
+def test_coerce_config_string_thinking_rejects_an_unknown_level():
+    with pytest.raises(settings.ConfigError, match=r"\[assistant\].thinking"):
+        settings.coerce_config_string("assistant", "thinking", "sort-of", table=core_table())

@@ -98,3 +98,36 @@ async def test_diag_names_the_model_aimu_resolved_when_the_config_declares_none(
 
     config = _config(tmp_path, model=None)
     assert model_label(config, config.entry_agent, _Client()) == "ollama:auto-resolved"
+
+
+async def test_diag_reports_the_thinking_each_agent_runs_at(tmp_path):
+    """Reasoning effort is startup-only with no panel field, exactly like the model, so /diag is the
+    only place a running session says what it resolved to."""
+    from tests.channels import FakeChannel, example_agents
+
+    agents = example_agents()
+    agents["researcher"].thinking = "high"
+    agents["coder"].thinking = False
+    config = _config(tmp_path, thinking="low", agents=agents)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert "- thinking: low | coder: off | researcher: high" in assistant._diag_report()
+
+
+async def test_diag_omits_the_thinking_line_when_nothing_is_declared(tmp_path):
+    """The common case emits nothing, so a line reading 'thinking: unset' would be noise on every /diag."""
+    from tests.channels import FakeChannel
+
+    config = _config(tmp_path)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert "thinking:" not in assistant._diag_report()
+
+
+async def test_diag_reports_a_default_of_off_with_no_overrides(tmp_path):
+    from tests.channels import FakeChannel
+
+    config = _config(tmp_path, thinking=False)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert "- thinking: off" in assistant._diag_report()

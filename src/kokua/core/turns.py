@@ -261,10 +261,19 @@ class TurnRunner:
             ctx.publish_user_index(resolve_user_index(ctx.agent.model_client.messages, base_len))
 
     def _record_provenance(self, conversation_id: str, user_index: int) -> None:
-        """Persist what produced this turn: whatever its spawns reported, and the model that answered.
-        Synchronous, so it also runs on the cancelled path where an await could be cut short."""
+        """Persist what produced this turn: whatever its spawns reported, the model that answered, and
+        the reasoning effort it ran at. Synchronous, so it also runs on the cancelled path where an await
+        could be cut short.
+
+        The effort comes from the config rather than the live agent's field, because the two cannot
+        disagree (``wire_agent`` sets the field from this same call) and the config is reachable without
+        resolving the conversation's agent."""
         self._book.record_turn_provenance(
-            subagent_events.get() or [], self._answering_model(conversation_id), user_index, conversation_id
+            subagent_events.get() or [],
+            self._answering_model(conversation_id),
+            user_index,
+            conversation_id,
+            thinking=self._config.thinking_for(self._config.entry_agent),
         )
 
     def _answering_model(self, conversation_id: str) -> str:

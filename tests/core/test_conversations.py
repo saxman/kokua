@@ -399,3 +399,30 @@ async def test_sessions_for_task_returns_only_that_tasks_conversations_oldest_fi
     book.touch(first)
 
     assert [s.key for s in book.sessions_for_task("task-1")] == [first.key, second.key]
+
+
+async def test_the_turn_thinking_is_recorded_alongside_the_model(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "ollama:qwen3:8b", 0, assistant._active_id, thinking="high")
+
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert metadata["thinking"] == {"0": "high"}
+
+
+async def test_a_turn_that_reasoned_at_no_configured_effort_records_no_thinking(tmp_path):
+    """``None`` is the common case (AIMU's own default), so recording it would bloat every session file."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "ollama:qwen3:8b", 0, assistant._active_id, thinking=None)
+
+    assert "thinking" not in assistant._store.get(assistant._active_id).metadata
+
+
+async def test_a_turn_with_reasoning_off_records_that_rather_than_nothing(tmp_path):
+    """``False`` is a declaration, so the guard cannot be a truthiness test or it would read as unset."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "", 0, assistant._active_id, thinking=False)
+
+    assert assistant._store.get(assistant._active_id).metadata["thinking"] == {"0": False}

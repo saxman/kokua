@@ -101,6 +101,10 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
     injected client already carries whatever system its own caller built it with, so computing one here
     and overwriting it would defeat the injection.
 
+    ``thinking`` is set from the config even when a ``client`` is injected, unlike the system message:
+    reasoning effort is a field on the *agent*, applied to every turn of a run, so there is nothing for
+    a caller-built client to already carry.
+
     Declared *skill* names are held back from toolset resolution here, because this agent is a
     ``SkillAgent`` and AIMU already gives it their catalogue and script tools from
     ``state.skill_manager``. Resolving them as toolsets too would append the same script tools (harmless,
@@ -124,6 +128,7 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
         skill_manager=state.skill_manager,
         name=agent_name,
         concurrent_tool_calls=config.concurrent_tools,
+        thinking=config.thinking_for(agent_name),
     )
     agent.tools = build_tools(toolsets, ToolsetContext(state=state, agent=agent))
     agent.tool_approval = state.tool_approval

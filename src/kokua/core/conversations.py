@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from aimu import aio
 from aimu.sessions import Session, TinyDBSessionStore
@@ -283,22 +283,36 @@ class ConversationBook:
         if changed:
             self._store.save(session)
 
-    def record_turn_provenance(self, events: list[dict], model: str, user_index: int, conversation_id: str) -> None:
-        """Persist what produced a turn's output: its sub-agent activity, and the model that answered.
+    def record_turn_provenance(
+        self,
+        events: list[dict],
+        model: str,
+        user_index: int,
+        conversation_id: str,
+        thinking: Optional[Union[bool, str]] = None,
+    ) -> None:
+        """Persist what produced a turn's output: its sub-agent activity, the model that answered, and
+        the reasoning effort it ran at.
 
-        The cards are what reload replays. The model is recorded per turn rather than once per
-        conversation because a conversation outlives the config that started it: ``[assistant].model``
-        and an agent's own declaration are read at startup, so two turns of one conversation can have
-        been answered by different models. Each spawn card carries its own worker's model, since a
-        worker need not run on the same one.
+        The cards are what reload replays. The model and the effort are recorded per turn rather than
+        once per conversation because a conversation outlives the config that started it:
+        ``[assistant].model``, ``[assistant].thinking``, and an agent's own declarations are all read at
+        startup, so two turns of one conversation can have been answered by different models at
+        different efforts. Each spawn card carries its own worker's pair, since a worker need not match.
+
+        ``thinking`` is guarded on ``is not None`` rather than truthiness, because ``False`` means
+        "reasoning off" and has to be distinguishable from "nothing configured", which is the common
+        case and stays out of the file.
         """
-        if user_index < 0 or not (events or model):
+        if user_index < 0 or not (events or model or thinking is not None):
             return
         session = self._store.get(conversation_id)
         if events:
             _merge_subagent_events(session, user_index, events)
         if model:
             session.metadata.setdefault("model", {})[str(user_index)] = model
+        if thinking is not None:
+            session.metadata.setdefault("thinking", {})[str(user_index)] = thinking
         self._store.save(session)
 
     def exists(self, conversation_id: str) -> bool:

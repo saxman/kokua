@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from kokua.config import paths as paths
 
@@ -26,12 +26,15 @@ class AgentConfig:
     disagree with it.
 
     ``model`` overrides ``[assistant].model`` for this agent alone; unset, the agent runs on that
-    default (see ``AssistantConfig.model_for``).
+    default (see ``AssistantConfig.model_for``). ``thinking`` does the same for reasoning effort
+    (see ``AssistantConfig.thinking_for``), and is ``None`` rather than ``False`` when unset because
+    ``False`` is itself a declaration -- "do not reason" -- that must be able to override a default.
     """
 
     description: str = ""
     system_message: str = ""
     model: Optional[str] = None
+    thinking: Optional[Union[bool, str]] = None
     tools: list[str] = field(default_factory=list)
     delegates_to: list[str] = field(default_factory=list)
 
@@ -56,6 +59,12 @@ class MCPServerConfig:
 @dataclass
 class AssistantConfig:
     model: Optional[str] = None
+    # The reasoning effort every agent runs at unless its own [agents.<name>].thinking overrides it.
+    # AIMU's four value forms: None emits nothing (its own default), False asks the model not to reason
+    # (and selects the model card's instruct-mode sampling profile where it declares one), True reasons
+    # at the model's own default effort, and a level string requests that effort. A level is advisory on
+    # a model whose card does not declare thinking_levels: AIMU warns once and reasoning is still on.
+    thinking: Optional[Union[bool, str]] = None
     system_message: str = DEFAULT_SYSTEM_MESSAGE
     # Set only by `--system` (never by config.toml, which has no key for it). `system_message` above
     # already has a value whether or not anyone set it -- its own default -- so "was --system passed"
@@ -131,6 +140,20 @@ class AssistantConfig:
         """
         agent = self.agents.get(agent_name)
         return (agent.model if agent else None) or self.model
+
+    def thinking_for(self, agent_name: str) -> Optional[Union[bool, str]]:
+        """The reasoning effort ``agent_name`` runs at: its own declaration, else the ``[assistant]`` default.
+
+        Resolved on ``is None`` rather than truthiness, which ``model_for`` above can afford but this
+        cannot: ``thinking = false`` is a real declaration ("do not reason"), and an ``or`` would let a
+        ``"high"`` default swallow it. This matches how AIMU's own per-run override tests the argument.
+
+        Per agent and never inherited down the delegation graph, for the same reason the model is not:
+        a delegator that reasons hard does not drag its workers up with it.
+        """
+        agent = self.agents.get(agent_name)
+        declared = agent.thinking if agent else None
+        return self.thinking if declared is None else declared
 
     @property
     def skills_dir(self) -> Path:

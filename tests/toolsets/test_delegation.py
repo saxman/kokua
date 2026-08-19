@@ -165,3 +165,46 @@ def test_an_unset_default_falls_back_to_the_model_the_delegator_already_resolved
     config, state = _state(tmp_path, agents)
     agent = _FakeAgent("assistant", "ollama:auto-resolved")
     assert _captured_spawn_model(monkeypatch, config, state, agent) == "ollama:auto-resolved"
+
+
+def test_a_spec_carries_the_thinking_level_its_agent_declares(tmp_path):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"], thinking="high"),
+    }
+    config, state = _state(tmp_path, agents)
+    config.thinking = "low"
+    assert build_agent_specs(config, state, "assistant")["researcher"]["thinking"] == "high"
+
+
+def test_a_spec_carries_the_resolved_default_when_its_agent_declares_nothing(tmp_path):
+    """Unlike ``model``, an omitted spec ``thinking`` is not a fallback AIMU can resolve: the spawn tool
+    has no thinking tier, so a worker inheriting the default requires the resolved value written in."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    config.thinking = "medium"
+    assert build_agent_specs(config, state, "assistant")["researcher"]["thinking"] == "medium"
+
+
+def test_a_spec_carries_thinking_off_rather_than_dropping_it(tmp_path):
+    """``False`` must survive into the spec, or a worker declaring "do not reason" would silently
+    inherit the default instead."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"], thinking=False),
+    }
+    config, state = _state(tmp_path, agents)
+    config.thinking = "high"
+    assert build_agent_specs(config, state, "assistant")["researcher"]["thinking"] is False
+
+
+def test_a_spec_omits_thinking_when_nothing_is_declared_anywhere(tmp_path):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    assert "thinking" not in build_agent_specs(config, state, "assistant")["researcher"]

@@ -22,7 +22,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.16.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.17.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -31,7 +31,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.16.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.17.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -41,14 +41,22 @@ Consequences for working in this repo:
   the tool result to its web `tool` frame, which no `getattr` can detect and which would otherwise
   degrade silently to tool cards with no output. AIMU 0.16.0 is another: it made
   `client.default_generate_kwargs` an input starting empty on every provider, where Ollama used to
-  report the model card's profile there, which is what let Kokua stop writing that tier itself. The
-  probe is currently a name lookup for `aimu.aio.ContextOverflowError`, the newest surface Kokua depends
-  on: without it, an over-long Ollama request comes back as a raw 500 whose wording names a missing user
-  turn rather than the overflow, and a delegating agent reads that as transient and re-runs the same
-  over-long task. It takes whatever shape the surface has, and a *signature*
-  check when that surface is a keyword argument no `getattr` would notice (as `SkillManager(include=...)`
-  was, before this). If you add a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the
-  `pyproject.toml` floor in the same commit, and move the probe to whatever the new surface is.
+  report the model card's profile there, which is what let Kokua stop writing that tier itself. AIMU
+  0.17.0 is a third, and the sharpest illustration: the capability Kokua depends on is a `"thinking"` key
+  it writes into an `agent_types` spec, and an AIMU that predates it *ignores an unknown spec key in
+  silence* -- per-worker reasoning effort would simply not apply, with nothing raised anywhere. A dict key
+  is invisible to both a name lookup and a signature check, so the floor is the only half that could
+  have covered it. What rescued the probe is the other half of that same release: closing a spec's keys
+  to a known set, published as `aimu.tools.builtin.SUBAGENT_SPEC_KEYS`, which *is* a symbol and *is* the
+  set the depended-on key belongs to. That is now the probe, and it restores the invariant the probe
+  wants -- a checkout carrying it necessarily carries every earlier release's surface too, so nothing is
+  lost by moving off `aio.ContextOverflowError`. The probe takes whatever shape its surface has, and a
+  *signature* check when that surface is a keyword argument no `getattr` would notice (as
+  `SkillManager(include=...)` was, before this). If you add a Kokua feature needing a newer AIMU, raise
+  `MINIMUM_AIMU` and the `pyproject.toml` floor in the same commit, and move the probe to whatever the new
+  surface is. When a release genuinely offers no handle a probe can grip, leave the probe where it is and
+  say so in `aimu_compat`'s docstring rather than moving it to something it can only pretend to check --
+  but look for a handle first, because 0.17.0 appeared to be that case and was not.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

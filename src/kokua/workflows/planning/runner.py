@@ -95,7 +95,7 @@ class PlanningWorkflow(aio.AsyncRunner):
         self._ui = ctx.ui
         self._config = ctx.config
         # This workflow's own [planning] section. Separate from _config, which is only consulted for
-        # core settings (the model the reviewers run on).
+        # core settings (the model and the reasoning effort the reviewers run at).
         self._settings = ctx.settings
         # The raw trace of the in-flight verbose turn: a list of {label, detail, text} phase segments,
         # accumulated by _send_phase / _run_and_capture / _stream_review. None outside a verbose turn.
@@ -214,9 +214,11 @@ class PlanningWorkflow(aio.AsyncRunner):
                         role="Result reviewer",
                         slug="result-review",
                         attempt=attempt,
-                        card=lambda: review.review_result(self._config.model, msg.text, plan, answer, evidence),
+                        card=lambda: review.review_result(
+                            self._config.model, msg.text, plan, answer, evidence, thinking=self._config.thinking
+                        ),
                         stream=lambda: review.stream_result_review(
-                            self._config.model, msg.text, plan, answer, evidence
+                            self._config.model, msg.text, plan, answer, evidence, thinking=self._config.thinking
                         ),
                     )
                     if verdict.approved:
@@ -272,8 +274,10 @@ class PlanningWorkflow(aio.AsyncRunner):
                 role="Plan reviewer",
                 slug="plan-review",
                 attempt=attempt,
-                card=lambda: review.review_plan(self._config.model, msg.text, plan),
-                stream=lambda: review.stream_plan_review(self._config.model, msg.text, plan),
+                card=lambda: review.review_plan(self._config.model, msg.text, plan, thinking=self._config.thinking),
+                stream=lambda: review.stream_plan_review(
+                    self._config.model, msg.text, plan, thinking=self._config.thinking
+                ),
             )
             if verdict.approved:
                 return plan, None

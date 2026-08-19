@@ -73,7 +73,9 @@ class Assistant:
         # One reporter for this connection (Assistant.create runs once per WebSocket connection): every
         # conversation's spawn_subagent reports through it, and it resolves the turn to record into
         # from a contextvar rather than from construction.
-        self._subagent_reporter = SubagentReporter(self._ui, model_for=config.model_for)
+        self._subagent_reporter = SubagentReporter(
+            self._ui, model_for=config.model_for, thinking_for=config.thinking_for
+        )
         self._scheduler = scheduler
         self._store = store
         self._config = config

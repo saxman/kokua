@@ -26,6 +26,22 @@
 #   model = "openai-compat:my-model@http://gpu-box:9000/v1;tools,thinking"
 # model = "ollama:qwen3:8b"
 
+# The default reasoning effort every agent runs at. An agent that declares its own `thinking` below
+# runs at that instead. Read at startup only, like `model` above and for the same reason: the settings
+# panel cannot write [agents.*], so a live field there could only ever disagree with a declaration.
+#
+# Unset (the default) sends nothing, leaving each model at its own behavior. Otherwise:
+#   thinking = false      # do not reason
+#   thinking = true       # reason, at the model's own default effort
+#   thinking = "low"      # reason at this effort; also "medium" and "high"
+#
+# Two caveats. A level is advisory on a model whose card does not declare effort-level support: AIMU
+# warns once and reasoning is still on, just not at the level asked for. And `false` additionally
+# selects the model card's instruct-mode sampling profile where the card specifies one (the Qwen
+# 3.5/3.6/3.8 cards do; most models have a single profile and are unaffected), since a model's
+# thinking-mode and non-thinking-mode sampling defaults are usually different.
+# thinking = "high"
+
 # Fallback opener for any agent below that sets no `system_message` of its own.
 # system_message = "You are a personal assistant running on the user's own machine. ..."
 
@@ -91,6 +107,7 @@ delegates_to = ["researcher", "coder", "generalist"]
 [agents.researcher]
 description = "Research specialist: gather and verify information from the web."
 # model = "ollama:qwen3:32b"   # this worker alone runs on a bigger model
+# thinking = "high"            # ...and reasons harder than the rest; `false` would turn it off
 tools = ["web", "misc", "time"]
 system_message = """\
 You are a research sub-agent. Investigate the task with web search and page lookups, verify claims \

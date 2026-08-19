@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.16.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.17.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -103,10 +103,10 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.16.0 or newer
     than as the user's own turn. A proactive message keeps its uppercase label.
   - **A settings panel** (gear button) changes the display preferences, the planning toggles, and the
     theme at runtime. Server-backed changes take effect on the next turn and persist to `config.toml`.
-    The model is deliberately not here: it is read at startup, from `[assistant].model` or an agent's
-    own `[agents.<name>].model`, and the panel cannot write the `[agents.*]` tables it would have to
-    agree with. Change it in `config.toml` (or have the assistant do it with `update_config`) and
-    restart.
+    The model and the reasoning effort are deliberately not here: both are read at startup, from
+    `[assistant].model` / `[assistant].thinking` or an agent's own `[agents.<name>]` keys, and the panel
+    cannot write the `[agents.*]` tables it would have to agree with. Change them in `config.toml` (or
+    have the assistant do it with `update_config`) and restart.
   - **Sampling parameters are AIMU's, not a Kokua setting.** There is no `[generation]` section and no
     generation fields in the panel. AIMU 0.16.0 resolves generation kwargs through one precedence chain
     (the client's fallbacks, then the model card's tuned profile, then `client.default_generate_kwargs`,
@@ -463,14 +463,39 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   onto it -- a worker declaring nothing runs on the default like any other undeclared agent. A declared
   model that AIMU cannot resolve fails startup naming the table it came from, rather than surfacing
   later as a failed spawn. Both are read once, at startup: no live client is ever rebound to another
-  model, which is why the model is not in the settings panel.
-- **`/diag` names the models in play**: the entry agent's first, then each agent that declares its own.
-  The model has no panel field and is read only at startup, so this is where a running session says
-  which one it is. With nothing declared, the line reports what AIMU resolved onto the live client.
-- **A stored conversation says which model produced its output.** Each turn records the model that
-  answered it under `metadata.model.<user_index>`, and each sub-agent card carries its own worker's
-  model, so a conversation that spans a config edit -- or a turn whose workers ran on different models
-  -- stays readable from the JSON alone. It is metadata, never a message key: AIMU strips only its own
+  model, which is why the model is not in the settings panel. `[assistant].thinking` follows the same
+  shape for reasoning effort (below).
+- **A default reasoning effort, with per-agent overrides.** `[assistant].thinking` is the effort every
+  agent runs at; an agent that names its own `[agents.<name>].thinking` runs at that instead. The values
+  are AIMU's own four: unset sends nothing (each model keeps its own behavior), `false` asks the model
+  not to reason, `true` reasons at the model's default effort, and `"low"` / `"medium"` / `"high"` request
+  a level. Startup-only with no panel field, for the same reason the model is. An unrecognized level
+  fails startup naming the table, since AIMU would otherwise raise on it only once a request was built,
+  and `"xhigh"` is a plausible typo (it is Qwen's own effort ceiling).
+  Resolution tests "is it declared" rather than "is it truthy", which the model can afford and this
+  cannot: `thinking = false` is a declaration that has to be able to override a `"high"` default. And
+  unlike the model, the *resolved* value is written into every sub-agent spec rather than only a declared
+  one -- AIMU falls a missing spec `model` back to the spawn tool's own, but a missing spec `thinking` is
+  simply `None`, so an undeclared worker would skip the default rather than inherit it. The `/plan`
+  workflow's independent reviewers run at the `[assistant]` effort too, being no agent's table.
+  Two caveats it is worth knowing: a level is advisory on a model whose card declares no effort-level
+  support (AIMU warns once and reasoning is still on), and `false` additionally selects a card's
+  instruct-mode sampling profile where it declares one -- only the Qwen 3.5/3.6/3.8 cards today, and
+  since Kokua sets no sampling parameter of its own, on those models nothing here can pin it back.
+  Needs `aimu>=0.17.0`, which added the `agent_types` spec key the per-worker half rides on. An AIMU that
+  predates it ignores an unknown spec key silently, so a per-worker effort would simply not apply with
+  nothing raised; that release also closes a spec's keys to a published `SUBAGENT_SPEC_KEYS`, which is
+  what the startup preflight now probes, since the key itself is a dict entry no probe can see.
+- **`/diag` names the models and the reasoning effort in play**: the entry agent's first, then each agent
+  that declares its own. Neither has a panel field and both are read only at startup, so this is where a
+  running session says what they are. With nothing declared, the model line reports what AIMU resolved
+  onto the live client, and the thinking line is omitted rather than reading "unset" on every `/diag`.
+- **A stored conversation says which model produced its output, and how hard it thought.** Each turn
+  records the model that answered it under `metadata.model.<user_index>` and its reasoning effort under
+  `metadata.thinking.<user_index>`, and each sub-agent card carries its own worker's pair, so a
+  conversation that spans a config edit -- or a turn whose workers ran on different models at different
+  efforts -- stays readable from the JSON alone. An effort of `None` is left out (it is the common case);
+  `false` is recorded, being a declaration rather than the absence of one. It is metadata, never a message key: AIMU strips only its own
   inert keys before a request, and Ollama and OpenAI-compatible providers forward anything else
   verbatim.
 - **Remote and custom model endpoints.** `[assistant] model` accepts AIMU's extended

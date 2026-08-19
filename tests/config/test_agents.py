@@ -160,3 +160,54 @@ def test_model_for_falls_back_to_the_default_when_an_agent_declares_none(tmp_pat
     config.model = "ollama:qwen3:8b"
     assert config.model_for("researcher") == "ollama:qwen3:32b"
     assert config.model_for("assistant") == "ollama:qwen3:8b"
+
+
+def test_an_agent_declares_its_own_thinking_level(tmp_path):
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = "high"')
+    config = _load(tmp_path, body)
+    assert config.agents["researcher"].thinking == "high"
+    assert config.agents["assistant"].thinking is None
+
+
+def test_an_agent_can_declare_thinking_off(tmp_path):
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = false')
+    config = _load(tmp_path, body)
+    assert config.agents["researcher"].thinking is False
+
+
+def test_an_agents_thinking_must_be_a_known_level(tmp_path):
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = "xhigh"')
+    with pytest.raises(ConfigError) as excinfo:
+        _load(tmp_path, body)
+    assert "[agents.researcher].thinking" in str(excinfo.value)
+    assert "xhigh" in str(excinfo.value)
+
+
+def test_an_agents_thinking_rejects_a_number(tmp_path):
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = 3')
+    with pytest.raises(ConfigError) as excinfo:
+        _load(tmp_path, body)
+    assert "[agents.researcher].thinking" in str(excinfo.value)
+
+
+def test_thinking_for_falls_back_to_the_default_when_an_agent_declares_none(tmp_path):
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = "low"')
+    config = _load(tmp_path, body)
+    config.thinking = "high"
+    assert config.thinking_for("researcher") == "low"
+    assert config.thinking_for("assistant") == "high"
+
+
+def test_thinking_for_lets_an_agent_override_a_default_back_to_off(tmp_path):
+    """``False`` is a real declaration, so resolution cannot be an ``or``-style truthiness test."""
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nthinking = false')
+    config = _load(tmp_path, body)
+    config.thinking = "high"
+    assert config.thinking_for("researcher") is False
+    assert config.thinking_for("assistant") == "high"
+
+
+def test_thinking_for_is_none_when_nothing_is_declared_anywhere(tmp_path):
+    config = _load(tmp_path, MINIMAL)
+    assert config.thinking_for("assistant") is None
+    assert config.thinking_for("researcher") is None

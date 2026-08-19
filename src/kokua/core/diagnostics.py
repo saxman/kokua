@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import time
+from typing import Optional
 
 from kokua.config.schema import AssistantConfig
 from kokua.core.turn_gate import TurnGate
@@ -37,6 +38,35 @@ def _model_line(config: AssistantConfig, entry_model: str) -> str:
     return " | ".join([f"- model: {entry_model or 'unresolved'}", *overrides])
 
 
+def _render_thinking(value) -> str:
+    """One reasoning-effort value as a word for a person: ``False`` reads as "off" rather than "False",
+    and ``True`` as "on", since neither Python spelling is what the user wrote or wants to read."""
+    if value is True:
+        return "on"
+    if value is False:
+        return "off"
+    return str(value)
+
+
+def _thinking_line(config: AssistantConfig) -> Optional[str]:
+    """The reasoning effort in play, or ``None`` when nothing is declared anywhere.
+
+    Worth a line for the same reason the model is: it is read only at startup and has no panel field.
+    Omitted entirely in the common case, where every agent is at AIMU's own default and a line saying so
+    would be noise on every ``/diag``. Tested against ``is not None`` throughout, so an agent declaring
+    ``thinking = false`` appears rather than being read as undeclared.
+    """
+    overrides = [
+        f"{name}: {_render_thinking(agent.thinking)}"
+        for name, agent in sorted(config.agents.items())
+        if agent.thinking is not None
+    ]
+    if config.thinking is None and not overrides:
+        return None
+    default = _render_thinking(config.thinking) if config.thinking is not None else "unset"
+    return " | ".join([f"- thinking: {default}", *overrides])
+
+
 def diag_report(
     tracker: TurnTracker,
     gate: TurnGate,
@@ -46,8 +76,8 @@ def diag_report(
     pending_approval: bool,
     pending_decision: bool,
 ) -> str:
-    """The `/diag` text: the models in play, in-flight turns, gate depth, pending human decisions, and
-    stuck-turn stacks.
+    """The `/diag` text: the models and reasoning effort in play, in-flight turns, gate depth, pending
+    human decisions, and stuck-turn stacks.
 
     ``entry_model`` is passed in rather than read off ``config`` because with nothing declared the only
     place the answer exists is the live client (see ``build.model_label``), which this module has no
@@ -55,6 +85,9 @@ def diag_report(
     """
     turns = tracker.all()
     lines = ["Diagnostics:", _model_line(config, entry_model)]
+    thinking = _thinking_line(config)
+    if thinking is not None:
+        lines.append(thinking)
     if turns:
         lines.append(f"- turn in flight: yes ({len(turns)})")
         for conversation_id, info in turns:

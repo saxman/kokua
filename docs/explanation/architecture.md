@@ -313,7 +313,7 @@ Keys the old per-role vocabulary used are not silently ignored. `[tools]`, `[sub
 `ConfigError` naming the replacement, checked ahead of the schema so an old file gets that message
 rather than a generic unknown-key one.
 
-### Which model an agent runs on
+### Which model an agent runs on, and how hard it thinks
 
 `[assistant].model` is the default every agent runs on; an agent naming its own `[agents.<name>].model`
 runs on that instead. `AssistantConfig.model_for(name)` is the single resolution, and it is per agent and
@@ -339,6 +339,37 @@ A stored conversation records what produced it, in `session.metadata` rather tha
 own worker's model (`SubagentReporter` resolves it, since AIMU's observer callbacks do not carry one).
 Metadata, deliberately -- AIMU strips only its own inert keys before a request, and Ollama and
 OpenAI-compatible providers forward any other message-dict key verbatim.
+
+**Reasoning effort follows the same shape, with three differences.** `[assistant].thinking` is the
+default and `[agents.<name>].thinking` the override, resolved by `AssistantConfig.thinking_for(name)`,
+read once at startup, reported by `/diag`, and recorded per turn under `metadata.thinking.<user_index>`
+and on each spawn card. The values are AIMU's own four: absent emits nothing, `false` asks the model not
+to reason, `true` reasons at the model's default effort, and `"low"` / `"medium"` / `"high"` request a
+level. What differs:
+
+1. **Resolution tests `is None`, not truthiness.** `thinking = false` is a declaration ("do not
+   reason"), so an `or` the way `model_for` uses one would let a `"high"` default swallow it. Every
+   guard on the value follows suit -- in `thinking_for`, `build_agent_specs`, `record_turn_provenance`,
+   `SubagentReporter.spawned`, and `_thinking_line`.
+2. **`build_agent_specs` writes the *resolved* value into every spec, not just a declared one.** This is
+   the reverse of `model`: AIMU reads a missing spec `model` as the spawn tool's own model, which is the
+   default, but a missing spec `thinking` as `None`, because a spawn tool has no thinking tier. Left to
+   AIMU, an undeclared worker would skip the default rather than inherit it.
+3. **It reaches the reviewers.** `critics.reviewer_agent` takes a `thinking`, and the four planning
+   wrappers thread `config.thinking` to it. A reviewer is not an `[agents.*]` agent, so the `[assistant]`
+   tier is the only one it has -- exactly as it is for the model it already ran on.
+
+One consequence worth knowing, since Kokua otherwise sets no sampling parameter at all: `false` also
+selects a model card's instruct-mode sampling profile where the card declares one (`select_profile` in
+AIMU). Only the Qwen 3.5/3.6/3.8 cards do today; every other model has a single profile and is
+unaffected. Kokua populates neither tier above the card, so on those four models the switch is the
+effective sampling and nothing in Kokua can pin it back.
+
+The per-agent half needs `aimu>=0.17.0`, which added the `"thinking"` key to the `agent_types` spec.
+An AIMU that predates it ignores an unknown spec key in silence, so a per-worker effort would simply not
+apply with nothing raised -- and a dict key is invisible to both a name lookup and a signature check. The
+same release closes a spec's keys to a published set (`SUBAGENT_SPEC_KEYS`), which is what the startup
+probe checks instead: a symbol, and the set the depended-on key belongs to. See `kokua.aimu_compat`.
 
 `config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
 comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Three writers: the web

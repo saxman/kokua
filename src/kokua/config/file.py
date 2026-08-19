@@ -46,6 +46,32 @@ def _str_list(section: str, key: str, value: list) -> list[str]:
     return list(value)
 
 
+# The reasoning-effort levels AIMU accepts as strings; `true` / `false` are the other two forms.
+_THINKING_LEVELS = ("low", "medium", "high")
+
+
+def _thinking(section: str, key: str, value: Any) -> Any:
+    """Validate one reasoning-effort value into AIMU's own vocabulary: a bool, or a level string.
+
+    Validated here rather than left to AIMU because AIMU raises on an unrecognized level only once a
+    request is built, so a typo would surface mid-turn instead of at startup naming the table it came
+    from -- and ``"xhigh"`` is a plausible one, being Qwen's own effort ceiling.
+
+    A ``"true"`` / ``"false"`` *string* is accepted as the bool it spells, because ``update_config``
+    passes every value as a string and this is the only validator that sees it; the same reason
+    ``_parse_scalar`` reads those two words for a bool-typed key.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "false"):
+            return lowered == "true"
+        if lowered in _THINKING_LEVELS:
+            return lowered
+    raise ConfigError(f"[{section}].{key} must be true, false, or one of {', '.join(_THINKING_LEVELS)}, got {value!r}")
+
+
 def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
     """Validate the [[mcp.server]] array of tables into a list of ``MCPServerConfig``."""
     if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
@@ -73,10 +99,14 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
 
 # String-list agent keys share the _str_list validator.
 _AGENT_LIST_KEYS = {"tools", "delegates_to"}
+# Agent keys whose value set is closed rather than merely typed, so a validator decides instead of an
+# isinstance check. `thinking` is a bool-or-string union besides, which the type map below cannot express.
+_AGENT_VALIDATED_KEYS = {"thinking": _thinking}
 _AGENT_KEYS = {
     "description": str,
     "system_message": str,
     "model": str,
+    "thinking": object,  # value set checked by _AGENT_VALIDATED_KEYS; listed here so it is a known key
     "tools": list,
     "delegates_to": list,
 }
@@ -102,6 +132,8 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
             raise ConfigError(f"unknown config key [agents.{name}].{key}")
         if key in _AGENT_LIST_KEYS:
             fields[key] = _str_list(f"agents.{name}", key, value)
+        elif key in _AGENT_VALIDATED_KEYS:
+            fields[key] = _AGENT_VALIDATED_KEYS[key](f"agents.{name}", key, value)
         elif not isinstance(value, expected):
             raise ConfigError(f"[agents.{name}].{key} must be a {expected.__name__}")
         else:
@@ -120,6 +152,15 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     # The default model every agent runs on unless its own [agents.<name>].model overrides it. Read once,
     # at startup: an agent's client is built with it and nothing rebinds a live client to another model.
     ("assistant", "model"): ("model", (str,), "a string", None),
+    # The default reasoning effort every agent runs at unless its own [agents.<name>].thinking overrides
+    # it. Startup-only, like the model above and for the same reason: the settings panel cannot write
+    # [agents.*], so a live field there could only ever disagree with a declaration.
+    ("assistant", "thinking"): (
+        "thinking",
+        (bool, str),
+        f"true, false, or one of {', '.join(_THINKING_LEVELS)}",
+        _thinking,
+    ),
     ("assistant", "system_message"): ("system_message", (str,), "a string", None),
     ("assistant", "agent"): ("entry_agent", (str,), "a string", None),
     ("assistant", "concurrent_tools"): ("concurrent_tools", (bool,), "a boolean", None),
@@ -203,7 +244,9 @@ def _coerce_flat(schema: dict, section: str, key: str, value: Any) -> tuple[str,
 
 def _parse_scalar(section: str, key: str, raw: str, types: tuple[type, ...]) -> Any:
     """Parse a string from the ``update_config`` tool into the TOML type the schema expects."""
-    if bool in types:
+    # `bool in types` alone would claim a bool-or-string union ([assistant].thinking), refusing a level
+    # string for a key whose own converter accepts one. A union's words are that converter's business.
+    if bool in types and str not in types:
         lowered = raw.strip().lower()
         if lowered in ("true", "false"):
             return lowered == "true"

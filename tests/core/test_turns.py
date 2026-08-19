@@ -1283,3 +1283,30 @@ async def test_an_unattended_turn_opens_a_catch_up_record_for_the_conversation_i
     assert ("begin", task_id, "run the report") in channel.calls
     # Ended at the persist, so a switch-in landing after it replays the store alone, not both.
     assert channel.calls.index(("end", task_id)) > channel.calls.index(("begin", task_id, "run the report"))
+
+
+async def test_a_turn_records_the_thinking_it_ran_at(tmp_path):
+    agents = example_agents()
+    agents["assistant"].thinking = "high"
+    config = _config(tmp_path, thinking="low", agents=agents)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient(["hi"]))
+
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    assert assistant._store.get(assistant._active_id).metadata["thinking"]["0"] == "high"
+
+
+async def test_a_spawn_card_records_the_workers_own_thinking(tmp_path):
+    """A worker need not reason at the same effort as the agent that spawned it, so the card is the only
+    record of what its part ran at."""
+    agents = example_agents()
+    agents["researcher"].thinking = False
+    client = _SpawningClient()
+    config = _config(tmp_path, thinking="high", agents=agents)
+    assistant = await Assistant.create(config, FakeChannel(), client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._handle(ChannelMessage(text="delegate this", channel="fake"), conversation_id=assistant._active_id)
+
+    card = assistant._store.get(assistant._active_id).metadata["subagent"]["0"][0]
+    assert card["thinking"] is False

@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.16.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.17.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -15,10 +15,18 @@ declared version already reads new enough while the code behind it predates the 
 string of an editable install says what the branch claims, not what it contains.
 
 The probe targets the newest surface Kokua depends on, which is all any older one needs: a checkout
-carrying ``ContextOverflowError`` necessarily carries everything the releases before it added. It takes
-whichever shape that surface has -- a name lookup for a symbol, or a signature check when the
-capability is a keyword argument that no ``getattr`` would notice (as ``SkillManager(include=...)``
-was, before this).
+carrying ``SUBAGENT_SPEC_KEYS`` necessarily carries everything the releases before it added. It takes
+whichever shape that surface has -- a name lookup for a symbol, or a signature check when the capability
+is a keyword argument that no ``getattr`` would notice (as ``SkillManager(include=...)`` was, before
+this).
+
+A capability can also be shaped so that *nothing* can probe it, and AIMU 0.17.0's headline surface is:
+the ``"thinking"`` key Kokua writes into an ``agent_types`` spec is a dict key, neither a symbol nor a
+parameter, and an AIMU that predates it ignores it in silence rather than raising. What makes that
+release probe-able anyway is the other half of it -- closing a spec's keys to a known set, published as
+``SUBAGENT_SPEC_KEYS``, which is a symbol *and* is the set the key Kokua depends on belongs to. Where a
+release offers no such handle, leave the probe where it is and say so here rather than moving it to
+something it could only pretend to check.
 """
 
 from __future__ import annotations
@@ -28,15 +36,15 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 16, 0)
+MINIMUM_AIMU = (0, 17, 0)
 
-# The newest AIMU surface Kokua depends on: the tool loop raising `TruncatedTurnError` rather than
-# nudging a turn the model had no room to finish, which is what turns a scheduled task's silent
-# rounds of continuation prompts into one actionable message. Looked up rather than imported, so a
-# miss is a clean message instead of an ImportError here. `None` parameter: a plain name lookup is
-# enough, since the class either exists or the behavior behind it does not.
-_PROBE_MODULE = "aimu.aio"
-_PROBE_SYMBOL = "ContextOverflowError"
+# The newest AIMU surface Kokua depends on: the closed `agent_types` spec key set, which contains the
+# `thinking` key `build_agent_specs` writes for a per-agent reasoning effort. The set is the probe rather
+# than the key because a dict key cannot be looked up on a module -- see the module docstring. Looked up
+# rather than imported, so a miss is a clean message instead of an ImportError here. `None` parameter: a
+# plain name lookup is enough, since the name either exists or the behavior behind it does not.
+_PROBE_MODULE = "aimu.tools.builtin"
+_PROBE_SYMBOL = "SUBAGENT_SPEC_KEYS"
 _PROBE_PARAMETER: Optional[str] = None
 
 

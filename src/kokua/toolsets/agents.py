@@ -444,6 +444,13 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         # default rather than inheriting whatever its delegator was pinned to.
         if agent.model:
             specs[name]["model"] = agent.model
+        # Thinking is the reverse: the *resolved* value is written in, not just a declared one, because
+        # the spawn tool has no thinking tier for a missing key to fall back to. AIMU reads a spec
+        # without one as None, so an undeclared worker would skip the [assistant].thinking default
+        # rather than inherit it. Tested against `is not None` so `thinking = false` reaches the spec.
+        thinking = config.thinking_for(name)
+        if thinking is not None:
+            specs[name]["thinking"] = thinking
     return specs
 
 

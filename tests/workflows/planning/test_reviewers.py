@@ -142,7 +142,8 @@ async def test_review_result_includes_evidence_in_prompt(monkeypatch):
         client = MockAsyncModelClient(["assessment", '{"approved": true, "issues": [], "suggestions": ""}'])
         client.model.supports_structured_output = False
         monkeypatch.setattr(
-            "kokua.workflows.critics.reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
+            "kokua.workflows.critics.reviewer_agent",
+            lambda model, system, tools=None, **kwargs: aio.Agent(client, tools=[]),
         )
         await review.review_result("mock", "do X", "PLAN", "ANSWER", evidence)
         first_user = client.messages[0]["content"]
@@ -159,7 +160,7 @@ async def test_reviewer_runs_tool_loop_then_extracts_verdict(monkeypatch):
     )
     client.model.supports_structured_output = False  # route the verdict through the parse path
 
-    def fake_reviewer_agent(model, system, tools=None):
+    def fake_reviewer_agent(model, system, tools=None, **kwargs):
         return aio.Agent(client, tools=[])  # tools irrelevant: the mock fakes the tool round
 
     monkeypatch.setattr("kokua.workflows.critics.reviewer_agent", fake_reviewer_agent)
@@ -181,7 +182,8 @@ async def test_streamed_reviewer_streams_then_extracts_verdict(monkeypatch):
     )
     client.model.supports_structured_output = False
     monkeypatch.setattr(
-        "kokua.workflows.critics.reviewer_agent", lambda model, system, tools=None: aio.Agent(client, tools=[])
+        "kokua.workflows.critics.reviewer_agent",
+        lambda model, system, tools=None, **kwargs: aio.Agent(client, tools=[]),
     )
 
     rc, stream = await review.stream_plan_review("mock", "do X", "PLAN")
@@ -278,7 +280,7 @@ async def test_result_review_receives_executor_evidence(tmp_path, monkeypatch):
     """The executor's tool transcript is extracted and passed to the result reviewer as evidence."""
     captured = {}
 
-    async def fake_review_result(model, request, plan, answer, evidence=""):
+    async def fake_review_result(model, request, plan, answer, evidence="", **kwargs):
         captured["evidence"] = evidence
         return APPROVE
 
@@ -361,3 +363,45 @@ def test_sanitize_keeps_review_flags():
     entries: a core-only table would drop both keys as unknown."""
     result = build_settings_table().sanitize({"planning.plan_review_agent": True, "planning.result_review": False})
     assert result["planning.plan_review_agent"] is True and result["planning.result_review"] is False
+
+
+# --- reviewer thinking effort ---------------------------------------------------------------
+
+
+def test_reviewer_agent_carries_the_thinking_it_is_given(monkeypatch):
+    """A reviewer is not an [agents.*] agent, so the [assistant] default is the only tier it has."""
+    monkeypatch.setattr(aio, "client", lambda model, system=None: MockAsyncModelClient([]))
+    assert critics.reviewer_agent(None, "Judge it.", thinking="high").thinking == "high"
+    assert critics.reviewer_agent(None, "Judge it.", thinking=False).thinking is False
+    assert critics.reviewer_agent(None, "Judge it.").thinking is None
+
+
+async def test_the_configured_thinking_reaches_every_planning_reviewer(monkeypatch):
+    """The default has to reach the reviewers through all four planning wrappers, not just the two
+    non-streamed ones, or a verbose planned turn would review at a different effort than a quiet one."""
+
+    class _StubAgent:
+        def __init__(self):
+            self.model_client = MockAsyncModelClient([])
+
+        async def run(self, *args, **kwargs):
+            return ""
+
+    seen: list = []
+
+    def fake_reviewer(model, system, tools=None, thinking=None):
+        seen.append(thinking)
+        return _StubAgent()
+
+    async def fake_finalize(client):
+        return APPROVE
+
+    monkeypatch.setattr(critics, "reviewer_agent", fake_reviewer)
+    monkeypatch.setattr(critics, "finalize_verdict", fake_finalize)
+
+    await review.review_plan(None, "req", "plan", thinking="high")
+    await review.review_result(None, "req", "plan", "answer", thinking="high")
+    await review.stream_plan_review(None, "req", "plan", thinking="high")
+    await review.stream_result_review(None, "req", "plan", "answer", thinking="high")
+
+    assert seen == ["high"] * 4

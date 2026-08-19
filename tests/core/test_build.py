@@ -695,3 +695,40 @@ def test_an_agent_declaring_no_model_is_built_with_the_default(tmp_path, monkeyp
     state = _live_state(config)
     model = _captured_client_model(monkeypatch, config, lambda: wire_agent(config, state, "assistant"))
     assert model == "ollama:qwen3:8b"
+
+
+def test_an_agent_is_wired_with_the_thinking_level_it_declares(tmp_path):
+    from kokua.core.build import wire_agent
+
+    agents = example_agents()
+    agents["assistant"].thinking = "high"
+    config = _config(tmp_path, agents=agents, thinking="low")
+    agent = wire_agent(config, _live_state(config), "assistant", client=MockAsyncModelClient([]))
+    assert agent.thinking == "high"
+
+
+def test_an_agent_declaring_no_thinking_is_wired_with_the_default(tmp_path):
+    from kokua.core.build import wire_agent
+
+    config = _config(tmp_path, thinking="medium")
+    agent = wire_agent(config, _live_state(config), "assistant", client=MockAsyncModelClient([]))
+    assert agent.thinking == "medium"
+
+
+def test_an_agent_declaring_thinking_off_overrides_the_default(tmp_path):
+    from kokua.core.build import wire_agent
+
+    agents = example_agents()
+    agents["assistant"].thinking = False
+    config = _config(tmp_path, agents=agents, thinking="high")
+    agent = wire_agent(config, _live_state(config), "assistant", client=MockAsyncModelClient([]))
+    assert agent.thinking is False
+
+
+def test_an_agent_is_wired_with_no_thinking_when_nothing_is_declared(tmp_path):
+    """Absent means AIMU's own default, which it documents as byte-for-byte unchanged requests."""
+    from kokua.core.build import wire_agent
+
+    config = _config(tmp_path)
+    agent = wire_agent(config, _live_state(config), "assistant", client=MockAsyncModelClient([]))
+    assert agent.thinking is None
