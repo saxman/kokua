@@ -250,3 +250,37 @@ def test_an_unknown_key_in_an_agents_generation_table_is_refused(tmp_path):
     body = GENERATION.replace("temperature = 0.2", "tempurature = 0.2")
     with pytest.raises(ConfigError, match="tempurature"):
         _load(tmp_path, body)
+
+
+def test_generation_for_merges_an_agents_table_over_the_default(tmp_path):
+    config = _load(tmp_path, GENERATION)
+    assert config.generation_for("researcher") == {"temperature": 0.2, "context_length": 32768}
+
+
+def test_generation_for_gives_an_undeclared_agent_the_default(tmp_path):
+    config = _load(tmp_path, GENERATION)
+    assert config.generation_for("assistant") == {"temperature": 0.7, "context_length": 32768}
+
+
+def test_generation_for_is_empty_when_nothing_is_declared_anywhere(tmp_path):
+    """Empty is the normal case, and what leaves a model card's own profile in force."""
+    config = _load(tmp_path, MINIMAL)
+    assert config.generation_for("assistant") == {}
+
+
+def test_generation_for_does_not_inherit_from_a_delegator(tmp_path):
+    """Per agent, like the model and the effort: a delegator's tuning must not follow its workers."""
+    body = GENERATION.replace(
+        'delegates_to = ["researcher"]\n',
+        'delegates_to = ["researcher"]\n\n[agents.assistant.generation]\ntemperature = 1.5\n',
+    )
+    config = _load(tmp_path, body)
+    assert config.generation_for("assistant")["temperature"] == 1.5
+    assert config.generation_for("researcher")["temperature"] == 0.2
+
+
+def test_generation_for_returns_a_fresh_dict(tmp_path):
+    """The caller assigns it to a live client, which may then mutate its own defaults."""
+    config = _load(tmp_path, GENERATION)
+    config.generation_for("researcher")["temperature"] = 1.9
+    assert config.generation == {"temperature": 0.7, "context_length": 32768}

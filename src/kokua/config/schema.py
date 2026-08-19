@@ -30,8 +30,8 @@ class AgentConfig:
     (see ``AssistantConfig.thinking_for``), and is ``None`` rather than ``False`` when unset because
     ``False`` is itself a declaration -- "do not reason" -- that must be able to override a default.
 
-    ``generation`` overrides ``[assistant.generation]`` *per key*, so an agent that wants only a colder
-    temperature keeps the default's context length.
+    ``generation`` overrides ``[assistant.generation]`` *per key* (see ``AssistantConfig.generation_for``),
+    so an agent that wants only a colder temperature keeps the default's context length.
     """
 
     description: str = ""
@@ -163,6 +163,26 @@ class AssistantConfig:
         agent = self.agents.get(agent_name)
         declared = agent.thinking if agent else None
         return self.thinking if declared is None else declared
+
+    def generation_for(self, agent_name: str) -> dict:
+        """The generation parameters ``agent_name`` runs with: ``[assistant.generation]``, per-key
+        overridden by its own ``[agents.<name>.generation]``.
+
+        Merged per key rather than table-for-table, so a context length set once at the top still
+        applies to an agent that only wanted a colder temperature. Per agent and never inherited down
+        the delegation graph, for the reason ``model_for`` and ``thinking_for`` are not: a delegator's
+        tuning is not its workers'.
+
+        An empty dict is the normal case, and the invariant the design rests on: **a key absent from
+        the file is absent from the request**, which is what leaves a model card's own tuned profile in
+        force. This tier sits above that profile in AIMU's precedence chain, so anything defaulted here
+        would silently replace a card's recommendation.
+
+        A fresh dict every call: the caller assigns it to a live client's ``default_generate_kwargs``,
+        which that client may then mutate.
+        """
+        agent = self.agents.get(agent_name)
+        return {**self.generation, **(agent.generation if agent else {})}
 
     @property
     def skills_dir(self) -> Path:
