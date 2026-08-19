@@ -359,17 +359,77 @@ level. What differs:
    wrappers thread `config.thinking` to it. A reviewer is not an `[agents.*]` agent, so the `[assistant]`
    tier is the only one it has -- exactly as it is for the model it already ran on.
 
-One consequence worth knowing, since Kokua otherwise sets no sampling parameter at all: `false` also
-selects a model card's instruct-mode sampling profile where the card declares one (`select_profile` in
-AIMU). Only the Qwen 3.5/3.6/3.8 cards do today; every other model has a single profile and is
-unaffected. Kokua populates neither tier above the card, so on those four models the switch is the
-effective sampling and nothing in Kokua can pin it back.
+One consequence worth knowing: `false` also selects a model card's instruct-mode sampling profile where
+the card declares one (`select_profile` in AIMU). Only the Qwen 3.5/3.6/3.8 cards do today; every other
+model has a single profile and is unaffected. Any key `[assistant.generation]` or an agent's own
+`[agents.<name>.generation]` sets still applies over that profile -- it is a tier above whichever profile
+`select_profile` picked, not a replacement for the mechanism -- so it is only a parameter nobody set that
+the profile switch decides outright.
 
 The per-agent half needs `aimu>=0.17.0`, which added the `"thinking"` key to the `agent_types` spec.
 An AIMU that predates it ignores an unknown spec key in silence, so a per-worker effort would simply not
 apply with nothing raised -- and a dict key is invisible to both a name lookup and a signature check. The
 same release closes a spec's keys to a published set (`SUBAGENT_SPEC_KEYS`), which is what the startup
 probe checks instead: a symbol, and the set the depended-on key belongs to. See `kokua.aimu_compat`.
+
+### Generation parameters
+
+`[assistant.generation]` sets `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`,
+`repetition_penalty`, `max_tokens`, and `context_length` for every agent; an agent's own
+`[agents.<name>.generation]` overrides it **per key**, not as a whole-table replacement, so an agent
+naming only `temperature` still inherits the default's `context_length`. `AssistantConfig.generation_for(name)`
+is the single resolution -- `{**self.generation, **(agent.generation if agent else {})}` -- and, like
+`model_for` and `thinking_for`, it is per agent and never inherited down the delegation graph. It returns
+an empty dict when nothing is declared anywhere, which is the normal case: a key a config never mentions
+stays absent from the request, so a model card's own tuned sampling profile survives untouched.
+
+Three places apply the result, all of them startup-only reads:
+
+1. **Every client the factory builds.** `core.build.build_model_client` serves the entry agent and each
+   per-conversation client alike, and right after construction it sets `client.default_generate_kwargs =
+   config.generation_for(agent_name)` -- but only `if generation:`, so a config that declares nothing
+   leaves the attribute as AIMU built it and the model card's own profile is what `select_profile`
+   returns. Writing an empty dict would be writing this tier, and this tier sits above the card. An
+   injected client (tests, `make_agent_builder`) is left alone: these parameters live on the client, so
+   one built elsewhere already carries whatever its own factory chose.
+2. **Each spawned worker's spec.** `build_agent_specs` writes the *resolved* value into
+   `specs[name]["generate_kwargs"]`, not just a declared one, for the same reason `thinking` does: AIMU
+   reads a spec without the key as "no generation parameters", so an undeclared worker would skip the
+   default rather than inherit it. Omitted entirely when nothing resolves, since an empty dict is itself
+   a written tier that would still sit above the card's profile.
+3. **The two planning reviewers.** `workflows/planning/runner.py` threads `config.generation` (not
+   `generation_for`, since a reviewer is no agent's own table) to both the plan-reviewer and the
+   result-reviewer, exactly as it already threads `config.thinking`. `[assistant.generation]` is the only
+   tier a reviewer can have.
+
+The per-agent half needs `aimu>=0.18.0`, which added the `generate_kwargs` key to the `agent_types` spec.
+That key is the one surface the startup probe covers now: 0.17.0 published `SUBAGENT_SPEC_KEYS` itself, so
+the set's existence no longer proves this capability, and `kokua.aimu_compat` checks `generate_kwargs`'s
+membership in it instead -- a membership check, the third shape the probe has taken after a name lookup
+and a signature check. The probe covers one surface at a time; the version floor is what covers every
+earlier release's.
+
+Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
+are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
+the whole window the prompt and the output share, so `context_length = 32768` with `max_tokens = 4096`
+leaves roughly 28k for the system prompt, the tool block, and history. And a parameter a backend cannot
+take is dropped by AIMU with a warning naming the remedy -- Ollama's SDK has no `min_p`, the Anthropic API
+has no penalties, and only Ollama's native API sizes the context window per request, so `context_length`
+is a no-op with a warning everywhere else. That warning reaches one place: the rotating file log
+(`logs_path/kokua.log`, i.e. `data/logs/kokua.log` under `$KOKUA_HOME`), since `logging_setup` attaches a
+file handler and nothing else. It is not surfaced in the chat, in the terminal, or in `/diag`, which
+reports what the config *declares*, not what survived to the wire. A user whose parameter never applies
+finds out by reading that log.
+
+`[assistant.generation]` is also the first sub-table `config/file.py`'s `_sections` handles: `tomllib`
+nests a dotted TOML header like `[assistant.generation]` inside `assistant`, so a flat key loop over
+`[assistant]` would read it as one key holding a table rather than as its own section. `_sections`
+re-enters it as `assistant.generation`, which is what lets one schema entry per parameter serve it and
+what makes an unknown key inside it report `[assistant.generation].<key>` rather than a generic
+`[assistant]` type complaint. Read only at startup, like the model and the reasoning effort: there is no
+settings-panel field for it, and `update_config` can write the default tier (a cold key, applying on the
+next start) but not an agent's own `[agents.<name>.generation]`, which stays hand-edit only like the rest
+of `[agents.*]`.
 
 `config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
 comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Three writers: the web
@@ -494,10 +554,19 @@ many survive: `1` replaces the previous run, `0` keeps them all, and a record wi
 inherits `[scheduling] max_task_conversations` (3), resolved by `TaskService` at fire time so a settings
 change reaches the next firing. The prune itself lives in `TurnRunner`, beside the run it follows: it
 asks `ConversationBook.sessions_for_task` for the task's conversations oldest-first (by `created_at`,
-so a late turn touching an older run cannot make it look newest) and deletes past the cap, never the
-conversation this firing just wrote. It runs only after a successful run and outside the turn's gate
-hold, since the delete takes the gate exclusively, and swallows failures the way the run itself does
-(invariant 6): a user who deleted a run by hand must not stop the task firing. That the cap is enforced
+so a late turn touching an older run cannot make it look newest), reorders them so runs holding no
+report come first, and deletes past the cap. It runs after every firing, successful or not, and outside
+the turn's gate hold, since the delete takes the gate exclusively, and swallows failures the way the run
+itself does (invariant 6): a user who deleted a run by hand must not stop the task firing.
+
+That eviction order is what lets the prune run on the failure path at all. Pruning used to be
+success-only, so a task failing on every firing was never pruned and accumulated conversations without
+bound, past a cap that was supposed to cover exactly that. Simply running it on both paths is not enough
+either: at a cap of `1`, an oldest-first eviction would drop the last good report in favour of the
+failure that followed it. So `_holds_no_report` marks a conversation whose turn recorded a failure, or
+which has no messages at all, and those go first. Both halves are needed, because the reason is keyed to
+a turn's user message: a firing that raised before its user turn reached the transcript -- an agent that
+would not build -- has no turn to key one to, and only its empty transcript says so. That the cap is enforced
 at a firing rather than at an edit is what makes lowering one non-destructive and leaves a disabled task
 whole. This is also why the record needs no `session_id`: nothing reuses a conversation, so a firing
 writes nothing back to the registry.
@@ -550,6 +619,21 @@ produces at all, so without a record switching into a running task showed an emp
 spawn's later `append` frames then arrived with no card to update. It opens the record *inside* its gate
 hold rather than beside the turn contextvars, because a firing can queue behind a turn already running on
 that conversation and would otherwise replace a record still standing in for live output.
+
+**A failed firing is persisted too.** `_run_unattended` used to reach `_persist` only where the run
+returned normally, so a firing that raised left the conversation it minted exactly as minted: zero
+messages, `updated_at` still equal to `created_at`, indistinguishable from a conversation that never ran.
+Everything the run had done up to the failure lived only on the in-memory agent and went with the next
+registry eviction. It now holds the error, snapshots the transcript, and re-raises so `proactive` still
+logs the traceback and tells the user. The floor of what survives is the prompt, because a model client
+appends the user turn before it sends the request. The reason goes into `metadata["failure"]`, keyed by
+user-message index like `model` and `trace`, and *not* into `session.messages`: the messages are what this
+conversation's agent rebuilds its context from, so a synthesized assistant turn saying "this failed" would
+come back to the model as its own prior words. `conversation_to_frames` replays it as a `notice` item at
+the *end* of its turn -- held until the next user message or the end of the transcript, so a conversation
+the user carried on in keeps the notice inside the turn it describes. An unattended run needs this most,
+since `_report`'s status line goes to whichever conversation the user was viewing at the time, leaving the
+run's own conversation with no account of why it holds only half a turn.
 
 Planning's reviewer verdicts and a turn's spawned sub-agents share one `subagent` frame type and one
 persisted map (`metadata["subagent"]`); `task` on the create event is what tells the two apart.

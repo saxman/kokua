@@ -81,21 +81,37 @@ def _write(path: Path, doc: TOMLDocument) -> None:
     path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
 
+def _section_table(doc: TOMLDocument, section: str, *, create: bool):
+    """The table at a (possibly dotted) ``section`` path, walked segment by segment.
+
+    ``doc["assistant.generation"] = table`` writes a *quoted* header -- a top-level key whose name
+    contains a dot -- which is not the sub-table of ``[assistant]`` the reader looks in. Walking the
+    segments is what makes the write land where ``load`` reads. Returns ``None`` for a missing path
+    when ``create`` is False.
+    """
+    table = doc
+    for segment in section.split("."):
+        nested = table.get(segment)
+        if nested is None:
+            if not create:
+                return None
+            nested = tomlkit.table()
+            table[segment] = nested
+        table = nested
+    return table
+
+
 def set_value(path: Path, section: str, key: str, value) -> None:
     """Set ``[section].key = value``, creating the section if absent, preserving everything else."""
     doc = _load(path)
-    table = doc.get(section)
-    if table is None:
-        table = tomlkit.table()
-        doc[section] = table
-    table[key] = value
+    _section_table(doc, section, create=True)[key] = value
     _write(path, doc)
 
 
 def unset_value(path: Path, section: str, key: str) -> None:
     """Remove ``[section].key`` if present; a missing section or key is a no-op."""
     doc = _load(path)
-    table = doc.get(section)
+    table = _section_table(doc, section, create=False)
     if table is not None and key in table:
         del table[key]
         _write(path, doc)

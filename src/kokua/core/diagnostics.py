@@ -67,6 +67,30 @@ def _thinking_line(config: AssistantConfig) -> Optional[str]:
     return " | ".join([f"- thinking: {default}", *overrides])
 
 
+def _render_generation(parameters: dict) -> str:
+    """One generation table as ``key=value`` pairs, sorted so two reports of one config read alike."""
+    return ", ".join(f"{key}={value}" for key, value in sorted(parameters.items()))
+
+
+def _generation_line(config: AssistantConfig) -> Optional[str]:
+    """The generation parameters in play, or ``None`` when nothing is declared anywhere.
+
+    Worth a line for the reason the model and the effort are: read only at startup, with no panel
+    field, so a running session would otherwise not say what it is sampling at. Each agent that
+    overrides the default shows only its own keys, not the merged result, because what a table declares
+    is what a reader is checking against the file.
+    """
+    overrides = [
+        f"{name}: {_render_generation(agent.generation)}"
+        for name, agent in sorted(config.agents.items())
+        if agent.generation
+    ]
+    if not config.generation and not overrides:
+        return None
+    default = _render_generation(config.generation) if config.generation else "unset"
+    return " | ".join([f"- generation: {default}", *overrides])
+
+
 def diag_report(
     tracker: TurnTracker,
     gate: TurnGate,
@@ -76,8 +100,8 @@ def diag_report(
     pending_approval: bool,
     pending_decision: bool,
 ) -> str:
-    """The `/diag` text: the models and reasoning effort in play, in-flight turns, gate depth, pending
-    human decisions, and stuck-turn stacks.
+    """The `/diag` text: the models, reasoning effort, and generation parameters in play, in-flight
+    turns, gate depth, pending human decisions, and stuck-turn stacks.
 
     ``entry_model`` is passed in rather than read off ``config`` because with nothing declared the only
     place the answer exists is the live client (see ``build.model_label``), which this module has no
@@ -88,6 +112,9 @@ def diag_report(
     thinking = _thinking_line(config)
     if thinking is not None:
         lines.append(thinking)
+    generation = _generation_line(config)
+    if generation is not None:
+        lines.append(generation)
     if turns:
         lines.append(f"- turn in flight: yes ({len(turns)})")
         for conversation_id, info in turns:

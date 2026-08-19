@@ -48,11 +48,23 @@ def build_model_client(config: AssistantConfig, system_message: str, agent_name:
     for an agent gives it the same message that agent was wired with. Raises ``ModelClientError``
     (carrying AIMU's message) instead of the raw ValueError/TypeError so a front end can present it
     rather than a traceback.
+
+    Generation parameters come from ``config.generation_for(agent_name)`` and are assigned to the
+    client, not the agent, which is why an injected client is left alone in ``wire_agent`` while
+    ``thinking`` is applied there regardless: reasoning effort is a field on the agent, and these are a
+    standing property of the client a caller may have built itself.
     """
     try:
-        return aio.client(config.model_for(agent_name), system=system_message)
+        client = aio.client(config.model_for(agent_name), system=system_message)
     except (ValueError, TypeError) as e:
         raise ModelClientError(str(e)) from e
+    # Only when something is declared, and only the keys that are: this is AIMU's third precedence
+    # tier, above the model card, so writing an empty or defaulted dict would shadow a card's own
+    # tuned sampling profile. See AssistantConfig.generation_for.
+    generation = config.generation_for(agent_name)
+    if generation:
+        client.default_generate_kwargs = generation
+    return client
 
 
 def model_label(config: AssistantConfig, agent_name: str, client=None) -> str:

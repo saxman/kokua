@@ -1552,3 +1552,51 @@ async def test_a_second_answer_after_a_phase_replays_as_its_own_bubble():
     assert [item["type"] for item in items] == ["user", "partial", "phase", "tool", "partial"]
     assert items[1]["text"] == "same"  # the first answer stayed where the phase closed it
     assert items[4]["text"] == "same more"  # the second floated below the tool call
+
+
+def test_conversation_to_frames_closes_a_failed_turn_with_its_reason():
+    """A failed turn ends mid-exchange, so without the notice the replay just stops with no account of
+    why -- the ``_report`` line that explained it went to whichever conversation the user was viewing.
+    Placed after the turn's own output, where a reader looking for the end of the turn will find it."""
+    messages = [{"role": "user", "content": "scan them"}, {"role": "assistant", "content": "starting"}]
+    items = conversation_to_frames(
+        messages, show_thinking=True, show_tools=True, failure={"0": "failed: out of context"}
+    )
+    assert items[-1] == {"type": "notice", "text": "failed: out of context"}
+
+
+def test_conversation_to_frames_keeps_a_failed_turns_reason_inside_that_turn():
+    """The user can carry on in a conversation whose earlier turn failed, so the notice belongs at the
+    end of the turn it describes rather than at the end of the transcript."""
+    messages = [
+        {"role": "user", "content": "scan them"},
+        {"role": "assistant", "content": "starting"},
+        {"role": "user", "content": "try again"},
+        {"role": "assistant", "content": "done"},
+    ]
+    items = conversation_to_frames(
+        messages, show_thinking=True, show_tools=True, failure={"0": "failed: out of context"}
+    )
+    kinds = [(i["type"], i.get("text")) for i in items]
+    assert kinds == [
+        ("user", "scan them"),
+        ("message", "starting"),
+        ("notice", "failed: out of context"),
+        ("user", "try again"),
+        ("message", "done"),
+    ]
+
+
+def test_conversation_to_frames_inherits_the_turn_timestamp_for_a_failure_notice():
+    messages = [
+        {"role": "user", "content": "scan them", "timestamp": "2026-08-19T06:43:56"},
+        {"role": "assistant", "content": "starting", "timestamp": "2026-08-19T06:44:10"},
+    ]
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True, failure={"0": "failed: boom"})
+    assert next(i for i in items if i["type"] == "notice")["ts"] == "2026-08-19T06:43:56"
+
+
+def test_conversation_to_frames_omits_the_notice_by_default():
+    messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    assert not any(i["type"] == "notice" for i in items)

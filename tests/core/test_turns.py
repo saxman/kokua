@@ -6,6 +6,7 @@ import asyncio
 
 import pytest
 
+from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
@@ -570,10 +571,14 @@ async def test_proactive_with_an_unlimited_cap_keeps_every_run(tmp_path):
 
 
 async def test_proactive_keeps_the_previous_run_when_the_new_one_fails(tmp_path):
-    """Pruning only after the run succeeds is what keeps a failed firing from leaving nothing to
-    read: the last good run has to outlive a bad one."""
+    """The last good run has to outlive a bad one, at the tightest cap there is.
+
+    A cap of 1 is the case that pins the eviction order: both runs cannot survive it, and evicting
+    strictly oldest-first would keep the failure and drop the report the user actually wants. The first
+    client goes to the conversation ``create`` opens, so the two firings take the second and third.
+    """
     channel = _ConvCapturingChannel()
-    clients = iter([MockAsyncModelClient(["out1"]), _FailingClient([])])
+    clients = iter([MockAsyncModelClient([]), MockAsyncModelClient(["out1"]), _FailingClient([])])
     assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: next(clients))
 
     await assistant._proactive("first run", task_name="digest", task_id="t1", max_conversations=1)
@@ -581,6 +586,7 @@ async def test_proactive_keeps_the_previous_run_when_the_new_one_fails(tmp_path)
     await assistant._proactive("second run", task_name="digest", task_id="t1", max_conversations=1)
 
     assert first_key in assistant._store.list_keys()  # the last good run survived the failure
+    assert len(assistant._book.sessions_for_task("t1")) == 1  # and the failure is what the cap evicted
 
 
 async def test_proactive_tolerates_a_run_the_user_already_deleted(tmp_path):
@@ -1310,3 +1316,110 @@ async def test_a_spawn_card_records_the_workers_own_thinking(tmp_path):
 
     card = assistant._store.get(assistant._active_id).metadata["subagent"]["0"][0]
     assert card["thinking"] is False
+
+
+async def test_a_failed_firing_persists_the_partial_transcript_it_produced(tmp_path):
+    """A scheduled run that fails must leave its conversation readable.
+
+    The unattended path used to reach ``_persist`` only where the run returned normally, so a firing
+    that raised left the conversation it minted exactly as minted: zero messages, ``updated_at`` still
+    equal to ``created_at``, and everything the run had done up to the failure lost with the agent. The
+    prompt is the floor of what has to survive -- a model client appends the user turn before it sends
+    the request, so it is on the transcript whatever the request does next.
+    """
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path),
+        channel,
+        client_factory=lambda cid: MockAsyncModelClient([RuntimeError("out of context")]),
+    )
+
+    await assistant._proactive("scan the transcripts", task_name="digest", task_id="t1")
+
+    session = assistant._book.sessions_for_task("t1")[0]
+    assert [m.get("content") for m in session.messages if m.get("role") == "user"] == ["scan the transcripts"]
+    assert session.metadata["updated_at"] > session.metadata["created_at"]
+
+
+async def test_a_failed_firing_records_why_it_stopped_in_its_own_conversation(tmp_path):
+    """An unattended run's ``_report`` line goes to whichever conversation the user is viewing, so the
+    run's own conversation is the only durable place the reason can live.
+
+    Recorded in metadata under the turn's user-message index, the way the model and the trace are,
+    rather than appended as a message: everything in ``session.messages`` is what this conversation's
+    agent rebuilds from, and a synthesized assistant turn would come back to the model as its own
+    prior words.
+    """
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path),
+        channel,
+        client_factory=lambda cid: MockAsyncModelClient([RuntimeError("out of context")]),
+    )
+
+    await assistant._proactive("scan the transcripts", task_name="digest", task_id="t1")
+
+    failure = assistant._book.sessions_for_task("t1")[0].metadata["failure"]
+    (reason,) = failure.values()
+    assert "out of context" in reason
+
+
+async def test_a_failed_firing_tags_its_partial_messages_as_proactive(tmp_path):
+    """The provenance tag is what keeps a replayed unattended turn from reading as something the user
+    typed. Applied in the same place the transcript is snapshotted, so a partial turn is tagged too:
+    tagging only where the run returned normally left the failed path's messages untagged the moment
+    they started being persisted."""
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path),
+        channel,
+        client_factory=lambda cid: MockAsyncModelClient([RuntimeError("out of context")]),
+    )
+
+    await assistant._proactive("scan the transcripts", task_name="digest", task_id="t1")
+
+    session = assistant._book.sessions_for_task("t1")[0]
+    assert session.messages
+    assert all(m.get(PROVENANCE_KEY) == PROVENANCE_PROACTIVE for m in session.messages)
+
+
+async def test_a_task_that_fails_every_firing_still_honours_its_cap(tmp_path):
+    """Retention used to run only where the firing succeeded, so a task failing on every firing minted
+    an unbounded pile of conversations the cap was supposed to cover."""
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path),
+        channel,
+        client_factory=lambda cid: MockAsyncModelClient([RuntimeError("boom")]),
+    )
+
+    for _ in range(4):
+        await assistant._proactive("run", task_name="digest", task_id="t1", max_conversations=2)
+
+    assert len(assistant._book.sessions_for_task("t1")) == 2
+
+
+async def test_retention_evicts_a_failed_run_before_a_successful_one(tmp_path):
+    """What lets retention run on the failure path without costing the user their last good report.
+
+    Ordering candidates failed-first is the whole mechanism: at a cap of 1 a strictly oldest-first
+    eviction would drop the successful run in favour of the failure that followed it.
+    """
+    channel = _ConvCapturingChannel()
+    clients = iter(
+        [
+            MockAsyncModelClient([RuntimeError("boom")]),
+            MockAsyncModelClient(["the report"]),
+            MockAsyncModelClient([RuntimeError("boom")]),
+        ]
+    )
+    assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: next(clients))
+
+    await assistant._proactive("run", task_name="digest", task_id="t1", max_conversations=2)
+    await assistant._proactive("run", task_name="digest", task_id="t1", max_conversations=2)
+    good_key = next(s.key for s in assistant._book.sessions_for_task("t1") if not s.metadata.get("failure"))
+    await assistant._proactive("run", task_name="digest", task_id="t1", max_conversations=2)
+
+    kept = assistant._book.sessions_for_task("t1")
+    assert len(kept) == 2  # the cap was applied, so something was evicted
+    assert good_key in assistant._store.list_keys()  # and it was not the successful run

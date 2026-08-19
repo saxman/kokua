@@ -19,11 +19,19 @@ from kokua.workflows.planning.prompts import PLAN_INPUT, PLAN_REVIEW_SYSTEM, RES
 
 
 async def review_plan(
-    model: Optional[str], request: str, plan: str, thinking: Optional[Union[bool, str]] = None
+    model: Optional[str],
+    request: str,
+    plan: str,
+    thinking: Optional[Union[bool, str]] = None,
+    generate_kwargs: Optional[dict] = None,
 ) -> critics.Verdict:
     """Independently review a plan against the request (no conversation context)."""
     return await critics.review(
-        model, PLAN_REVIEW_SYSTEM, PLAN_INPUT.format(request=request, plan=plan), thinking=thinking
+        model,
+        PLAN_REVIEW_SYSTEM,
+        PLAN_INPUT.format(request=request, plan=plan),
+        thinking=thinking,
+        generate_kwargs=generate_kwargs,
     )
 
 
@@ -34,23 +42,36 @@ async def review_result(
     answer: str,
     evidence: str = "",
     thinking: Optional[Union[bool, str]] = None,
+    generate_kwargs: Optional[dict] = None,
 ) -> critics.Verdict:
     """Independently review a final result against the request and plan (no conversation context).
 
     ``evidence`` is the agent's tool-result transcript (see ``runner._tool_evidence``); when given, the
     reviewer weighs it as fresher than its own memory instead of rejecting on stale-knowledge suspicion."""
     return await critics.review(
-        model, RESULT_REVIEW_SYSTEM, result_input(request, plan, answer, evidence), thinking=thinking
+        model,
+        RESULT_REVIEW_SYSTEM,
+        result_input(request, plan, answer, evidence),
+        thinking=thinking,
+        generate_kwargs=generate_kwargs,
     )
 
 
 async def stream_plan_review(
-    model: Optional[str], request: str, plan: str, thinking: Optional[Union[bool, str]] = None
+    model: Optional[str],
+    request: str,
+    plan: str,
+    thinking: Optional[Union[bool, str]] = None,
+    generate_kwargs: Optional[dict] = None,
 ):
     """Open a streamed plan review (see :func:`kokua.workflows.critics.stream_review`). Returns
     ``(client, chunk_stream)``; the caller streams the chunks, then finalizes the verdict."""
     return await critics.stream_review(
-        model, PLAN_REVIEW_SYSTEM, PLAN_INPUT.format(request=request, plan=plan), thinking=thinking
+        model,
+        PLAN_REVIEW_SYSTEM,
+        PLAN_INPUT.format(request=request, plan=plan),
+        thinking=thinking,
+        generate_kwargs=generate_kwargs,
     )
 
 
@@ -61,9 +82,14 @@ async def stream_result_review(
     answer: str,
     evidence: str = "",
     thinking: Optional[Union[bool, str]] = None,
+    generate_kwargs: Optional[dict] = None,
 ):
     """Open a streamed result review (see :func:`stream_plan_review`). ``evidence`` is the agent's
     tool-result transcript, weighed as fresher than the reviewer's own memory when present."""
     return await critics.stream_review(
-        model, RESULT_REVIEW_SYSTEM, result_input(request, plan, answer, evidence), thinking=thinking
+        model,
+        RESULT_REVIEW_SYSTEM,
+        result_input(request, plan, answer, evidence),
+        thinking=thinking,
+        generate_kwargs=generate_kwargs,
     )

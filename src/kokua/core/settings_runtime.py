@@ -9,9 +9,12 @@ The model is deliberately absent: every agent's model comes from its own ``[agen
 ``[assistant].model`` default, both read at startup, and no live client is ever rebound to another one.
 A panel field for it could only disagree with a table the panel cannot write.
 
-Sampling parameters are not here at all. AIMU owns their precedence chain (client fallbacks, then the
-model card's tuned profile, then ``client.default_generate_kwargs``, then the per-call dict), and Kokua
-writing the third tier from a ``[generation]`` section duplicated that chain while shadowing the card.
+Sampling parameters are not here either, and for the same reason, but they are set elsewhere: AIMU owns
+their precedence chain (client fallbacks, then the model card's tuned profile, then
+``client.default_generate_kwargs``, then the per-call dict), and ``[assistant.generation]`` plus each
+``[agents.<name>.generation]`` write that third tier at startup, with only the keys those tables name. A
+panel field would always hold a value, so it would write the tier even when the user asked for nothing,
+shadowing the card's tuned profile -- which is why that tier is startup-only and not a runtime setting.
 """
 
 from __future__ import annotations

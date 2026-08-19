@@ -707,6 +707,42 @@ def test_an_agent_is_wired_with_the_thinking_level_it_declares(tmp_path):
     assert agent.thinking == "high"
 
 
+def _captured_client(monkeypatch, build):
+    """The client ``build`` constructs, with AIMU's factory stubbed out."""
+    from aimu import aio
+
+    captured = []
+
+    def fake_client(model, system=None):
+        client = MockAsyncModelClient([])
+        client.default_generate_kwargs = {}
+        captured.append(client)
+        return client
+
+    monkeypatch.setattr(aio, "client", fake_client)
+    build()
+    return captured[0]
+
+
+def test_a_client_is_built_with_the_generation_parameters_its_agent_resolves(tmp_path, monkeypatch):
+    from kokua.core.build import build_model_client
+
+    agents = example_agents()
+    agents["assistant"].generation = {"temperature": 0.2}
+    config = _config(tmp_path, agents=agents, generation={"temperature": 0.7, "context_length": 32768})
+    client = _captured_client(monkeypatch, lambda: build_model_client(config, "sys", "assistant"))
+    assert client.default_generate_kwargs == {"temperature": 0.2, "context_length": 32768}
+
+
+def test_a_client_is_left_untouched_when_nothing_is_declared(tmp_path, monkeypatch):
+    """The regression that matters: this tier shadows the model card, so absent must stay absent."""
+    from kokua.core.build import build_model_client
+
+    config = _config(tmp_path)
+    client = _captured_client(monkeypatch, lambda: build_model_client(config, "sys", "assistant"))
+    assert client.default_generate_kwargs == {}
+
+
 def test_an_agent_declaring_no_thinking_is_wired_with_the_default(tmp_path):
     from kokua.core.build import wire_agent
 

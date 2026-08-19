@@ -65,6 +65,28 @@ def test_unset_value_missing_key_is_no_op(tmp_path):
     assert _read(path)["assistant"]["memory"] is True
 
 
+def test_setting_a_dotted_section_writes_a_real_sub_table(tmp_path):
+    """`doc["assistant.generation"] = ...` would write a *quoted* top-level key, not a sub-table."""
+    path = tmp_path / "config.toml"
+    path.write_text('[assistant]\nmodel = "ollama:qwen3:8b"\n', encoding="utf-8")
+
+    config_store.set_value(path, "assistant.generation", "temperature", 0.7)
+
+    text = path.read_text(encoding="utf-8")
+    assert "[assistant.generation]" in text
+    assert '"assistant.generation"' not in text
+    assert tomllib.loads(text)["assistant"]["generation"]["temperature"] == 0.7
+
+
+def test_unsetting_a_dotted_section_key_removes_it(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[assistant.generation]\ntemperature = 0.7\ntop_p = 0.9\n", encoding="utf-8")
+
+    config_store.unset_value(path, "assistant.generation", "temperature")
+
+    assert tomllib.loads(path.read_text(encoding="utf-8"))["assistant"]["generation"] == {"top_p": 0.9}
+
+
 def test_add_mcp_server_appends_and_is_readable_by_settings(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("", encoding="utf-8")

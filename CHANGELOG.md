@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.17.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -306,14 +306,18 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   `max_conversations` says how many of them survive: `1` means each run replaces the one before it,
   `0` keeps every run forever, and a task that names no cap follows `[scheduling]
   max_task_conversations` (default 3), read at fire time so a change reaches the next firing without a
-  restart. Pruning happens only *after* a firing succeeds and never touches the conversation that
-  firing just wrote, so a run that errors leaves the previous ones to read, and a run the user already
-  deleted is not an error. Lowering a cap deletes nothing until the task next fires, so an edit is not
-  destructive and a disabled task keeps everything. A channel with no conversation list (the CLI) has
-  nowhere to put a minted conversation, so there a firing runs in the one being viewed and prunes
-  nothing.
+  restart. Pruning happens after every firing, successful or not, evicting runs that hold no report
+  before ones that do, so a task that keeps failing cannot grow past its cap and a cap of `1` still
+  keeps the last good report rather than the failure that followed it. Lowering a cap deletes nothing
+  until the task next fires, so an edit is not destructive and a disabled task keeps everything. A run
+  the user already deleted is not an error. A channel with no conversation list (the CLI) has nowhere to
+  put a minted conversation, so there a firing runs in the one being viewed and prunes nothing.
 - A failing firing is reported and swallowed rather than propagating into the scheduler, which has no
-  handler of its own.
+  handler of its own. **Its conversation is still persisted as far as the run got** -- at minimum the
+  prompt, since the model client appends the user turn before it sends the request -- with the reason it
+  stopped recorded against that turn and replayed as a notice at the end of it. Without that, a firing
+  that failed left a conversation with nothing in it at all, and the status line explaining why went to
+  whichever conversation the user happened to be viewing.
 - **A tasks section in the web sidebar**, below the conversation list, showing each task's name,
   schedule, and next firing, with disable/enable, run-now, and delete per row. It hides itself entirely
   when there are no tasks, collapses (remembered per browser), and scrolls independently of the
@@ -480,16 +484,54 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   workflow's independent reviewers run at the `[assistant]` effort too, being no agent's table.
   Two caveats it is worth knowing: a level is advisory on a model whose card declares no effort-level
   support (AIMU warns once and reasoning is still on), and `false` additionally selects a card's
-  instruct-mode sampling profile where it declares one -- only the Qwen 3.5/3.6/3.8 cards today, and
-  since Kokua sets no sampling parameter of its own, on those models nothing here can pin it back.
+  instruct-mode sampling profile where it declares one -- only the Qwen 3.5/3.6/3.8 cards today. A
+  generation parameter set below still applies over that profile; it is only a parameter nobody set that
+  the profile switch decides outright.
   Needs `aimu>=0.17.0`, which added the `agent_types` spec key the per-worker half rides on. An AIMU that
   predates it ignores an unknown spec key silently, so a per-worker effort would simply not apply with
   nothing raised; that release also closes a spec's keys to a published `SUBAGENT_SPEC_KEYS`, which is
   what the startup preflight now probes, since the key itself is a dict entry no probe can see.
-- **`/diag` names the models and the reasoning effort in play**: the entry agent's first, then each agent
-  that declares its own. Neither has a panel field and both are read only at startup, so this is where a
-  running session says what they are. With nothing declared, the model line reports what AIMU resolved
-  onto the live client, and the thinking line is omitted rather than reading "unset" on every `/diag`.
+- **A default tier of generation parameters, with per-key overrides.** `[assistant.generation]` sets
+  `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`, `repetition_penalty`, `max_tokens`, and
+  `context_length` for every agent; an agent's own `[agents.<name>.generation]` overrides it **per key**,
+  so naming only `temperature` still inherits the default's `context_length` rather than replacing the
+  whole table. `AssistantConfig.generation_for(name)` is the single resolution, per agent and never
+  inherited down the delegation graph, and it is empty by default -- the normal case, since a key this
+  never sets stays absent from the request and a model card's own tuned sampling profile is what answers
+  instead. The result reaches three places: the entry agent's client (`build_model_client`), each
+  spawned worker's spec (the *resolved* value, like `thinking`, so an undeclared worker still inherits
+  the default rather than skipping it), and the two planning reviewers, which get the `[assistant]` tier
+  only, being no agent's own table. Startup-only with no panel field, like the model and the effort, and
+  `[assistant.generation]` is the first dotted sub-table `config/file.py`'s section loader handles, which
+  is what lets a schema entry per parameter serve it instead of the flat-key loop reading it as one
+  `[assistant]` key holding a table.
+  Two things worth knowing about the parameters themselves: `max_tokens` caps *generated* tokens while
+  `context_length` sizes the whole window prompt and output share, so a 32768 window with a 4096 cap
+  leaves roughly 28k for the system prompt, the tool block, and history -- and AIMU's own weakest tier
+  sets `max_tokens = 1024` on Anthropic, the OpenAI-compatible family, and llama.cpp, which is low for a
+  turn carrying tool results. A parameter a backend cannot take is dropped with a warning naming the
+  remedy: Ollama's SDK has no `min_p`, the Anthropic API has no penalties, and only Ollama's native API
+  sizes the context window per request. That warning is written to the rotating file log
+  (`data/logs/kokua.log` under your Kokua home) and nowhere else -- not the chat, not the terminal, and
+  not `/diag`, which reports what you declared rather than what the backend accepted -- so the log is
+  where to look when a parameter you set has no effect.
+  Needs `aimu>=0.18.0` for the per-agent half, which added the `generate_kwargs` key to the `agent_types`
+  spec; an AIMU that predates it ignores the unknown key silently, so 0.18.0 replaces the 0.17.0 floor
+  above rather than sitting alongside it. This is a breaking change.
+  **That AIMU bump also changes how four Ollama models sample, whether or not you set anything here.**
+  It renames the portable `repetition_penalty` into Ollama's own `repeat_penalty`, so the
+  `repetition_penalty = 1.0` that the `qwen3.8:27b`, `qwen3.6:35b`, `qwen3.6:27b`, and `qwen3.5:9b` cards
+  have always carried now reaches the wire instead of being discarded by the SDK, and Ollama's own server
+  default of 1.1 no longer applies: the repetition penalty is effectively off for those four. It is what
+  each card asks for, but it is a real change in their output. The example config's `ollama:qwen3:8b` is
+  not one of them -- that card declares no sampling profile at all, so nothing about it changes.
+- **`/diag` names the models, the reasoning effort, and the generation parameters in play**: the entry
+  agent's first, then each agent that declares its own. None has a panel field and all are read only at
+  startup, so this is where a running session says what they are. With nothing declared, the model line
+  reports what AIMU resolved onto the live client, and the thinking and generation lines are omitted
+  rather than reading "unset" on every `/diag`; an agent that overrides the default generation tier shows
+  only the keys it declares, not the merged result, since what a table declares is what a reader checks
+  against the file.
 - **A stored conversation says which model produced its output, and how hard it thought.** Each turn
   records the model that answered it under `metadata.model.<user_index>` and its reasoning effort under
   `metadata.thinking.<user_index>`, and each sub-agent card carries its own worker's pair, so a

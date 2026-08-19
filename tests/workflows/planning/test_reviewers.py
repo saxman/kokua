@@ -389,7 +389,7 @@ async def test_the_configured_thinking_reaches_every_planning_reviewer(monkeypat
 
     seen: list = []
 
-    def fake_reviewer(model, system, tools=None, thinking=None):
+    def fake_reviewer(model, system, tools=None, thinking=None, generate_kwargs=None):
         seen.append(thinking)
         return _StubAgent()
 
@@ -405,3 +405,68 @@ async def test_the_configured_thinking_reaches_every_planning_reviewer(monkeypat
     await review.stream_result_review(None, "req", "plan", "answer", thinking="high")
 
     assert seen == ["high"] * 4
+
+
+# --- reviewer generation parameters ----------------------------------------------------------
+
+
+def _recording_client_factory(seen: list):
+    def fake_client(model, system=None):
+        client = MockAsyncModelClient([])
+        client.default_generate_kwargs = {}
+        seen.append(client)
+        return client
+
+    return fake_client
+
+
+def test_reviewer_agent_carries_the_generation_parameters_it_is_given(monkeypatch):
+    """A reviewer is not an [agents.*] agent, so the [assistant] default is the only tier it has."""
+    seen: list = []
+    monkeypatch.setattr(aio, "client", _recording_client_factory(seen))
+
+    critics.reviewer_agent(None, "Judge it.", generate_kwargs={"temperature": 0.2})
+
+    assert seen[-1].default_generate_kwargs == {"temperature": 0.2}
+
+
+def test_reviewer_agent_leaves_a_client_untouched_when_given_nothing(monkeypatch):
+    """Absent must stay absent: the tier sits above the model card's own tuned profile."""
+    seen: list = []
+    monkeypatch.setattr(aio, "client", _recording_client_factory(seen))
+
+    critics.reviewer_agent(None, "Judge it.")
+
+    assert seen[-1].default_generate_kwargs == {}
+
+
+async def test_the_configured_generation_reaches_every_planning_reviewer(monkeypatch):
+    """All four wrappers, not just the two non-streamed ones, or a verbose planned turn would review
+    with different parameters than a quiet one."""
+
+    class _StubAgent:
+        def __init__(self):
+            self.model_client = MockAsyncModelClient([])
+
+        async def run(self, *args, **kwargs):
+            return ""
+
+    seen: list = []
+
+    def fake_reviewer(model, system, tools=None, thinking=None, generate_kwargs=None):
+        seen.append(generate_kwargs)
+        return _StubAgent()
+
+    async def fake_finalize(client):
+        return APPROVE
+
+    monkeypatch.setattr(critics, "reviewer_agent", fake_reviewer)
+    monkeypatch.setattr(critics, "finalize_verdict", fake_finalize)
+
+    parameters = {"context_length": 32768}
+    await review.review_plan(None, "req", "plan", generate_kwargs=parameters)
+    await review.review_result(None, "req", "plan", "answer", generate_kwargs=parameters)
+    await review.stream_plan_review(None, "req", "plan", generate_kwargs=parameters)
+    await review.stream_result_review(None, "req", "plan", "answer", generate_kwargs=parameters)
+
+    assert seen == [parameters] * 4

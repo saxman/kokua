@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.17.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.18.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -14,11 +14,13 @@ frame, which no ``getattr`` can detect). The capability probe catches an editabl
 declared version already reads new enough while the code behind it predates the release -- the version
 string of an editable install says what the branch claims, not what it contains.
 
-The probe targets the newest surface Kokua depends on, which is all any older one needs: a checkout
-carrying ``SUBAGENT_SPEC_KEYS`` necessarily carries everything the releases before it added. It takes
-whichever shape that surface has -- a name lookup for a symbol, or a signature check when the capability
-is a keyword argument that no ``getattr`` would notice (as ``SkillManager(include=...)`` was, before
-this).
+The probe covers exactly one surface at a time: the newest one Kokua depends on, whose shape decides the
+check's shape. A name lookup answers for a symbol; a signature check answers for a keyword argument no
+``getattr`` would notice (as ``SkillManager(include=...)`` was); a membership check answers for an entry
+in a published set, which is the shape in force today. What Kokua depends on is the ``"generate_kwargs"``
+it writes into an ``agent_types`` spec, and although the set holding it (``SUBAGENT_SPEC_KEYS``) is a
+symbol, that symbol shipped a release earlier, so its existence proves nothing here and only its contents
+do. Checking one surface is no claim about the others; covering those is the version floor's job.
 
 A capability can also be shaped so that *nothing* can probe it, and AIMU 0.17.0's headline surface is:
 the ``"thinking"`` key Kokua writes into an ``agent_types`` spec is a dict key, neither a symbol nor a
@@ -36,16 +38,17 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 17, 0)
+MINIMUM_AIMU = (0, 18, 0)
 
-# The newest AIMU surface Kokua depends on: the closed `agent_types` spec key set, which contains the
-# `thinking` key `build_agent_specs` writes for a per-agent reasoning effort. The set is the probe rather
-# than the key because a dict key cannot be looked up on a module -- see the module docstring. Looked up
-# rather than imported, so a miss is a clean message instead of an ImportError here. `None` parameter: a
-# plain name lookup is enough, since the name either exists or the behavior behind it does not.
+# The newest AIMU surface Kokua depends on: the `generate_kwargs` member of the closed `agent_types`
+# spec key set, which `build_agent_specs` writes for a per-agent generation table. The set is the
+# symbol and the key is checked *in* it, because 0.17.0 published the set itself -- so its existence
+# no longer proves anything, where its contents do. `None` for the parameter: a member check answers
+# this capability, and a signature check would be probing the wrong shape.
 _PROBE_MODULE = "aimu.tools.builtin"
 _PROBE_SYMBOL = "SUBAGENT_SPEC_KEYS"
 _PROBE_PARAMETER: Optional[str] = None
+_PROBE_MEMBER: Optional[str] = "generate_kwargs"
 
 
 class AimuVersionError(RuntimeError):
@@ -99,6 +102,13 @@ def require_aimu() -> None:
             _message(
                 f"the AIMU at {where} reports version {installed} but has no {_PROBE_SYMBOL}, "
                 f"so it predates that release"
+            )
+        )
+    if _PROBE_MEMBER is not None and _PROBE_MEMBER not in probed:
+        raise AimuVersionError(
+            _message(
+                f"the AIMU at {where} reports version {installed} but its {_PROBE_SYMBOL} has no "
+                f"{_PROBE_MEMBER!r} entry, so it predates that release"
             )
         )
     if _PROBE_PARAMETER is None:

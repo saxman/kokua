@@ -58,6 +58,40 @@ load_plugins = true
 # from persisted state on next access, so the cap bounds memory, not correctness.
 agent_cache_cap = 8
 
+# Generation parameters for every agent, each overridable per key by an agent's own
+# [agents.<name>.generation] table below. Startup-only, like `model` and `thinking` above. This is the
+# last thing in [assistant] because it is a sub-table: any plain [assistant] key written after the
+# header below would belong to it instead.
+#
+# Only the keys you set here are sent. That matters: this tier sits above the model card's own tuned
+# profile in AIMU's precedence chain, so a value set here replaces the card's recommendation for that
+# one parameter and leaves the rest of the card's profile in force. Setting nothing keeps the whole
+# profile.
+#
+# A parameter a backend cannot take is dropped with a warning naming where to set it instead (Ollama has
+# no min_p, the Anthropic API has no penalties), so a value that works locally does not break a cloud
+# model, it just stops applying. That warning goes to the rotating log only (data/logs/kokua.log under
+# your Kokua home), not to the chat or the terminal, so look there if a parameter you set has no effect.
+#
+# max_tokens and context_length are different knobs, and they interact. max_tokens caps *generated*
+# tokens; context_length sizes the whole window, which the prompt and the generated tokens share. With
+# the window at 32768 and the cap at 4096, roughly 28k is left for the system prompt, the tool block,
+# and the conversation. Note also that AIMU's own fallback sets max_tokens = 1024 on Anthropic,
+# the OpenAI-compatible family, and llama.cpp, which is low for a turn carrying tool results.
+#
+# context_length is set per request only on Ollama's native API. Elsewhere the window is fixed at load
+# time, at server launch (--ctx-size / --max-model-len), or by the vendor, and the key is dropped with
+# a warning naming that remedy.
+# [assistant.generation]
+# temperature = 0.7          # 0.0 to 2.0
+# top_p = 0.9                # 0.0 to 1.0
+# top_k = 40                 # at least 1
+# min_p = 0.05               # 0.0 to 1.0
+# presence_penalty = 1.5     # -2.0 to 2.0
+# repetition_penalty = 1.05  # greater than 0.0
+# max_tokens = 4096          # at least 1
+# context_length = 32768     # at least 1
+
 [display]
 # Stream the model's reasoning / tool calls into the channel. The web settings panel toggles these
 # at runtime; a change there is written straight back into these keys.
@@ -113,6 +147,13 @@ system_message = """\
 You are a research sub-agent. Investigate the task with web search and page lookups, verify claims \
 against sources rather than memory, and return a concise, well-organized findings summary that names \
 its sources."""
+# An agent may override any of [assistant.generation]'s keys, per key: what it does not name, it
+# inherits from that default (and what neither sets, the model card decides). Hand-edit only, like the
+# rest of an agent's table. Written last in the agent's table for the reason [assistant.generation] is:
+# a plain [agents.researcher] key after this header would belong to the sub-table instead.
+# [agents.researcher.generation]
+# temperature = 0.2
+# context_length = 131072
 
 [agents.coder]
 description = "Coding specialist: read/write files and run code to complete a task."

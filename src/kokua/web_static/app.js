@@ -993,6 +993,9 @@ ws.onmessage = (event) => {
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
       else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);
       else if (item.type === "message") addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text, item.ts);
+      // Why a turn stopped early. A scheduled run's error never reached this conversation live, so on
+      // reload this is the only account of it the conversation has.
+      else if (item.type === "notice") addBubble("notice", item.text, item.ts);
     }
     autoscroll();
   }
