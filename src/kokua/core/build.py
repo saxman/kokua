@@ -28,8 +28,8 @@ class ModelClientError(RuntimeError):
 def resolve_system_message(config: AssistantConfig, agent_name: str, toolsets: Sequence[Toolset]) -> str:
     """One agent's system prompt: its declared opener plus the guidance its toolsets and delegation earn.
 
-    Shared by the initial build and a runtime model switch, so a switch reuses exactly the message the
-    agent was built with rather than recomputing a possibly different one.
+    Shared by every path that builds a client for an agent, so each one gives it the same message the
+    agent's toolsets and delegation earn rather than recomputing a possibly different one.
     """
     # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which pulls
     # in kokua.core.transcripts -- a submodule of this package -- and importing it triggers kokua/core/__init__
@@ -39,16 +39,18 @@ def resolve_system_message(config: AssistantConfig, agent_name: str, toolsets: S
     return assemble_system_message(config, agent_name, toolsets)
 
 
-def build_model_client(config: AssistantConfig, system_message: str):
-    """Build the model client for ``config.model``, carrying ``system_message``.
+def build_model_client(config: AssistantConfig, system_message: str, agent_name: str):
+    """Build ``agent_name``'s model client, carrying ``system_message``.
 
-    The caller assembles the message (see ``resolve_system_message``) and passes it in, rather than this
-    function computing its own, so a runtime model switch and the initial build always give the client
-    the same message the agent was wired with. Raises ``ModelClientError`` (carrying AIMU's message)
-    instead of the raw ValueError/TypeError so a front end can present it rather than a traceback.
+    The model is ``config.model_for(agent_name)``: the agent's own declaration, else the
+    ``[assistant].model`` default. The caller assembles the message (see ``resolve_system_message``)
+    and passes it in, rather than this function computing its own, so every path that builds a client
+    for an agent gives it the same message that agent was wired with. Raises ``ModelClientError``
+    (carrying AIMU's message) instead of the raw ValueError/TypeError so a front end can present it
+    rather than a traceback.
     """
     try:
-        return aio.client(config.model, system=system_message)
+        return aio.client(config.model_for(agent_name), system=system_message)
     except (ValueError, TypeError) as e:
         raise ModelClientError(str(e)) from e
 
@@ -56,15 +58,14 @@ def build_model_client(config: AssistantConfig, system_message: str):
 def entry_agent_system_message(config: AssistantConfig, state: LiveState) -> str:
     """The assembled system message for the entry agent -- the one every client Kokua builds directly needs.
 
-    Every agent Kokua constructs directly (the initial build, a runtime model switch, and every later
-    per-conversation client) IS the entry agent, ``config.entry_agent``; only a spawned worker differs,
+    Every agent Kokua constructs directly (the initial build and every later per-conversation client)
+    IS the entry agent, ``config.entry_agent``; only a spawned worker differs,
     and it gets its own message from ``build_agent_specs``. Reads ``config.agents[config.entry_agent]``
     rather than a hardcoded toolset list, so a renamed entry agent gets the message its own
     ``[agents.*]`` table declares rather than one assembled for whichever agent used to hold that role.
-    Centralized here so the callers that build a client for the entry agent --
-    ``SettingsApplier.switch_model`` and ``Assistant.create``'s per-conversation client factory --
-    resolve its toolsets exactly once, in one place, instead of duplicating ``select`` plus
-    ``resolve_system_message`` and risking the copies drifting apart.
+    Centralized here so ``Assistant.create``'s per-conversation client factory resolves its toolsets in
+    one place, instead of duplicating ``select`` plus ``resolve_system_message`` and risking the copies
+    drifting apart.
     """
     name = config.entry_agent
     toolsets = select(config.agents[name].tools, state.registry, agent=name, entry_point=name)
@@ -101,7 +102,7 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
     toolsets = select(resolvable, state.registry, agent=agent_name, entry_point=config.entry_agent)
     resolved_client = client
     if resolved_client is None:
-        resolved_client = build_model_client(config, resolve_system_message(config, agent_name, toolsets))
+        resolved_client = build_model_client(config, resolve_system_message(config, agent_name, toolsets), agent_name)
 
     agent = aio.SkillAgent(
         resolved_client,

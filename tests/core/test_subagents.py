@@ -11,9 +11,9 @@ from kokua.core.subagents import SubagentReporter, subagent_events
 from tests.channels import SubagentCapturingChannel
 
 
-def _reporter(**flags):
+def _reporter(model_for=lambda agent_type: None, **flags):
     channel = SubagentCapturingChannel(**flags)
-    return SubagentReporter(ChannelUI(channel)), channel
+    return SubagentReporter(ChannelUI(channel), model_for=model_for), channel
 
 
 def _collect():
@@ -211,7 +211,7 @@ async def test_a_cancelled_spawn_records_before_it_tries_to_send():
         async def send_subagent(self, event):
             raise asyncio.CancelledError
 
-    reporter = SubagentReporter(ChannelUI(_RefusingChannel()))
+    reporter = SubagentReporter(ChannelUI(_RefusingChannel()), model_for=lambda agent_type: None)
     events = _collect()
     await reporter.finished("r-1", "partial", asyncio.CancelledError())
     assert events == [{"id": "r-1", "status": "stopped", "append": {"kind": "answer", "text": "partial"}}]
@@ -288,3 +288,22 @@ async def test_no_collector_installed_still_displays():
     subagent_events.set(None)
     await reporter.spawned("r-1", "researcher", "find X")
     assert len(channel.subagent_frames) == 1
+
+
+async def test_a_spawn_records_the_model_that_produced_its_output():
+    """A conversation's stored JSON has to answer which model produced a worker's answer, and the
+    workers of one turn need not share one: each runs on its own [agents.*].model or the default."""
+    reporter, channel = _reporter(model_for=lambda agent_type: f"ollama:{agent_type}-model")
+    events = _collect()
+    await reporter.spawned("researcher-abc", "researcher", "find X")
+    assert events[0]["model"] == "ollama:researcher-model"
+    assert channel.subagent_frames[0]["model"] == "ollama:researcher-model"
+
+
+async def test_a_spawn_with_no_model_configured_anywhere_records_no_model():
+    """AIMU resolves an unset model when the client is built, so there is no string to record here.
+    Omitted rather than null: a key present means it is the answer."""
+    reporter, _ = _reporter()
+    events = _collect()
+    await reporter.spawned("researcher-abc", "researcher", "find X")
+    assert "model" not in events[0]

@@ -192,6 +192,7 @@ def validate_agents(config: AssistantConfig, registry: Mapping[str, Toolset]) ->
             select(agent.tools, registry, agent=name, entry_point=config.entry_agent)
         except ToolsetError as e:
             raise ConfigError(str(e)) from e
+        _check_model(name, agent.model)
         for target in agent.delegates_to:
             if target not in config.agents:
                 known = ", ".join(sorted(config.agents))
@@ -438,7 +439,30 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
             "system_message": f"{agent.description or name}\n\n{message}",
             "tools": tools,
         }
+        # Only a declared model is carried. AIMU reads a missing key as "the model the spawn tool was
+        # built with", which is the [assistant].model default -- so an undeclared worker runs on that
+        # default rather than inheriting whatever its delegator was pinned to.
+        if agent.model:
+            specs[name]["model"] = agent.model
     return specs
+
+
+def _check_model(agent_name: str, model: Optional[str]) -> None:
+    """Reject a declared model AIMU cannot resolve, naming the table it came from.
+
+    Resolving the string is offline and cheap: no client is constructed, no key is read, and no weights
+    load. Doing it here rather than at first use is what keeps a typo from surfacing mid-turn, since a
+    worker's model is only reached once something delegates to it. A provider whose optional dependency
+    is not installed fails the same way, which is the same wall the client build would hit later.
+    """
+    if not model:
+        return
+    from aimu.models.model_client import resolve_model_string
+
+    try:
+        resolve_model_string(model)
+    except (ValueError, TypeError) as e:
+        raise ConfigError(f"[agents.{agent_name}].model is {model!r}, which cannot be resolved: {e}") from e
 
 
 def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Callable:
@@ -455,15 +479,18 @@ def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Ca
 def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Optional[Callable]:
     """The delegate for a live agent, or None when it declares no targets.
 
-    Uses the agent's own model rather than ``config.model`` so a runtime model switch reaches the
-    workers it spawns.
+    The tool is built with the ``[assistant].model`` default, not the delegator's own model: a worker
+    declaring no model of its own runs on that default rather than inheriting a delegator's pin, and a
+    worker that declares one carries it in its spec. Falling back to the delegator's already-resolved
+    client model covers an unset default, where AIMU picked a model when that client was built: reusing
+    the string keeps every spawn on it instead of re-resolving per spawn.
     """
     name = getattr(agent, "name", config.entry_agent)
     if not config.agents[name].delegates_to:
         return None
     observer: Optional[SubagentObserver] = state.observer
     return make_async_subagent_tool(
-        agent.model_client.model,
+        config.model or agent.model_client.model,
         agent_types=build_agent_specs(config, state, name),
         tool_approval=state.tool_approval,
         observer=observer,

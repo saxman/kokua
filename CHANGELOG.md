@@ -101,9 +101,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.16.0 or newer
   - **Agent-loop continuations are distinguished from user input.** The loop injects its own turns as
     `user`-role messages; these render as a dim `continuation` row showing the injected prompt rather
     than as the user's own turn. A proactive message keeps its uppercase label.
-  - **A settings panel** (gear button) changes the model, the display preferences, the planning toggles,
-    and the theme at runtime. Server-backed changes take effect on the next turn and persist to
-    `config.toml`; switching the model rebuilds the client and carries the conversation over.
+  - **A settings panel** (gear button) changes the display preferences, the planning toggles, and the
+    theme at runtime. Server-backed changes take effect on the next turn and persist to `config.toml`.
+    The model is deliberately not here: it is read at startup, from `[assistant].model` or an agent's
+    own `[agents.<name>].model`, and the panel cannot write the `[agents.*]` tables it would have to
+    agree with. Change it in `config.toml` (or have the assistant do it with `update_config`) and
+    restart.
   - **Sampling parameters are AIMU's, not a Kokua setting.** There is no `[generation]` section and no
     generation fields in the panel. AIMU 0.16.0 resolves generation kwargs through one precedence chain
     (the client's fallbacks, then the model card's tuned profile, then `client.default_generate_kwargs`,
@@ -156,8 +159,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.16.0 or newer
   An unknown name raises rather than being dropped, since a dropped name is a declaration silently
   overruled.
 - **`spawn_subagent(agent_type, task)`** is typed, and a non-empty `delegates_to` is the whole switch
-  for it: that agent gets a delegate offering exactly the agents it names, each cloning the active model
-  with the tools its own table declares. Delegation nesting is Kokua's rather than AIMU's `max_depth`,
+  for it: that agent gets a delegate offering exactly the agents it names, each running on its own
+  declared model (or the default) with the tools its own table declares. Delegation nesting is Kokua's rather than AIMU's `max_depth`,
   so an agent you delegate to that delegates in turn gets its own menu of its own targets; the graph must
   be acyclic and a cycle fails startup printing the cycle as a path. Independent spawns in one turn run
   concurrently (`[assistant] concurrent_tools`, default on). A worker's gated-tool call is routed to the
@@ -274,7 +277,8 @@ so they appear in `--list-toolsets` alongside anything you install -- grouped un
   `ContentCreationAgent` as the tools `code_review`, `research_report`, and `create_content`. It exists
   mainly as the worked example of wiring an AIMU-built agent into Kokua: every `Runner` exposes
   `.run(task) -> str`, so a toolset is the entire bridge and the core gains no new surface. Each call
-  builds a fresh agent, reading `config.model` at call time so a runtime model switch reaches it. The
+  builds a fresh agent on `[assistant].model`, the same default an agent that declares no model of its
+  own runs on. The
   caveats are documented in the module: the prebuilts are synchronous, so a nested run gets no sub-agent
   card, no `/stop`, and no approval gate on its workers.
 - **`example`**: the template for writing your own.
@@ -453,6 +457,19 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   time) -- can never be changed by the tool, only by hand: `update_config` is a tool the assistant holds,
   so a writable agent table would let it widen its own reach. `update_config` is also in the default
   `confirm_tools` list, so each write it *is* allowed goes through the approval prompt.
+- **A default model, with per-agent overrides.** `[assistant].model` is the model every agent runs on;
+  an agent that names its own `[agents.<name>].model` runs on that instead. Resolution is per agent and
+  never inherited down the delegation graph, so a delegator that pins a model does not drag its workers
+  onto it -- a worker declaring nothing runs on the default like any other undeclared agent. A declared
+  model that AIMU cannot resolve fails startup naming the table it came from, rather than surfacing
+  later as a failed spawn. Both are read once, at startup: no live client is ever rebound to another
+  model, which is why the model is not in the settings panel.
+- **A stored conversation says which model produced its output.** Each turn records the model that
+  answered it under `metadata.model.<user_index>`, and each sub-agent card carries its own worker's
+  model, so a conversation that spans a config edit -- or a turn whose workers ran on different models
+  -- stays readable from the JSON alone. It is metadata, never a message key: AIMU strips only its own
+  inert keys before a request, and Ollama and OpenAI-compatible providers forward anything else
+  verbatim.
 - **Remote and custom model endpoints.** `[assistant] model` accepts AIMU's extended
   `provider:model_id[@base_url][;flags]` form, so Kokua can target a remote OpenAI-compatible server or
   a model id not in AIMU's catalog, e.g.

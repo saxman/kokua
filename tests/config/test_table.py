@@ -31,6 +31,7 @@ def _table() -> SettingsTable:
             *CORE_RUNTIME_SETTINGS,
             RuntimeSetting("verbose", "widgets", bool, toolset="widgets"),
             RuntimeSetting("rounds", "widgets", int, toolset="widgets"),
+            RuntimeSetting("label", "widgets", str, toolset="widgets"),
         ]
     )
 
@@ -148,20 +149,23 @@ def test_every_core_runtime_setting_is_documented_under_its_own_section():
 
 
 def test_sanitize_drops_a_key_no_setting_declares():
-    """Sampling parameters are the concrete case: they were wire keys once, and are not settings now."""
-    result = _table().sanitize({"model": "anthropic:x", "temperature": 0.5, "generate_kwargs": {"top_p": 1}})
-    assert result == {"model": "anthropic:x"}
+    """Sampling parameters are one concrete case (they were wire keys once); the model is another, now
+    that it is read only at startup."""
+    result = _table().sanitize(
+        {"widgets.label": "x", "model": "anthropic:x", "temperature": 0.5, "generate_kwargs": {"top_p": 1}}
+    )
+    assert result == {"widgets.label": "x"}
 
 
-def test_sanitize_model_and_flags():
-    result = _table().sanitize({"model": "  anthropic:x  ", "show_thinking": True, "show_tools": "yes"})
-    assert result["model"] == "anthropic:x"  # trimmed
+def test_sanitize_strings_and_flags():
+    result = _table().sanitize({"widgets.label": "  x  ", "show_thinking": True, "show_tools": "yes"})
+    assert result["widgets.label"] == "x"  # trimmed
     assert result["show_thinking"] is True
     assert "show_tools" not in result  # non-bool dropped
 
 
-def test_sanitize_blank_model_omitted():
-    assert "model" not in _table().sanitize({"model": "   "})
+def test_sanitize_blank_string_omitted():
+    assert "widgets.label" not in _table().sanitize({"widgets.label": "   "})
 
 
 def test_sanitize_of_nothing_is_empty():

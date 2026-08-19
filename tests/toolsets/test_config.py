@@ -72,10 +72,10 @@ async def test_update_config_restart_key_does_not_apply_live(tmp_path):
 
 async def test_update_config_hot_key_not_persisted_when_apply_fails(tmp_path):
     async def apply_hot(section, key, value):
-        raise RuntimeError("bad model")
+        raise RuntimeError("bad flag")
 
     path, _, update_config = _tools(tmp_path, apply_hot)
-    result = await update_config("assistant", "model", "nonsense:model")
+    result = await update_config("display", "show_tools", "false")
     assert not path.exists()  # apply failed, so nothing was written
     assert "could not be applied" in result.lower()
 

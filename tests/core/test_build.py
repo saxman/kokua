@@ -118,6 +118,16 @@ async def test_an_unknown_toolset_name_refuses_to_start(tmp_path):
         await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
 
 
+async def test_an_unresolvable_declared_model_refuses_to_start(tmp_path):
+    """A worker's model is only reached when something delegates to it, so an unchecked typo would
+    surface mid-turn as a failed spawn rather than at startup."""
+    from kokua.config import ConfigError
+
+    cfg = _config(tmp_path, agents={"assistant": AgentConfig(tools=[], model="nonsense:whatever")})
+    with pytest.raises(ConfigError, match=r"\[agents.assistant\].model"):
+        await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+
 async def test_a_missing_entry_agent_refuses_to_start(tmp_path):
     from kokua.config import ConfigError
 
@@ -644,3 +654,44 @@ def test_wire_agent_uses_an_injected_client_as_is(tmp_path):
 
     assert agent.model_client is client
     assert agent.model_client.system_message == "Injected system message."
+
+
+def _captured_client_model(monkeypatch, config, build) -> object:
+    """The model string ``build`` resolves, with client construction stubbed out."""
+    from aimu import aio
+
+    captured = []
+
+    def fake_client(model, system=None):
+        captured.append(model)
+        return MockAsyncModelClient([])
+
+    monkeypatch.setattr(aio, "client", fake_client)
+    build()
+    return captured[0]
+
+
+def _live_state(config) -> LiveState:
+    from kokua.toolsets.agents import build_registry
+
+    return LiveState(config=config, registry=build_registry(config))
+
+
+def test_an_agents_client_is_built_with_the_model_it_declares(tmp_path, monkeypatch):
+    from kokua.core.build import wire_agent
+
+    agents = example_agents()
+    agents["assistant"].model = "ollama:qwen3:32b"
+    config = _config(tmp_path, agents=agents, model="ollama:qwen3:8b")
+    state = _live_state(config)
+    model = _captured_client_model(monkeypatch, config, lambda: wire_agent(config, state, "assistant"))
+    assert model == "ollama:qwen3:32b"
+
+
+def test_an_agent_declaring_no_model_is_built_with_the_default(tmp_path, monkeypatch):
+    from kokua.core.build import wire_agent
+
+    config = _config(tmp_path, model="ollama:qwen3:8b")
+    state = _live_state(config)
+    model = _captured_client_model(monkeypatch, config, lambda: wire_agent(config, state, "assistant"))
+    assert model == "ollama:qwen3:8b"

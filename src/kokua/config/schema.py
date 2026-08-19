@@ -24,10 +24,14 @@ class AgentConfig:
     group, a plugin, or a configured MCP server, and the agent does not say which. A non-empty
     ``delegates_to`` is what makes this agent a delegator: there is no separate switch that could
     disagree with it.
+
+    ``model`` overrides ``[assistant].model`` for this agent alone; unset, the agent runs on that
+    default (see ``AssistantConfig.model_for``).
     """
 
     description: str = ""
     system_message: str = ""
+    model: Optional[str] = None
     tools: list[str] = field(default_factory=list)
     delegates_to: list[str] = field(default_factory=list)
 
@@ -116,6 +120,17 @@ class AssistantConfig:
     # and the assistant's own update_config tool all persist here; set from --config / $KOKUA_CONFIG by
     # the CLI, else the default $KOKUA_HOME/config.toml.
     config_path: Path = field(default_factory=paths.config_path)
+
+    def model_for(self, agent_name: str) -> Optional[str]:
+        """The model ``agent_name`` runs on: its own declaration, else the ``[assistant].model`` default.
+
+        Resolution is per agent and never inherited down the delegation graph, so a delegator that pins
+        a model does not drag its workers onto it: a worker declaring nothing runs on the same default
+        every other undeclared agent does. ``None`` here means "no model configured anywhere", which
+        AIMU resolves at client construction.
+        """
+        agent = self.agents.get(agent_name)
+        return (agent.model if agent else None) or self.model
 
     @property
     def skills_dir(self) -> Path:

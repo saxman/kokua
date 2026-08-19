@@ -245,13 +245,13 @@ async def test_apply_setting_does_not_persist_a_hot_setting_that_failed_to_apply
     next startup too."""
 
     async def apply_hot(section, key, value):
-        raise RuntimeError("bad model")
+        raise RuntimeError("bad flag")
 
     path = tmp_path / "config.toml"
     with pytest.raises(config_store.HotApplyFailed) as failure:
-        await config_store.apply_setting(path, "assistant", "model", "nonsense:model", apply_hot, table=core_table())
+        await config_store.apply_setting(path, "display", "show_tools", "false", apply_hot, table=core_table())
 
-    assert "bad model" in str(failure.value)
+    assert "bad flag" in str(failure.value)
     assert not path.exists()
 
 

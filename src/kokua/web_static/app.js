@@ -304,7 +304,6 @@ function closeSettings() { settingsModal.classList.add("hidden"); }
 
 // Fill the form from a server settings frame.
 function populateSettings(values) {
-  document.getElementById("set-model").value = values.model || "";
   document.getElementById("set-show_thinking").checked = !!values.show_thinking;
   document.getElementById("set-show_tools").checked = !!values.show_tools;
   document.getElementById("set-plan_review").checked = !!values["planning.plan_review"];
@@ -320,7 +319,6 @@ settingsModal.addEventListener("click", (e) => { if (e.target === settingsModal)
 settingsForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const values = {
-    model: document.getElementById("set-model").value.trim(),
     show_thinking: document.getElementById("set-show_thinking").checked,
     show_tools: document.getElementById("set-show_tools").checked,
     "planning.plan_review": document.getElementById("set-plan_review").checked,

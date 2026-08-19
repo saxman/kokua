@@ -138,3 +138,25 @@ def test_a_removed_per_agent_key_fails(tmp_path):
         _load(tmp_path, body)
     assert "tool_packs" in str(excinfo.value)
     assert "tools" in str(excinfo.value)
+
+
+def test_an_agent_declares_its_own_model(tmp_path):
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nmodel = "ollama:qwen3:32b"')
+    config = _load(tmp_path, body)
+    assert config.agents["researcher"].model == "ollama:qwen3:32b"
+    assert config.agents["assistant"].model is None
+
+
+def test_an_agents_model_must_be_a_string(tmp_path):
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nmodel = 3')
+    with pytest.raises(ConfigError) as excinfo:
+        _load(tmp_path, body)
+    assert "[agents.researcher].model must be a str" in str(excinfo.value)
+
+
+def test_model_for_falls_back_to_the_default_when_an_agent_declares_none(tmp_path):
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nmodel = "ollama:qwen3:32b"')
+    config = _load(tmp_path, body)
+    config.model = "ollama:qwen3:8b"
+    assert config.model_for("researcher") == "ollama:qwen3:32b"
+    assert config.model_for("assistant") == "ollama:qwen3:8b"

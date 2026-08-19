@@ -72,7 +72,7 @@ class Assistant:
         # One reporter for this connection (Assistant.create runs once per WebSocket connection): every
         # conversation's spawn_subagent reports through it, and it resolves the turn to record into
         # from a contextvar rather than from construction.
-        self._subagent_reporter = SubagentReporter(self._ui)
+        self._subagent_reporter = SubagentReporter(self._ui, model_for=config.model_for)
         self._scheduler = scheduler
         self._store = store
         self._config = config
@@ -118,18 +118,13 @@ class Assistant:
             is_proactive=proactive_turn.get,
             turn_conversation=streaming_conversation.get,
         )
-        # Reads, applies, and persists the runtime-mutable settings. Reaches the agent cache through
-        # callbacks rather than holding it, since the registry does not exist yet (see create()).
+        # Reads, applies, and persists the runtime-mutable settings. Reaches the live state through a
+        # callback rather than holding it, since it does not exist yet (see create()).
         self._settings = SettingsApplier(
             config,
             self._ui,
             self._gate,
             table=self._settings_table,
-            live_agents=lambda: self._registry.live_agents(),
-            cached_ids=lambda: self._registry.cached_ids(),
-            agent_for=lambda conversation_id: self._registry.get(conversation_id),
-            active_agent=lambda: self._book.agent,
-            cancel_active_turn=self._cancel_current_turn,
             state=lambda: self._state,
         )
         # Turn execution, reactive and proactive. Reaches the store and the agent cache through the
@@ -206,11 +201,11 @@ class Assistant:
             def raw_factory(conversation_id: str, _client=client, _initial=initial_id):
                 if conversation_id == _initial:
                     return _client
-                return build_model_client(config, entry_agent_system_message(config, state))
+                return build_model_client(config, entry_agent_system_message(config, state), config.entry_agent)
         else:
 
             def raw_factory(conversation_id: str):
-                return build_model_client(config, entry_agent_system_message(config, state))
+                return build_model_client(config, entry_agent_system_message(config, state), config.entry_agent)
 
         assistant._settings.set_client_factory(raw_factory)
 

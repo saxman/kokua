@@ -58,8 +58,9 @@ def build(config: AssistantConfig) -> list:
     per call also keeps each run isolated: a cached orchestrator's ``ModelClient.messages`` is shared
     mutable state, so two concurrent calls would interleave into one history.
 
-    Reading ``config.model`` at call time is deliberate too. ``SettingsApplier.switch_model`` assigns
-    that field on this same config object, so a runtime model switch reaches these tools for free.
+    A prebuilt runs on ``config.model``, the default every agent falls back to, rather than on the
+    declaring agent's own ``[agents.*].model``: an orchestrator AIMU builds is not one of Kokua's agents,
+    and the context a toolset builds from does not name the agent that declared it.
     """
 
     def run_prebuilt(agent_class, task: str, **kwargs) -> str:

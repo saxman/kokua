@@ -41,7 +41,7 @@ Every rule here was learned from a bug. Read them before changing anything in th
    concurrent switch to race or for a ``finally`` to clobber back.
 
 5. **Record a turn's sub-agent events before its own notification send, in every branch.**
-   ``_record_subagents`` is synchronous, but that only protects it from a cancellation that arrives
+   ``_record_provenance`` is synchronous, but that only protects it from a cancellation that arrives
    *after* it runs. A cancelled or failed turn still does one more ``await`` of its own (the
    "(stopped)" notice, or the failure message) before falling through to the shared ``_persist``
    call; a second cancellation delivered during that send raises ``CancelledError`` again, which
@@ -179,7 +179,7 @@ class TurnRunner:
                     # propagate straight past a record placed after -- see invariant 5. Keep the
                     # partial state (the agent snapshots it in a finally), and return so the daemon
                     # keeps serving.
-                    self._record_subagents(conversation_id, user_index)
+                    self._record_provenance(conversation_id, user_index)
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                     try:
                         await self._ui.send("(stopped)", reply_to=msg)
@@ -188,19 +188,19 @@ class TurnRunner:
                     await self._persist(conversation_id)
                     return
                 except ModelConnectionError as exc:
-                    self._record_subagents(conversation_id, user_index)  # before the send: invariant 5
+                    self._record_provenance(conversation_id, user_index)  # before the send: invariant 5
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
                     await self._ui.send(
                         f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
                     )
                 except Exception as exc:
-                    self._record_subagents(conversation_id, user_index)  # before the send: invariant 5
+                    self._record_provenance(conversation_id, user_index)  # before the send: invariant 5
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"failed: {describe_error(exc)}"
                     await self._ui.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
                 else:
-                    self._record_subagents(conversation_id, user_index)
+                    self._record_provenance(conversation_id, user_index)
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
                 await self._persist(conversation_id)
@@ -259,10 +259,24 @@ class TurnRunner:
         finally:
             ctx.publish_user_index(resolve_user_index(ctx.agent.model_client.messages, base_len))
 
-    def _record_subagents(self, conversation_id: str, user_index: int) -> None:
-        """Persist whatever the turn's spawns reported. Synchronous, so it also runs on the cancelled
-        path where an await could be cut short."""
-        self._book.record_subagent_events(subagent_events.get() or [], user_index, conversation_id)
+    def _record_provenance(self, conversation_id: str, user_index: int) -> None:
+        """Persist what produced this turn: whatever its spawns reported, and the model that answered.
+        Synchronous, so it also runs on the cancelled path where an await could be cut short."""
+        self._book.record_turn_provenance(
+            subagent_events.get() or [], self._answering_model(conversation_id), user_index, conversation_id
+        )
+
+    def _answering_model(self, conversation_id: str) -> str:
+        """The model behind this conversation's agent, as a string for the stored record.
+
+        Prefers what the config declares, since that is the string a reader recognizes; falls back to
+        the model AIMU resolved onto the live client, which is the only answer when nothing is declared.
+        """
+        declared = self._config.model_for(self._config.entry_agent)
+        if declared:
+            return str(declared)
+        agent = self._book.agent_for(conversation_id)
+        return str(getattr(agent.model_client, "model", "") or "")
 
     async def _notify_if_backgrounded(self, conversation_id: str, *, succeeded: bool, failure_reason: str) -> None:
         """The user switched away before this turn finished: tell them rather than silently updating
@@ -394,7 +408,7 @@ class TurnRunner:
                     message.setdefault(PROVENANCE_KEY, PROVENANCE_PROACTIVE)
                 if spec.echo_reply:
                     await self._ui.send(reply)
-                self._record_subagents(conversation_id, resolve_user_index(agent.model_client.messages, start))
+                self._record_provenance(conversation_id, resolve_user_index(agent.model_client.messages, start))
                 await self._persist(conversation_id)
         finally:
             self._book.unpin(conversation_id)

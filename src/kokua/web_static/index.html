@@ -93,14 +93,12 @@
     </main>
   </div>
 
-  <!-- Settings panel: model and display prefs. Applied at runtime and persisted. -->
+  <!-- Settings panel: display and planning prefs. Applied at runtime and persisted. The model is not
+       here: it comes from [assistant].model or an agent's own [agents.*] table, both read at startup. -->
   <div id="settings-modal" class="modal hidden">
     <div class="modal-card">
       <h2>Settings</h2>
       <form id="settings-form">
-        <label class="field">Model
-          <input id="set-model" type="text" autocomplete="off" placeholder="e.g. anthropic:claude-sonnet-4-6" />
-        </label>
         <fieldset>
           <legend>Display</legend>
           <label class="field">theme

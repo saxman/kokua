@@ -11,9 +11,13 @@
 # and the whole [agents.*] section can only be changed by hand-editing, never by the assistant.
 
 [assistant]
-# Model string, e.g. "ollama:qwen3:8b". Unset -> $AIMU_LANGUAGE_MODEL, else the first already-running
-# local model found (a running Ollama server, then a local OpenAI-compatible server). A cloud model is
-# never auto-selected. Startup fails with an actionable message if nothing can be resolved.
+# The default model every agent runs on, e.g. "ollama:qwen3:8b". An agent that declares its own
+# `model` below runs on that instead; this is what the rest fall back to. Read at startup only, so a
+# change here (by hand, or through the assistant's update_config) takes effect on the next start.
+#
+# Unset -> $AIMU_LANGUAGE_MODEL, else the first already-running local model found (a running Ollama
+# server, then a local OpenAI-compatible server). A cloud model is never auto-selected. Startup fails
+# with an actionable message if nothing can be resolved.
 #
 # For a remote/custom OpenAI-compatible server (llama.cpp llama-server, vLLM, LM Studio, SGLang,
 # HF-Serve), append "@<base_url>" to override the endpoint, and for a model id not built into AIMU add
@@ -56,6 +60,12 @@ show_tools = true
 # accepts here, grouped by what provides it. An unknown name is a startup error that lists the valid ones,
 # so a typo can never quietly leave an agent with a smaller toolset than you wrote.
 #
+# `model` overrides [assistant].model for one agent -- a cheap fast worker under an expensive supervisor,
+# or a vision model for the one agent that needs it. It is resolved per agent and never inherited: a
+# delegator that pins a model does not drag its workers onto it, so a worker declaring no `model` runs on
+# the [assistant].model default like every other undeclared agent. A model string AIMU cannot resolve
+# fails startup naming the table it came from.
+#
 # A non-empty `delegates_to` is what makes an agent delegate: it gets a `spawn_subagent(agent_type, task)`
 # tool offering exactly the agents it names, each built from its own table. A worker's gated-tool calls
 # (the confirm_tools below, e.g. execute_python) are routed to you for approval, not run unattended.
@@ -80,6 +90,7 @@ delegates_to = ["researcher", "coder", "generalist"]
 
 [agents.researcher]
 description = "Research specialist: gather and verify information from the web."
+# model = "ollama:qwen3:32b"   # this worker alone runs on a bigger model
 tools = ["web", "misc", "time"]
 system_message = """\
 You are a research sub-agent. Investigate the task with web search and page lookups, verify claims \

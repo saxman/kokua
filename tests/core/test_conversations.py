@@ -291,24 +291,35 @@ async def test_switch_methods_sync_channel_active_conversation_id(tmp_path):
     assert channel.active_conversation_id == assistant._active_id
 
 
-async def test_record_subagent_events_extends_rather_than_replaces(tmp_path):
+async def test_recording_subagent_events_extends_rather_than_replaces(tmp_path):
     """A planned turn can both review a plan and spawn sub-agents; neither may erase the other."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
     conversation_id = assistant._active_id
 
-    assistant._book.record_subagent_events([{"id": "a", "status": "done"}], 0, conversation_id)
-    assistant._book.record_subagent_events([{"id": "b", "status": "done"}], 0, conversation_id)
+    assistant._book.record_turn_provenance([{"id": "a", "status": "done"}], "", 0, conversation_id)
+    assistant._book.record_turn_provenance([{"id": "b", "status": "done"}], "", 0, conversation_id)
 
     stored = assistant._store.get(conversation_id).metadata["subagent"]["0"]
     assert [event["id"] for event in stored] == ["a", "b"]
 
 
-async def test_record_subagent_events_ignores_an_empty_list(tmp_path):
+async def test_recording_a_turn_that_produced_nothing_writes_no_metadata(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
-    assistant._book.record_subagent_events([], 0, assistant._active_id)
+    assistant._book.record_turn_provenance([], "", 0, assistant._active_id)
 
-    assert "subagent" not in assistant._store.get(assistant._active_id).metadata
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert "subagent" not in metadata and "model" not in metadata
+
+
+async def test_the_turn_model_is_recorded_even_when_no_subagent_ran(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "ollama:qwen3:8b", 0, assistant._active_id)
+
+    metadata = assistant._store.get(assistant._active_id).metadata
+    assert metadata["model"] == {"0": "ollama:qwen3:8b"}
+    assert "subagent" not in metadata
 
 
 async def test_new_session_records_the_task_that_minted_it(tmp_path):

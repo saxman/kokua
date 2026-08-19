@@ -76,6 +76,7 @@ _AGENT_LIST_KEYS = {"tools", "delegates_to"}
 _AGENT_KEYS = {
     "description": str,
     "system_message": str,
+    "model": str,
     "tools": list,
     "delegates_to": list,
 }
@@ -112,10 +113,13 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
 # AssistantConfig field name, or "<toolset>.<key>" for a key a toolset owns (see `_coerce_flat`).
 # `bool` is an int subclass, so it is rejected for numeric fields unless explicitly accepted.
 #
-# Startup-only keys are declared here; the runtime-mutable ones (model, the display flags, and each
-# toolset's hot settings) come from the settings table, so the two never drift. A toolset's *cold* keys
+# Startup-only keys are declared here; the runtime-mutable ones (the display flags, and each toolset's
+# hot settings) come from the settings table, so the two never drift. A toolset's *cold* keys
 # are neither: they come from `settings_sources.startup_schema`. `build_schema` joins all three.
 _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
+    # The default model every agent runs on unless its own [agents.<name>].model overrides it. Read once,
+    # at startup: an agent's client is built with it and nothing rebinds a live client to another model.
+    ("assistant", "model"): ("model", (str,), "a string", None),
     ("assistant", "system_message"): ("system_message", (str,), "a string", None),
     ("assistant", "agent"): ("entry_agent", (str,), "a string", None),
     ("assistant", "concurrent_tools"): ("concurrent_tools", (bool,), "a boolean", None),

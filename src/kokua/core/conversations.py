@@ -283,12 +283,22 @@ class ConversationBook:
         if changed:
             self._store.save(session)
 
-    def record_subagent_events(self, events: list[dict], user_index: int, conversation_id: str) -> None:
-        """Persist a turn's sub-agent activity so reload replays it. No-op when the turn produced none."""
-        if not events or user_index < 0:
+    def record_turn_provenance(self, events: list[dict], model: str, user_index: int, conversation_id: str) -> None:
+        """Persist what produced a turn's output: its sub-agent activity, and the model that answered.
+
+        The cards are what reload replays. The model is recorded per turn rather than once per
+        conversation because a conversation outlives the config that started it: ``[assistant].model``
+        and an agent's own declaration are read at startup, so two turns of one conversation can have
+        been answered by different models. Each spawn card carries its own worker's model, since a
+        worker need not run on the same one.
+        """
+        if user_index < 0 or not (events or model):
             return
         session = self._store.get(conversation_id)
-        _merge_subagent_events(session, user_index, events)
+        if events:
+            _merge_subagent_events(session, user_index, events)
+        if model:
+            session.metadata.setdefault("model", {})[str(user_index)] = model
         self._store.save(session)
 
     def exists(self, conversation_id: str) -> bool:

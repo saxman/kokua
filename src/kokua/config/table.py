@@ -109,7 +109,6 @@ class RuntimeSetting:
 # reads is that capability's own declaration, which is where the [planning] flags live (see
 # ``toolsets.planning.PLANNING_SETTINGS``).
 CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = (
-    RuntimeSetting("model", "assistant", str),
     RuntimeSetting("show_thinking", "display", bool, mirror_on_channel=True),
     RuntimeSetting("show_tools", "display", bool, mirror_on_channel=True),
 )

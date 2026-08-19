@@ -11,7 +11,7 @@ from aimu.aio.channels.base import Channel, ChannelMessage
 from kokua.core.assistant import Assistant
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow
-from tests.channels import FakeChannel, _ConvCapturingChannel, _config, planning_settings
+from tests.channels import FakeChannel, _ConvCapturingChannel, _config, example_agents, planning_settings
 from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
 from tests.helpers import MockAsyncModelClient
 
@@ -734,6 +734,45 @@ async def test_turn_records_its_subagent_events_under_its_user_index(tmp_path):
     assert metadata["subagent"]["0"][0]["task"] == "find X"
 
 
+async def test_a_spawn_card_records_the_workers_own_model(tmp_path):
+    """The card is what the stored JSON replays, and a worker need not run on the model that answered
+    the turn: this is the only record of which model produced its part."""
+    agents = example_agents()
+    agents["researcher"].model = "ollama:qwen3:32b"
+    client = _SpawningClient()
+    config = _config(tmp_path, model="ollama:qwen3:8b", agents=agents)
+    assistant = await Assistant.create(config, FakeChannel(), client=client)
+    client.reporter = assistant._subagent_reporter
+
+    await assistant._handle(ChannelMessage(text="delegate this", channel="fake"), conversation_id=assistant._active_id)
+
+    card = assistant._store.get(assistant._active_id).metadata["subagent"]["0"][0]
+    assert card["model"] == "ollama:qwen3:32b"
+
+
+async def test_turn_records_the_model_that_answered_it_under_its_user_index(tmp_path):
+    """The stored JSON has to say which model produced an answer, and a conversation outlives the
+    config: [assistant].model can be edited between two turns of the same conversation."""
+    assistant = await Assistant.create(
+        _config(tmp_path, model="ollama:qwen3:8b"), FakeChannel(), client=MockAsyncModelClient(["hi"])
+    )
+
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    assert assistant._store.get(assistant._active_id).metadata["model"]["0"] == "ollama:qwen3:8b"
+
+
+async def test_a_turn_records_the_entry_agents_own_model_over_the_default(tmp_path):
+    agents = example_agents()
+    agents["assistant"].model = "ollama:qwen3:32b"
+    config = _config(tmp_path, model="ollama:qwen3:8b", agents=agents)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient(["hi"]))
+
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    assert assistant._store.get(assistant._active_id).metadata["model"]["0"] == "ollama:qwen3:32b"
+
+
 async def test_a_turn_on_a_conversation_not_being_viewed_still_records(tmp_path):
     """Switching away mutes the frames but must not lose the trace: the record is what the user
     comes back to."""
@@ -1024,7 +1063,7 @@ class _CancelsOnStoppedSendChannel(Channel):
 
 async def test_a_second_cancellation_during_the_stopped_send_still_records(tmp_path):
     """Regression for invariant 5: a cancellation racing the '(stopped)' notice must not skip the
-    record call. Before the fix, `_record_subagents` ran after that send, so this second
+    record call. Before the fix, `_record_provenance` ran after that send, so this second
     CancelledError (an ordinary BaseException, uncaught by the send's `except Exception`) propagated
     straight past it and the spawn's card was lost."""
     client = _SpawnsThenHangsClient()

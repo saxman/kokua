@@ -170,7 +170,7 @@ async def test_web_channel_send_conversations_emits_frame():
 async def test_web_channel_send_settings_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
-    values = {"model": "m1", "show_thinking": True, "show_tools": False}
+    values = {"show_thinking": True, "show_tools": False}
     await channel.send_settings(values)
     assert ws.frames == [{"type": "settings", "values": values}]
 
@@ -919,7 +919,7 @@ def test_ws_get_and_apply_settings(tmp_path):
         _drain_until(ws, "settings")  # the connect-time push
         ws.send_text(json.dumps({"type": "get_settings"}))
         _drain_until(ws, "settings")
-        # Apply a kwargs + display change (no model switch, so no real client is built).
+        # Apply a display change.
         ws.send_text(json.dumps({"type": "settings", "values": {"show_thinking": False, "show_tools": False}}))
         echoed = _drain_until(ws, "settings")
     assert echoed["values"]["show_thinking"] is False

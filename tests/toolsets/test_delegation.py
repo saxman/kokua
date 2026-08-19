@@ -89,3 +89,79 @@ def test_a_nested_spawn_tool_offers_only_the_childs_own_targets(tmp_path):
     assert "helper" in spawn.__doc__
     assert "other" in spawn.__doc__
     assert "lead" not in spawn.__doc__
+
+
+def test_a_spec_carries_the_model_its_agent_declares(tmp_path):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"], model="ollama:qwen3:32b"),
+    }
+    config, state = _state(tmp_path, agents)
+    assert build_agent_specs(config, state, "assistant")["researcher"]["model"] == "ollama:qwen3:32b"
+
+
+def test_a_spec_declaring_no_model_carries_none_so_the_spawn_default_applies(tmp_path):
+    """AIMU reads a missing spec ``model`` as "use the tool's own model", which is the default one the
+    delegate was built with. A worker therefore inherits the default rather than its delegator's pin."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"], model="ollama:qwen3:32b"),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    assert "model" not in build_agent_specs(config, state, "assistant")["researcher"]
+
+
+class _FakeClient:
+    def __init__(self, model):
+        self.model = model
+
+
+class _FakeAgent:
+    """Enough of a live agent for ``make_delegation_tool``: a name and a client carrying a model."""
+
+    def __init__(self, name, model):
+        self.name = name
+        self.model_client = _FakeClient(model)
+
+
+def _captured_spawn_model(monkeypatch, config, state, agent) -> object:
+    from kokua.toolsets import agents as agents_mod
+
+    captured = []
+
+    def fake_make(model, **kwargs):
+        captured.append(model)
+
+        async def spawn_subagent(agent_type: str, task: str) -> str:
+            """menu"""
+            return "ok"
+
+        spawn_subagent.__name__ = "spawn_subagent"
+        return spawn_subagent
+
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make)
+    agents_mod.make_delegation_tool(agent, config, state)
+    return captured[0]
+
+
+def test_the_delegate_is_built_with_the_default_model_not_the_delegators_pin(tmp_path, monkeypatch):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"], model="ollama:qwen3:32b"),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    config.model = "ollama:qwen3:8b"
+    agent = _FakeAgent("assistant", "ollama:qwen3:32b")
+    assert _captured_spawn_model(monkeypatch, config, state, agent) == "ollama:qwen3:8b"
+
+
+def test_an_unset_default_falls_back_to_the_model_the_delegator_already_resolved(tmp_path, monkeypatch):
+    """With no [assistant].model, AIMU resolved one when the entry agent's client was built. Reusing
+    that string keeps every spawn on the same model instead of re-resolving per spawn."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    agent = _FakeAgent("assistant", "ollama:auto-resolved")
+    assert _captured_spawn_model(monkeypatch, config, state, agent) == "ollama:auto-resolved"

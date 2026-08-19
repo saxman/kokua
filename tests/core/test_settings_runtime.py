@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-from aimu.aio.channels.base import ChannelMessage
 
 from kokua.config import AssistantConfig
 from kokua.config.table import CORE_RUNTIME_SETTINGS, RuntimeSetting, SettingsTable
@@ -27,25 +25,12 @@ class _UI:
         return None
 
 
-class _Agent:
-    class _Client:
-        default_generate_kwargs: dict = {}
-        messages: list = []
-
-    model_client = _Client()
-
-
 def _applier(config, table):
     return SettingsApplier(
         config,
         _UI(),
         TurnGate(lambda conversation_id: None),
         table=table,
-        live_agents=lambda: [],
-        cached_ids=lambda: [],
-        agent_for=lambda conversation_id: _Agent(),
-        active_agent=lambda: _Agent(),
-        cancel_active_turn=None,
         state=lambda: None,
     )
 
@@ -154,8 +139,6 @@ async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
     payload: dict = {}
     expected = {}
     for setting in table.settings:
-        if setting.wire_key == "model":
-            continue  # switching the model rebuilds the client; covered by its own test
         expected[setting] = changed(setting)
         payload[setting.wire_key] = expected[setting]
 
@@ -202,52 +185,12 @@ async def test_update_config_tool_refuses_blocklisted_key(tmp_path):
     assert "hand-edit" in result.lower()
 
 
-async def test_apply_settings_switches_model(tmp_path, monkeypatch):
-    first = MockAsyncModelClient(["hi"])
-    assistant = await Assistant.create(_config(tmp_path, model="m1"), FakeChannel(), client=first)
-    await assistant._handle(
-        ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id
-    )  # populate conversation state
-
-    second = MockAsyncModelClient([])
-    monkeypatch.setattr("kokua.core.assistant.aio.client", lambda *a, **k: second)
-
-    await assistant.apply_settings({"model": "m2"})
-
-    assert assistant._agent.model_client is second
-    assert assistant._config.model == "m2"
-    # conversation restored onto the new client (system message stripped, the user turn preserved)
-    assert any(m.get("content") == "hello" for m in second.messages)
-
-
 async def test_current_settings_reports_effective(tmp_path):
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(_config(tmp_path, model="m1"), FakeChannel(), client=client)
     s = assistant.current_settings()
-    assert s["model"] == "m1"
     assert "show_thinking" in s and "show_tools" in s
     assert "generate_kwargs" not in s  # sampling is AIMU's, not a panel field
-
-
-async def test_model_switch_applies_to_all_live_agents(tmp_path, monkeypatch):
-    cfg = _config(tmp_path)
-    assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
-    first = assistant._active_id
-    second = await assistant.new_conversation()  # noqa: F841
-    await assistant.select_conversation(first)
-
-    built = []
-
-    def fake_client(model, system=None):
-        c = MockAsyncModelClient([])
-        c.model = MagicMock(supports_tools=True, supports_thinking=False, supports_vision=False)
-        built.append(model)
-        return c
-
-    monkeypatch.setattr("kokua.core.settings_runtime.aio.client", fake_client)
-    await assistant._settings.switch_model("anthropic:claude-x")
-    # Both cached agents got a rebuilt client for the new model.
-    assert built.count("anthropic:claude-x") == len(assistant._registry.live_agents())
 
 
 async def test_new_conversation_agent_gets_an_untouched_client(tmp_path):
@@ -273,3 +216,23 @@ async def test_create_wraps_unbuildable_client_as_model_client_error(tmp_path, m
     monkeypatch.setattr(assistant_mod.aio, "client", boom)
     with pytest.raises(ModelClientError, match="no default could be resolved"):
         await Assistant.create(_config(tmp_path), FakeChannel())
+
+
+async def test_the_model_is_not_a_runtime_setting(tmp_path):
+    """An agent's model comes from its own [agents.*] table or the [assistant].model default, both read
+    at startup. A panel field that could disagree with a table the panel cannot write is the conflict
+    this removal avoids."""
+    assistant = await Assistant.create(_config(tmp_path, model="m1"), FakeChannel(), client=MockAsyncModelClient([]))
+    assert "model" not in assistant.current_settings()
+
+
+async def test_update_config_writes_the_model_for_the_next_restart(tmp_path):
+    from kokua.config import file as settings
+
+    cfg = _config(tmp_path, model="m1")
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    update = next(t for t in assistant._agent.tools if t.__name__ == "update_config")
+    result = await update(section="assistant", key="model", value="ollama:qwen3:8b")
+    assert settings.load(str(cfg.config_path), table=core_table())["model"] == "ollama:qwen3:8b"
+    assert assistant._config.model == "m1"  # the running conversations keep the client they were built with
+    assert "restart" in result.lower()

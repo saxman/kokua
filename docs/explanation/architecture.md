@@ -29,7 +29,7 @@ src/kokua/
     transcripts.py       reading a stored conversation as text: flatten, truncate, search
     turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
     interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
-    settings_runtime.py  SettingsApplier: read, apply live, persist, switch model
+    settings_runtime.py  SettingsApplier: read, apply live, persist
     commands: /stop and /diag are parsed inline in assistant._serve_channel; a workflow's own
               command (e.g. /plan) dispatches through self._workflows, built from the toolset registry
     diagnostics.py       the /diag report
@@ -312,6 +312,29 @@ Keys the old per-role vocabulary used are not silently ignored. `[tools]`, `[sub
 `[assistant].memory`, and a per-agent `groups` / `tool_packs` / `mcp_servers` each raise a targeted
 `ConfigError` naming the replacement, checked ahead of the schema so an old file gets that message
 rather than a generic unknown-key one.
+
+### Which model an agent runs on
+
+`[assistant].model` is the default every agent runs on; an agent naming its own `[agents.<name>].model`
+runs on that instead. `AssistantConfig.model_for(name)` is the single resolution, and it is per agent and
+never inherited down the delegation graph: a delegator that pins a model does not drag its workers onto
+it, so a worker declaring nothing runs on the same default every other undeclared agent does. That is
+also why `make_delegation_tool` builds the delegate with the default rather than the delegator's own
+model, and `build_agent_specs` sets a spec's `model` key only for a worker that declared one -- AIMU
+reads a missing key as "the model the spawn tool was built with". `validate_agents` resolves every
+declared model string at startup (offline, no client and no key), so a typo names its table instead of
+surfacing later as a failed spawn.
+
+Both are read once, at startup. No live client is rebound to another model, which is why the model is
+not a `RuntimeSetting` and not in the settings panel: the panel cannot write `[agents.*]`, so a field
+there could only disagree with a table it cannot change. It is an ordinary cold key, so `update_config`
+writes it and reports that a restart is needed.
+
+A stored conversation records what produced it, in `session.metadata` rather than on any message dict:
+`metadata.model.<user_index>` is the model that answered that turn, and each sub-agent card carries its
+own worker's model (`SubagentReporter` resolves it, since AIMU's observer callbacks do not carry one).
+Metadata, deliberately -- AIMU strips only its own inert keys before a request, and Ollama and
+OpenAI-compatible providers forward any other message-dict key verbatim.
 
 `config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
 comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Three writers: the web
