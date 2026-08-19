@@ -55,6 +55,20 @@ def build_model_client(config: AssistantConfig, system_message: str, agent_name:
         raise ModelClientError(str(e)) from e
 
 
+def model_label(config: AssistantConfig, agent_name: str, client=None) -> str:
+    """The model ``agent_name`` runs on, as a string for a person to read or a record to store.
+
+    Prefers what the config declares, since that is the string the user wrote and recognizes. With
+    nothing declared anywhere, AIMU resolved one when the client was built, so the live client is the
+    only place the answer exists; it renders as the provider enum rather than a ``provider:id`` string,
+    which is unambiguous even though it is not the form you would type back into ``config.toml``.
+    """
+    declared = config.model_for(agent_name)
+    if declared:
+        return str(declared)
+    return str(getattr(client, "model", "") or "") if client is not None else ""
+
+
 def entry_agent_system_message(config: AssistantConfig, state: LiveState) -> str:
     """The assembled system message for the entry agent -- the one every client Kokua builds directly needs.
 

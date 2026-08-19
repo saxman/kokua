@@ -34,6 +34,7 @@ from kokua.core.build import (
     build_model_client,
     entry_agent_system_message,
     make_agent_builder,
+    model_label,
 )
 from kokua.config import AssistantConfig
 from kokua.core.conversations import ConversationBook
@@ -517,6 +518,8 @@ class Assistant:
         return diag_report(
             self._tracker,
             self._gate,
+            config=self._config,
+            entry_model=model_label(self._config, self._config.entry_agent, self._book.agent.model_client),
             pending_approval=self._human.approval.pending,
             pending_decision=self._human.decision.pending,
         )

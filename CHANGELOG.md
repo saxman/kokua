@@ -464,6 +464,9 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   model that AIMU cannot resolve fails startup naming the table it came from, rather than surfacing
   later as a failed spawn. Both are read once, at startup: no live client is ever rebound to another
   model, which is why the model is not in the settings panel.
+- **`/diag` names the models in play**: the entry agent's first, then each agent that declares its own.
+  The model has no panel field and is read only at startup, so this is where a running session says
+  which one it is. With nothing declared, the line reports what AIMU resolved onto the live client.
 - **A stored conversation says which model produced its output.** Each turn records the model that
   answered it under `metadata.model.<user_index>`, and each sub-agent card carries its own worker's
   model, so a conversation that spans a config edit -- or a turn whose workers ran on different models

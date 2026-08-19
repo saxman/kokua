@@ -76,6 +76,7 @@ from aimu.aio import ModelConnectionError
 from aimu.aio.channels.base import ChannelMessage
 
 from kokua.channels.web import proactive_turn, streaming_conversation
+from kokua.core.build import model_label
 from kokua.core.errors import describe_error
 from kokua.core.messages import derive_title, resolve_user_index
 from kokua.core.subagents import subagent_events
@@ -269,14 +270,11 @@ class TurnRunner:
     def _answering_model(self, conversation_id: str) -> str:
         """The model behind this conversation's agent, as a string for the stored record.
 
-        Prefers what the config declares, since that is the string a reader recognizes; falls back to
-        the model AIMU resolved onto the live client, which is the only answer when nothing is declared.
+        The live client is passed for the case where nothing is declared: it is a cache hit here, since
+        this only runs inside a turn on that conversation, whose agent is pinned.
         """
-        declared = self._config.model_for(self._config.entry_agent)
-        if declared:
-            return str(declared)
         agent = self._book.agent_for(conversation_id)
-        return str(getattr(agent.model_client, "model", "") or "")
+        return model_label(self._config, self._config.entry_agent, agent.model_client)
 
     async def _notify_if_backgrounded(self, conversation_id: str, *, succeeded: bool, failure_reason: str) -> None:
         """The user switched away before this turn finished: tell them rather than silently updating

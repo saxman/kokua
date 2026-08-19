@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import time
 
+from kokua.config.schema import AssistantConfig
 from kokua.core.turn_gate import TurnGate
 from kokua.core.turn_registry import TurnTracker
 
@@ -25,10 +26,35 @@ def format_task_stack(task) -> str:
         return ""
 
 
-def diag_report(tracker: TurnTracker, gate: TurnGate, *, pending_approval: bool, pending_decision: bool) -> str:
-    """The `/diag` text: in-flight turns, gate depth, pending human decisions, and stuck-turn stacks."""
+def _model_line(config: AssistantConfig, entry_model: str) -> str:
+    """The models this session is running on: the entry agent's, then each worker that overrides it.
+
+    Worth a line because the model is read only at startup and has no panel field, so a running session
+    would otherwise not say which one it is. Only agents that declare their own appear after the first:
+    listing every agent would repeat the default once per table and bury the exception among them.
+    """
+    overrides = [f"{name}: {agent.model}" for name, agent in sorted(config.agents.items()) if agent.model]
+    return " | ".join([f"- model: {entry_model or 'unresolved'}", *overrides])
+
+
+def diag_report(
+    tracker: TurnTracker,
+    gate: TurnGate,
+    *,
+    config: AssistantConfig,
+    entry_model: str,
+    pending_approval: bool,
+    pending_decision: bool,
+) -> str:
+    """The `/diag` text: the models in play, in-flight turns, gate depth, pending human decisions, and
+    stuck-turn stacks.
+
+    ``entry_model`` is passed in rather than read off ``config`` because with nothing declared the only
+    place the answer exists is the live client (see ``build.model_label``), which this module has no
+    route to.
+    """
     turns = tracker.all()
-    lines = ["Diagnostics:"]
+    lines = ["Diagnostics:", _model_line(config, entry_model)]
     if turns:
         lines.append(f"- turn in flight: yes ({len(turns)})")
         for conversation_id, info in turns:

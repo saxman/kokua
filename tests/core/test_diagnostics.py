@@ -75,3 +75,26 @@ async def test_diag_reports_wedged_turn_with_stack(tmp_path):
     if info is not None:
         info.handle.cancel()
         await asyncio.gather(info.handle.task, return_exceptions=True)
+
+
+async def test_diag_reports_the_model_each_agent_runs_on(tmp_path):
+    """The model is not in the settings panel any more, so /diag is where a running session says which
+    one it is -- and with per-agent overrides, one line for the default is not the whole answer."""
+    from tests.channels import FakeChannel, example_agents
+
+    agents = example_agents()
+    agents["researcher"].model = "ollama:qwen3:32b"
+    config = _config(tmp_path, model="ollama:qwen3:8b", agents=agents)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert "- model: ollama:qwen3:8b | researcher: ollama:qwen3:32b" in assistant._diag_report()
+
+
+async def test_diag_names_the_model_aimu_resolved_when_the_config_declares_none(tmp_path):
+    from kokua.core.build import model_label
+
+    class _Client:
+        model = "ollama:auto-resolved"
+
+    config = _config(tmp_path, model=None)
+    assert model_label(config, config.entry_agent, _Client()) == "ollama:auto-resolved"

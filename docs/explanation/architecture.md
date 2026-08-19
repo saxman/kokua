@@ -330,6 +330,10 @@ not a `RuntimeSetting` and not in the settings panel: the panel cannot write `[a
 there could only disagree with a table it cannot change. It is an ordinary cold key, so `update_config`
 writes it and reports that a restart is needed.
 
+`/diag` reports the entry agent's model plus every override, since a running session otherwise has no
+surface that names one. `build.model_label` is the single renderer: the declared string when there is
+one, else what AIMU resolved onto the live client, which is also what the stored record uses.
+
 A stored conversation records what produced it, in `session.metadata` rather than on any message dict:
 `metadata.model.<user_index>` is the model that answered that turn, and each sub-agent card carries its
 own worker's model (`SubagentReporter` resolves it, since AIMU's observer callbacks do not carry one).
