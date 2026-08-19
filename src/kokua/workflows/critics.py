@@ -57,6 +57,7 @@ def reviewer_agent(
     system: str,
     tools: Optional[list[Callable]] = None,
     thinking: Optional[Union[bool, str]] = None,
+    generate_kwargs: Optional[dict] = None,
 ) -> aio.Agent:
     """A fresh, context-free reviewer agent with the verification toolset (an independent, tool-using
     critic). ``tools`` overrides ``REVIEWER_TOOLS``, for a workflow that needs its judge grounded in a
@@ -65,12 +66,20 @@ def reviewer_agent(
     Public so a workflow that needs a judge shaped differently (a debate round, a scored rubric) can
     build on the same independent agent instead of assembling its own.
 
-    ``thinking`` is the reviewer's reasoning effort, and the caller's to decide: a reviewer is not an
-    ``[agents.*]`` agent, so ``[assistant].thinking`` is the only tier it has, exactly as
-    ``[assistant].model`` is for the model above it. As an agent field it applies to every turn of the
-    review, including the typed verdict."""
+    ``thinking`` is the reviewer's reasoning effort and ``generate_kwargs`` its generation parameters,
+    and both are the caller's to decide: a reviewer is not an ``[agents.*]`` agent, so
+    ``[assistant].thinking`` and ``[assistant].generation`` are the only tiers it has, exactly as
+    ``[assistant].model`` is for the model above it. ``thinking`` is an agent field, so it applies to
+    every turn of the review, including the typed verdict.
+    """
+    client = aio.client(model, system=system)
+    # Only when there is something to set: this is the tier above the model card's own tuned profile, so
+    # an empty write would shadow it. The caller's to decide, like the model and the effort -- a reviewer
+    # is no [agents.*] agent, so [assistant.generation] is the only tier it has.
+    if generate_kwargs:
+        client.default_generate_kwargs = dict(generate_kwargs)
     return aio.Agent(
-        aio.client(model, system=system),
+        client,
         tools=REVIEWER_TOOLS if tools is None else tools,
         max_iterations=6,  # bound verification cost
         final_answer_prompt=_VERDICT_PROMPT,  # force an assessment if it hits the cap mid-tool-call
@@ -79,7 +88,11 @@ def reviewer_agent(
 
 
 async def review(
-    model: Optional[str], system: str, user_input: str, thinking: Optional[Union[bool, str]] = None
+    model: Optional[str],
+    system: str,
+    user_input: str,
+    thinking: Optional[Union[bool, str]] = None,
+    generate_kwargs: Optional[dict] = None,
 ) -> Verdict:
     """Run one context-free review: a bounded tool-calling assessment, then the typed verdict.
 
@@ -87,13 +100,17 @@ async def review(
     curated verification toolset, a typed verdict), while what counts as approvable is the workflow's
     own business.
     """
-    agent = reviewer_agent(model, system, thinking=thinking)
+    agent = reviewer_agent(model, system, thinking=thinking, generate_kwargs=generate_kwargs)
     await agent.run(user_input)  # free-text tool-calling loop; assessment lands in the agent's client
     return await finalize_verdict(agent.model_client)
 
 
 async def stream_review(
-    model: Optional[str], system: str, user_input: str, thinking: Optional[Union[bool, str]] = None
+    model: Optional[str],
+    system: str,
+    user_input: str,
+    thinking: Optional[Union[bool, str]] = None,
+    generate_kwargs: Optional[dict] = None,
 ):
     """Open a streamed review. Returns ``(client, chunk_stream)``; the caller streams the chunks (the
     reviewer's prose reasoning and tool activity) then calls :func:`finalize_verdict`.
@@ -103,7 +120,7 @@ async def stream_review(
     it is a forced tool: JSON only, no thinking). So the assessment loop streams and the typed verdict
     is extracted from that reasoning afterwards, on the same client.
     """
-    agent = reviewer_agent(model, system, thinking=thinking)
+    agent = reviewer_agent(model, system, thinking=thinking, generate_kwargs=generate_kwargs)
     stream = await agent.run(user_input, stream=True)
     return agent.model_client, stream
 

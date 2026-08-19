@@ -215,10 +215,22 @@ class PlanningWorkflow(aio.AsyncRunner):
                         slug="result-review",
                         attempt=attempt,
                         card=lambda: review.review_result(
-                            self._config.model, msg.text, plan, answer, evidence, thinking=self._config.thinking
+                            self._config.model,
+                            msg.text,
+                            plan,
+                            answer,
+                            evidence,
+                            thinking=self._config.thinking,
+                            generate_kwargs=self._config.generation,
                         ),
                         stream=lambda: review.stream_result_review(
-                            self._config.model, msg.text, plan, answer, evidence, thinking=self._config.thinking
+                            self._config.model,
+                            msg.text,
+                            plan,
+                            answer,
+                            evidence,
+                            thinking=self._config.thinking,
+                            generate_kwargs=self._config.generation,
                         ),
                     )
                     if verdict.approved:
@@ -274,9 +286,19 @@ class PlanningWorkflow(aio.AsyncRunner):
                 role="Plan reviewer",
                 slug="plan-review",
                 attempt=attempt,
-                card=lambda: review.review_plan(self._config.model, msg.text, plan, thinking=self._config.thinking),
+                card=lambda: review.review_plan(
+                    self._config.model,
+                    msg.text,
+                    plan,
+                    thinking=self._config.thinking,
+                    generate_kwargs=self._config.generation,
+                ),
                 stream=lambda: review.stream_plan_review(
-                    self._config.model, msg.text, plan, thinking=self._config.thinking
+                    self._config.model,
+                    msg.text,
+                    plan,
+                    thinking=self._config.thinking,
+                    generate_kwargs=self._config.generation,
                 ),
             )
             if verdict.approved:
