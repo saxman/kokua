@@ -564,3 +564,46 @@ def test_update_of_an_unknown_task_raises(tmp_path):
 
     with pytest.raises(scheduling.TaskNotFound):
         tasks.update("nope", prompt="x")
+
+
+# -- stopping a run --------------------------------------------------------------------------------
+
+
+def test_stop_cancels_the_runs_in_flight_and_leaves_the_task_armed(tmp_path):
+    """Stopping a run is not disabling a task. Which is why the cancelling is injected rather than done
+    with ``scheduler.cancel``: that would reach the running job, but it unregisters it too, so a stop
+    would silently disarm the schedule."""
+    asked: list[str] = []
+
+    def stop_run(task_id):
+        asked.append(task_id)
+        return 2, False
+
+    scheduler, path, tasks = _make(tmp_path)
+    tasks = TaskService(scheduler, path, _noop_fire, stop_run=stop_run)
+    record, _ = tasks.create("do it", EVERY_MINUTE, name="brief")
+
+    result = tasks.stop("brief")
+
+    assert asked == [record["id"]]
+    assert result.stopped == 2 and result.skipped_self is False
+    assert record["id"] in scheduler.jobs  # still armed for its next firing
+    assert scheduling.load(path)[0]["enabled"] is True
+
+
+def test_stop_reports_nothing_running_without_touching_the_registry(tmp_path):
+    scheduler, path, tasks = _make(tmp_path)
+    tasks.create("do it", EVERY_MINUTE, name="brief")
+
+    result = tasks.stop("brief")
+
+    assert result.stopped == 0 and result.skipped_self is False
+
+
+def test_stop_raises_for_an_unknown_handle(tmp_path):
+    from kokua.scheduling.tasks import TaskNotFound
+
+    scheduler, path, tasks = _make(tmp_path)
+
+    with pytest.raises(TaskNotFound):
+        tasks.stop("nope")

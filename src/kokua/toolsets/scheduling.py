@@ -329,6 +329,29 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         note = " (note: this task is disabled)" if not record.get("enabled", True) else ""
         return f"Running task {handle} now; its output will appear shortly in a new conversation.{note}"
 
+    @tool
+    async def stop_scheduled_task(id_or_name: str) -> str:
+        """Stop a scheduled task's run that is happening right now, by id or name.
+
+        Only affects a run in flight: the task stays on its schedule and will fire again as usual, so
+        use ``disable_scheduled_task`` to keep it from coming back. The stopped run keeps whatever it had
+        produced so far in its own conversation.
+        """
+        try:
+            result = tasks.stop(id_or_name)
+        except TaskNotFound:
+            return _unknown(id_or_name)
+        handle = _handle(result.record)
+        if result.stopped:
+            runs = "1 run" if result.stopped == 1 else f"{result.stopped} runs"
+            return f"Stopped {runs} of scheduled task {handle}. Its schedule is unchanged, so it will fire again."
+        if result.skipped_self:
+            return (
+                f"Scheduled task {handle} is the task running this very turn, and a run cannot stop "
+                "itself. Finish here instead, or stop this run from outside it."
+            )
+        return f"Scheduled task {handle} is not running right now, so there was nothing to stop."
+
     return [
         schedule_task,
         list_scheduled_tasks,
@@ -338,6 +361,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         disable_scheduled_task,
         enable_scheduled_task,
         run_scheduled_task,
+        stop_scheduled_task,
     ]
 
 

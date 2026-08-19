@@ -9,7 +9,10 @@ Every rule here was learned from a bug. Read them before changing anything in th
    reader deadlocks against a concurrent exclusive(), which is waiting for the reader count to reach
    zero that the outer hold will never release. Every path below takes exactly one
    ``gate.turn(...)``, and no path calls another path that takes one. Do not wrap a call to
-   ``reactive`` or ``proactive`` in a gate hold.
+   ``reactive`` or ``proactive`` in a gate hold. An unattended run's hold is taken by
+   ``_run_unattended`` and the child task it starts takes none of its own, which keeps the count at one
+   for the firing as a whole; the gate's per-conversation lock is an ``asyncio.Lock``, which has no
+   owning task, so acquiring and releasing it around a child is sound.
    (Regression: ``test_proactive_new_session_holds_at_most_one_gate_turn``.)
 
 2. **Pin for the whole turn.** The agent registry evicts LRU. Without a pin, another conversation's
@@ -63,7 +66,33 @@ Every rule here was learned from a bug. Read them before changing anything in th
 
 6. **An unattended turn never lets an exception escape.** A scheduled firing has no user awaiting it
    and runs inside a scheduler job with no handler of its own, so a propagating error would take the
-   scheduler down with it. Report it on the channel and swallow it.
+   scheduler down with it. Report it on the channel and swallow it. Invariant 7 is the same rule for
+   the one cancellation that is not an error.
+
+7. **A stop ends a firing; a shutdown ends the process. Both arrive as a cancellation.** An unattended
+   run is stoppable, which means something has to be cancellable, and the two candidates are not
+   interchangeable. Cancelling the task the firing runs *in* is the scheduler's job: that is what
+   ``Scheduler.cancel`` reaches, and it unregisters the job as well, so stopping a run that way would
+   silently disarm the task's schedule. So ``_run_unattended`` runs the turn in a child task, registers
+   *that* in the ``TurnTracker`` (keyed by conversation, like a reactive turn's, and carrying the task id
+   a stop looks it up by), and a stop cancels the child. The firing then ends and its scheduler job
+   returns to re-arm as if the run had finished.
+   Telling the two apart is the subtle half. Cancelling a task cascades into the task it is awaiting, so
+   the child is cancelled either way and its own state says nothing; ``asyncio.current_task().cancelling()``
+   is the discriminator, since it counts only the cancellations aimed at this task. A stop is converted
+   into an ordinary return (invariant 6's shape), while a cancellation aimed here keeps propagating,
+   taking the child with it. The child records and persists its partial turn before ending either way,
+   for invariant 5's reason.
+   The tracker entry is added *inside* the gate, alongside the catch-up record and for the same reason:
+   a firing queued behind a turn already running on this conversation would otherwise overwrite that
+   turn's entry, which is the one ``/stop`` and shutdown reach. A queued firing is therefore not yet
+   stoppable. The converse costs the same and only on a channel with no conversation list, where a firing
+   shares the viewed conversation: the serve loop tracks a reactive turn when it is *submitted* rather
+   than when it takes the gate, so a message sent during a firing replaces the firing's entry, and the
+   stop that message queued behind is the one a stop then reaches. Both follow from one entry per
+   conversation, which is what keeps a finished turn from ever cancelling a live one.
+   (Regressions: ``test_a_running_firing_is_tracked_under_its_task_so_it_can_be_stopped``,
+   ``test_shutdown_cancellation_still_takes_the_firing_down_with_it``.)
 """
 
 from __future__ import annotations
@@ -75,7 +104,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
-from aimu.aio import ModelConnectionError
+from aimu.aio import ModelConnectionError, RunHandle
 from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import Session
 
@@ -84,6 +113,7 @@ from kokua.core.build import model_label
 from kokua.core.errors import describe_error
 from kokua.core.messages import derive_title, resolve_user_index
 from kokua.core.subagents import subagent_events
+from kokua.core.turn_registry import TurnInfo
 from kokua.workflows import SettingsView, WorkflowContext, is_rich
 
 logger = logging.getLogger(__name__)
@@ -101,12 +131,17 @@ class ProactiveTarget:
     ``prunes_for_task`` is the task whose retention cap this run should enforce afterwards, set only on
     the minting path: a firing that fell back to the viewed conversation minted nothing, and that
     conversation belongs to the user rather than to the task.
+
+    ``task_id`` is which task is firing, and unlike ``prunes_for_task`` it is set on both paths: it is
+    what a stop looks the run up by, and a firing is no less stoppable for having run in the conversation
+    the user was already looking at.
     """
 
     conversation_id: str
     echo_reply: bool
     announce: Optional[str] = None
     prunes_for_task: Optional[str] = None
+    task_id: Optional[str] = None
 
 
 def _holds_no_report(session: Session) -> bool:
@@ -125,8 +160,11 @@ def _holds_no_report(session: Session) -> bool:
 
 
 class TurnRunner:
-    def __init__(self, book, ui, gate, config, *, decide, push_conversations, delete_conversation, state=None):
+    def __init__(self, book, ui, gate, config, *, tracker, decide, push_conversations, delete_conversation, state=None):
         self._book = book
+        # Where a firing registers itself while it runs, so a stop can reach it. The reactive path's own
+        # entries are added by the serve loop, which owns the handle it starts.
+        self._tracker = tracker
         self._ui = ui
         self._gate = gate
         self._config = config
@@ -341,25 +379,33 @@ class TurnRunner:
         to the one being viewed and stamps nothing: that conversation belongs to the user.
 
         ``max_conversations`` is how many of this task's conversations survive the firing, ``0``
-        meaning unlimited. Pruning happens whether or not the run succeeded (see
-        :meth:`_prune_task_conversations`).
+        meaning unlimited. Pruning happens whether or not the run succeeded, and whether or not it was
+        stopped (see :meth:`_prune_task_conversations`).
+
+        A run can be stopped while it is in flight; invariant 7 covers how. Here that is just a third way
+        to end: the announce is withheld, since there is no output to send the user to, and everything
+        else -- the prune, the refreshed list -- happens as it does for a run that finished.
         """
         spec = self._resolve_target(prompt, task_name, task_id)
+        report: Optional[str] = None
         try:
-            await self._run_unattended(prompt, spec)
+            stopped = await self._run_unattended(prompt, spec)
         except ModelConnectionError as exc:  # invariant 6
             logger.exception("proactive turn connection error")
-            await self._prune_task_conversations(spec, max_conversations)
-            await self._report(f"A scheduled task couldn't reach the model server: {describe_error(exc)}")
+            report = f"A scheduled task couldn't reach the model server: {describe_error(exc)}"
         except Exception as exc:  # invariant 6
             logger.exception("proactive turn error")
-            await self._prune_task_conversations(spec, max_conversations)
-            await self._report(f"A scheduled task failed: {describe_error(exc)}")
+            report = f"A scheduled task failed: {describe_error(exc)}"
         else:
-            await self._prune_task_conversations(spec, max_conversations)
-            if spec.announce:
-                await self._push_conversations()
-                await self._report(spec.announce)
+            # A stopped run has no output to send anyone to, so it says nothing rather than announcing
+            # itself as finished. The user asked for the stop; the run's own conversation records it.
+            report = None if stopped else spec.announce
+        await self._prune_task_conversations(spec, max_conversations)
+        # Every path refreshes the list, because every path has to clear the running marker the run put
+        # on its conversation when it started.
+        await self._push_conversations()
+        if report:
+            await self._report(report)
 
     async def _prune_task_conversations(self, spec: ProactiveTarget, cap: int) -> None:
         """Keep the firing task's newest ``cap`` conversations and delete the rest, once this run is done.
@@ -401,7 +447,7 @@ class TurnRunner:
         conversation they cannot see.
         """
         if not self._ui.supports_conversations:
-            return ProactiveTarget(conversation_id=self._book.active_id, echo_reply=True)
+            return ProactiveTarget(conversation_id=self._book.active_id, echo_reply=True, task_id=task_id)
 
         title = task_name or derive_title([{"role": "user", "content": prompt}]) or "Scheduled task"
         session = self._book.new_session(title=title, task_id=task_id)
@@ -411,63 +457,52 @@ class TurnRunner:
             echo_reply=False,
             announce=f"Scheduled task '{title}' finished; open the '{title}' conversation to review.",
             prunes_for_task=task_id,
+            task_id=task_id,
         )
 
-    async def _run_unattended(self, prompt: str, spec: ProactiveTarget) -> None:
-        """The one body every proactive target shares. See the module's concurrency invariants."""
+    async def _run_unattended(self, prompt: str, spec: ProactiveTarget) -> bool:
+        """Run one unattended turn, returning whether it was stopped instead of allowed to finish.
+
+        The body runs in a child task, which is what a stop cancels. Stopping the child rather than this
+        task is what keeps the schedule intact: this task is the scheduler's job, and ``Scheduler.cancel``
+        would reach it but unregisters the job too, silently disarming the task. It also leaves the job
+        free to re-arm afterwards, since a stopped firing returns to it normally.
+        """
         conversation_id = spec.conversation_id
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
         proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run
         self._book.pin(conversation_id)  # invariant 2
         try:
+            # Held here rather than in the child so there is exactly one hold for the firing either way
+            # (invariant 1). An asyncio lock has no owning task, so releasing it here is sound.
             async with self._gate.turn(conversation_id):  # invariant 1
-                # Record the turn for a user who switches into its conversation before it finishes. An
-                # unattended turn's only display frames are its spawns' cards, so without this a task
-                # delegating in a conversation nobody is watching shows nothing of that work on the
-                # switch-in, and the spawn's later `append` frames arrive with no card to update.
-                # Opened inside the gate rather than beside the contextvars above (as the reactive path
-                # does; see invariant 3): a firing that has to queue behind a turn already running on
-                # this conversation would otherwise replace that turn's record while it is still needed.
-                self._ui.begin_catch_up(conversation_id, prompt)
-                agent = self._book.agent_for(conversation_id)
-                # The agent doesn't reset on run (the system prompt lives on the client), so the
-                # pre-run length is a stable start index for the exchange.
-                start = len(agent.model_client.messages)
-                # A failed run is snapshotted as far as it got, so the conversation the firing minted is
-                # never indistinguishable from one that never ran: the model client appends the user turn
-                # before it sends the request, so even a firing that got no answer has its prompt (and
-                # any completed tool rounds) on the transcript. The error is held rather than allowed to
-                # propagate straight out, so the record and the snapshot below run on every path, and
-                # re-raised afterwards so `proactive` still logs the traceback and tells the user.
-                # Deliberately not a `finally`: `_persist` awaits, and a store failure raised from a
-                # `finally` would replace the run's own error as the reason reported.
-                error: Optional[BaseException] = None
-                failure: Optional[str] = None
-                try:
-                    reply = await agent.run(prompt)
-                    if spec.echo_reply:
-                        await self._ui.send(reply)
-                except ModelConnectionError as exc:
-                    error, failure = exc, f"couldn't reach the model server: {describe_error(exc)}"
-                except Exception as exc:
-                    error, failure = exc, f"failed: {describe_error(exc)}"
-                for message in agent.model_client.messages[start:]:
-                    # Tag every message this unprompted run appended, so replayed history can distinguish
-                    # it from a user-driven turn. setdefault, not assignment: the agent loop tags the
-                    # turns it injects itself (`continuation`, `final_answer`), and those tags are how a
-                    # transcript tells an injected nudge from something the user typed. Overwriting them
-                    # made every nudge replay as a user bubble.
-                    message.setdefault(PROVENANCE_KEY, PROVENANCE_PROACTIVE)
-                # The reason is recorded here rather than left to `_report`, whose status line goes to
-                # whichever conversation the user is viewing rather than to this one. Before the persist,
-                # and synchronously, for invariant 5's reason.
-                self._record_provenance(
-                    conversation_id, resolve_user_index(agent.model_client.messages, start), failure=failure
+                handle = RunHandle.start(self._unattended_body(prompt, spec))
+                # Tracked inside the gate, for the same reason the catch-up record is opened there: a
+                # firing queued behind a turn already running on this conversation would otherwise
+                # overwrite that turn's entry, which is the one `/stop` and shutdown reach. A queued
+                # firing is therefore not yet stoppable, which is what the tracker's one-entry-per-
+                # conversation rule buys. Registered before the first await below, so the entry is in
+                # place by the time the child's first statement runs.
+                self._tracker.add(
+                    conversation_id,
+                    TurnInfo(handle=handle, started=time.monotonic(), preview=prompt[:120], task_id=spec.task_id),
                 )
-                await self._persist(conversation_id)
-                if error is not None:
-                    raise error
+                try:
+                    await handle.result()
+                except asyncio.CancelledError:
+                    # Two different cancellations land here and have to end differently: a stop, which
+                    # cancels the child and is this firing's own ending, and a shutdown, which cancels
+                    # *this* task and has to keep propagating. The child's state cannot tell them apart
+                    # (cancelling a task cascades into the task it is awaiting, so the child is cancelled
+                    # either way); `cancelling()` can, since it counts only the cancellations aimed here.
+                    if asyncio.current_task().cancelling():
+                        handle.cancel()  # already cascaded, except if we were cancelled outside the await
+                        raise
+                    logger.info("scheduled firing in %s was stopped", conversation_id)
+                    return True
+                finally:
+                    self._tracker.remove_if(conversation_id, handle)
         finally:
             self._book.unpin(conversation_id)
             # Normally already done by `_persist`; this covers a run that raised before reaching it.
@@ -475,6 +510,78 @@ class TurnRunner:
             proactive_turn.reset(proactive_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
+        return False
+
+    async def _unattended_body(self, prompt: str, spec: ProactiveTarget) -> None:
+        """One unattended turn, inside its caller's gate hold. See the module's concurrency invariants.
+
+        Ends cancelled when it was stopped, as a cancelled task should, having first recorded and
+        persisted as much of the turn as it got: ``_run_unattended`` is what turns that back into an
+        ordinary return.
+        """
+        conversation_id = spec.conversation_id
+        # The run's conversation reaches the sidebar here, at the start, marked as running: it is what
+        # the task panel offers a Stop button against, and a firing that only pushed on success left a
+        # run in flight (or one that failed) invisible in the list.
+        await self._push_conversations()
+        # Record the turn for a user who switches into its conversation before it finishes. An
+        # unattended turn's only display frames are its spawns' cards, so without this a task
+        # delegating in a conversation nobody is watching shows nothing of that work on the
+        # switch-in, and the spawn's later `append` frames arrive with no card to update.
+        # Opened inside the gate rather than beside the contextvars in the caller (as the reactive
+        # path does; see invariant 3): a firing that has to queue behind a turn already running on
+        # this conversation would otherwise replace that turn's record while it is still needed.
+        self._ui.begin_catch_up(conversation_id, prompt)
+        agent = self._book.agent_for(conversation_id)
+        # The agent doesn't reset on run (the system prompt lives on the client), so the
+        # pre-run length is a stable start index for the exchange.
+        start = len(agent.model_client.messages)
+        # A failed run is snapshotted as far as it got, so the conversation the firing minted is
+        # never indistinguishable from one that never ran: the model client appends the user turn
+        # before it sends the request, so even a firing that got no answer has its prompt (and
+        # any completed tool rounds) on the transcript. The error is held rather than allowed to
+        # propagate straight out, so the record and the snapshot below run on every path, and
+        # re-raised afterwards so `proactive` still logs the traceback and tells the user.
+        # Deliberately not a `finally`: `_persist` awaits, and a store failure raised from a
+        # `finally` would replace the run's own error as the reason reported.
+        error: Optional[BaseException] = None
+        failure: Optional[str] = None
+        stopped = False
+        try:
+            reply = await agent.run(prompt)
+            if spec.echo_reply:
+                await self._ui.send(reply)
+        except asyncio.CancelledError:
+            # Stopped. Handled alongside the failures rather than left to propagate, so the partial
+            # turn is recorded and snapshotted the way a failed one is; re-raised below, after that.
+            stopped, failure = True, "stopped"
+        except ModelConnectionError as exc:
+            error, failure = exc, f"couldn't reach the model server: {describe_error(exc)}"
+        except Exception as exc:
+            error, failure = exc, f"failed: {describe_error(exc)}"
+        for message in agent.model_client.messages[start:]:
+            # Tag every message this unprompted run appended, so replayed history can distinguish
+            # it from a user-driven turn. setdefault, not assignment: the agent loop tags the
+            # turns it injects itself (`continuation`, `final_answer`), and those tags are how a
+            # transcript tells an injected nudge from something the user typed. Overwriting them
+            # made every nudge replay as a user bubble.
+            message.setdefault(PROVENANCE_KEY, PROVENANCE_PROACTIVE)
+        # The reason is recorded here rather than left to `_report`, whose status line goes to
+        # whichever conversation the user is viewing rather than to this one. Before the persist,
+        # and synchronously, for invariant 5's reason.
+        self._record_provenance(
+            conversation_id, resolve_user_index(agent.model_client.messages, start), failure=failure
+        )
+        await self._persist(conversation_id)
+        if stopped:
+            if spec.echo_reply:  # the user is watching this conversation, as the CLI's one user is
+                try:
+                    await self._ui.send("(stopped)")
+                except Exception:
+                    pass
+            raise asyncio.CancelledError
+        if error is not None:
+            raise error
 
     async def _report(self, text: str) -> None:
         """Send an unattended run's own status line, tolerating a channel that cannot take it.

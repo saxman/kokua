@@ -838,3 +838,30 @@ def test_tasks_section_collapses_and_remembers_it(page, live_server):
     page.wait_for_selector("#conv-list li")
     expect(page.locator("#tasks")).to_be_visible()
     expect(page.locator("#task-list")).to_be_hidden()  # the choice survived the reload
+
+
+def test_a_running_task_offers_stop_in_place_of_run_now(page, live_server):
+    """The whole loop the panel exists for: run a task now, watch the row report the firing in flight,
+    stop it, and watch Stop hand its slot back to Run-now."""
+    _open(page, live_server(delay=3.0, seed=_seed_task_and_conversations))
+    row = page.locator(".task-row")
+    row.hover()
+    expect(row.locator(".task-actions button").nth(1)).to_have_text("⟲")
+
+    row.locator(".task-actions button").nth(1).click()  # run it now
+
+    expect(page.locator(".task-row")).to_have_class(re.compile(r"(^|\s)running(\s|$)"))
+    expect(page.locator(".task-conv.running .task-conv-label")).to_have_text("running…")
+    # Visible without hovering, which is the point: a control you have to go looking for is no use for
+    # interrupting something already under way.
+    expect(page.locator(".task-row .task-actions")).to_be_visible()
+    stop = page.locator(".task-row .task-actions button").nth(1)
+    expect(stop).to_have_text("■")
+
+    stop.click()
+
+    expect(page.locator(".task-row")).not_to_have_class(re.compile(r"(^|\s)running(\s|$)"))
+    expect(page.locator(".task-row .task-actions button").nth(1)).to_have_text("⟲")
+    # The task is still scheduled: stopping a run is not disabling it.
+    expect(page.locator(".task-row")).to_have_class(re.compile(r"(^|\s)enabled(\s|$)"))
+    expect(page.locator(".task-row .task-when")).to_contain_text("in ")

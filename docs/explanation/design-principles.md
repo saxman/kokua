@@ -133,7 +133,7 @@ turns *are* concurrent, and every rule that makes that safe is named, next to th
 it prevents.
 
 *How this cashes out:* [`core/turns.py`](../../src/kokua/core/turns.py) opens with a
-`## Concurrency invariants` block -- five rules, each stating what breaks without it, including a
+`## Concurrency invariants` block -- seven rules, each stating what breaks without it, including a
 deadlock that a regression test still guards. [`TurnGate`](../../src/kokua/core/turn_gate.py) is a
 documented writer-preferring readers-writer gate: turns read, a settings change writes.
 [`AgentRegistry`](../../src/kokua/core/agent_registry.py) gives each conversation its own agent and

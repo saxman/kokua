@@ -52,3 +52,18 @@ def test_remove_if_only_removes_matching_handle():
     assert tracker.get("c1") is None
 
     tracker.remove_if("missing", first.handle)  # no entry -> no error
+
+
+def test_for_task_reports_only_the_running_firings_of_that_task():
+    """Stopping a task's runs starts here: a task can have more than one firing in flight (a run-now
+    alongside an armed one), and a finished entry must not be offered up for cancellation."""
+    tracker = TurnTracker()
+    tracker.add("c1", TurnInfo(handle=_handle(), started=1.0, preview="a", task_id="t1"))
+    tracker.add("c2", TurnInfo(handle=_handle(), started=2.0, preview="b", task_id="t1"))
+    tracker.add("c3", TurnInfo(handle=_handle(), started=3.0, preview="c", task_id="t2"))
+    tracker.add("c4", TurnInfo(handle=_handle(done=True), started=4.0, preview="d", task_id="t1"))
+    tracker.add("c5", TurnInfo(handle=_handle(), started=5.0, preview="e"))  # a reactive turn
+
+    assert {cid for cid, _ in tracker.for_task("t1")} == {"c1", "c2"}
+    assert {cid for cid, _ in tracker.for_task("t2")} == {"c3"}
+    assert tracker.for_task("nope") == []

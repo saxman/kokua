@@ -1600,3 +1600,32 @@ def test_conversation_to_frames_omits_the_notice_by_default():
     messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
     items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
     assert not any(i["type"] == "notice" for i in items)
+
+
+def test_ws_task_stop_also_refreshes_the_conversation_list(tmp_path):
+    """The panel decides whether to offer Stop from the running marker on a task's conversations, so a
+    stop has to refresh that list too -- unlike the other task actions, which only touch the registry."""
+    import json
+
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    _seed_task(config)
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "tasks")
+        ws.send_text(json.dumps({"type": "task", "action": "stop", "id": "t1"}))
+        _drain_until(ws, "conversations")
+        echoed = _drain_until(ws, "tasks")
+    assert [item["id"] for item in echoed["items"]] == ["t1"]  # a stop leaves the task in place
+
+
+def test_ws_conversations_carry_whether_a_turn_is_running(tmp_path):
+    """The flag the page reads for its spinner and for the task panel's Stop button."""
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        frame = _drain_until(ws, "conversations")
+    assert frame["items"] and frame["items"][0]["running"] is False

@@ -79,7 +79,7 @@ serve loop, and little else. It owns:
 - **`ConversationBook`** -- the session store, the per-conversation agent cache, and which
   conversation is being viewed. These move together on a switch, which is why they are one object.
 - **`TurnRunner`** -- reactive turns (the user sent something) and proactive turns (a scheduled task
-  fired). The six concurrency invariants are documented at the top of that module.
+  fired). The seven concurrency invariants are documented at the top of that module.
 - **`HumanGate`** -- tool approval and a workflow's own decision, each a lock-guarded single-slot request
   the serve loop resolves with the user's next message.
 - **`SettingsApplier`** -- reading, applying, and persisting the runtime-mutable settings.
@@ -214,7 +214,7 @@ rather than a naming convention alone:
 | `get_current_date_and_time`, `convert_time` | AIMU `builtin.time` | `time` |
 | `add_mcp_server`, `remove_mcp_server` | `toolsets/mcp_admin.py` | `mcp-admin` |
 | `read_config`, `update_config` | `toolsets/config.py` | `config` |
-| `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task` | `toolsets/scheduling.py` | `scheduling` |
+| `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task`, `stop_scheduled_task` | `toolsets/scheduling.py` | `scheduling` |
 | `list_conversations`, `read_conversation`, `search_conversations` | `toolsets/conversations.py` | `conversations` |
 | `spawn_subagent` | AIMU `make_async_subagent_tool` | implied by a non-empty `delegates_to` |
 
@@ -528,6 +528,17 @@ document; `Assistant` exposes only accessors (`current_settings` / `apply_settin
 `list_tasks` / `task_action`) and `frontends/web.py`'s pump handles the control frames. A new transport
 that wants a task list implements its own; it is not a hole in the channel contract.
 
+**Stopping a run in flight.** A firing is a turn like any other, so stopping one is cancelling a task --
+but not the *scheduler's* task. `Scheduler.cancel` would reach the job running the firing and would also
+unregister it, which turns "stop this run" into "silently disarm this schedule". So `_run_unattended` runs
+the turn in a child task and registers that in the `TurnTracker` under the firing's conversation, carrying
+the task id; `Assistant.stop_task_runs` cancels every entry for a task, and the scheduler job goes on to
+re-arm as though the run had finished. Invariant 7 in `core/turns.py` covers the rest, including how a
+stop is told apart from a shutdown (both arrive as a cancellation) and why a firing is never stopped from
+inside itself. Three surfaces reach it and all three go through `TaskService.stop`: the panel's Stop
+button, the `stop_scheduled_task` tool, and -- because the firing is now tracked like any other turn --
+`/stop` on a channel with no conversation list, where a firing runs in the conversation being viewed.
+
 `task_action` is the seam that keeps the panel honest. Every task mutation pairs a registry write with
 the scheduler (un)arming that must accompany it, and both the agent's tools and the panel go through the
 one `scheduling.TaskService` on `LiveState`, so the two cannot drift: a front end that edited
@@ -545,9 +556,17 @@ conversation. The page nests a conversation under a task when its `task_id` matc
 the list*. Requiring the task to be present is what makes
 deleting a task return its conversations to the chat list instead of hiding them: keying on `task_id`
 alone would leave an orphan unreachable from the sidebar. Because the nesting is client-side, a firing's
-new conversation appears under its task with no task re-fetch -- `TurnRunner.proactive` already pushes the
-conversation list. The reverse is not true: a task the model schedules or cancels mid-chat does not push a
-`tasks` frame, which is what the section's refresh button is for.
+new conversation appears under its task with no task re-fetch -- `TurnRunner` pushes the conversation list
+when a run starts and again when it ends. The reverse is not true: a task the model schedules or cancels
+mid-chat does not push a `tasks` frame, which is what the section's refresh button is for.
+
+That same client-side nesting is how the panel knows a task is running at all. `Assistant.list_conversations`
+decorates each row with `running` from the `TurnTracker` (decorated there rather than in
+`ConversationBook.list`, which has no view of turn bookkeeping and needs none), and the page offers Stop on
+a task when any conversation nested under it is running. Nothing about
+running state reaches the `tasks` frame, so the core still never sends one -- which matters because the
+registry does not change when a run starts or stops, and a `tasks` frame is only ever a reply to something
+the page asked for.
 
 **Retention.** Every firing mints its own conversation, and a task's `max_conversations` decides how
 many survive: `1` replaces the previous run, `0` keeps them all, and a record with no cap of its own

@@ -1423,3 +1423,136 @@ async def test_retention_evicts_a_failed_run_before_a_successful_one(tmp_path):
     kept = assistant._book.sessions_for_task("t1")
     assert len(kept) == 2  # the cap was applied, so something was evicted
     assert good_key in assistant._store.list_keys()  # and it was not the successful run
+
+
+# -- stopping a firing -----------------------------------------------------------------------------
+
+
+async def _firing(assistant, prompt="run the report", *, task_name="digest", task_id="t1"):
+    """Start a firing that hangs in the model call, and hand back its task plus its conversation id."""
+    run = asyncio.create_task(assistant._proactive(prompt, task_name=task_name, task_id=task_id))
+    await asyncio.wait_for(assistant._agent.model_client.started.wait(), timeout=2.0)
+    running = assistant._tracker.for_task(task_id)
+    assert len(running) == 1, "the firing should be tracked while it runs"
+    return run, running[0][0]
+
+
+async def test_a_running_firing_is_tracked_under_its_task_so_it_can_be_stopped(tmp_path):
+    """Nothing could cancel a firing before it was tracked: it ran inside the scheduler's job task,
+    which only ``Scheduler.cancel`` could reach, and that disarms the task as a side effect."""
+    client = _BlockingStreamClient()
+    assistant = await Assistant.create(_config(tmp_path), _ConvCapturingChannel(), client_factory=lambda c: client)
+
+    run, conversation_id = await _firing(assistant)
+    assert conversation_id != assistant._active_id  # invariant 4: the firing minted its own
+
+    assert assistant.stop_task_runs("t1") == (1, False)
+    await asyncio.wait_for(run, timeout=2.0)  # the stop does not escape the run (invariant 6)
+
+    assert assistant._tracker.for_task("t1") == []
+    session = assistant._book.get(conversation_id)
+    assert any(m.get("content") == "run the report" for m in session.messages)  # partial turn kept
+    assert "stopped" in str(session.metadata.get("failure"))
+
+
+async def test_stopping_a_firing_reports_nothing_as_finished(tmp_path):
+    """The announce line tells the user to go read the run's output. A run that was stopped has none,
+    so it must not claim to have finished."""
+    client = _BlockingStreamClient()
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda c: client)
+
+    run, _ = await _firing(assistant)
+    assistant.stop_task_runs("t1")
+    await asyncio.wait_for(run, timeout=2.0)
+
+    assert not any("finished" in text for text in channel.sent)
+
+
+async def test_a_firings_conversation_is_listed_as_running_and_cleared_when_it_ends(tmp_path):
+    """What the task panel's Stop button hangs off. The row also has to reach the sidebar at all: the
+    firing used to push its conversation only once it had succeeded, so a run in flight was invisible."""
+    client = _BlockingStreamClient()
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda c: client)
+
+    run, conversation_id = await _firing(assistant)
+
+    live = [item for item in channel.conversation_pushes[-1] if item["id"] == conversation_id]
+    assert live and live[0]["running"] is True and live[0]["task_id"] == "t1"
+
+    assistant.stop_task_runs("t1")
+    await asyncio.wait_for(run, timeout=2.0)
+
+    ended = [item for item in channel.conversation_pushes[-1] if item["id"] == conversation_id]
+    assert ended and ended[0]["running"] is False
+
+
+async def test_a_firing_is_never_stopped_from_inside_itself(tmp_path):
+    """A task whose own prompt leads the model to stop it would otherwise cut its turn off mid-tool-call,
+    leaving a transcript that reads like a crash and no room to say why."""
+    from kokua.channels.web import streaming_conversation
+
+    client = _BlockingStreamClient()
+    assistant = await Assistant.create(_config(tmp_path), _ConvCapturingChannel(), client_factory=lambda c: client)
+
+    run, conversation_id = await _firing(assistant)
+    token = streaming_conversation.set(conversation_id)  # as the run's own tool call would see it
+    try:
+        assert assistant.stop_task_runs("t1") == (0, True)
+    finally:
+        streaming_conversation.reset(token)
+
+    assert assistant._tracker.for_task("t1"), "the run it was called from is still going"
+    assert assistant.stop_task_runs("t1") == (1, False)  # from outside, it stops
+    await asyncio.wait_for(run, timeout=2.0)
+
+
+async def test_shutdown_cancellation_still_takes_the_firing_down_with_it(tmp_path):
+    """A firing runs in a child task now, so the two cancellations have to stay distinguishable: a stop
+    ends the run and lets the scheduler job carry on, while a cancellation aimed at the job itself
+    (shutdown) has to keep propagating -- and must not leave the child running behind it."""
+    client = _BlockingStreamClient()
+    assistant = await Assistant.create(_config(tmp_path), _ConvCapturingChannel(), client_factory=lambda c: client)
+
+    run, _ = await _firing(assistant)
+    child = assistant._tracker.for_task("t1")[0][1].handle
+
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    await asyncio.gather(child.task, return_exceptions=True)
+
+    assert child.done
+
+
+async def test_stop_reaches_a_firing_once_you_have_switched_into_its_conversation(tmp_path):
+    """The surface that comes free from tracking the run: the firing's conversation now reports a turn in
+    flight, so switching into it shows the working indicator, and `/stop` reaches the firing itself."""
+    client = _BlockingStreamClient()
+    assistant = await Assistant.create(_config(tmp_path), _ConvCapturingChannel(), client_factory=lambda c: client)
+
+    run, conversation_id = await _firing(assistant)
+    await assistant.select_conversation(conversation_id)
+    assert assistant.turn_running(conversation_id) is True
+
+    assistant._stop_active_turn()  # the helper the `/stop` branch calls
+    await asyncio.wait_for(run, timeout=2.0)
+
+    assert assistant._tracker.for_task("t1") == []
+    assert "stopped" in str(assistant._book.get(conversation_id).metadata.get("failure"))
+
+
+async def test_a_stopped_firing_says_so_where_the_user_can_see_it(tmp_path):
+    """On a channel with no conversation list a firing runs in the conversation being viewed, so the stop
+    belongs in that conversation the way a reactive turn's does, not only in metadata."""
+    client = _BlockingStreamClient()
+    channel = FakeChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+
+    run = asyncio.create_task(assistant._proactive("run it", task_name="digest", task_id="t1"))
+    await asyncio.wait_for(client.started.wait(), timeout=2.0)
+    assert assistant.stop_task_runs("t1") == (1, False)
+    await asyncio.wait_for(run, timeout=2.0)
+
+    assert "(stopped)" in channel.sent

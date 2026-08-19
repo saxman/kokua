@@ -247,19 +247,25 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                             await channel.send("Sorry, those settings could not be applied.")
                         await channel.send_settings(assistant.current_settings())
                         continue
-                    # Task controls touch only the scheduled-task registry, so like the settings
-                    # controls they answer with a fresh task list and skip the sidebar/history refresh.
+                    # Task controls mostly touch only the scheduled-task registry, so like the settings
+                    # controls they answer with a fresh task list and skip the history refresh.
                     if control["type"] == "get_tasks":
                         await channel.send_tasks(assistant.list_tasks())
                         continue
                     if control["type"] == "task":
+                        action = str(control.get("action", ""))
                         try:
                             # task_action allowlists the action, so an unrecognized one raises here
                             # rather than reaching the registry.
-                            assistant.task_action(str(control.get("action", "")), str(control.get("id", "")))
+                            assistant.task_action(action, str(control.get("id", "")))
                         except Exception:
                             logger.warning("Could not apply task action", exc_info=True)
                             await channel.send("Sorry, that task action could not be applied.")
+                        # "stop" is the one action whose effect is not in the task list at all: the page
+                        # reads whether a task is running off the running marker on its conversations, so
+                        # the button it just used would otherwise linger until the run's own push landed.
+                        if action == "stop":
+                            await channel.send_conversations(assistant.list_conversations())
                         await channel.send_tasks(assistant.list_tasks())
                         continue
                     if control["type"] == "new":

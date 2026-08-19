@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 
 from kokua.core.assistant import Assistant
 from tests.channels import FakeChannel, _config
@@ -121,3 +122,38 @@ async def test_a_config_without_a_scheduling_section_falls_back_to_the_declared_
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
     assert assistant._state.tasks.default_max_conversations() == DEFAULT_MAX_TASK_CONVERSATIONS
+
+
+async def test_task_action_stops_a_running_firing_through_the_shared_service(tmp_path):
+    """The panel's Stop button reaches the tracker the same way its other buttons reach the registry:
+    through the one TaskService, so the tool and the panel cannot disagree about what stopping means."""
+    from kokua import scheduling
+
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    scheduling.add(
+        cfg.scheduled_tasks_path,
+        {
+            "id": "t1",
+            "name": "brief",
+            "prompt": "p",
+            "schedule": {"type": "interval", "seconds": 3600},
+            "created_at": "x",
+            "enabled": True,
+        },
+    )
+    asked: list[str] = []
+    assistant._tasks = replace(assistant._tasks, stop_run=lambda task_id: (asked.append(task_id), (1, False))[1])
+
+    assistant.task_action("stop", "brief")
+
+    assert asked == ["t1"]
+    assert scheduling.load(cfg.scheduled_tasks_path)[0]["enabled"] is True  # a stop is not a disable
+
+
+async def test_the_task_service_stops_runs_through_the_assistants_tracker(tmp_path):
+    """The service's canceller is wired to the live tracker, which is the half a unit test of either
+    side cannot see."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assert assistant._tasks.stop_run.__self__ is assistant

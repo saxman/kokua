@@ -18,6 +18,10 @@ class TurnInfo:
     handle: RunHandle
     started: float
     preview: str
+    # The scheduled task this turn is a firing of, None for a turn the user asked for. Held here rather
+    # than read back off the conversation's stored metadata so it is also known for a firing on a channel
+    # with no conversation list, which runs in the viewed conversation and stamps no task id on it.
+    task_id: Optional[str] = None
 
 
 class TurnTracker:
@@ -46,3 +50,15 @@ class TurnTracker:
 
     def all(self) -> list[tuple[str, "TurnInfo"]]:
         return list(self._turns.items())
+
+    def for_task(self, task_id: str) -> list[tuple[str, "TurnInfo"]]:
+        """Every still-running turn that is a firing of ``task_id``, as ``(conversation id, info)``.
+
+        A list rather than one entry: a task can have two firings in flight at once (a manual run-now
+        alongside its armed one), each in a conversation of its own, so stopping "the task's run" means
+        stopping all of them."""
+        return [
+            (conversation_id, info)
+            for conversation_id, info in self._turns.items()
+            if info.task_id == task_id and not info.handle.done
+        ]

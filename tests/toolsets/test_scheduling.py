@@ -249,3 +249,60 @@ async def test_run_scheduled_task_reports_an_unknown_handle_and_enqueues_nothing
 
     assert "No scheduled task" in await tools["run_scheduled_task"]("nope")
     assert scheduler.jobs == {}
+
+
+# -- stop_scheduled_task ---------------------------------------------------------------------------
+
+
+def _make_with_stop(tmp_path, stop_run):
+    scheduler = FakeScheduler()
+    path = tmp_path / "scheduled_tasks.json"
+    tasks = TaskService(scheduler, path, _noop_fire, default_max_conversations=lambda: 3, stop_run=stop_run)
+    return scheduler, path, {fn.__name__: fn for fn in make_scheduling_tools(tasks)}
+
+
+async def test_stop_scheduled_task_says_what_it_stopped_and_that_the_schedule_stands(tmp_path):
+    """The model has to be able to tell the user the task will be back, or it reads as a cancel."""
+    scheduler, path, tools = _make_with_stop(tmp_path, lambda task_id: (1, False))
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="s")
+
+    out = await tools["stop_scheduled_task"]("s")
+
+    assert "Stopped" in out and "s" in out
+    assert "schedule" in out.lower()
+    assert scheduling.load(path)[0]["enabled"] is True
+
+
+async def test_stop_scheduled_task_names_the_count_when_several_runs_were_in_flight(tmp_path):
+    """A manual run-now alongside an armed firing means a task can have more than one run going."""
+    scheduler, path, tools = _make_with_stop(tmp_path, lambda task_id: (2, False))
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="s")
+
+    assert "2 runs" in await tools["stop_scheduled_task"]("s")
+
+
+async def test_stop_scheduled_task_reports_a_task_that_was_not_running(tmp_path):
+    """Distinct from a stop that worked: the model should not tell the user it stopped something."""
+    scheduler, path, tools = _make_with_stop(tmp_path, lambda task_id: (0, False))
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="s")
+
+    out = await tools["stop_scheduled_task"]("s")
+
+    assert "not running" in out.lower() and "Stopped" not in out
+
+
+async def test_stop_scheduled_task_says_when_the_only_run_is_the_one_asking(tmp_path):
+    """A task's own firing asking to stop itself is left alone, so the sentence has to explain the
+    difference from 'nothing was running' rather than claim the task is idle."""
+    scheduler, path, tools = _make_with_stop(tmp_path, lambda task_id: (0, True))
+    await tools["schedule_task"]("ping", "interval", interval_seconds=60, name="s")
+
+    out = await tools["stop_scheduled_task"]("s")
+
+    assert "this run" in out.lower() and "not running" not in out.lower()
+
+
+async def test_stop_scheduled_task_reports_an_unknown_handle(tmp_path):
+    scheduler, path, tools = _make_with_stop(tmp_path, lambda task_id: (1, False))
+
+    assert "No scheduled task" in await tools["stop_scheduled_task"]("nope")

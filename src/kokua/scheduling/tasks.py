@@ -86,6 +86,21 @@ class EnabledResult:
 
 
 @dataclass(frozen=True)
+class StopResult:
+    """The outcome of :meth:`TaskService.stop`.
+
+    ``stopped`` is how many of the task's runs were cancelled, which is zero for a task that simply had
+    nothing in flight. ``skipped_self`` says one of its runs was left alone because the call came from
+    inside it; a caller needs both, since "nothing was running" and "the only run is the one asking" are
+    different things to report.
+    """
+
+    record: dict
+    stopped: int
+    skipped_self: bool
+
+
+@dataclass(frozen=True)
 class TaskService:
     """Every scheduled-task operation, bound to a live ``Scheduler`` and a proactive-turn callback.
 
@@ -97,12 +112,18 @@ class TaskService:
     ``default_max_conversations`` is read at fire time rather than captured, so a change to the
     ``[scheduling]`` setting behind it reaches the next firing without a restart. A callable rather
     than the config object keeps this subsystem free of any dependency on the config layer.
+
+    ``stop_run`` cancels a task's in-flight firings, returning ``(how many, whether one of them was the
+    run the call came from)``. Injected for the same reason ``fire`` is: which runs are in flight is the
+    assistant's bookkeeping, not the registry's. Left unset, :meth:`stop` reports nothing running, which
+    is the truth for a service with no live turns behind it.
     """
 
     scheduler: object
     registry_path: Path
     fire: Callable[..., Awaitable[None]]
     default_max_conversations: Callable[[], int] = lambda: 0
+    stop_run: Optional[Callable[[str], tuple[int, bool]]] = None
 
     # -- reading ---------------------------------------------------------------------------------
 
@@ -338,6 +359,17 @@ class TaskService:
             self.scheduler.cancel(record["id"])
             return EnabledResult(record, changed=True, armed=False)
         return EnabledResult(record, changed=True, armed=self._arm(record) is not None)
+
+    def stop(self, id_or_name: str) -> StopResult:
+        """Cancel whatever runs of a task are in flight, leaving its schedule armed.
+
+        Not a state change, which is why nothing here is written: a recurring task fires again on its
+        normal cadence afterwards, and a one-shot is still consumed. Use :meth:`set_enabled` to keep it
+        from coming back. Raises :class:`TaskNotFound`.
+        """
+        record = self._require(id_or_name)
+        stopped, skipped_self = self.stop_run(record["id"]) if self.stop_run else (0, False)
+        return StopResult(record, stopped, skipped_self)
 
     def run_now(self, id_or_name: str) -> dict:
         """Enqueue a task to run immediately, without changing its schedule.

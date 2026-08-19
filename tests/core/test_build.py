@@ -187,6 +187,7 @@ ENTRY_AGENT_TOOLS = {
         "enable_scheduled_task",
         "disable_scheduled_task",
         "run_scheduled_task",
+        "stop_scheduled_task",
     },
     "aimu make_skill_authoring_tool / make_skill_script_tool": {"author_skill", "add_skill_script"},
     "aimu builtin.time": {"get_current_date_and_time", "convert_time"},

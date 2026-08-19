@@ -295,8 +295,16 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   weekly (no cron dependency).
 - Managed by the assistant through `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`,
   `update_scheduled_task`, `cancel_scheduled_task`, `disable_scheduled_task` / `enable_scheduled_task`
-  (pause without losing the task), and `run_scheduled_task` (run one now, reproducing a real firing, so
-  a task can be dry-run before it is due).
+  (pause without losing the task), `run_scheduled_task` (run one now, reproducing a real firing, so
+  a task can be dry-run before it is due), and `stop_scheduled_task` (end a run that is happening now).
+- **A run in flight can be stopped**, from the task row in the web sidebar, by asking in chat, or with
+  `/stop` on a channel where a firing runs in the conversation being viewed. Stopping ends that run
+  only: the task stays on its schedule and fires again as usual, so a task that should not come back is
+  still a `disable`. The stopped run keeps whatever it produced in its own conversation, with the stop
+  recorded against that turn the way a failure is (and treated like one by retention, so a stopped run
+  is evicted before a report). A firing is never stopped from inside itself, which would cut its own turn
+  off mid-tool-call. This is also why a firing runs in a child task: cancelling the scheduler's job
+  would have disarmed the schedule as a side effect.
 - `update_scheduled_task` edits any subset of a task's fields in place, keeping its id, `created_at`,
   and retention cap, and re-deriving the schedule fields you omit, so changing a weekly task's
   time keeps its day. It re-arms only when the schedule actually changes, so editing a prompt never
@@ -319,7 +327,10 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   that failed left a conversation with nothing in it at all, and the status line explaining why went to
   whichever conversation the user happened to be viewing.
 - **A tasks section in the web sidebar**, below the conversation list, showing each task's name,
-  schedule, and next firing, with disable/enable, run-now, and delete per row. It hides itself entirely
+  schedule, and next firing, with disable/enable, run-now, and delete per row. A task with a run in
+  flight pulses, keeps its buttons visible rather than waiting to be hovered, and offers Stop in place of
+  run-now; the run's own conversation appears under it as it starts, marked running, rather than only once
+  it has finished. It hides itself entirely
   when there are no tasks, collapses (remembered per browser), and scrolls independently of the
   conversation list so neither can crowd the other out. Creating and editing tasks stays in chat, where
   the model turns a natural-language schedule into a validated one.

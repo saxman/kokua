@@ -104,7 +104,7 @@ each claim, is in [docs/explanation/design-principles.md](docs/explanation/desig
    holds and a writable agent table would let it widen its own reach.
 4. **All state under one directory the user owns.** `$KOKUA_HOME`, default `~/.kokua`. Every leaf
    below `data/` is a derived `AssistantConfig` property, never a new function in `config/paths.py`.
-5. **A single user, one process, with concurrency rules written down.** The five turn invariants live
+5. **A single user, one process, with concurrency rules written down.** The seven turn invariants live
    at the top of `core/turns.py`, each naming the bug it prevents. Update them in the same commit as
    any change to turn concurrency.
 6. **Verifiable without a model.** The default suite is mock-only. This is why the model client is

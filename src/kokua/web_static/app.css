@@ -110,12 +110,17 @@ body.resizing { user-select: none; }
    spending a row's width on the word. */
 .task-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--accent); }
 .task-row.enabled .task-dot { background: var(--accent); }
+/* The same pulse the header's working indicator uses, for the same meaning: a turn is under way. */
+.task-row.running .task-dot { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.task-conv.running .task-conv-label { color: var(--fg); font-style: italic; }
 .task-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .task-name { font-size: 0.88em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .task-when { font-size: 0.72em; color: var(--fg-faint); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; }
 .task-actions { flex: none; display: flex; gap: 0; opacity: 0; }
-.task-row:hover .task-actions, .task-actions:focus-within { opacity: 1; }
+/* A running task keeps its actions visible: Stop is only offered while a firing is in flight, and a
+   control you have to hover to discover is no use for interrupting something already under way. */
+.task-row:hover .task-actions, .task-actions:focus-within, .task-row.running .task-actions { opacity: 1; }
 .task-actions button { border: none; background: none; color: var(--fg-faint); cursor: pointer;
   font-size: 0.95em; line-height: 1; padding: 0 3px; border-radius: 4px; }
 .task-actions button:hover { color: var(--fg); background: var(--bg); }
@@ -146,7 +151,9 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 #working-indicator .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
   animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { #working-indicator .dot { animation: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  #working-indicator .dot, .task-row.running .task-dot { animation: none; opacity: 1; }
+}
 /* Dismissible banners for background-turn completions ("notification" frames), stacked above the log. */
 #notifications { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 0; }
 .notification-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px;

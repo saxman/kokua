@@ -137,6 +137,7 @@ class Assistant:
             self._ui,
             self._gate,
             config,
+            tracker=self._tracker,
             decide=self._human.decide,
             push_conversations=self._maybe_push_conversations,
             delete_conversation=self.delete_conversation,
@@ -230,6 +231,7 @@ class Assistant:
             proactive=assistant._proactive,
             conversation_book=assistant._book,
             turn_running=assistant.turn_running,
+            stop_task_runs=assistant.stop_task_runs,
             tool_approval=assistant._approve,
             reapply_config=assistant._settings.apply_one,
             observer=assistant._subagent_reporter,
@@ -336,8 +338,15 @@ class Assistant:
         return self._session.metadata
 
     def list_conversations(self) -> list[dict]:
-        """All conversations as {id, title, updated_at, active}, most-recently-updated first."""
-        return self._book.list()
+        """All conversations as {id, title, updated_at, active, task_id, running}, most-recently-updated
+        first.
+
+        ``running`` is decorated on here rather than reported by ``ConversationBook.list`` because the
+        book has no view of turn bookkeeping and does not need one: which turns are in flight is this
+        object's own state, and the two readers of the flag (the page's spinner and the task panel's Stop
+        button) both reach the list through here.
+        """
+        return [{**item, "running": self._tracker.running(item["id"])} for item in self._book.list()]
 
     async def _cancel_current_turn(self) -> None:
         """Cancel the viewed conversation's in-flight turn (if any) and let it settle, so its partial
@@ -367,6 +376,29 @@ class Assistant:
         if conversation_id == self._active_id:
             self._human.abandon_all()
         await self._book.delete(conversation_id, cancel_turn=self._cancel_turn)
+
+    def stop_task_runs(self, task_id: str) -> tuple[int, bool]:
+        """Cancel every in-flight firing of ``task_id``; returns (how many were cancelled, whether one
+        of them was the run this call is being made from).
+
+        The mechanism behind ``TaskService.stop``, injected there the way ``_proactive`` is: which runs
+        are in flight is the tracker's knowledge, and the tracker lives here. The task's schedule is
+        untouched -- stopping a run is not disabling a task.
+
+        A firing is never cancelled from inside itself. A task whose own prompt leads the model to stop it
+        would otherwise cut its turn off mid-tool-call, leaving a transcript that reads like a crash and
+        no room to say why, so the skip is reported back for the caller to explain instead.
+        """
+        current = streaming_conversation.get()
+        stopped = 0
+        skipped_self = False
+        for conversation_id, info in self._tracker.for_task(task_id):
+            if conversation_id == current:
+                skipped_self = True
+                continue
+            info.handle.cancel()
+            stopped += 1
+        return stopped, skipped_self
 
     def _cancel_turn(self, conversation_id: str) -> None:
         """Cancel a conversation's in-flight turn without awaiting it."""
@@ -398,6 +430,7 @@ class Assistant:
             "enable": lambda: self._tasks.set_enabled(id_or_name, True),
             "disable": lambda: self._tasks.set_enabled(id_or_name, False),
             "run": lambda: self._tasks.run_now(id_or_name),
+            "stop": lambda: self._tasks.stop(id_or_name),
             "delete": lambda: self._tasks.cancel(id_or_name),
         }
         run = actions.get(action)

@@ -73,6 +73,13 @@ function conversationsOfTask(task) {
   return lastConversations.filter((conv) => conv.task_id && conv.task_id === task.id);
 }
 
+// Whether a firing of this task is happening right now, which is what the row offers Stop for. Read
+// off the task's conversations rather than from the task frame: the running state changes while the
+// registry does not, and the conversation list is the frame the core already pushes when it does.
+function taskIsRunning(task) {
+  return conversationsOfTask(task).some((conv) => conv.running);
+}
+
 // Ids nested under a task that is *currently in the list*. Deleting a task therefore returns its
 // conversations to the chat list instead of hiding them: excluding every conversation with a task_id
 // would leave an orphan unreachable from the sidebar entirely.
@@ -173,8 +180,9 @@ function actionButton(label, title, handler) {
 }
 
 function taskRow(task) {
+  const running = taskIsRunning(task);
   const li = document.createElement("li");
-  li.className = "task-row" + (task.enabled ? " enabled" : "");
+  li.className = "task-row" + (task.enabled ? " enabled" : "") + (running ? " running" : "");
   li.dataset.taskId = task.id;
 
   const dot = document.createElement("span");
@@ -205,7 +213,13 @@ function taskRow(task) {
       ? actionButton("⏸", "Disable this task", () => taskAction("disable", task.id))
       : actionButton("▶", "Enable this task", () => taskAction("enable", task.id))
   );
-  actions.appendChild(actionButton("⟲", "Run this task now", () => taskAction("run", task.id)));
+  // Stop takes Run-now's slot for as long as a firing is in flight, the way the composer's Stop takes
+  // Send's: running it again while it is already running is not what the button is for at that moment.
+  actions.appendChild(
+    running
+      ? actionButton("■", "Stop the run in progress (the task stays scheduled)", () => taskAction("stop", task.id))
+      : actionButton("⟲", "Run this task now", () => taskAction("run", task.id))
+  );
   const del = actionButton("×", "Delete this task", () => {
     if (confirm(`Delete the task "${task.name || task.prompt}"?`)) taskAction("delete", task.id);
   });
@@ -217,7 +231,7 @@ function taskRow(task) {
 
 function taskConversationRow(conv) {
   const li = document.createElement("li");
-  li.className = "task-conv" + (conv.active ? " active" : "");
+  li.className = "task-conv" + (conv.active ? " active" : "") + (conv.running ? " running" : "");
   // When a task runs, every firing's conversation carries the same title (the task's name), so the
   // row shows when it ran instead -- that is the only thing telling two firings apart. The marker
   // keeps a bare date from reading as a stray row rather than a child of the task above.
@@ -228,7 +242,9 @@ function taskConversationRow(conv) {
   const label = document.createElement("span");
   label.className = "task-conv-label";
   const when = relativeTime(conv.updated_at);
-  label.textContent = when || conv.title;
+  // A run in flight has nothing to date yet -- its conversation is minted at the start of the firing,
+  // so "now" would be the only thing every one of them said. It says what it is doing instead.
+  label.textContent = conv.running ? "running…" : (when || conv.title);
   li.appendChild(marker);
   li.appendChild(label);
   li.title = conv.title;
