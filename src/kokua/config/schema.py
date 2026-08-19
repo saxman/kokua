@@ -29,12 +29,16 @@ class AgentConfig:
     default (see ``AssistantConfig.model_for``). ``thinking`` does the same for reasoning effort
     (see ``AssistantConfig.thinking_for``), and is ``None`` rather than ``False`` when unset because
     ``False`` is itself a declaration -- "do not reason" -- that must be able to override a default.
+
+    ``generation`` overrides ``[assistant.generation]`` *per key*, so an agent that wants only a colder
+    temperature keeps the default's context length.
     """
 
     description: str = ""
     system_message: str = ""
     model: Optional[str] = None
     thinking: Optional[Union[bool, str]] = None
+    generation: dict = field(default_factory=dict)
     tools: list[str] = field(default_factory=list)
     delegates_to: list[str] = field(default_factory=list)
 
@@ -65,6 +69,11 @@ class AssistantConfig:
     # at the model's own default effort, and a level string requests that effort. A level is advisory on
     # a model whose card does not declare thinking_levels: AIMU warns once and reasoning is still on.
     thinking: Optional[Union[bool, str]] = None
+    # Generation parameters every agent runs with, each overridable per key by an agent's own
+    # [agents.<name>.generation] table. Only the keys config.toml declares are here: this dict becomes
+    # `client.default_generate_kwargs`, which sits ABOVE the model card in AIMU's precedence chain, so
+    # a key filled in with a default would shadow a card's own tuned profile. Empty is the normal case.
+    generation: dict = field(default_factory=dict)
     system_message: str = DEFAULT_SYSTEM_MESSAGE
     # Set only by `--system` (never by config.toml, which has no key for it). `system_message` above
     # already has a value whether or not anyone set it -- its own default -- so "was --system passed"

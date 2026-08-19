@@ -72,6 +72,57 @@ def _thinking(section: str, key: str, value: Any) -> Any:
     raise ConfigError(f"[{section}].{key} must be true, false, or one of {', '.join(_THINKING_LEVELS)}, got {value!r}")
 
 
+# Every generation parameter Kokua sets, with the range each accepts: (accepted TOML types, the label
+# an error shows, the range predicate). One table because both tiers read it -- the flat schema entries
+# for [assistant.generation] and the whole-table validator for [agents.<name>.generation] -- so the two
+# cannot disagree about what a key means, the same arrangement `_thinking` has.
+#
+# `int` is accepted for the float keys because TOML `temperature = 1` is an int, and every backend takes
+# one. Range-checking here rather than leaving it to the provider is what turns a typo into a startup
+# error naming the table instead of a rejected request mid-turn.
+_GENERATION_KEYS: dict[str, tuple[tuple[type, ...], str, Callable[[Any], bool]]] = {
+    "temperature": ((int, float), "a number from 0.0 to 2.0", lambda v: 0.0 <= v <= 2.0),
+    "top_p": ((int, float), "a number from 0.0 to 1.0", lambda v: 0.0 <= v <= 1.0),
+    "top_k": ((int,), "an integer of at least 1", lambda v: v >= 1),
+    "min_p": ((int, float), "a number from 0.0 to 1.0", lambda v: 0.0 <= v <= 1.0),
+    "presence_penalty": ((int, float), "a number from -2.0 to 2.0", lambda v: -2.0 <= v <= 2.0),
+    "repetition_penalty": ((int, float), "a number greater than 0.0", lambda v: v > 0.0),
+    "max_tokens": ((int,), "an integer of at least 1", lambda v: v >= 1),
+    "context_length": ((int,), "an integer of at least 1", lambda v: v >= 1),
+}
+
+# The sub-table of [assistant] the default tier lives in. A dotted section, so one schema entry per key
+# serves it and `update_config` can write one; nothing can collide with the name, since a toolset name
+# has no dot in it.
+_GENERATION_SECTION = "assistant.generation"
+
+
+def _generation_value(section: str, key: str, value: Any) -> Any:
+    """Validate one generation parameter, naming the table it came from.
+
+    Shared by both tiers: the flat schema calls it as a converter for ``[assistant.generation]``, and
+    ``_generation`` calls it per entry for an agent's own table.
+    """
+    spec = _GENERATION_KEYS.get(key)
+    if spec is None:
+        raise ConfigError(f"unknown config key [{section}].{key}. Accepted: {', '.join(sorted(_GENERATION_KEYS))}")
+    types, label, in_range = spec
+    # `bool` is an int subclass, so `temperature = true` would otherwise pass as a number.
+    if isinstance(value, bool) or not isinstance(value, types):
+        raise ConfigError(f"[{section}].{key} must be {label}, got {type(value).__name__}")
+    if not in_range(value):
+        raise ConfigError(f"[{section}].{key} must be {label}, got {value!r}")
+    return value
+
+
+def _generation(section: str, key: str, value: Any) -> dict:
+    """Validate a ``[<agent>.generation]`` sub-table into a dict of checked parameters."""
+    if not isinstance(value, dict):
+        raise ConfigError(f"[{section}.{key}] must be a table")
+    table = f"{section}.{key}"
+    return {name: _generation_value(table, name, item) for name, item in value.items()}
+
+
 def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
     """Validate the [[mcp.server]] array of tables into a list of ``MCPServerConfig``."""
     if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
@@ -101,12 +152,13 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
 _AGENT_LIST_KEYS = {"tools", "delegates_to"}
 # Agent keys whose value set is closed rather than merely typed, so a validator decides instead of an
 # isinstance check. `thinking` is a bool-or-string union besides, which the type map below cannot express.
-_AGENT_VALIDATED_KEYS = {"thinking": _thinking}
+_AGENT_VALIDATED_KEYS = {"thinking": _thinking, "generation": _generation}
 _AGENT_KEYS = {
     "description": str,
     "system_message": str,
     "model": str,
     "thinking": object,  # value set checked by _AGENT_VALIDATED_KEYS; listed here so it is a known key
+    "generation": object,  # a sub-table, validated by _AGENT_VALIDATED_KEYS; listed here for the same reason
     "tools": list,
     "delegates_to": list,
 }
@@ -181,6 +233,17 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("web", "port"): ("port", (int,), "an integer", None),
     ("logging", "level"): ("log_level", (str,), "a string", None),
 }
+
+# One entry per generation parameter, derived from `_GENERATION_KEYS` rather than written out, so a key
+# added there reaches the schema (and `update_config`) without a second list to keep in step. The target
+# is the `generation` field, but `load` routes this section by name rather than by target: `generation`
+# is also a legal toolset name, and the dotted-target convention would send these into that bucket.
+_STARTUP_SCHEMA.update(
+    {
+        (_GENERATION_SECTION, key): ("generation", types, label, _generation_value)
+        for key, (types, label, _) in _GENERATION_KEYS.items()
+    }
+)
 
 
 # The tables ``load`` parses itself, key by key, rather than through the flat schema above: each has its
@@ -306,6 +369,32 @@ def resolve_path(explicit: Optional[str]) -> tuple[Path, bool]:
     return paths.config_path(), False
 
 
+def _sections(data: dict) -> list[tuple[str, dict]]:
+    """Every ``[section]``, plus each nested ``[section.sub]`` as its own dotted section.
+
+    ``tomllib`` nests ``[assistant.generation]`` inside ``assistant``, where the flat key loop would
+    read it as a key whose value is a table. Re-entering it as its own section is what lets one schema
+    entry per key serve a sub-table. General rather than special-cased for one key, so any other nested
+    table gets an accurate "unknown config key [section.sub].key" instead of a type complaint about a
+    dict. The structured sections are handed over whole: each parses its own nested tables.
+    """
+    sections: list[tuple[str, dict]] = []
+    for section, entries in data.items():
+        if not isinstance(entries, dict):
+            raise ConfigError(f"top-level config key {section!r} is not a [section] table")
+        if section in _STRUCTURED_SECTIONS:
+            sections.append((section, entries))
+            continue
+        flat = {}
+        for key, value in entries.items():
+            if isinstance(value, dict):
+                sections.append((f"{section}.{key}", value))
+            else:
+                flat[key] = value
+        sections.append((section, flat))
+    return sections
+
+
 def load(
     explicit: Optional[str] = None,
     *,
@@ -344,9 +433,7 @@ def load(
 
     schema = build_schema(table, extra_schema)
     overrides: dict[str, Any] = {}
-    for section, entries in data.items():
-        if not isinstance(entries, dict):
-            raise ConfigError(f"top-level config key {section!r} is not a [section] table")
+    for section, entries in _sections(data):
         if (section, None) in _REMOVED_KEYS:
             raise ConfigError(_REMOVED_KEYS[(section, None)])
         # [subagents] no longer holds anything live: `concurrent` moved to [assistant].concurrent_tools,
@@ -371,6 +458,13 @@ def load(
                 if key != "server":
                     raise ConfigError(f"unknown config key [mcp].{key}")
                 overrides["mcp_servers"] = _parse_mcp_servers(value)
+            continue
+        # Routed by section rather than by the dotted-target convention a toolset's keys use, because
+        # `generation` is also a legal toolset name and would claim the same bucket.
+        if section == _GENERATION_SECTION:
+            for key, value in entries.items():
+                _, coerced = _coerce_flat(schema, section, key, value)
+                overrides.setdefault("generation", {})[key] = coerced
             continue
         for key, value in entries.items():
             if (section, key) in _REMOVED_KEYS:

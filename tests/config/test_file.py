@@ -396,3 +396,80 @@ def test_coerce_config_string_thinking_takes_a_level_or_a_bool():
 def test_coerce_config_string_thinking_rejects_an_unknown_level():
     with pytest.raises(settings.ConfigError, match=r"\[assistant\].thinking"):
         settings.coerce_config_string("assistant", "thinking", "sort-of", table=core_table())
+
+
+def _load_generation(tmp_path, body: str) -> dict:
+    path = tmp_path / "config.toml"
+    path.write_text(body, encoding="utf-8")
+    return settings.load(str(path), table=core_table())
+
+
+def test_the_generation_table_loads_every_key(tmp_path):
+    overrides = _load_generation(
+        tmp_path,
+        """
+[assistant.generation]
+temperature = 0.7
+top_p = 0.9
+top_k = 40
+min_p = 0.05
+presence_penalty = 1.5
+repetition_penalty = 1.05
+max_tokens = 4096
+context_length = 32768
+""",
+    )
+    assert overrides["generation"] == {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "top_k": 40,
+        "min_p": 0.05,
+        "presence_penalty": 1.5,
+        "repetition_penalty": 1.05,
+        "max_tokens": 4096,
+        "context_length": 32768,
+    }
+
+
+def test_a_config_with_no_generation_table_sets_nothing(tmp_path):
+    """Absent must stay absent: this tier sits above the model card, so a default would shadow it."""
+    overrides = _load_generation(tmp_path, '[assistant]\nmodel = "ollama:qwen3:8b"\n')
+    assert "generation" not in overrides
+
+
+def test_an_out_of_range_generation_value_is_refused(tmp_path):
+    with pytest.raises(settings.ConfigError, match="temperature"):
+        _load_generation(tmp_path, "[assistant.generation]\ntemperature = 5.0\n")
+
+
+def test_a_zero_repetition_penalty_is_refused(tmp_path):
+    """The bound is exclusive: 0.0 would suppress every repeated token outright."""
+    with pytest.raises(settings.ConfigError, match="repetition_penalty"):
+        _load_generation(tmp_path, "[assistant.generation]\nrepetition_penalty = 0.0\n")
+
+
+def test_a_misspelled_generation_key_names_the_table_it_came_from(tmp_path):
+    with pytest.raises(settings.ConfigError, match=r"\[assistant.generation\].temperture"):
+        _load_generation(tmp_path, "[assistant.generation]\ntemperture = 0.7\n")
+
+
+def test_a_boolean_is_not_a_number(tmp_path):
+    """bool is an int subclass, so a plain isinstance check would accept `temperature = true`."""
+    with pytest.raises(settings.ConfigError, match="temperature"):
+        _load_generation(tmp_path, "[assistant.generation]\ntemperature = true\n")
+
+
+def test_an_integer_is_accepted_where_a_float_is_expected(tmp_path):
+    """TOML `temperature = 1` is an int, and refusing it would be a papercut with no upside."""
+    assert _load_generation(tmp_path, "[assistant.generation]\ntemperature = 1\n")["generation"] == {"temperature": 1}
+
+
+def test_a_context_length_of_zero_is_refused(tmp_path):
+    with pytest.raises(settings.ConfigError, match="context_length"):
+        _load_generation(tmp_path, "[assistant.generation]\ncontext_length = 0\n")
+
+
+def test_an_unknown_nested_table_names_its_own_section(tmp_path):
+    """The expansion is general, so any nested table gets a key error rather than a type complaint."""
+    with pytest.raises(settings.ConfigError, match=r"\[assistant.sampling\]"):
+        _load_generation(tmp_path, "[assistant.sampling]\ntemperature = 0.7\n")

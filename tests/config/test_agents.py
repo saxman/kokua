@@ -211,3 +211,42 @@ def test_thinking_for_is_none_when_nothing_is_declared_anywhere(tmp_path):
     config = _load(tmp_path, MINIMAL)
     assert config.thinking_for("assistant") is None
     assert config.thinking_for("researcher") is None
+
+
+GENERATION = """
+[assistant]
+agent = "assistant"
+
+[assistant.generation]
+temperature = 0.7
+context_length = 32768
+
+[agents.assistant]
+tools = ["memory"]
+delegates_to = ["researcher"]
+
+[agents.researcher]
+tools = ["web"]
+
+[agents.researcher.generation]
+temperature = 0.2
+"""
+
+
+def test_an_agents_generation_table_loads_onto_its_agent(tmp_path):
+    config = _load(tmp_path, GENERATION)
+    assert config.generation == {"temperature": 0.7, "context_length": 32768}
+    assert config.agents["researcher"].generation == {"temperature": 0.2}
+    assert config.agents["assistant"].generation == {}
+
+
+def test_an_out_of_range_value_in_an_agents_table_names_that_table(tmp_path):
+    body = GENERATION.replace("temperature = 0.2", "temperature = 9.0")
+    with pytest.raises(ConfigError, match=r"\[agents.researcher.generation\].temperature"):
+        _load(tmp_path, body)
+
+
+def test_an_unknown_key_in_an_agents_generation_table_is_refused(tmp_path):
+    body = GENERATION.replace("temperature = 0.2", "tempurature = 0.2")
+    with pytest.raises(ConfigError, match="tempurature"):
+        _load(tmp_path, body)
