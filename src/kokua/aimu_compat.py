@@ -14,11 +14,13 @@ frame, which no ``getattr`` can detect). The capability probe catches an editabl
 declared version already reads new enough while the code behind it predates the release -- the version
 string of an editable install says what the branch claims, not what it contains.
 
-The probe targets the newest surface Kokua depends on, which is all any older one needs: a checkout
-carrying ``SUBAGENT_SPEC_KEYS`` necessarily carries everything the releases before it added. It takes
-whichever shape that surface has -- a name lookup for a symbol, or a signature check when the capability
-is a keyword argument that no ``getattr`` would notice (as ``SkillManager(include=...)`` was, before
-this).
+The probe covers exactly one surface at a time: the newest one Kokua depends on, whose shape decides the
+check's shape. A name lookup answers for a symbol; a signature check answers for a keyword argument no
+``getattr`` would notice (as ``SkillManager(include=...)`` was); a membership check answers for an entry
+in a published set, which is the shape in force today. What Kokua depends on is the ``"generate_kwargs"``
+it writes into an ``agent_types`` spec, and although the set holding it (``SUBAGENT_SPEC_KEYS``) is a
+symbol, that symbol shipped a release earlier, so its existence proves nothing here and only its contents
+do. Checking one surface is no claim about the others; covering those is the version floor's job.
 
 A capability can also be shaped so that *nothing* can probe it, and AIMU 0.17.0's headline surface is:
 the ``"thinking"`` key Kokua writes into an ``agent_types`` spec is a dict key, neither a symbol nor a
@@ -27,12 +29,6 @@ release probe-able anyway is the other half of it -- closing a spec's keys to a 
 ``SUBAGENT_SPEC_KEYS``, which is a symbol *and* is the set the key Kokua depends on belongs to. Where a
 release offers no such handle, leave the probe where it is and say so here rather than moving it to
 something it could only pretend to check.
-
-A probe takes whichever shape its surface has, and 0.18.0 needed a third: the capability is the
-``"generate_kwargs"`` entry in ``SUBAGENT_SPEC_KEYS``, and the set carrying it shipped one release
-earlier, so the symbol's existence proves nothing and its contents prove everything. Hence a
-membership check, alongside the name lookup and the signature check (as ``SkillManager(include=...)``
-was, before this).
 """
 
 from __future__ import annotations

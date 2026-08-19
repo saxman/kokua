@@ -68,7 +68,7 @@ def reviewer_agent(
 
     ``thinking`` is the reviewer's reasoning effort and ``generate_kwargs`` its generation parameters,
     and both are the caller's to decide: a reviewer is not an ``[agents.*]`` agent, so
-    ``[assistant].thinking`` and ``[assistant].generation`` are the only tiers it has, exactly as
+    ``[assistant].thinking`` and ``[assistant.generation]`` are the only tiers it has, exactly as
     ``[assistant].model`` is for the model above it. ``thinking`` is an agent field, so it applies to
     every turn of the review, including the typed verdict.
     """

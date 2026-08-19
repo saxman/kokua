@@ -507,10 +507,20 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   sets `max_tokens = 1024` on Anthropic, the OpenAI-compatible family, and llama.cpp, which is low for a
   turn carrying tool results. A parameter a backend cannot take is dropped with a warning naming the
   remedy: Ollama's SDK has no `min_p`, the Anthropic API has no penalties, and only Ollama's native API
-  sizes the context window per request.
+  sizes the context window per request. That warning is written to the rotating file log
+  (`data/logs/kokua.log` under your Kokua home) and nowhere else -- not the chat, not the terminal, and
+  not `/diag`, which reports what you declared rather than what the backend accepted -- so the log is
+  where to look when a parameter you set has no effect.
   Needs `aimu>=0.18.0` for the per-agent half, which added the `generate_kwargs` key to the `agent_types`
   spec; an AIMU that predates it ignores the unknown key silently, so 0.18.0 replaces the 0.17.0 floor
   above rather than sitting alongside it. This is a breaking change.
+  **That AIMU bump also changes how four Ollama models sample, whether or not you set anything here.**
+  It renames the portable `repetition_penalty` into Ollama's own `repeat_penalty`, so the
+  `repetition_penalty = 1.0` that the `qwen3.8:27b`, `qwen3.6:35b`, `qwen3.6:27b`, and `qwen3.5:9b` cards
+  have always carried now reaches the wire instead of being discarded by the SDK, and Ollama's own server
+  default of 1.1 no longer applies: the repetition penalty is effectively off for those four. It is what
+  each card asks for, but it is a real change in their output. The example config's `ollama:qwen3:8b` is
+  not one of them -- that card declares no sampling profile at all, so nothing about it changes.
 - **`/diag` names the models, the reasoning effort, and the generation parameters in play**: the entry
   agent's first, then each agent that declares its own. None has a panel field and all are read only at
   startup, so this is where a running session says what they are. With nothing declared, the model line

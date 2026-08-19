@@ -70,7 +70,8 @@ agent_cache_cap = 8
 #
 # A parameter a backend cannot take is dropped with a warning naming where to set it instead (Ollama has
 # no min_p, the Anthropic API has no penalties), so a value that works locally does not break a cloud
-# model, it just stops applying.
+# model, it just stops applying. That warning goes to the rotating log only (data/logs/kokua.log under
+# your Kokua home), not to the chat or the terminal, so look there if a parameter you set has no effect.
 #
 # max_tokens and context_length are different knobs, and they interact. max_tokens caps *generated*
 # tokens; context_length sizes the whole window, which the prompt and the generated tokens share. With

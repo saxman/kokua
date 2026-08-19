@@ -452,7 +452,7 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         if thinking is not None:
             specs[name]["thinking"] = thinking
         # Resolved, not just declared, for the reason thinking is: AIMU reads a spec without the key as
-        # "no generation parameters", so an undeclared worker would skip the [assistant].generation
+        # "no generation parameters", so an undeclared worker would skip the [assistant.generation]
         # default rather than inherit it. Omitted entirely when nothing resolves, because an empty dict
         # is still a written tier and this one sits above the model card's own profile.
         generation = config.generation_for(name)

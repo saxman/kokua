@@ -513,9 +513,15 @@ def test_an_agents_generation_table_is_not_editable_with_update_config():
         ("context_length", 1, 0),
     ],
 )
-def test_generation_key_accepts_its_inclusive_boundary_and_rejects_just_outside_it(tmp_path, key, accepted, rejected):
+def test_generation_key_accepts_its_last_valid_value_and_rejects_the_next_one(tmp_path, key, accepted, rejected):
     """Each of the eight generation keys is checked against a range predicate; this pins the exact edge
-    of that range so a `<` written for `<=`, or a wrong bound, fails a test instead of shipping."""
+    of that range so a `<` written for `<=`, or a wrong bound, fails a test instead of shipping.
+
+    The pair per key is the last value the range accepts and the nearest one it does not, which reads the
+    same whichever kind of bound it is: `temperature = 2.0` is accepted because its bound is inclusive,
+    while `repetition_penalty = 0.0` is rejected because its bound is exclusive and `0.0001` is the
+    smallest step this test can take past it.
+    """
     overrides = _load_generation(tmp_path, f"[assistant.generation]\n{key} = {accepted}\n")
     assert overrides["generation"][key] == accepted
 

@@ -20,11 +20,17 @@ A runtime setting may be Kokua's own or a toolset's, and the two are added diffe
 :class:`SettingsTable` is therefore an instance rather than module state, since which settings exist is
 not known until the installed toolsets are.
 
-Sampling parameters are deliberately absent. AIMU resolves them itself, lowest precedence first: the
-client's own fallbacks, then the model card's tuned profile, then ``client.default_generate_kwargs``,
-then the per-call dict. Kokua used to write the third tier from a ``[generation]`` section, which
-duplicated the chain and shadowed the card; it no longer does, so a model's own tuned profile is what
-reaches a request.
+Sampling parameters are deliberately absent *from this table*, but they are not absent from Kokua.
+AIMU resolves them lowest precedence first: the client's own fallbacks, then the model card's tuned
+profile, then ``client.default_generate_kwargs``, then the per-call dict. Kokua writes that third
+tier from ``[assistant.generation]`` and each ``[agents.<name>.generation]``, whose keys are
+declared once in ``config/file.py`` (the one table both tiers validate against) and read at startup
+only, and it writes *only* the keys those tables name -- an absent key stays absent from the
+request, which is what leaves a card's own profile in force. Do not move them here, and do not give
+them a panel field: a panel input always holds a value, so the tier would be written whether or not
+the user asked for anything, and since it sits above the card it would shadow every card's tuned
+profile. That is exactly the regression an earlier ``[generation]`` section caused. Startup-only
+cold keys are what keep "absent means absent" true.
 """
 
 from __future__ import annotations

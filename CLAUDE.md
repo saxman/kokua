@@ -48,20 +48,18 @@ Consequences for working in this repo:
   is invisible to both a name lookup and a signature check, so the floor is the only half that could
   have covered it. What rescued the probe is the other half of that same release: closing a spec's keys
   to a known set, published as `aimu.tools.builtin.SUBAGENT_SPEC_KEYS`, which *is* a symbol and *is* the
-  set the depended-on key belongs to. That is now the probe, and it restores the invariant the probe
-  wants -- a checkout carrying it necessarily carries every earlier release's surface too, so nothing is
-  lost by moving off `aio.ContextOverflowError`. The probe takes whatever shape its surface has, and a
-  *signature* check when that surface is a keyword argument no `getattr` would notice (as
-  `SkillManager(include=...)` was, before this). AIMU 0.18.0 is a fourth, and it moves the probe again
-  without moving the symbol: the capability is `generate_kwargs`, a member of that same
-  `SUBAGENT_SPEC_KEYS`, published one release earlier for the `thinking` key. Once the set itself is a
-  published symbol, its mere presence stops proving anything -- the same gap a name lookup left for a
-  dict key, one level down, inside a set instead of at module scope. So the probe stays on
-  `SUBAGENT_SPEC_KEYS` and gains a third shape, a membership check, alongside the name lookup and the
-  signature check. If you add a Kokua feature needing a newer AIMU, raise
-  `MINIMUM_AIMU` and the `pyproject.toml` floor in the same commit, and move the probe to whatever the new
-  surface is. When a release genuinely offers no handle a probe can grip, leave the probe where it is and
-  say so in `aimu_compat`'s docstring rather than moving it to something it can only pretend to check --
+  set the depended-on key belongs to. That is what the probe moved to, off `aio.ContextOverflowError`.
+  AIMU 0.18.0 then moved it again without moving the symbol: the capability is `generate_kwargs`, a member
+  of that same `SUBAGENT_SPEC_KEYS`, which shipped one release earlier for the `thinking` key, so the set's
+  mere presence proves nothing and only its contents do -- the same gap a name lookup left for a dict key,
+  one level down, inside a set instead of at module scope. The probe therefore covers exactly one surface
+  at a time, in whatever shape that surface has, and it has taken three: a name lookup for a symbol, a
+  *signature* check for a keyword argument no `getattr` would notice (as `SkillManager(include=...)` was),
+  and now a membership check for an entry in a published set. What the current surface says nothing about,
+  only the floor covers. If you add a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the
+  `pyproject.toml` floor in the same commit, and move the probe to whatever the new surface is. When a
+  release genuinely offers no handle a probe can grip, leave the probe where it is and say so in
+  `aimu_compat`'s docstring rather than moving it to something it can only pretend to check --
   but look for a handle first, because 0.17.0 appeared to be that case and was not.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.

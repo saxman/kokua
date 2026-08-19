@@ -385,9 +385,13 @@ stays absent from the request, so a model card's own tuned sampling profile surv
 
 Three places apply the result, all of them startup-only reads:
 
-1. **The entry agent's client.** `core.build.build_model_client` sets `client.default_generate_kwargs =
-   config.generation_for(agent_name)` right after construction, layering this tier over whatever profile
-   `select_profile` already chose.
+1. **Every client the factory builds.** `core.build.build_model_client` serves the entry agent and each
+   per-conversation client alike, and right after construction it sets `client.default_generate_kwargs =
+   config.generation_for(agent_name)` -- but only `if generation:`, so a config that declares nothing
+   leaves the attribute as AIMU built it and the model card's own profile is what `select_profile`
+   returns. Writing an empty dict would be writing this tier, and this tier sits above the card. An
+   injected client (tests, `make_agent_builder`) is left alone: these parameters live on the client, so
+   one built elsewhere already carries whatever its own factory chose.
 2. **Each spawned worker's spec.** `build_agent_specs` writes the *resolved* value into
    `specs[name]["generate_kwargs"]`, not just a declared one, for the same reason `thinking` does: AIMU
    reads a spec without the key as "no generation parameters", so an undeclared worker would skip the
@@ -398,10 +402,12 @@ Three places apply the result, all of them startup-only reads:
    result-reviewer, exactly as it already threads `config.thinking`. `[assistant.generation]` is the only
    tier a reviewer can have.
 
-The per-agent half needs `aimu>=0.18.0`, which added the `generate_kwargs` key to the `agent_types` spec
--- a fourth capability the startup probe covers, alongside the name lookup, the signature check, and the
-`"thinking"` key: 0.17.0 published `SUBAGENT_SPEC_KEYS` itself, so the set's existence no longer proves
-this one, and `generate_kwargs`'s membership in it is what `kokua.aimu_compat` checks instead.
+The per-agent half needs `aimu>=0.18.0`, which added the `generate_kwargs` key to the `agent_types` spec.
+That key is the one surface the startup probe covers now: 0.17.0 published `SUBAGENT_SPEC_KEYS` itself, so
+the set's existence no longer proves this capability, and `kokua.aimu_compat` checks `generate_kwargs`'s
+membership in it instead -- a membership check, the third shape the probe has taken after a name lookup
+and a signature check. The probe covers one surface at a time; the version floor is what covers every
+earlier release's.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
@@ -409,7 +415,11 @@ the whole window the prompt and the output share, so `context_length = 32768` wi
 leaves roughly 28k for the system prompt, the tool block, and history. And a parameter a backend cannot
 take is dropped by AIMU with a warning naming the remedy -- Ollama's SDK has no `min_p`, the Anthropic API
 has no penalties, and only Ollama's native API sizes the context window per request, so `context_length`
-is a no-op with a warning everywhere else.
+is a no-op with a warning everywhere else. That warning reaches one place: the rotating file log
+(`logs_path/kokua.log`, i.e. `data/logs/kokua.log` under `$KOKUA_HOME`), since `logging_setup` attaches a
+file handler and nothing else. It is not surfaced in the chat, in the terminal, or in `/diag`, which
+reports what the config *declares*, not what survived to the wire. A user whose parameter never applies
+finds out by reading that log.
 
 `[assistant.generation]` is also the first sub-table `config/file.py`'s `_sections` handles: `tomllib`
 nests a dotted TOML header like `[assistant.generation]` inside `assistant`, so a flat key loop over
