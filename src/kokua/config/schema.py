@@ -138,6 +138,11 @@ class AssistantConfig:
     # and the assistant's own update_config tool all persist here; set from --config / $KOKUA_CONFIG by
     # the CLI, else the default $KOKUA_HOME/config.toml.
     config_path: Path = field(default_factory=paths.config_path)
+    # Tasks declared in [scheduling.task.<name>], keyed by name, validated at startup so a bad table
+    # fails here rather than becoming a task that quietly never fires. TaskService does not read this:
+    # it re-reads the file on every operation, because a cancel between arming and firing must win over
+    # any snapshot.
+    scheduled_tasks: dict = field(default_factory=dict)
 
     def model_for(self, agent_name: str) -> Optional[str]:
         """The model ``agent_name`` runs on: its own declaration, else the ``[assistant].model`` default.

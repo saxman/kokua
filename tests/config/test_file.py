@@ -552,3 +552,138 @@ def test_unknown_key_in_an_unknown_section_stays_bare():
 def test_unknown_key_offers_every_section_that_has_it():
     with pytest.raises(settings.ConfigError, match=r"\[email\].host or \[web\].host"):
         settings.coerce_config_string("logging", "host", "x", table=core_table())
+
+
+def _write_task_config(tmp_path, body: str):
+    path = tmp_path / "config.toml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_parse_task_returns_a_record_with_its_name(tmp_path):
+    record = settings.parse_task(
+        "morning-brief",
+        {"prompt": "Summarize my calendar", "schedule": {"type": "daily", "at": "09:00"}},
+    )
+    assert record == {
+        "name": "morning-brief",
+        "prompt": "Summarize my calendar",
+        "schedule": {"type": "daily", "at": "09:00"},
+    }
+
+
+def test_parse_task_keeps_the_optional_fields_it_knows():
+    record = settings.parse_task(
+        "spent",
+        {
+            "prompt": "p",
+            "schedule": {"type": "once", "at": "2026-08-20T09:00"},
+            "enabled": False,
+            "max_conversations": 0,
+            "created_at": "2026-08-19T10:00:00",
+            "fired_at": "2026-08-20T09:00:03",
+        },
+    )
+    assert record["enabled"] is False
+    assert record["max_conversations"] == 0
+    assert record["fired_at"] == "2026-08-20T09:00:03"
+
+
+def test_parse_task_rejects_an_unknown_key():
+    with pytest.raises(settings.ConfigError, match=r"\[scheduling.task.x\].promt"):
+        settings.parse_task("x", {"promt": "typo", "schedule": {"type": "interval", "seconds": 60}})
+
+
+def test_parse_task_rejects_an_unknown_schedule_type():
+    with pytest.raises(settings.ConfigError, match="schedule.type must be one of"):
+        settings.parse_task("x", {"prompt": "p", "schedule": {"type": "hourly", "at": "09:00"}})
+
+
+def test_parse_task_rejects_a_schedule_missing_its_required_key():
+    with pytest.raises(settings.ConfigError, match="requires 'day' for a 'weekly' schedule"):
+        settings.parse_task("x", {"prompt": "p", "schedule": {"type": "weekly", "at": "09:00"}})
+
+
+def test_parse_task_rejects_an_unknown_schedule_key():
+    with pytest.raises(settings.ConfigError, match="unknown key.*schedule: every"):
+        settings.parse_task("x", {"prompt": "p", "schedule": {"type": "daily", "at": "09:00", "every": 2}})
+
+
+def test_parse_task_requires_a_prompt():
+    with pytest.raises(settings.ConfigError, match="requires 'prompt'"):
+        settings.parse_task("x", {"schedule": {"type": "interval", "seconds": 60}})
+
+
+def test_parse_task_rejects_a_negative_retention():
+    with pytest.raises(settings.ConfigError, match="max_conversations must be 0"):
+        settings.parse_task(
+            "x", {"prompt": "p", "schedule": {"type": "interval", "seconds": 60}, "max_conversations": -1}
+        )
+
+
+def test_load_collects_task_tables_by_name(tmp_path):
+    path = _write_task_config(
+        tmp_path,
+        """
+[agents.assistant]
+tools = []
+
+[scheduling.task.morning-brief]
+prompt = "Summarize my calendar"
+schedule = { type = "daily", at = "09:00" }
+""",
+    )
+    overrides = settings.load(str(path), table=core_table())
+    assert set(overrides["scheduled_tasks"]) == {"morning-brief"}
+    assert overrides["scheduled_tasks"]["morning-brief"]["prompt"] == "Summarize my calendar"
+
+
+def test_a_task_table_and_the_toolsets_own_key_share_the_scheduling_section(tmp_path):
+    # core_table() is core-only and would read max_task_conversations as an unknown key, so this one
+    # case needs the real table: it is the case that proves the two halves of [scheduling] coexist.
+    from kokua.config import settings_sources
+
+    path = _write_task_config(
+        tmp_path,
+        """
+[agents.assistant]
+tools = []
+
+[scheduling]
+max_task_conversations = 5
+
+[scheduling.task.morning-brief]
+prompt = "Summarize my calendar"
+schedule = { type = "daily", at = "09:00" }
+""",
+    )
+    overrides = settings.load(
+        str(path),
+        table=settings_sources.build_settings_table(),
+        extra_schema=settings_sources.startup_schema(),
+    )
+    assert set(overrides["scheduled_tasks"]) == {"morning-brief"}
+    assert overrides["toolset_settings"]["scheduling"]["max_task_conversations"] == 5
+
+
+def test_load_names_the_task_in_a_bad_table(tmp_path):
+    path = _write_task_config(
+        tmp_path,
+        """
+[agents.assistant]
+tools = []
+
+[scheduling.task.broken]
+prompt = "p"
+schedule = { type = "daily" }
+""",
+    )
+    with pytest.raises(settings.ConfigError, match=r"\[scheduling.task.broken\].schedule requires 'at'"):
+        settings.load(str(path), table=core_table())
+
+
+def test_scheduling_is_not_a_reserved_core_section():
+    # `core_sections` is what `settings_sources.declared_settings` refuses a toolset for claiming.
+    # Routing the task tables on the dotted "scheduling.task" keeps the scheduling toolset's own
+    # max_task_conversations declaration legal; adding "scheduling" to _STRUCTURED_SECTIONS would not.
+    assert "scheduling" not in settings.core_sections()

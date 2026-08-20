@@ -193,6 +193,90 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
     return AgentConfig(**fields)
 
 
+# The dotted section `_sections` yields for the [scheduling.task.<name>] tables. Not a member of
+# _STRUCTURED_SECTIONS: that set feeds `core_sections`, and reserving "scheduling" there would make
+# `settings_sources` reject the scheduling toolset's own max_task_conversations as a section collision.
+# A dotted name is safe to route on because a toolset name may not contain a '.'.
+_TASK_SECTION = "scheduling.task"
+
+# Per schedule type, the keys it requires: accepted TOML types plus the label an error uses. Only the
+# shape is checked here. Whether "25:99" is a real time is recurrence math, and `scheduling` sits above
+# `config`, which imports nothing above it; a structurally valid but unsatisfiable schedule still shows
+# up as STATUS_INVALID when the task is armed, exactly as it does today.
+_SCHEDULE_KEYS: dict[str, dict[str, tuple]] = {
+    "once": {"at": (str, "string")},
+    "interval": {"seconds": ((int, float), "number")},
+    "daily": {"at": (str, "string")},
+    "weekly": {"at": (str, "string"), "day": (str, "string")},
+}
+
+_TASK_KEYS = {
+    "prompt": str,
+    "schedule": dict,
+    "enabled": bool,
+    "max_conversations": int,
+    "created_at": str,
+    "fired_at": str,
+}
+
+
+def _parse_schedule(name: str, value: dict) -> dict:
+    """Validate one task's schedule table, naming the task in every message."""
+    kind = value.get("type")
+    required = _SCHEDULE_KEYS.get(kind)
+    if required is None:
+        raise ConfigError(
+            f"[scheduling.task.{name}].schedule.type must be one of {', '.join(sorted(_SCHEDULE_KEYS))}; got {kind!r}"
+        )
+    unknown = set(value) - set(required) - {"type"}
+    if unknown:
+        raise ConfigError(f"unknown key(s) in [scheduling.task.{name}].schedule: {', '.join(sorted(unknown))}")
+    for key, (types, label) in required.items():
+        if key not in value:
+            raise ConfigError(f"[scheduling.task.{name}].schedule requires {key!r} for a {kind!r} schedule")
+        entry = value[key]
+        if isinstance(entry, bool) or not isinstance(entry, types):
+            raise ConfigError(f"[scheduling.task.{name}].schedule.{key} must be a {label}")
+    return dict(value)
+
+
+def parse_task(name: str, spec: Any) -> dict:
+    """Validate one [scheduling.task.<name>] table into a task record, its name folded in.
+
+    Public, unlike ``_parse_agent``, because ``config.store`` reuses it for the live re-read
+    ``TaskService`` does on every operation: one validator means the startup path and the live path
+    cannot drift in what they accept.
+
+    Returns a plain dict rather than a dataclass. A task record travels through the service, the tool
+    surface, and the web frame as a dict already, so a dataclass here would only be unpacked at both
+    ends.
+    """
+    if not isinstance(spec, dict):
+        raise ConfigError(f"[scheduling.task.{name}] must be a table")
+    record: dict = {"name": name}
+    for key, value in spec.items():
+        expected = _TASK_KEYS.get(key)
+        if expected is None:
+            raise ConfigError(f"unknown config key [scheduling.task.{name}].{key}")
+        if key == "schedule":
+            if not isinstance(value, dict):
+                raise ConfigError(f"[scheduling.task.{name}].schedule must be a table")
+            record[key] = _parse_schedule(name, value)
+            continue
+        # bool is an int subclass, so an explicit check keeps `max_conversations = true` from passing.
+        if expected is int and isinstance(value, bool):
+            raise ConfigError(f"[scheduling.task.{name}].{key} must be an int")
+        if not isinstance(value, expected):
+            raise ConfigError(f"[scheduling.task.{name}].{key} must be a {expected.__name__}")
+        record[key] = value
+    for required_key in ("prompt", "schedule"):
+        if required_key not in record:
+            raise ConfigError(f"[scheduling.task.{name}] requires {required_key!r}")
+    if record.get("max_conversations", 0) < 0:
+        raise ConfigError(f"[scheduling.task.{name}].max_conversations must be 0 (unlimited) or more")
+    return record
+
+
 # (section, key) -> (target, accepted TOML types, human label, optional converter), where a target is an
 # AssistantConfig field name, or "<toolset>.<key>" for a key a toolset owns (see `_coerce_flat`).
 # `bool` is an int subclass, so it is rejected for numeric fields unless explicitly accepted.
@@ -497,6 +581,12 @@ def load(
             for key, value in entries.items():
                 _, coerced = _coerce_flat(schema, section, key, value)
                 overrides.setdefault("generation", {})[key] = coerced
+            continue
+        # A dotted section like _GENERATION_SECTION above, and routed the same way: `_sections` hands
+        # the [scheduling.task.*] tables over as one {name: table} mapping, and each is a whole task
+        # rather than one key of a flat section.
+        if section == _TASK_SECTION:
+            overrides["scheduled_tasks"] = {name: parse_task(name, spec) for name, spec in entries.items()}
             continue
         for key, value in entries.items():
             if (section, key) in _REMOVED_KEYS:
