@@ -30,3 +30,6 @@ docs/superpowers/
 
 # Kokua runtime state (default: ~/.kokua). Ignored here in case KOKUA_HOME points at the repo.
 .kokua/
+
+# Subagent-driven-development scratch (ledgers, briefs, review packages)
+.superpowers/
