@@ -926,13 +926,13 @@ def test_ws_get_and_apply_settings(tmp_path):
     assert echoed["values"]["show_tools"] is False
 
 
-def _seed_task(config, task_id="t1", name="brief", enabled=True):
-    from kokua import scheduling
+def _seed_task(config, name="brief", enabled=True):
+    from kokua.config import store
 
-    scheduling.add(
-        config.scheduled_tasks_path,
+    store.write_task(
+        config.config_path,
+        name,
         {
-            "id": task_id,
             "name": name,
             "prompt": "summarize inbox",
             "schedule": {"type": "interval", "seconds": 3600},
@@ -943,7 +943,6 @@ def _seed_task(config, task_id="t1", name="brief", enabled=True):
     )
 
 
-@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
 def test_ws_sends_tasks_on_connect(tmp_path):
     """The sidebar section is populated without the page having to ask, mirroring the settings push."""
     from starlette.testclient import TestClient
@@ -953,13 +952,12 @@ def test_ws_sends_tasks_on_connect(tmp_path):
     app = build_app(config, client=MockAsyncModelClient([]))
     with TestClient(app).websocket_connect("/ws") as ws:
         frame = _drain_until(ws, "tasks")
-    assert [item["id"] for item in frame["items"]] == ["t1"]
+    assert [item["name"] for item in frame["items"]] == ["brief"]
     assert frame["items"][0]["name"] == "brief" and frame["items"][0]["enabled"] is True
     # The wire shape the sidebar reads: a task's retention cap, and no dead conversation key.
     assert frame["items"][0]["max_conversations"] == 2 and "session_id" not in frame["items"][0]
 
 
-@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
 def test_ws_get_tasks_returns_the_registry(tmp_path):
     import json
 
@@ -972,14 +970,35 @@ def test_ws_get_tasks_returns_the_registry(tmp_path):
         _drain_until(ws, "tasks")  # the connect-time push
         ws.send_text(json.dumps({"type": "get_tasks"}))
         frame = _drain_until(ws, "tasks")
-    assert [item["id"] for item in frame["items"]] == ["t1"]
+    assert [item["name"] for item in frame["items"]] == ["brief"]
 
 
-@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
+def test_ws_get_tasks_reports_a_broken_config_without_dropping_the_connection(tmp_path):
+    """list_tasks raises rather than reading an empty list from an unparseable config.toml, so a
+    mid-session hand-edit must reach the browser as a message, not close the socket out from under it."""
+    import json
+
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    _seed_task(config)
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "tasks")  # the connect-time push, while config.toml still parses
+        # An unclosed table header is the same kind of slip a hand-edit could leave mid-session.
+        config.config_path.write_text("[scheduling.task.x\nprompt = 'p'\n", encoding="utf-8")
+        ws.send_text(json.dumps({"type": "get_tasks"}))
+        message = _drain_until(ws, "message")
+        assert "could not" in message["text"].lower()
+        # The connection survives: an unrelated control still gets its normal answer afterward.
+        ws.send_text(json.dumps({"type": "get_settings"}))
+        _drain_until(ws, "settings")
+
+
 def test_ws_task_disable_applies_and_echoes_fresh_tasks(tmp_path):
     import json
 
-    from kokua import scheduling
+    from kokua.config import store
     from starlette.testclient import TestClient
 
     config = _config(tmp_path)
@@ -987,17 +1006,16 @@ def test_ws_task_disable_applies_and_echoes_fresh_tasks(tmp_path):
     app = build_app(config, client=MockAsyncModelClient([]))
     with TestClient(app).websocket_connect("/ws") as ws:
         _drain_until(ws, "tasks")
-        ws.send_text(json.dumps({"type": "task", "action": "disable", "id": "t1"}))
+        ws.send_text(json.dumps({"type": "task", "action": "disable", "name": "brief"}))
         echoed = _drain_until(ws, "tasks")
     assert echoed["items"][0]["enabled"] is False
-    assert scheduling.load(config.scheduled_tasks_path)[0]["enabled"] is False
+    assert store.load_tasks(config.config_path)[0]["enabled"] is False
 
 
-@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
 def test_ws_task_delete_removes_the_record(tmp_path):
     import json
 
-    from kokua import scheduling
+    from kokua.config import store
     from starlette.testclient import TestClient
 
     config = _config(tmp_path)
@@ -1005,16 +1023,16 @@ def test_ws_task_delete_removes_the_record(tmp_path):
     app = build_app(config, client=MockAsyncModelClient([]))
     with TestClient(app).websocket_connect("/ws") as ws:
         _drain_until(ws, "tasks")
-        ws.send_text(json.dumps({"type": "task", "action": "delete", "id": "t1"}))
+        ws.send_text(json.dumps({"type": "task", "action": "delete", "name": "brief"}))
         echoed = _drain_until(ws, "tasks")
     assert echoed["items"] == []
-    assert scheduling.load(config.scheduled_tasks_path) == []
+    assert store.load_tasks(config.config_path) == []
 
 
 def test_ws_task_rejects_unknown_action_without_touching_the_registry(tmp_path):
     import json
 
-    from kokua import scheduling
+    from kokua.config import store
     from starlette.testclient import TestClient
 
     config = _config(tmp_path)
@@ -1022,10 +1040,37 @@ def test_ws_task_rejects_unknown_action_without_touching_the_registry(tmp_path):
     app = build_app(config, client=MockAsyncModelClient([]))
     with TestClient(app).websocket_connect("/ws") as ws:
         _drain_until(ws, "tasks")
-        ws.send_text(json.dumps({"type": "task", "action": "drop_table", "id": "t1"}))
+        ws.send_text(json.dumps({"type": "task", "action": "drop_table", "name": "brief"}))
         message = _drain_until(ws, "message")
     assert "could not" in message["text"].lower()
-    assert scheduling.load(config.scheduled_tasks_path)[0]["enabled"] is True
+    assert store.load_tasks(config.config_path)[0].get("enabled", True) is True
+
+
+def test_a_task_control_frame_addresses_the_task_by_name(tmp_path):
+    import json
+
+    from kokua.config import store
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    _seed_task(config, name="hourly")
+    app = build_app(config, client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "tasks")
+        ws.send_text(json.dumps({"type": "task", "action": "disable", "name": "hourly"}))
+        _drain_until(ws, "tasks")
+    assert store.load_tasks(config.config_path)[0]["enabled"] is False
+
+
+async def test_the_task_frame_carries_names_not_ids(tmp_path):
+    from kokua.core.assistant import Assistant
+
+    config = _config(tmp_path)
+    _seed_task(config, name="hourly")
+    assistant = await Assistant.create(config, WebChannel(_FakeWS()), client=MockAsyncModelClient([]))
+    items = assistant.list_tasks()
+    assert items[0]["name"] == "hourly"
+    assert "id" not in items[0]
 
 
 def test_ws_conversations_carry_their_task_id(tmp_path):
@@ -1606,7 +1651,6 @@ def test_conversation_to_frames_omits_the_notice_by_default():
     assert not any(i["type"] == "notice" for i in items)
 
 
-@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
 def test_ws_task_stop_also_refreshes_the_conversation_list(tmp_path):
     """The panel decides whether to offer Stop from the running marker on a task's conversations, so a
     stop has to refresh that list too -- unlike the other task actions, which only touch the registry."""
@@ -1619,10 +1663,10 @@ def test_ws_task_stop_also_refreshes_the_conversation_list(tmp_path):
     app = build_app(config, client=MockAsyncModelClient([]))
     with TestClient(app).websocket_connect("/ws") as ws:
         _drain_until(ws, "tasks")
-        ws.send_text(json.dumps({"type": "task", "action": "stop", "id": "t1"}))
+        ws.send_text(json.dumps({"type": "task", "action": "stop", "name": "brief"}))
         _drain_until(ws, "conversations")
         echoed = _drain_until(ws, "tasks")
-    assert [item["id"] for item in echoed["items"]] == ["t1"]  # a stop leaves the task in place
+    assert [item["name"] for item in echoed["items"]] == ["brief"]  # a stop leaves the task in place
 
 
 def test_ws_conversations_carry_whether_a_turn_is_running(tmp_path):

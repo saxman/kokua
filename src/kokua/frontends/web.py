@@ -250,14 +250,21 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                     # Task controls mostly touch only the scheduled-task registry, so like the settings
                     # controls they answer with a fresh task list and skip the history refresh.
                     if control["type"] == "get_tasks":
-                        await channel.send_tasks(assistant.list_tasks())
+                        try:
+                            # list_tasks raises rather than reading an empty list from a config a
+                            # mid-session hand-edit left unparseable, so that failure never reads as
+                            # "there are no tasks" and looks like every scheduled task was cancelled.
+                            await channel.send_tasks(assistant.list_tasks())
+                        except Exception:
+                            logger.warning("Could not list tasks", exc_info=True)
+                            await channel.send("Sorry, the task list could not be loaded.")
                         continue
                     if control["type"] == "task":
                         action = str(control.get("action", ""))
                         try:
                             # task_action allowlists the action, so an unrecognized one raises here
                             # rather than reaching the registry.
-                            assistant.task_action(action, str(control.get("id", "")))
+                            assistant.task_action(action, str(control.get("name", "")))
                         except Exception:
                             logger.warning("Could not apply task action", exc_info=True)
                             await channel.send("Sorry, that task action could not be applied.")
@@ -266,7 +273,11 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                         # the button it just used would otherwise linger until the run's own push landed.
                         if action == "stop":
                             await channel.send_conversations(assistant.list_conversations())
-                        await channel.send_tasks(assistant.list_tasks())
+                        try:
+                            await channel.send_tasks(assistant.list_tasks())
+                        except Exception:
+                            logger.warning("Could not list tasks", exc_info=True)
+                            await channel.send("Sorry, the task list could not be loaded.")
                         continue
                     if control["type"] == "new":
                         try:

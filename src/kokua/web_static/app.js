@@ -70,7 +70,7 @@ function selectConversation(id) {
 // A conversation belongs to a task if that task minted it (`task_id`, stamped at mint time). A
 // conversation minted before task_id was recorded carries no link and stays in the chat list.
 function conversationsOfTask(task) {
-  return lastConversations.filter((conv) => conv.task_id && conv.task_id === task.id);
+  return lastConversations.filter((conv) => conv.task_id && conv.task_id === task.name);
 }
 
 // Whether a firing of this task is happening right now, which is what the row offers Stop for. Read
@@ -166,8 +166,8 @@ function scheduleText(schedule) {
   return schedule.type;
 }
 
-function taskAction(action, id) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "task", action, id }));
+function taskAction(action, name) {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "task", action, name }));
 }
 
 function actionButton(label, title, handler) {
@@ -183,7 +183,7 @@ function taskRow(task) {
   const running = taskIsRunning(task);
   const li = document.createElement("li");
   li.className = "task-row" + (task.enabled ? " enabled" : "") + (running ? " running" : "");
-  li.dataset.taskId = task.id;
+  li.dataset.taskName = task.name;
 
   const dot = document.createElement("span");
   dot.className = "task-dot";
@@ -210,18 +210,18 @@ function taskRow(task) {
   actions.className = "task-actions";
   actions.appendChild(
     task.enabled
-      ? actionButton("⏸", "Disable this task", () => taskAction("disable", task.id))
-      : actionButton("▶", "Enable this task", () => taskAction("enable", task.id))
+      ? actionButton("⏸", "Disable this task", () => taskAction("disable", task.name))
+      : actionButton("▶", "Enable this task", () => taskAction("enable", task.name))
   );
   // Stop takes Run-now's slot for as long as a firing is in flight, the way the composer's Stop takes
   // Send's: running it again while it is already running is not what the button is for at that moment.
   actions.appendChild(
     running
-      ? actionButton("■", "Stop the run in progress (the task stays scheduled)", () => taskAction("stop", task.id))
-      : actionButton("⟲", "Run this task now", () => taskAction("run", task.id))
+      ? actionButton("■", "Stop the run in progress (the task stays scheduled)", () => taskAction("stop", task.name))
+      : actionButton("⟲", "Run this task now", () => taskAction("run", task.name))
   );
   const del = actionButton("×", "Delete this task", () => {
-    if (confirm(`Delete the task "${task.name || task.prompt}"?`)) taskAction("delete", task.id);
+    if (confirm(`Delete the task "${task.name || task.prompt}"?`)) taskAction("delete", task.name);
   });
   del.className = "task-delete";
   actions.appendChild(del);

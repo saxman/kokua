@@ -677,18 +677,19 @@ def test_a_card_built_from_an_append_alone_still_names_itself(page, live_server)
 # --- Scheduled tasks sidebar section -------------------------------------------------------------
 
 
-def _seed_task_and_conversations(config, *, task_id="t1", enabled=True, with_task=True):
+def _seed_task_and_conversations(config, *, enabled=True, with_task=True):
     """Plant one interval task plus two conversations it minted and one ordinary chat."""
     from aimu.sessions import Session, TinyDBSessionStore
 
-    from kokua import scheduling
+    from kokua.config import store as config_store
 
+    name = "morning-brief"
     if with_task:
-        scheduling.add(
-            config.scheduled_tasks_path,
+        config_store.write_task(
+            config.config_path,
+            name,
             {
-                "id": task_id,
-                "name": "morning-brief",
+                "name": name,
                 "prompt": "Summarize my calendar and unread mail.",
                 "schedule": {"type": "daily", "at": "07:00"},
                 "max_conversations": 0,
@@ -696,8 +697,8 @@ def _seed_task_and_conversations(config, *, task_id="t1", enabled=True, with_tas
                 "enabled": enabled,
             },
         )
-    store = TinyDBSessionStore(str(config.sessions_path))
-    store.save(
+    sessions = TinyDBSessionStore(str(config.sessions_path))
+    sessions.save(
         Session(
             key="chat",
             messages=[{"role": "user", "content": "my own chat"}],
@@ -705,7 +706,7 @@ def _seed_task_and_conversations(config, *, task_id="t1", enabled=True, with_tas
         )
     )
     for index in (1, 2):
-        store.save(
+        sessions.save(
             Session(
                 key=f"firing-{index}",
                 messages=[{"role": "user", "content": "Summarize my calendar and unread mail."}],
@@ -713,7 +714,7 @@ def _seed_task_and_conversations(config, *, task_id="t1", enabled=True, with_tas
                     "title": "morning-brief",
                     "created_at": f"2026-08-1{index}T07:00:00",
                     "updated_at": f"2026-08-1{index}T07:00:00",
-                    "task_id": task_id,
+                    "task_id": name,
                 },
             )
         )

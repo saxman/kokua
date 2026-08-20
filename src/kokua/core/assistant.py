@@ -418,20 +418,20 @@ class Assistant:
         """The scheduled tasks as fields, for a front end that renders its own task rows."""
         return self._tasks.list()
 
-    def task_action(self, action: str, id_or_name: str) -> None:
+    def task_action(self, action: str, name: str) -> None:
         """Run one task lifecycle action on behalf of a front end.
 
         The action name reaches this from a front end, so it is looked up in a table rather than
         dispatched on the string. Raises ``ValueError`` for anything not in it, and ``TaskError`` for a
-        handle that does not resolve. Nothing is returned: a front end shows the refreshed task list,
+        name that does not resolve. Nothing is returned: a front end shows the refreshed task list,
         not a sentence, and the sentences the tools return are written for a model.
         """
         actions: dict[str, Callable[[], object]] = {
-            "enable": lambda: self._tasks.set_enabled(id_or_name, True),
-            "disable": lambda: self._tasks.set_enabled(id_or_name, False),
-            "run": lambda: self._tasks.run_now(id_or_name),
-            "stop": lambda: self._tasks.stop(id_or_name),
-            "delete": lambda: self._tasks.cancel(id_or_name),
+            "enable": lambda: self._tasks.set_enabled(name, True),
+            "disable": lambda: self._tasks.set_enabled(name, False),
+            "run": lambda: self._tasks.run_now(name),
+            "stop": lambda: self._tasks.stop(name),
+            "delete": lambda: self._tasks.cancel(name),
         }
         run = actions.get(action)
         if run is None:
