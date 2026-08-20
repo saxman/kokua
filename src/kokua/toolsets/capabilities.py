@@ -16,12 +16,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Mapping
 
+from aimu.aio.tools.builtin import make_async_subagent_tool
 from aimu.tools import tool
 
-from kokua.toolsets.registry import Setting, Toolset, build_tools, select
+from kokua.toolsets.registry import Setting, Toolset, ToolsetError, build_tools, select
 
 if TYPE_CHECKING:
-    from kokua.toolsets.context import ToolsetContext
+    from kokua.toolsets.context import LiveState, ToolsetContext
 
 DEFAULT_MAX_DEPTH = 3
 
@@ -48,7 +49,7 @@ def _compose_spec(
     name: str,
     tools: list[str],
     instructions: str,
-    state,
+    state: "LiveState",
     *,
     compose_tool: Callable | None,
     model: str | None,
@@ -110,8 +111,82 @@ def _catalogue(registry: Mapping[str, Toolset], filter_text: str) -> str:
     return "\n".join(lines)
 
 
+def _max_depth(config) -> int:
+    """The configured composition cap, floored at zero.
+
+    Read from ``toolset_settings`` at call time rather than closed over at build time: ``build`` runs
+    once per conversation agent, so a build-time read would leave a hot change stranded until restart.
+    """
+    configured = config.toolset_settings.get("capabilities", {}).get("max_depth", DEFAULT_MAX_DEPTH)
+    return max(0, int(configured))
+
+
+def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model: str | None) -> Callable:
+    """``compose_worker`` with ``remaining_depth`` compositions left to the agent holding it.
+
+    ``None`` means "read the cap when called", which is what the tool given to a real agent is built
+    with. A nested tool carries a concrete count instead, so lowering the cap mid-turn cannot extend a
+    chain that is already running.
+
+    The recursion lives here and only here. Since a composed worker refers to no declared agent, there
+    is no graph for ``validate_agents`` to prove acyclic, so this decrement is the whole termination
+    argument, and it is a closure variable precisely so nothing the model writes can influence it.
+    """
+
+    @tool
+    async def compose_worker(name: str, task: str, tools: list[str], instructions: str) -> str:
+        """Build a sub-agent with exactly the capabilities a task needs, run one task on it, and return
+        its answer.
+
+        Prefer spawn_subagent and one of its named roles. Use this only when no role fits: it costs an
+        extra step, and a declared role carries instructions written for its job. Call
+        list_capabilities first to see what the names are. The worker shares no history with you, so
+        the task must be self-contained, and it is discarded afterwards.
+
+        Args:
+            name: A short kebab-case label for this worker, used in the logs and the sub-agent card,
+                e.g. "quote-checker".
+            task: The complete, self-contained task for the worker to carry out.
+            tools: The capability names to give it, from list_capabilities, e.g. ["web", "compute"].
+            instructions: The worker's standing instructions: its role, and how to report back.
+        """
+        label = name.strip() or DEFAULT_WORKER_NAME
+        if not tools:
+            return (
+                f"No capabilities named for {label!r}. Call list_capabilities to see what is installed, "
+                "then pass the names this task needs."
+            )
+        depth = _max_depth(state.config) if remaining_depth is None else remaining_depth
+        if depth <= 0:
+            return (
+                "Composing a worker is switched off: [capabilities].max_depth is 0. Use spawn_subagent "
+                "and one of your named roles, or ask the user to raise the setting."
+            )
+        # A call spends one, so the worker gets a tool of its own only while a composition would remain
+        # after this one.
+        nested = _make_compose_tool(state, remaining_depth=depth - 1, model=model) if depth > 1 else None
+        try:
+            spec = _compose_spec(label, tools, instructions, state, compose_tool=nested, model=model)
+        except ToolsetError as error:
+            return f"Could not compose {label!r}: {error}"
+        spawn = make_async_subagent_tool(
+            model,
+            agent_types={label: spec},
+            max_depth=1,
+            tool_approval=state.tool_approval,
+            observer=state.observer,
+        )
+        return await spawn(label, task)
+
+    return compose_worker
+
+
 def make_capability_tools(ctx: "ToolsetContext") -> list:
     state = ctx.state
+    # The [assistant] default, falling back to whatever the holder's own client already resolved. That
+    # is the fallback `make_delegation_tool` takes, for the same reason: with no default set, resolving
+    # per composition would pick a model afresh each time instead of staying on the one in use.
+    model = state.config.model or getattr(getattr(ctx.agent, "model_client", None), "model", None)
 
     @tool
     async def list_capabilities(filter: str = "") -> str:
@@ -126,7 +201,7 @@ def make_capability_tools(ctx: "ToolsetContext") -> list:
         """
         return _catalogue(state.registry, filter)
 
-    return [list_capabilities]
+    return [list_capabilities, _make_compose_tool(state, remaining_depth=None, model=model)]
 
 
 TOOLSET = Toolset(

@@ -5,7 +5,8 @@ from aimu.tools import tool as aimu_tool
 from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
 
 from kokua.config.schema import AgentConfig, AssistantConfig
-from kokua.toolsets.capabilities import TOOLSET, _compose_spec, make_capability_tools
+from kokua.toolsets import capabilities
+from kokua.toolsets.capabilities import DEFAULT_WORKER_NAME, TOOLSET, _compose_spec, make_capability_tools
 from kokua.toolsets.context import LiveState, ToolsetContext
 from kokua.toolsets.registry import Toolset, ToolsetError, register
 
@@ -37,6 +38,36 @@ async def _sample_tool() -> str:
 
 def _spec(state, *, name="quote-checker", tools=("web",), instructions="Check the quote.", compose_tool=None):
     return _compose_spec(name, list(tools), instructions, state, compose_tool=compose_tool, model="ollama:test")
+
+
+class _RecordingSpawn:
+    """Stands in for AIMU's spawn-tool factory, which builds a real model client per call.
+
+    The dispatch path cannot run against MockAsyncModelClient because `make_async_subagent_tool`
+    constructs its own client per spawn, so what is worth asserting here is the call it would make.
+    """
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, model, **kwargs):
+        self.calls.append({"model": model, **kwargs})
+
+        async def spawn_subagent(agent_type: str, task: str) -> str:
+            return f"{agent_type} ran: {task}"
+
+        return spawn_subagent
+
+
+def _recording(monkeypatch) -> _RecordingSpawn:
+    spawn = _RecordingSpawn()
+    monkeypatch.setattr(capabilities, "make_async_subagent_tool", spawn)
+    return spawn
+
+
+def _compose(state, monkeypatch, **kwargs):
+    spawn = _recording(monkeypatch)
+    return _tools_by_name(state)["compose_worker"], spawn
 
 
 async def test_list_capabilities_reports_every_name_with_its_provider_and_description(tmp_path):
@@ -166,3 +197,108 @@ def test_compose_spec_hands_the_worker_a_composition_tool_when_given_one(tmp_pat
 
 def test_compose_spec_leaves_the_worker_without_one_by_default(tmp_path):
     assert _spec(_state(tmp_path))["tools"] == []
+
+
+async def test_compose_worker_runs_the_worker_under_its_given_name(tmp_path, monkeypatch):
+    compose, spawn = _compose(_state(tmp_path), monkeypatch)
+    result = await compose("quote-checker", "Check AAPL.", ["web"], "Check quotes.")
+    assert result == "quote-checker ran: Check AAPL."
+    assert list(spawn.calls[0]["agent_types"]) == ["quote-checker"]
+
+
+async def test_compose_worker_labels_an_unnamed_worker_rather_than_leaving_the_card_blank(tmp_path, monkeypatch):
+    """The agent_types key is both the observer's card label and AIMU's Agent name, so it reaches the
+    web sub-agent card and the logs; a blank one makes two concurrent workers indistinguishable."""
+    compose, spawn = _compose(_state(tmp_path), monkeypatch)
+    await compose("  ", "Check AAPL.", ["web"], "Check quotes.")
+    assert list(spawn.calls[0]["agent_types"]) == [DEFAULT_WORKER_NAME]
+
+
+async def test_compose_worker_forwards_the_approval_gate_and_the_observer(tmp_path, monkeypatch):
+    """Every tool a composed worker holds must still route to the human through confirm_tools, and the
+    run must still reach the web sub-agent card."""
+    state = _state(tmp_path)
+    state.tool_approval = lambda *a, **k: True
+    state.observer = object()
+    compose, spawn = _compose(state, monkeypatch)
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    assert spawn.calls[0]["tool_approval"] is state.tool_approval
+    assert spawn.calls[0]["observer"] is state.observer
+
+
+async def test_compose_worker_calls_aimu_with_max_depth_one_at_every_level(tmp_path, monkeypatch):
+    """Kokua owns the recursion, exactly as `build_agent_specs` does: AIMU's own max_depth would give
+    every level the same menu, which cannot express a worker composed fresh per call."""
+    compose, spawn = _compose(_state(tmp_path), monkeypatch)
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    assert spawn.calls[0]["max_depth"] == 1
+
+
+async def test_a_composed_worker_can_compose_again_while_depth_remains(tmp_path, monkeypatch):
+    state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 2}})
+    compose, spawn = _compose(state, monkeypatch)
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    worker_tools = spawn.calls[0]["agent_types"]["w"]["tools"]
+    assert "compose_worker" in {fn.__name__ for fn in worker_tools}
+
+
+async def test_the_last_worker_in_the_chain_gets_no_composition_tool(tmp_path, monkeypatch):
+    """The decrementing counter is the entire termination argument: at zero the worker keeps discovery
+    and loses composition."""
+    state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 1}})
+    compose, spawn = _compose(state, monkeypatch)
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    worker_tools = spawn.calls[0]["agent_types"]["w"]["tools"]
+    assert "compose_worker" not in {fn.__name__ for fn in worker_tools}
+
+
+async def test_the_depth_cap_is_read_at_call_time_so_a_hot_change_reaches_a_built_agent(tmp_path, monkeypatch):
+    """`build` runs once per conversation agent, so a build-time read would strand a hot setting change
+    until restart, which is what hot=True promises will not happen."""
+    state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 2}})
+    compose, spawn = _compose(state, monkeypatch)
+    state.config.toolset_settings["capabilities"]["max_depth"] = 1
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    worker_tools = spawn.calls[0]["agent_types"]["w"]["tools"]
+    assert "compose_worker" not in {fn.__name__ for fn in worker_tools}
+
+
+async def test_a_max_depth_of_zero_switches_composition_off(tmp_path, monkeypatch):
+    """The cap is a genuine off switch, not just a nesting bound: at zero the tool is still present but
+    composes nothing, so a user who wants the behavior gone can turn it off without editing an agent."""
+    state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 0}})
+    compose, spawn = _compose(state, monkeypatch)
+    result = await compose("w", "Do it.", ["web"], "Instructions.")
+    assert "max_depth" in result
+    assert spawn.calls == []
+
+
+async def test_compose_worker_reports_an_unknown_capability_as_text(tmp_path, monkeypatch):
+    """A tool that raises breaks the agent's tool loop, so an unresolvable name comes back as an answer
+    the model can act on."""
+    compose, spawn = _compose(_state(tmp_path), monkeypatch)
+    result = await compose("w", "Do it.", ["nope"], "Instructions.")
+    assert "nope" in result
+    assert "Available toolsets" in result
+    assert spawn.calls == []
+
+
+async def test_compose_worker_asks_for_a_capability_when_given_none(tmp_path, monkeypatch):
+    compose, spawn = _compose(_state(tmp_path), monkeypatch)
+    result = await compose("w", "Do it.", [], "Instructions.")
+    assert "list_capabilities" in result
+    assert spawn.calls == []
+
+
+async def test_compose_worker_falls_back_to_the_agents_own_model_when_no_default_is_set(tmp_path, monkeypatch):
+    """Reusing the string the delegator's client already resolved keeps every composition on that model
+    instead of re-resolving per call, the same fallback `make_delegation_tool` takes."""
+
+    class _Agent:
+        model_client = type("_Client", (), {"model": "ollama:resolved"})()
+
+    spawn = _recording(monkeypatch)
+    state = _state(tmp_path)
+    tools = {fn.__name__: fn for fn in make_capability_tools(ToolsetContext(state=state, agent=_Agent()))}
+    await tools["compose_worker"]("w", "Do it.", ["web"], "Instructions.")
+    assert spawn.calls[0]["model"] == "ollama:resolved"
