@@ -1,8 +1,11 @@
 """The table of runtime-mutable settings, and the sanitizer for the settings panel.
 
-A *runtime* setting is one the user can change without restarting: the model, the display flags, the
-planning flags, and whatever a toolset declared as hot. Everything else in
-``config.toml`` is startup-only and is declared in ``config.file._STARTUP_SCHEMA`` instead.
+A *runtime* setting is one the user can change without restarting: the display flags, the planning
+flags, and whatever a toolset declared as hot. Everything else in ``config.toml`` is startup-only and
+is declared in ``config.file._STARTUP_SCHEMA`` instead. The model is one of those, not a runtime
+setting, however much it reads like one: nothing rebinds a live client, so a panel field or a hot
+``update_config`` write for it could only report a change it had not made (see
+``core.settings_runtime``, which says the same from the applying end).
 
 The table is the single declaration of that set. It drives, in one place, what used to be repeated
 across nine sites: the TOML schema entry, the panel payload sanitizer, the hot-appliable key set that

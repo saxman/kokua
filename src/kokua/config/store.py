@@ -256,10 +256,17 @@ async def apply_setting(
 ) -> AppliedSetting:
     """Coerce, apply, and persist one setting. Raises rather than reporting.
 
-    A hot-appliable change (the model, the display flags, and whatever the installed toolsets declared
-    as hot) is applied to the live session BEFORE it is written, so a value that fails to apply -- an
-    invalid model, say -- is not persisted and left to break the next startup. That ordering is the whole
-    reason this is one function rather than a coerce call and a write call at the call site.
+    A hot-appliable change (the display flags, and whatever the installed toolsets declared as hot) is
+    applied to the live session BEFORE it is written, so a value that coerces but cannot be applied is
+    not persisted and left to break the next startup. That ordering is the whole reason this is one
+    function rather than a coerce call and a write call at the call site.
+
+    The model is *not* among the hot settings, despite being the setting a reader expects to find there:
+    no live client is ever rebound, so ``[assistant].model`` is startup-only and takes the cold path
+    below. Nothing here can tell whether the string it writes names a real model -- that answer needs
+    AIMU, which this layer cannot import -- so the caller supplies the check as a schema converter
+    (``toolsets.config._resolvable_model``). The caller is told which path a change took, via
+    :attr:`AppliedSetting.hot`.
 
     ``table`` is the live :class:`~kokua.config.table.SettingsTable`: it decides both what a value coerces
     to and whether the change is hot, so both questions are answered by the same declaration. ``table``

@@ -9,9 +9,10 @@ The policy, the coercion, and the apply-then-persist ordering are all in ``confi
 here is the two tool schemas and the four sentences that report what happened -- including the one that
 says a change waits for a restart, which is what keeps the assistant honest about a cold setting.
 
-One thing this module has to supply rather than merely wrap: *which keys exist*. ``config/`` cannot see
-the installed toolsets, so the cold half of their declarations is assembled here and handed down (see
-:func:`make_config_tools`).
+Two things this module has to supply rather than merely wrap, both because ``config/`` is the bottom
+layer and can reach neither the installed toolsets nor AIMU: *which keys exist* (the cold half of the
+toolsets' declarations, assembled here and handed down -- see :func:`make_config_tools`), and whether a
+model string resolves (see :func:`_resolvable_model`).
 """
 
 from __future__ import annotations
@@ -27,6 +28,27 @@ from kokua.config.settings_sources import startup_schema
 from kokua.toolsets.registry import Toolset
 
 
+def _resolvable_model(section: str, key: str, value: str) -> str:
+    """Refuse a model string this process could not build a client for.
+
+    A schema *converter* rather than a check in the tool body, so it runs wherever the schema is
+    consulted and cannot be bypassed by a second write path. ``[assistant].model`` is startup-only, so
+    the apply-before-persist ordering that catches a bad hot value never sees it: an unresolvable string
+    would be saved and turn up as a Kokua that will not start, with the assistant that wrote it gone.
+
+    The import is function-local because ``core.build`` reaches ``toolsets/`` and a module-level import
+    here would close that cycle -- the same reason ``core.build`` imports ``toolsets.agents`` inside a
+    function.
+    """
+    from kokua.core.build import ModelClientError, validate_model_string
+
+    try:
+        validate_model_string(value)
+    except ModelClientError as error:
+        raise settings.ConfigError(f"[{section}].{key}: {error}") from error
+    return value
+
+
 def make_config_tools(
     config_path: Path, apply_hot: Callable[[str, str, object], Awaitable[None]], table
 ) -> list[Callable]:
@@ -40,8 +62,12 @@ def make_config_tools(
     ``config.store`` -- and it is the same route ``kokua.cli`` takes to build the parse schema, so the
     tool and the file agree about which keys exist by construction. Without it the assistant would answer
     "unknown config key" for a cold toolset key sitting in the user's own file.
+
+    The one entry added on top is a stricter ``[assistant].model``: the file's own schema type-checks it
+    as a string and leaves resolving it to startup, which is too late for a tool whose write outlives the
+    conversation that made it (see :func:`_resolvable_model`).
     """
-    cold_schema = startup_schema()
+    cold_schema = {**startup_schema(), ("assistant", "model"): ("model", (str,), "a string", _resolvable_model)}
 
     @tool
     async def read_config() -> str:
@@ -60,11 +86,14 @@ def make_config_tools(
         """Change one setting in config.toml, e.g. section="email", key="host", value="smtp.gmail.com".
 
         Pass the value as a string; it is coerced to the setting's real type (numbers, true/false, and
-        comma-separated lists are understood). A setting marked hot -- the model, a display flag, or any
-        other setting flagged to apply live -- takes effect
-        immediately in this session; any other setting is saved and takes effect the next time Kokua
-        restarts (the result says which). A few security-critical keys cannot be changed here and must
-        be hand-edited in the file.
+        comma-separated lists are understood). A hot setting -- a display flag, a planning flag, or any
+        other setting flagged to apply live -- takes effect immediately in this session. Every other
+        setting, the model and the reasoning effort among them, is saved and takes effect only the next
+        time Kokua restarts. The result says which of the two happened; pass that on, because a saved
+        setting is not yet in force and only the user can restart. A model string is checked against the
+        providers actually installed before it is saved, so a name that does not resolve is refused here
+        rather than breaking the next startup. A few security-critical keys cannot be changed here and
+        must be hand-edited in the file.
         """
         try:
             applied = await config_store.apply_setting(

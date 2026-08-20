@@ -289,6 +289,25 @@ def build_schema(table, extra: Optional[dict] = None) -> dict:
     return {**_STARTUP_SCHEMA, **table.toml_schema(), **(extra or {})}
 
 
+def _unknown_key_error(schema: dict, section: str, key: str) -> ConfigError:
+    """A "no such key" error that also says where the key *does* live and what this section takes.
+
+    Two hints for the two ways a key gets misplaced: the right key in the wrong section, and a key the
+    section has never had. Both are read off the same schema the lookup just missed in, so neither can
+    name something that is not really there. It matters most for ``update_config``, whose caller is a
+    model retrying from the error text alone -- ``[assistant.generation].thinking`` is the case that
+    prompted it, `thinking` being an ``[assistant]`` key whose sub-table sits directly beneath it.
+    """
+    message = f"unknown config key [{section}].{key}"
+    elsewhere = sorted(other for other, other_key in schema if other_key == key and other != section)
+    if elsewhere:
+        message += "; did you mean " + " or ".join(f"[{other}].{key}" for other in elsewhere) + "?"
+    accepted = sorted(k for s, k in schema if s == section)
+    if accepted:
+        message += f" Accepted in [{section}]: {', '.join(accepted)}."
+    return ConfigError(message)
+
+
 def _coerce_flat(schema: dict, section: str, key: str, value: Any) -> tuple[str, Any]:
     """Validate one scalar ``[section].key`` against ``schema``; return ``(target, coerced)``.
 
@@ -297,7 +316,7 @@ def _coerce_flat(schema: dict, section: str, key: str, value: Any) -> tuple[str,
     """
     spec = schema.get((section, key))
     if spec is None:
-        raise ConfigError(f"unknown config key [{section}].{key}")
+        raise _unknown_key_error(schema, section, key)
     target, types, label, convert = spec
     rejected_bool = isinstance(value, bool) and bool not in types
     if rejected_bool or not isinstance(value, types):
@@ -350,9 +369,10 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
         raise ConfigError("[agents.*] is hand-edit only; update_config cannot change an agent's table")
     if section in ("subagents", "mcp"):
         raise ConfigError(f"[{section}] has no scalar keys editable with update_config")
-    spec = build_schema(table, extra_schema).get((section, key))
+    schema = build_schema(table, extra_schema)
+    spec = schema.get((section, key))
     if spec is None:
-        raise ConfigError(f"unknown config key [{section}].{key}")
+        raise _unknown_key_error(schema, section, key)
     _, types, _, convert = spec
     value = _parse_scalar(section, key, raw, types)
     return convert(section, key, value) if convert else value

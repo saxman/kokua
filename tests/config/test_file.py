@@ -527,3 +527,28 @@ def test_generation_key_accepts_its_last_valid_value_and_rejects_the_next_one(tm
 
     with pytest.raises(settings.ConfigError, match=key):
         _load_generation(tmp_path, f"[assistant.generation]\n{key} = {rejected}\n")
+
+
+def test_unknown_key_names_the_section_that_does_have_it():
+    """The mistake that motivated this: `thinking` is an [assistant] key, and [assistant.generation]
+    sits right under it in the file, so both a hand-edit and `update_config` land it in the sub-table."""
+    _write_config('[assistant.generation]\nthinking = "medium"\n')
+    with pytest.raises(settings.ConfigError, match=r"did you mean \[assistant\].thinking\?"):
+        settings.load(table=core_table())
+
+
+def test_unknown_key_lists_what_the_section_does_accept():
+    _write_config('[web]\nhostname = "0.0.0.0"\n')
+    with pytest.raises(settings.ConfigError, match=r"Accepted in \[web\]: host, port"):
+        settings.load(table=core_table())
+
+
+def test_unknown_key_in_an_unknown_section_stays_bare():
+    """No section to enumerate and no other home for the key: the error says only what it knows."""
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[widgets\].nonsense$"):
+        settings.coerce_config_string("widgets", "nonsense", "1", table=core_table())
+
+
+def test_unknown_key_offers_every_section_that_has_it():
+    with pytest.raises(settings.ConfigError, match=r"\[email\].host or \[web\].host"):
+        settings.coerce_config_string("logging", "host", "x", table=core_table())

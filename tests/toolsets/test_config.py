@@ -128,3 +128,66 @@ async def test_update_config_rejects_invalid_value_without_writing(tmp_path):
     result = await update_config("web", "port", "not-a-number")
     assert not path.exists()
     assert "port" in result
+
+
+async def test_update_config_points_a_misplaced_key_at_its_real_section(tmp_path):
+    """`thinking` is an [assistant] key and [assistant.generation] is the sub-table directly beneath it,
+    so this is the miss to expect. The error has to carry the fix: the assistant retries from it alone."""
+    path, _, update_config = _tools(tmp_path)
+
+    result = await update_config("assistant.generation", "thinking", "medium")
+
+    assert "did you mean [assistant].thinking?" in result
+    assert not path.exists()
+
+
+async def test_update_config_lists_the_keys_a_known_section_accepts(tmp_path):
+    path, _, update_config = _tools(tmp_path)
+
+    result = await update_config("assistant.generation", "warmth", "0.7")
+
+    assert "Accepted in [assistant.generation]: context_length" in result
+    assert "temperature" in result
+    assert not path.exists()
+
+
+def _stub_model_resolution(monkeypatch):
+    """Let any model string resolve, so a test about something else does not depend on which provider
+    extras are installed. `update_config` validates `[assistant].model` by building a throwaway client."""
+    from aimu import aio
+
+    monkeypatch.setattr(aio, "client", lambda model, system=None: object())
+
+
+async def test_update_config_refuses_a_model_string_this_process_cannot_build(tmp_path):
+    """`[assistant].model` is startup-only, so a bad value is not caught by a failed hot apply: without
+    this check it persists and the failure surfaces at the next startup, with Kokua unable to start."""
+    path, _, update_config = _tools(tmp_path)
+
+    result = await update_config("assistant", "model", "bogus-provider:whatever")
+
+    assert result.startswith("Rejected:") and "bogus-provider" in result
+    assert not path.exists()
+
+
+async def test_update_config_writes_a_model_string_that_resolves(tmp_path, monkeypatch):
+    _stub_model_resolution(monkeypatch)
+    path, _, update_config = _tools(tmp_path)
+
+    result = await update_config("assistant", "model", "ollama:qwen3.8:27b")
+
+    assert _read(path)["assistant"]["model"] == "ollama:qwen3.8:27b"
+    assert "takes effect the next time Kokua restarts" in result
+
+
+@pytest.mark.parametrize("key,value", [("model", "ollama:qwen3.8:27b"), ("thinking", "medium")])
+async def test_update_config_says_a_startup_only_assistant_key_waits_for_a_restart(tmp_path, monkeypatch, key, value):
+    """Neither is rebindable live -- no client is ever pointed at another model, and an agent's reasoning
+    effort is fixed when it is built -- so the tool must not let the assistant report either as in force."""
+    _stub_model_resolution(monkeypatch)
+    path, _, update_config = _tools(tmp_path)
+
+    result = await update_config("assistant", key, value)
+
+    assert _read(path)["assistant"][key] == value
+    assert "takes effect the next time Kokua restarts" in result

@@ -769,3 +769,24 @@ def test_an_agent_is_wired_with_no_thinking_when_nothing_is_declared(tmp_path):
     config = _config(tmp_path)
     agent = wire_agent(config, _live_state(config), "assistant", client=MockAsyncModelClient([]))
     assert agent.thinking is None
+
+
+def test_validate_model_string_rejects_one_this_process_cannot_build():
+    """No install has a "bogus-provider", so this is the rejection any typo'd provider gets, carrying
+    AIMU's own message -- which names the providers whose extras *are* installed."""
+    from kokua.core.build import ModelClientError, validate_model_string
+
+    with pytest.raises(ModelClientError, match="bogus-provider"):
+        validate_model_string("bogus-provider:whatever")
+
+
+def test_validate_model_string_accepts_one_the_client_factory_accepts(monkeypatch):
+    """It answers by building a throwaway client, which is what makes a pass here mean the same startup
+    will succeed: it is the call `build_model_client` makes."""
+    from aimu import aio
+    from kokua.core.build import validate_model_string
+
+    seen = []
+    monkeypatch.setattr(aio, "client", lambda model, system=None: seen.append(model))
+    validate_model_string("ollama:qwen3.8:27b")
+    assert seen == ["ollama:qwen3.8:27b"]

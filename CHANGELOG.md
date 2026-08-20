@@ -466,8 +466,18 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   and nothing else. Both are enforced by tests.
 - **The assistant can inspect and repair its own configuration**: `read_config` / `update_config`.
   `update_config` validates and coerces the value, applies hot-appliable keys immediately and persists
-  only after a successful apply (so a bad model is not saved), and reports "restart required" for
-  everything else. A blocklist -- `[security] confirm_tools`, `[email] to`, `[paths] data_dir`, and the
+  only after a successful apply (so a flag that cannot be applied is not saved), and reports "restart
+  required" for everything else. Which of the two happened is in every result, because most of what the
+  assistant is asked to change -- the model and the reasoning effort among them -- is startup-only, and
+  a saved-but-not-yet-applied change reported as done is a change the user thinks they have. A rejected
+  key says where to put it instead: an unknown `[section].key` names the section that *does* declare
+  that key (`[assistant.generation].thinking` is answered with `[assistant].thinking`) and lists what
+  the section it was given accepts, so the assistant can correct itself from the error alone. A model
+  string gets a stronger check than the schema's `str`: `[assistant].model` is startup-only, so nothing
+  applies it live and a name that does not resolve would be saved and surface as a Kokua that will not
+  start. It is refused at write time by building a throwaway client -- the same call startup makes, so
+  it also catches a provider whose extra is not installed. A
+  blocklist -- `[security] confirm_tools`, `[email] to`, `[paths] data_dir`, and the
   whole `[agents.*]` section (matched by section prefix, since agent names cannot be enumerated ahead of
   time) -- can never be changed by the tool, only by hand: `update_config` is a tool the assistant holds,
   so a writable agent table would let it widen its own reach. `update_config` is also in the default

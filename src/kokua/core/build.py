@@ -67,6 +67,25 @@ def build_model_client(config: AssistantConfig, system_message: str, agent_name:
     return client
 
 
+def validate_model_string(model: str) -> None:
+    """Raise ``ModelClientError`` unless this process could build a client for ``model``.
+
+    Answered by building a throwaway client rather than by parsing the string, so a pass here means the
+    same call in :func:`build_model_client` will succeed: the check is the thing it predicts, including
+    the parts of it a parser cannot see (whether the provider's extra is installed at all). AIMU's async
+    factory refuses the in-process providers outright rather than loading weights, and every other
+    provider constructs a transport and makes no request, so this stays cheap and offline.
+
+    Its caller is ``update_config`` writing ``[assistant].model``, which is startup-only: nothing applies
+    it live, so without this an unresolvable string is persisted and surfaces only as a Kokua that will
+    not start. The client is discarded; this reports, it does not build.
+    """
+    try:
+        aio.client(model)
+    except (ValueError, TypeError) as e:
+        raise ModelClientError(str(e)) from e
+
+
 def model_label(config: AssistantConfig, agent_name: str, client=None) -> str:
     """The model ``agent_name`` runs on, as a string for a person to read or a record to store.
 
