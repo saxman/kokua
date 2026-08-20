@@ -294,7 +294,9 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   `[scheduling.task.<name>]` tables in `config.toml` and re-armed at startup. A task's **name** is its
   identity: it is required, unique, the table key, and the handle every scheduling tool and the sidebar
   use in place of an internal id. A table can be hand-written or hand-edited, comments and all, the same
-  way an `[[mcp.server]]` entry can; a malformed one is rejected at startup, naming the table rather than
+  way an `[[mcp.server]]` entry can: the comment lines directly above a task's header are that task's, so
+  they stay put when it is renamed and go with it when it is cancelled, never sliding onto its neighbour.
+  A malformed table is rejected at startup, naming the table rather than
   becoming a task that silently never fires. Schedules are one-shot, interval, daily, or weekly (no cron
   dependency).
 - Managed by the assistant through `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`,
@@ -353,7 +355,7 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
 - **Each task's conversations are nested under it** in that section and left out of the chat list, so
   the chat list holds only conversations you started. A conversation records the task that minted it
   (`task_id` in its metadata, set to the task's name -- its identity -- so a rename re-points every
-  conversation the old name owned before the table itself is renamed). Grouping happens on the
+  conversation the old name owned, right after the table itself is renamed). Grouping happens on the
   page, not in the core: nothing is filtered out of `ConversationBook.list()`, so the agent's
   conversation tools still see every conversation. A conversation whose task has been deleted falls back
   into the chat list rather than becoming unreachable. Each nested row carries its own delete, like a

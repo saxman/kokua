@@ -101,9 +101,14 @@ each claim, is in [docs/explanation/design-principles.md](docs/explanation/desig
    built at startup from both, is what still drives the schema, the sanitizer, the hot-apply set, the
    live-apply loop, and the persist path from one place. `[agents.*]` is hand-edit only (locked by
    section prefix in `config/store.py`'s `is_locked`), because `update_config` is a tool the assistant
-   holds and a writable agent table would let it widen its own reach.
+   holds and a writable agent table would let it widen its own reach. `[scheduling.task.*]` is locked by
+   prefix too, but for routing rather than capability: the assistant may change any task, only through
+   the scheduling tools, since a bare `update_config` write would skip the scheduler (un)arming a task
+   write has to be paired with.
 4. **All state under one directory the user owns.** `$KOKUA_HOME`, default `~/.kokua`. Every leaf
    below `data/` is a derived `AssistantConfig` property, never a new function in `config/paths.py`.
+   Declared scheduled tasks are the one stated exception, living in `config.toml` rather than under
+   `data/`, because a task is a declaration a user should be able to write and comment.
 5. **A single user, one process, with concurrency rules written down.** The seven turn invariants live
    at the top of `core/turns.py`, each naming the bug it prevents. Update them in the same commit as
    any change to turn concurrency.
@@ -134,7 +139,7 @@ src/kokua/
   workflows/    protocol (Workflow, WorkflowContext, WorkflowResult, the two tiers), critics
                 (the shared independent reviewer), planning/ (the /plan workflow)
   mcp/          servers (connect, attach, add, remove), auth
-  scheduling/   recurrence (pure math), registry (the JSON file), tasks (TaskService)
+  scheduling/   recurrence (pure math), tasks (TaskService, over config.toml's [scheduling.task.*])
   channels/     ui (ChannelUI), protocol (RichChannel), cli, web
   frontends/    cli, web           -- registered as plugins, exactly like a third party's
   toolsets/     registry (Toolset, select, build_tools), context (LiveState, ToolsetContext),

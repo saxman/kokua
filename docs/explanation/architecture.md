@@ -554,8 +554,8 @@ else rather than being dispatched on.
 Grouping a task's conversations under it happens **on the page**, not in the core. `new_session` stamps
 `metadata["task_id"]` on any conversation a firing mints, with the task's name -- its identity -- so a
 rename has to move that stamp too: `update_scheduled_task`'s `new_name` path calls
-`ConversationBook.retag_task` to re-point every conversation the old name owned before the table itself
-is renamed, which is what lets the sidebar keep a task's history nested under it across a rename.
+`ConversationBook.retag_task` to re-point every conversation the old name owned, right after the table
+itself is renamed, which is what lets the sidebar keep a task's history nested under it across a rename.
 `ConversationBook.list()` projects `task_id`, but nothing is filtered there -- the agent's read-only
 conversation tools walk `sessions()` and still see every conversation. The page nests a conversation under a task when its `task_id` matches a task *currently in
 the list*. Requiring the task to be present is what makes
