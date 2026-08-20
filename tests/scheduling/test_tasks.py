@@ -4,6 +4,7 @@ These exercise ``TaskService`` directly, so they assert on records and raised er
 model reads are covered in ``tests/toolsets/test_scheduling.py``.
 """
 
+import logging
 from datetime import datetime, timedelta
 
 import pytest
@@ -162,6 +163,19 @@ def test_get_resolves_by_name_and_raises_for_an_unknown_one(tmp_path):
     assert tasks.get("k")["prompt"] == "x"
     with pytest.raises(TaskNotFound):
         tasks.get("nope")
+
+
+def test_cancel_warns_when_the_table_it_disarmed_was_not_deleted(tmp_path, monkeypatch, caplog):
+    """A store that cannot find the table the read found leaves a task the scheduler has forgotten but
+    the next startup will re-arm. The service cannot repair that, so it must at least not hide it."""
+    scheduler, path, tasks = _make(tmp_path)
+    tasks.create("x", EVERY_MINUTE, name="stubborn")
+    monkeypatch.setattr(store, "remove_task", lambda *args, **kwargs: False)
+
+    with caplog.at_level(logging.WARNING):
+        tasks.cancel("stubborn")
+
+    assert "stubborn" in caplog.text and "next restart" in caplog.text
 
 
 def test_cancel_removes_the_record_and_the_job(tmp_path):

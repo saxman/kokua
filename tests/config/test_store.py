@@ -526,3 +526,117 @@ def test_task_tables_are_locked_against_programmatic_writes():
     assert config_store.is_locked("scheduling.task", "anything") is True
     # The toolset's own setting in the parent section stays writable.
     assert config_store.is_locked("scheduling", "max_task_conversations") is False
+
+
+# --- Hand-edited task shapes -------------------------------------------------------------------------
+#
+# `write_task` only ever produces one `[scheduling.task.<name>]` header per task, but TOML lets a hand
+# edit write the same data as an inline table or split one task across several fragments, and
+# `load_tasks` reads both. A remove or rename that misses those shapes tells the user a task is gone
+# while leaving it (or half of it) on disk.
+
+_INLINE_TASK_BODIES = {
+    "inline-task-table": (
+        "[scheduling]\n"
+        'task = { alpha = { prompt = "p", schedule = { type = "interval", seconds = 60 } },'
+        ' beta = { prompt = "q", schedule = { type = "interval", seconds = 30 } } }\n'
+    ),
+    "dotted-inline-task": (
+        "[scheduling]\n"
+        'task.alpha = { prompt = "p", schedule = { type = "interval", seconds = 60 } }\n'
+        'task.beta = { prompt = "q", schedule = { type = "interval", seconds = 30 } }\n'
+    ),
+}
+
+_SPLIT_TASK_BODIES = {
+    "fragments-around-another-section": (
+        "[scheduling.task.alpha]\n"
+        'prompt = "p"\n'
+        "\n"
+        "[email]\n"
+        'to = "someone@example.com"\n'
+        "\n"
+        "[scheduling.task.alpha.schedule]\n"
+        'type = "interval"\n'
+        "seconds = 60\n"
+        "\n"
+        "[scheduling.task.beta]\n"
+        'prompt = "q"\n'
+        'schedule = { type = "interval", seconds = 30 }\n'
+    ),
+    "dotted-fragments": (
+        "[scheduling]\n"
+        'task.alpha.prompt = "p"\n'
+        'task.beta.prompt = "q"\n'
+        'task.alpha.schedule = { type = "interval", seconds = 60 }\n'
+        'task.beta.schedule = { type = "interval", seconds = 30 }\n'
+    ),
+    "dotted-fragments-in-one-section": (
+        "[scheduling.task]\n"
+        'alpha.prompt = "p"\n'
+        'beta.prompt = "q"\n'
+        'alpha.schedule = { type = "interval", seconds = 60 }\n'
+        'beta.schedule = { type = "interval", seconds = 30 }\n'
+    ),
+}
+
+
+@pytest.mark.parametrize("body", _INLINE_TASK_BODIES.values(), ids=_INLINE_TASK_BODIES)
+def test_remove_task_removes_a_task_written_as_an_inline_table(tmp_path, body):
+    path = _task_config(tmp_path, body)
+    assert config_store.remove_task(path, "alpha") is True
+    text = path.read_text(encoding="utf-8")
+    assert "alpha" not in text
+    assert [r["name"] for r in config_store.load_tasks(path)] == ["beta"]
+    assert config_store.remove_task(path, "alpha") is False
+
+
+@pytest.mark.parametrize("body", _INLINE_TASK_BODIES.values(), ids=_INLINE_TASK_BODIES)
+def test_rename_task_renames_a_task_written_as_an_inline_table(tmp_path, body):
+    path = _task_config(tmp_path, body)
+    config_store.rename_task(path, "alpha", "renamed")
+    text = path.read_text(encoding="utf-8")
+    assert "alpha" not in text
+    records = {r["name"]: r for r in config_store.load_tasks(path)}
+    assert set(records) == {"renamed", "beta"}
+    assert records["renamed"]["prompt"] == "p"
+    assert records["renamed"]["schedule"] == {"type": "interval", "seconds": 60}
+    assert records["beta"]["schedule"] == {"type": "interval", "seconds": 30}
+
+
+@pytest.mark.parametrize("body", _SPLIT_TASK_BODIES.values(), ids=_SPLIT_TASK_BODIES)
+def test_remove_task_removes_every_fragment_of_a_split_task(tmp_path, body):
+    path = _task_config(tmp_path, body)
+    assert config_store.remove_task(path, "alpha") is True
+    text = path.read_text(encoding="utf-8")
+    assert "alpha" not in text
+    records = config_store.load_tasks(path)
+    assert [r["name"] for r in records] == ["beta"]
+    assert records[0]["schedule"] == {"type": "interval", "seconds": 30}
+
+
+@pytest.mark.parametrize("body", _SPLIT_TASK_BODIES.values(), ids=_SPLIT_TASK_BODIES)
+def test_rename_task_renames_every_fragment_of_a_split_task(tmp_path, body):
+    path = _task_config(tmp_path, body)
+    config_store.rename_task(path, "alpha", "renamed")
+    text = path.read_text(encoding="utf-8")
+    assert "alpha" not in text
+    records = {r["name"]: r for r in config_store.load_tasks(path)}
+    assert set(records) == {"renamed", "beta"}
+    assert records["renamed"]["prompt"] == "p"
+    assert records["renamed"]["schedule"] == {"type": "interval", "seconds": 60}
+    assert records["beta"] == {"name": "beta", "prompt": "q", "schedule": {"type": "interval", "seconds": 30}}
+
+
+def test_removing_a_split_task_leaves_a_neighbouring_section_intact(tmp_path):
+    path = _task_config(tmp_path, _SPLIT_TASK_BODIES["fragments-around-another-section"])
+    assert config_store.remove_task(path, "alpha") is True
+    assert _read(path)["email"] == {"to": "someone@example.com"}
+
+
+def test_renaming_over_a_split_task_removes_all_of_the_task_it_replaces(tmp_path):
+    path = _task_config(tmp_path, _SPLIT_TASK_BODIES["fragments-around-another-section"])
+    config_store.rename_task(path, "beta", "alpha")
+    records = config_store.load_tasks(path)
+    assert [r["name"] for r in records] == ["alpha"]
+    assert records[0]["schedule"] == {"type": "interval", "seconds": 30}

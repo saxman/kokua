@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 import tomlkit
 from tomlkit import TOMLDocument
 from tomlkit.container import Container
-from tomlkit.items import Comment, Null, Table, Whitespace
+from tomlkit.items import Comment, InlineTable, Key, Null, Table, Whitespace
 
 from kokua.config import file as settings
 
@@ -288,12 +288,20 @@ def write_task(path: Path, name: str, record: dict) -> None:
 # document immediately: look a task up again after one of these and the lookup answers from before.
 
 
-def _index_in(body: list, name: str) -> Optional[int]:
-    """Where the sub-table named ``name`` sits in ``body``, or ``None``."""
-    for index, (key, item) in enumerate(body):
-        if key is not None and key.key == name and isinstance(item, Table):
-            return index
-    return None
+def _indices_in(body: list, name: str) -> list[int]:
+    """Every position in ``body`` holding a table named ``name``, in document order.
+
+    An inline table counts: ``task.nightly = { prompt = ... }`` is a task ``load_tasks`` reads, so a
+    remove or rename that skipped it would report success and leave the task on disk. One name can
+    occupy several positions in one body when a hand edit writes a task as dotted keys
+    (``nightly.prompt`` on one line, ``nightly.schedule`` on another), which tomlkit keeps as one entry
+    per line.
+    """
+    return [
+        index
+        for index, (key, item) in enumerate(body)
+        if key is not None and key.key == name and isinstance(item, (Table, InlineTable))
+    ]
 
 
 def _task_sections(doc: TOMLDocument) -> list[tuple[Container, list[tuple[list, int]]]]:
@@ -303,6 +311,10 @@ def _task_sections(doc: TOMLDocument) -> list[tuple[Container, list[tuple[list, 
     A hand-edited file may split the section (``[scheduling.task.a]``, some other section, then
     ``[scheduling.task.b]``), which tomlkit keeps as separate fragments, so this collects all of them
     rather than the first.
+
+    Descending into an inline table (``task = { nightly = { ... } }``) starts the path over, because
+    TOML forbids a comment line inside one: no comment found outside it can belong to an entry within
+    it, so ``_comment_slot`` must not reach out past the inline table to claim one.
     """
     frontier: list[tuple[Container, list[tuple[list, int]]]] = [(doc, [])]
     for segment in ("scheduling", "task"):
@@ -310,19 +322,30 @@ def _task_sections(doc: TOMLDocument) -> list[tuple[Container, list[tuple[list, 
         for container, chain in frontier:
             body = container.body
             for index, (key, item) in enumerate(body):
-                if key is not None and key.key == segment and isinstance(item, Table):
+                if key is None or key.key != segment:
+                    continue
+                if isinstance(item, Table):
                     deeper.append((item.value, [*chain, (body, index)]))
+                elif isinstance(item, InlineTable):
+                    deeper.append((item.value, []))
         frontier = deeper
     return frontier
 
 
-def _find_task(doc: TOMLDocument, name: str) -> Optional[tuple[Container, list[tuple[list, int]]]]:
-    """The container holding task ``name``, and the path of ``(body, index)`` steps down to the task."""
-    for container, chain in _task_sections(doc):
-        index = _index_in(container.body, name)
-        if index is not None:
-            return container, [*chain, (container.body, index)]
-    return None
+def _find_task(doc: TOMLDocument, name: str) -> list[tuple[Container, list[tuple[list, int]]]]:
+    """Every fragment of task ``name``: its container, and the ``(body, index)`` steps down to it.
+
+    A task normally has exactly one fragment, but a hand edit can spread one task's keys over several
+    (``[scheduling.task.a]`` here, ``[scheduling.task.a.schedule]`` after an intervening section, or one
+    dotted line per key). ``load_tasks`` reads those as a single task, so a remove that took only the
+    first would leave the rest behind and turn the next read into a ``ConfigError`` about a task missing
+    a required key.
+    """
+    return [
+        (container, [*chain, (container.body, index)])
+        for container, chain in _task_sections(doc)
+        for index in _indices_in(container.body, name)
+    ]
 
 
 def _comment_run_start(body: list, position: int) -> int:
@@ -377,10 +400,18 @@ def _delete_task(container: Container, chain: list[tuple[list, int]]) -> None:
 
     The trailing comment run inside the deleted table is the *next* table's comment, so it is re-homed
     into the slot the deleted table vacated, which renders in the same place. The run leading the
-    deleted table is this task's own, and is taken out of wherever tomlkit put it.
+    deleted table is this task's own, and is taken out of wherever tomlkit put it. An inline table has
+    neither: it is one line with no body of its own, and the comment above that line is found by the
+    same walk, so no special case is needed for it here.
+
+    The slot can already be blank when one task has several fragments in a single container (dotted
+    keys, one per line): tomlkit maps that name to every one of its positions and blanks them all on the
+    first removal, so a later fragment of the same task is already gone by the time it is reached.
     """
     body, index = chain[-1]
     key, table = body[index]
+    if key is None:
+        return
     successor_comment = _take_comment_run(table.value.body, len(table.value.body))
     slot = _comment_slot(chain)
     if slot is not None:
@@ -395,14 +426,32 @@ def remove_task(path: Path, name: str) -> bool:
 
     A comment directly above the header is read as this task's and leaves with it; one separated from
     the header by a blank line stays, along with every neighbouring task's.
+
+    Every fragment of the task goes, not just the first. Deletion blanks a body slot in place rather
+    than shortening the list, so the positions of the fragments still to be reached stay valid.
     """
     doc = _load(path)
-    found = _find_task(doc, name)
-    if found is None:
+    fragments = _find_task(doc, name)
+    if not fragments:
         return False
-    _delete_task(*found)
+    for fragment in fragments:
+        _delete_task(*fragment)
     _write(path, doc)
     return True
+
+
+def _renamed_key(old: Key, new: str) -> Key:
+    """``new`` as a key rendered the way ``old`` was, dotted or not.
+
+    tomlkit records dottedness on the key, not on the table it points at, and decides from it whether to
+    render the table as a ``task.<name>.prompt = ...`` line or as a ``[task.<name>]`` header. A plain
+    ``tomlkit.key(new)`` is never dotted, so swapping one into a dotted line rewrites it as a header,
+    and a task split across two dotted lines becomes two headers of the same name: a file that no longer
+    parses. tomlkit exposes no setter for the flag, hence the direct assignment.
+    """
+    key = tomlkit.key(new)
+    key._dotted = old.is_dotted()
+    return key
 
 
 def rename_task(path: Path, old: str, new: str) -> None:
@@ -411,24 +460,27 @@ def rename_task(path: Path, old: str, new: str) -> None:
     The key is swapped in place rather than the table being deleted and re-appended at the end of the
     section, so nothing else in the file moves and no comment changes hands. ``invalidate_display_name``
     is what makes the header print the new key: a parsed table remembers the header text it came from
-    and would otherwise keep rendering the old name.
+    and would otherwise keep rendering the old name. It applies to a table with a header of its own;
+    an inline table has none, and renaming its key is the whole edit.
+
+    Every fragment of a task split across several is renamed, so the file still reads back as one task.
 
     A missing ``old`` is a no-op. An existing ``new`` is deleted first, since two tables of one name is
     not a file that can be read back.
     """
     doc = _load(path)
-    found = _find_task(doc, old)
-    if found is None:
+    fragments = _find_task(doc, old)
+    if not fragments:
         return
     if new != old:
-        collision = _find_task(doc, new)
-        if collision is not None:
+        for collision in _find_task(doc, new):
             _delete_task(*collision)
-    container, chain = found
-    body, index = chain[-1]
-    _, table = body[index]
-    body[index] = (tomlkit.key(new), table)
-    table.invalidate_display_name()
+    for _, chain in fragments:
+        body, index = chain[-1]
+        key, table = body[index]
+        body[index] = (_renamed_key(key, new), table)
+        if isinstance(table, Table):
+            table.invalidate_display_name()
     _write(path, doc)
 
 

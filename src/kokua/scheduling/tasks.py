@@ -433,7 +433,17 @@ class TaskService:
         """
         record = self._require(name)
         self.scheduler.cancel(name)
-        store.remove_task(self.config_path, name)
+        if not store.remove_task(self.config_path, name):
+            # The read that found the task and the write that deletes it walk the file differently, so a
+            # shape one accepts and the other misses would leave the task on disk to return at the next
+            # startup, with the scheduler already told to forget it. Nothing here can repair that; the
+            # log is what keeps it from being silent.
+            logger.warning(
+                "Scheduled task %r was disarmed but no table for it was found in %s; it may return on "
+                "the next restart.",
+                name,
+                self.config_path,
+            )
         return record
 
     def set_enabled(self, name: str, enabled: bool) -> EnabledResult:

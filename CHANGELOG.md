@@ -296,6 +296,9 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   use in place of an internal id. A table can be hand-written or hand-edited, comments and all, the same
   way an `[[mcp.server]]` entry can: the comment lines directly above a task's header are that task's, so
   they stay put when it is renamed and go with it when it is cancelled, never sliding onto its neighbour.
+  Cancelling and renaming also cover the shapes a hand edit can write and the app never does: a task
+  written as an inline table, and one task whose keys are split across several fragments, both move or
+  go whole rather than in part.
   A malformed table is rejected at startup, naming the table rather than
   becoming a task that silently never fires. Schedules are one-shot, interval, daily, or weekly (no cron
   dependency).
