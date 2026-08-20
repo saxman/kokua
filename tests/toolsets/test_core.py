@@ -12,8 +12,8 @@ def _ctx(tmp_path, **state_kwargs) -> ToolsetContext:
     return ToolsetContext(state=state, agent=object())
 
 
-def test_the_five_core_toolsets_are_collected():
-    assert sorted(BY_NAME) == ["config", "conversations", "mcp-admin", "planning", "scheduling"]
+def test_the_six_core_toolsets_are_collected():
+    assert sorted(BY_NAME) == ["capabilities", "config", "conversations", "mcp-admin", "planning", "scheduling"]
 
 
 def test_the_planning_toolset_carries_a_workflow_and_no_tools(tmp_path):
