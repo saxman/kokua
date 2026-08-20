@@ -172,7 +172,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
   build a sub-agent holding exactly the capabilities that task needs. The composed worker is
   constructed per call, runs one task, and is discarded; its tools still route through
   `[security].confirm_tools`. `[capabilities].max_depth` (default 3, `0` off) bounds how far composition
-  nests: the worker at the last level can still discover capabilities but cannot compose another. A
+  nests: at 3 a chain reaches three workers, and the last of them holds neither tool, since a
+  `compose_worker` with no way to look up capability names is useless to whatever holds it. A
   declared role is ranked above composing one in the prompt guidance, since its instructions were
   written for its job where a composed worker's are written in the moment.
 - **Guidance travels with the capability.** Each toolset carries the prompt text that makes the model use
@@ -760,7 +761,8 @@ notice on startup.
   [docs/how-to/](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace,
   declaring an agent, writing a toolset), [add a skill](docs/how-to/add-skills.md), and
   [add an MCP service](docs/how-to/add-mcp-services.md). All three converge on the same rule: a capability
-  is declared, never defaulted, and nothing reaches an agent until an `[agents.*]` table names it.
+  is declared, never defaulted, and nothing reaches an agent until an `[agents.*]` table names it,
+  composing a worker for one task included, since that takes declaring `capabilities`.
 - **Verifiable without a model.** The default test suite is mock-only: no model, no network, no keys.
   This is why the model client is injectable and the builders are free functions. Client-side page JS is
   covered by an opt-in Playwright suite (`pytest -m e2e`) driving the real `index.html` in headless

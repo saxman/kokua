@@ -190,7 +190,8 @@ Each one excludes things, and most of what is absent from Kokua is absent for a 
 rules out a hardcoded tool registry, an `if config.enable_x` switchboard, and importing a front end's
 dependencies at core-import time. Its corollary, **declared and never defaulted**, additionally rules out
 a tool an agent gets without asking, a flag that grants capability, and a code path that filters a
-declaration it disagrees with. **`config.toml` as the single source** rules out a second settings
+declaration it disagrees with; the composed worker qualified under that corollary is the one exception,
+and it is entered by declaration. **`config.toml` as the single source** rules out a second settings
 store and rules out environment variables as a settings mechanism -- the three that exist
 (`KOKUA_HOME`, `KOKUA_CONFIG`, `KOKUA_EMAIL_PASSWORD`) are exactly the ones that *cannot* live in the
 file: the file's own location, twice, and a secret. **One directory the user owns** rules out writing
