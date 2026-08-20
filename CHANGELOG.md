@@ -145,9 +145,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
   something that looks alive and cannot work.
 - **One namespace of named toolsets.** A *toolset* is one named capability an agent can declare: a name,
   a description, a `build(ctx)` returning tool callables, and optional `guidance`. Every provider lands
-  in one namespace -- AIMU's built-in tool groups plus its two stores and skills, Kokua's own `config` /
-  `conversations` / `mcp-admin` / `scheduling`, each installed plugin toolset, and each configured MCP
-  server by its (now required) `name` -- so a `tools` list says `"stocks"`, never `"mcp:stocks"`, and a
+  in one namespace -- AIMU's built-in tool groups plus its two stores and skills, Kokua's own `capabilities` /
+  `config` / `conversations` / `mcp-admin` / `scheduling`, each installed plugin toolset, and each configured
+  MCP server by its (now required) `name` -- so a `tools` list says `"stocks"`, never `"mcp:stocks"`, and a
   capability can change provider without touching an agent. The cost is paid at startup: two providers
   claiming one name is a `ConfigError` naming both. `kokua --list-toolsets` prints the whole registry
   grouped by provider, and is the discovery command for the namespace.
@@ -157,7 +157,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
   two agents declaring one toolset share one store rather than opening two, and the memory and document
   stores are opened because some agent declared them and not otherwise.
   An unknown name raises rather than being dropped, since a dropped name is a declaration silently
-  overruled.
+  overruled. The one exception is a worker composed by `compose_worker` (below), and it is entered by
+  declaration too: only an agent whose own table names `capabilities` can compose one, and what it
+  composes is one task's worker rather than an agent the config describes.
 - **`spawn_subagent(agent_type, task)`** is typed, and a non-empty `delegates_to` is the whole switch
   for it: that agent gets a delegate offering exactly the agents it names, each running on its own
   declared model (or the default) with the tools its own table declares. Delegation nesting is Kokua's rather than AIMU's `max_depth`,
@@ -165,6 +167,14 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
   be acyclic and a cycle fails startup printing the cycle as a path. Independent spawns in one turn run
   concurrently (`[assistant] concurrent_tools`, default on). A worker's gated-tool call is routed to the
   user for approval and is never run unattended.
+- **Capability discovery** (`capabilities` toolset). An agent can read the toolset registry at runtime
+  with `list_capabilities` and, when no declared sub-agent role fits a task, call `compose_worker` to
+  build a sub-agent holding exactly the capabilities that task needs. The composed worker is
+  constructed per call, runs one task, and is discarded; its tools still route through
+  `[security].confirm_tools`. `[capabilities].max_depth` (default 3, `0` off) bounds how far composition
+  nests: the worker at the last level can still discover capabilities but cannot compose another. A
+  declared role is ranked above composing one in the prompt guidance, since its instructions were
+  written for its job where a composed worker's are written in the moment.
 - **Guidance travels with the capability.** Each toolset carries the prompt text that makes the model use
   it, appended to any agent holding it, so installing a toolset brings its instructions and removing one
   takes them away. An agent's system message is its own opener (falling back to
@@ -212,12 +222,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
   message. Search matches the phrase first and falls back to all-of-these-words within one message,
   saying which it used.
 - **Agent tools are findable, and are only presentation.** Every module defining an `@aimu.tool` is a
-  toolset module, so `grep -rl '@tool' src/kokua/` finds only files under `toolsets/`. Kokua's own four
-  (`config.py`, `conversations.py`, `mcp_admin.py`, `scheduling.py`) each wrap one subsystem and export
-  the `TOOLSET` for it, indexed in `toolsets/core.py`. The subsystem underneath (`core/transcripts.py`,
-  `config/store.py`, `mcp/servers.py`, `scheduling/tasks.py`) holds only what agents and front ends both
-  need: it returns records and raises typed errors, and formats no sentence. Because about half the 27 tools the
-  shipped entry agent holds come from AIMU and cannot be grepped here at all,
+  toolset module, so `grep -rl '@tool' src/kokua/` finds only files under `toolsets/`. Kokua's own five
+  (`capabilities.py`, `config.py`, `conversations.py`, `mcp_admin.py`, `scheduling.py`) each wrap one
+  subsystem (`capabilities.py` wraps the registry itself) and export the `TOOLSET` for it, indexed in
+  `toolsets/core.py`. The subsystem underneath (`core/transcripts.py`, `config/store.py`,
+  `mcp/servers.py`, `scheduling/tasks.py`) holds only what agents and front ends both need: it returns
+  records and raises typed errors, and formats no sentence. Because about half the 30 tools the shipped
+  entry agent holds come from AIMU and cannot be grepped here at all,
   [docs/explanation/architecture.md](docs/explanation/architecture.md#how-an-agents-tools-resolve) carries
   the full inventory with the factory that builds each and the toolset it is declared as, and
   `tests/core/test_build.py` pins it as an **exact set**: adding a tool to the entry agent fails the suite

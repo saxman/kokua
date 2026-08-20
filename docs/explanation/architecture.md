@@ -64,9 +64,10 @@ src/kokua/
     context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
     agents.py      builds the registry from every provider; resolves and validates one agent
     builtin.py     AIMU's tool groups, its two stores, and skills, wrapped as toolsets
-    core.py        an index over the five TOOLSET constants in the five modules below
-    config.py, conversations.py, mcp_admin.py, planning.py, scheduling.py -- Kokua's own five, each
-                   wrapping one subsystem's logic as agent tools (planning wraps a workflow instead)
+    core.py        an index over the six TOOLSET constants in the six modules below
+    capabilities.py, config.py, conversations.py, mcp_admin.py, planning.py, scheduling.py -- Kokua's
+                   own six, each wrapping one subsystem's logic as agent tools (planning wraps a
+                   workflow instead, and capabilities wraps the registry itself)
     aimu_agents.py, image.py -- plugins, like a third party's
 ```
 
@@ -138,6 +139,14 @@ conversation's agent cannot differ from a sibling's by accident, and there is no
   a *provisioned* name nothing references (`agents.unreferenced_toolsets`, which excludes the AIMU and
   core toolsets that ship regardless), since a plugin loaded or a server connected to be unreachable is
   invisible otherwise and cost something.
+- **A composed worker is the one exception, and it is entered by declaration.** `compose_worker`
+  ([toolsets/capabilities.py](../../src/kokua/toolsets/capabilities.py)) resolves a sub-agent's tools from
+  names the model picked out of the registry rather than from a table, and runs one task on it through
+  AIMU's subagent machinery instead of `wire_agent`. Only an agent whose own `tools` names `capabilities`
+  holds that tool; the worker may not be handed `capabilities` itself, since how far composition nests is
+  `[capabilities].max_depth`'s decision (default 3, `0` off) and not the model's; and the worker's tools
+  still route through `[security].confirm_tools`. It is built per call and discarded with the call, so
+  what widens is one task's reach, never a persistent agent's.
 - **Delegation nesting is Kokua's, not AIMU's.** AIMU's `max_depth` gives every level the same worker
   menu, which cannot express a graph where each agent has its own targets, so `build_agent_specs`
   recurses over `delegates_to` and calls AIMU with `max_depth=1` at every level. `validate_agents`
@@ -152,12 +161,13 @@ At least one agent is therefore required, and `Assistant.create` refuses a confi
 
 What the *shipped* config declares is a lean entry agent: `kokua config init` gives
 `[agents.assistant]` the cross-cutting toolsets (memory, documents, skills, config, `mcp-admin`,
-scheduling, conversations, `planning`, the clock) and no domain toolset, delegating web, filesystem, and compute work
-to `researcher`, `coder`, and `generalist`. That keeps the always-on agent's tool context small, and the
-prompt tells it so: `assemble_system_message` adds the "you are a lean supervisor, you MUST delegate"
-clause only when every toolset the agent declared is `cross_cutting`. But that is a property of the
-config, not a law of the code. Give `[agents.assistant]` a `tools = [..., "compute"]` and it gets
-`execute_python`, loses the lean clause, and Kokua neither objects nor cares. The one structural
+scheduling, conversations, `planning`, `capabilities`, the clock) and no domain toolset, delegating web,
+filesystem, and compute work to `researcher`, `coder`, and `generalist`. That keeps the always-on agent's
+tool context small, and the prompt tells it so: `assemble_system_message` adds the "you are a lean
+supervisor, you MUST delegate" clause only when every toolset the agent declared is `cross_cutting`. But
+that is a property of the config, not a law of the code. Give `[agents.assistant]` a
+`tools = [..., "compute"]` and it gets `execute_python`, loses the lean clause, and Kokua neither objects
+nor cares. The one structural
 restriction is `entry_point_only`: `skills` works solely on the entry agent, because a spawned worker is a
 plain AIMU `Agent` rather than a `SkillAgent`, so skill injection would have nothing to hook.
 
@@ -202,7 +212,7 @@ tools, so the two cannot resolve different toolsets for the same names.
 
 #### The shipped entry agent's inventory
 
-All 27 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
+All 30 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
 `config.example.toml` declares, not a fixed list: a different `tools` line produces a different set.
 Roughly half come from AIMU and so are not greppable in this repository, which is why this table exists
 rather than a naming convention alone:
@@ -217,6 +227,7 @@ rather than a naming convention alone:
 | `read_config`, `update_config` | `toolsets/config.py` | `config` |
 | `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task`, `stop_scheduled_task` | `toolsets/scheduling.py` | `scheduling` |
 | `list_conversations`, `read_conversation`, `search_conversations` | `toolsets/conversations.py` | `conversations` |
+| `list_capabilities`, `compose_worker` | `toolsets/capabilities.py` | `capabilities` |
 | `spawn_subagent` | AIMU `make_async_subagent_tool` | implied by a non-empty `delegates_to` |
 
 Two conventions keep this honest. Every Kokua-side agent tool lives under `toolsets/` and nowhere else,
