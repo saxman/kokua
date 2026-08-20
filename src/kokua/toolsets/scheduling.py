@@ -171,7 +171,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         """
         try:
             schedule = _build_schedule(schedule_type, time_of_day, at_datetime, interval_seconds, weekday)
-            handle = name.strip() if name else _derive_name(prompt, {item["name"] for item in tasks.list()})
+            handle = (name or "").strip() or _derive_name(prompt, {item["name"] for item in tasks.list()})
             record, delay = tasks.create(prompt, schedule, name=handle, max_conversations=max_conversations)
         except ScheduleInvalid as exc:
             return f"Invalid schedule: {exc}"

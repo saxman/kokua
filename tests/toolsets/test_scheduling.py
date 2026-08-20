@@ -340,6 +340,15 @@ async def test_schedule_task_keeps_an_explicit_name(tmp_path):
     assert [r["name"] for r in store.load_tasks(path)] == ["hourly"]
 
 
+async def test_schedule_task_treats_a_blank_name_as_omitted(tmp_path):
+    scheduler, path, tasks, tools = _make(tmp_path)
+
+    out = await tools["schedule_task"]("Summarize my calendar", "interval", interval_seconds=60, name="   ")
+
+    assert "Scheduled task" in out
+    assert [r["name"] for r in store.load_tasks(path)] == ["summarize-my-calendar"]
+
+
 async def test_list_scheduled_tasks_shows_the_name_not_an_id(tmp_path):
     scheduler, path, tasks, tools = _make(tmp_path)
     await tools["schedule_task"]("p", "interval", interval_seconds=60, name="hourly")
