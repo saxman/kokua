@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from kokua.config import store
 from kokua.core.assistant import Assistant
 from tests.channels import FakeChannel, _config
 from tests.helpers import MockAsyncModelClient
@@ -21,15 +22,12 @@ async def test_create_registers_scheduling_tools(tmp_path):
     } <= names
 
 
-async def test_list_tasks_reports_the_persisted_registry(tmp_path):
-    from kokua import scheduling
-
+async def test_list_tasks_reports_the_persisted_config(tmp_path):
     cfg = _config(tmp_path)
-    scheduling.add(
-        cfg.scheduled_tasks_path,
+    store.write_task(
+        cfg.config_path,
+        "brief",
         {
-            "id": "t1",
-            "name": "brief",
             "prompt": "summarize inbox",
             "schedule": {"type": "interval", "seconds": 3600},
             "max_conversations": 1,
@@ -41,20 +39,17 @@ async def test_list_tasks_reports_the_persisted_registry(tmp_path):
 
     items = assistant.list_tasks()
 
-    assert len(items) == 1 and items[0]["id"] == "t1" and items[0]["name"] == "brief"
+    assert len(items) == 1 and items[0]["name"] == "brief"
 
 
 async def test_task_action_disables_a_task_through_the_shared_service(tmp_path):
-    """The panel's actions go through the one TaskService, so the registry and the live scheduler agree."""
-    from kokua import scheduling
-
+    """The panel's actions go through the one TaskService, so the file and the live scheduler agree."""
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
-    scheduling.add(
-        cfg.scheduled_tasks_path,
+    store.write_task(
+        cfg.config_path,
+        "brief",
         {
-            "id": "t1",
-            "name": "brief",
             "prompt": "p",
             "schedule": {"type": "interval", "seconds": 3600},
             "created_at": "x",
@@ -62,9 +57,9 @@ async def test_task_action_disables_a_task_through_the_shared_service(tmp_path):
         },
     )
 
-    assistant.task_action("disable", "t1")
+    assistant.task_action("disable", "brief")
 
-    assert scheduling.load(cfg.scheduled_tasks_path)[0]["enabled"] is False
+    assert store.load_tasks(cfg.config_path)[0]["enabled"] is False
     assert assistant.list_tasks()[0]["status"] == "disabled"
 
 
@@ -76,28 +71,24 @@ async def test_task_action_rejects_an_unknown_action(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
 
     with pytest.raises(ValueError):
-        assistant.task_action("drop_table", "t1")
+        assistant.task_action("drop_table", "brief")
 
 
 async def test_create_arms_persisted_tasks_and_drops_past_once(tmp_path):
-    from kokua import scheduling
-
     cfg = _config(tmp_path)
-    scheduling.add(
-        cfg.scheduled_tasks_path,
+    store.write_task(
+        cfg.config_path,
+        "o",
         {
-            "id": "stale",
-            "name": "o",
             "prompt": "p",
             "schedule": {"type": "once", "at": "2000-01-01T00:00:00"},
-            "new_session": False,
             "created_at": "x",
             "enabled": True,
         },
     )
     await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
     # Past-due one-shot was dropped during boot arming.
-    assert scheduling.load(cfg.scheduled_tasks_path) == []
+    assert store.load_tasks(cfg.config_path) == []
 
 
 async def test_the_configured_default_cap_reaches_the_task_service(tmp_path):
@@ -125,17 +116,14 @@ async def test_a_config_without_a_scheduling_section_falls_back_to_the_declared_
 
 
 async def test_task_action_stops_a_running_firing_through_the_shared_service(tmp_path):
-    """The panel's Stop button reaches the tracker the same way its other buttons reach the registry:
+    """The panel's Stop button reaches the tracker the same way its other buttons reach the file:
     through the one TaskService, so the tool and the panel cannot disagree about what stopping means."""
-    from kokua import scheduling
-
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
-    scheduling.add(
-        cfg.scheduled_tasks_path,
+    store.write_task(
+        cfg.config_path,
+        "brief",
         {
-            "id": "t1",
-            "name": "brief",
             "prompt": "p",
             "schedule": {"type": "interval", "seconds": 3600},
             "created_at": "x",
@@ -143,12 +131,12 @@ async def test_task_action_stops_a_running_firing_through_the_shared_service(tmp
         },
     )
     asked: list[str] = []
-    assistant._tasks = replace(assistant._tasks, stop_run=lambda task_id: (asked.append(task_id), (1, False))[1])
+    assistant._tasks = replace(assistant._tasks, stop_run=lambda name: (asked.append(name), (1, False))[1])
 
     assistant.task_action("stop", "brief")
 
-    assert asked == ["t1"]
-    assert scheduling.load(cfg.scheduled_tasks_path)[0]["enabled"] is True  # a stop is not a disable
+    assert asked == ["brief"]
+    assert store.load_tasks(cfg.config_path)[0].get("enabled", True) is True  # a stop is not a disable
 
 
 async def test_the_task_service_stops_runs_through_the_assistants_tracker(tmp_path):

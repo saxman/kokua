@@ -207,8 +207,8 @@ class LiveState:
     def tasks(self) -> Any:
         """The scheduled-task lifecycle, shared by the ``scheduling`` toolset and the web task panel.
 
-        One instance per process: it pairs each registry write with the matching scheduler (un)arming,
-        so two of them over one registry would let the panel disable a task the agent's copy keeps
+        One instance per process: it pairs each config write with the matching scheduler (un)arming,
+        so two of them over one config file would let the panel disable a task the agent's copy keeps
         firing. The assistant reaches for ``arm_all`` at boot whether or not any agent declares the
         scheduling toolset, since a persisted task must still fire.
         """
@@ -217,7 +217,7 @@ class LiveState:
 
         return TaskService(
             self.scheduler,
-            self.config.scheduled_tasks_path,
+            self.config.config_path,
             self.proactive,
             # A lambda rather than the value: read at fire time, so a change to the setting reaches the
             # next firing. The fallback covers a config built without ``resolve_config``, which is the
@@ -226,6 +226,9 @@ class LiveState:
                 "max_task_conversations", DEFAULT_MAX_TASK_CONVERSATIONS
             ),
             stop_run=self.stop_task_runs,
+            rename_conversations=(
+                (lambda old, new: self.conversation_book.retag_task(old, new)) if self.conversation_book else None
+            ),
         )
 
 
