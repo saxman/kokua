@@ -13,10 +13,12 @@ was filled wrongly. So ``_build_schedule`` and ``_flatten_schedule`` belong to t
 
 from __future__ import annotations
 
+import re
 from typing import Callable, Literal, Optional
 
 from aimu.tools import tool
 
+from kokua.config.store import disambiguate_name
 from kokua.scheduling.tasks import (
     STATUS_DISABLED,
     STATUS_INVALID,
@@ -80,13 +82,37 @@ def _flatten_schedule(schedule: dict) -> dict:
     }
 
 
+#: How many of a prompt's words a derived name keeps. Enough to tell two tasks apart at a glance in
+#: the sidebar and in config.toml, short enough to stay readable as a TOML table header.
+_SLUG_WORDS = 5
+
+
+def _slug(prompt: str) -> str:
+    """A readable table name derived from a prompt: its first few words, lowercased and hyphenated.
+
+    Falls back to ``"task"`` for a prompt with no alphanumeric content at all, since a task must have
+    a name to be a table key and an empty one is not a name.
+    """
+    words = re.findall(r"[a-z0-9]+", prompt.lower())[:_SLUG_WORDS]
+    return "-".join(words) or "task"
+
+
+def _derive_name(prompt: str, used: set[str]) -> str:
+    """A free name for a task scheduled without one, derived from its prompt.
+
+    Reuses the MCP path's suffixing rather than a second scheme, because both answer the same
+    question: the file needs a unique key and the caller supplied none.
+    """
+    return disambiguate_name(_slug(prompt), used)
+
+
 def _handle(record: dict) -> str:
-    """How a task is named back to the model and the user: id plus its optional name."""
-    return f"{record['id']} ({record.get('name') or 'unnamed'})"
+    """How a task is named back to the model and the user. The name is the task's identity."""
+    return record["name"]
 
 
-def _unknown(id_or_name: str) -> str:
-    return f"No scheduled task matches {id_or_name!r}."
+def _unknown(name: str) -> str:
+    return f"No scheduled task matches {name!r}."
 
 
 def _next_fire_text(status: str, seconds: Optional[float]) -> str:
@@ -136,7 +162,8 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
             at_datetime: For "once", an ISO-8601 local datetime, e.g. "2026-07-16T17:00:00".
             interval_seconds: For "interval", the number of seconds between runs (>= 1).
             weekday: For "weekly", one of mon/tue/wed/thu/fri/sat/sun.
-            name: Optional unique handle to cancel the task later.
+            name: A unique handle for the task; it becomes its table name in config.toml and shows in
+                the sidebar. Supply a short kebab-case one. Omitted, a name is derived from the prompt.
             max_conversations: How many of this task's conversations to keep. Every firing runs in its
                 own conversation; once there are more than this, the oldest are deleted. 1 means each
                 run replaces the one before it, which suits a task that fires often and whose old runs
@@ -144,7 +171,8 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         """
         try:
             schedule = _build_schedule(schedule_type, time_of_day, at_datetime, interval_seconds, weekday)
-            record, delay = tasks.create(prompt, schedule, name=name, max_conversations=max_conversations)
+            handle = name.strip() if name else _derive_name(prompt, {item["name"] for item in tasks.list()})
+            record, delay = tasks.create(prompt, schedule, name=handle, max_conversations=max_conversations)
         except ScheduleInvalid as exc:
             return f"Invalid schedule: {exc}"
         except SchedulePast:
@@ -157,7 +185,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
 
     @tool
     async def list_scheduled_tasks() -> str:
-        """List the scheduled tasks: id, name, schedule, next fire, and the start of each prompt.
+        """List the scheduled tasks: name, schedule, next fire, and the start of each prompt.
 
         Prompts are shown as previews. Use ``get_scheduled_task`` to read one in full.
         """
@@ -175,7 +203,7 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
                 preview += "..."
                 truncated_any = True
             lines.append(
-                f"- {item['id']} [{item['name'] or 'unnamed'}] {item['schedule']} "
+                f"- {item['name']} {item['schedule']} "
                 f"next {_next_fire_text(item['status'], item['next_fire_seconds'])} "
                 f"keep={_keep_text(item['max_conversations'])}: {preview}"
             )
@@ -184,42 +212,43 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         return "\n".join(lines)
 
     @tool
-    async def get_scheduled_task(id_or_name: str) -> str:
-        """Show one scheduled task in full, including its complete prompt, by id or name.
+    async def get_scheduled_task(name: str) -> str:
+        """Show one scheduled task in full, including its complete prompt, by name.
 
         Read a task with this before editing it, so ``update_scheduled_task`` can revise the existing
         prompt rather than replace it with a guess.
         """
         try:
-            record = tasks.get(id_or_name)
+            record = tasks.get(name)
         except TaskNotFound:
-            return _unknown(id_or_name)
+            return _unknown(name)
         status, seconds = tasks.next_firing(record)
         lines = [
-            f"id: {record['id']}",
-            f"name: {record.get('name') or 'unnamed'}",
+            f"name: {record['name']}",
             f"enabled: {record.get('enabled', True)}",
             f"schedule: {record['schedule']}",
             f"next fire: {_next_fire_text(status, seconds)}",
             f"keep: {_keep_text(record.get('max_conversations'), tasks.default_max_conversations())}",
             f"created_at: {record.get('created_at', 'unknown')}",
-            f"prompt: {record['prompt']}",
         ]
+        if record.get("fired_at"):
+            lines.append(f"fired_at: {record['fired_at']}")
+        lines.append(f"prompt: {record['prompt']}")
         return "\n".join(lines)
 
     @tool
     async def update_scheduled_task(
-        id_or_name: str,
+        name: str,
         prompt: Optional[str] = None,
         schedule_type: Optional[Literal["once", "interval", "daily", "weekly"]] = None,
         time_of_day: Optional[str] = None,
         at_datetime: Optional[str] = None,
         interval_seconds: Optional[float] = None,
         weekday: Optional[str] = None,
-        name: Optional[str] = None,
+        new_name: Optional[str] = None,
         max_conversations: Optional[int] = None,
     ) -> str:
-        """Edit an existing scheduled task in place, keeping its id, history, and any fields you omit.
+        """Edit an existing scheduled task in place, keeping its history and any fields you omit.
 
         Call ``get_scheduled_task`` first and pass the full revised text as ``prompt``: this replaces
         the prompt outright, it does not append to it. Omitted schedule fields keep their current
@@ -227,14 +256,15 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         only when the schedule actually changes, so editing a prompt never resets an interval countdown.
 
         Args:
-            id_or_name: The task to edit.
+            name: The task to edit, by name.
             prompt: The complete new instruction, replacing the old one.
             schedule_type: One of "once", "interval", "daily", or "weekly".
             time_of_day: For "daily" or "weekly", a 24-hour "HH:MM".
             at_datetime: For "once", an ISO-8601 local datetime.
             interval_seconds: For "interval", the number of seconds between runs (>= 1).
             weekday: For "weekly", one of mon/tue/wed/thu/fri/sat/sun.
-            name: A new unique handle for the task.
+            new_name: A new unique name for the task. Renaming moves its table in config.toml and
+                re-points the conversations it has already run, so its history follows it.
             max_conversations: How many of this task's conversations to keep; see ``schedule_task``.
         """
         schedule_args = {
@@ -250,14 +280,14 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
             # one-user rule, where nothing else can edit the record in between.
             schedule = None
             if any(value is not None for value in schedule_args.values()):
-                current = _flatten_schedule(tasks.get(id_or_name)["schedule"])
+                current = _flatten_schedule(tasks.get(name)["schedule"])
                 merged = {key: (value if value is not None else current[key]) for key, value in schedule_args.items()}
                 schedule = _build_schedule(**merged)
             record, changed = tasks.update(
-                id_or_name, prompt=prompt, schedule=schedule, name=name, max_conversations=max_conversations
+                name, prompt=prompt, schedule=schedule, new_name=new_name, max_conversations=max_conversations
             )
         except TaskNotFound:
-            return _unknown(id_or_name)
+            return _unknown(name)
         except ScheduleInvalid as exc:
             return f"Invalid schedule: {exc}"
         except SchedulePast:
@@ -275,21 +305,21 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         return summary
 
     @tool
-    async def cancel_scheduled_task(id_or_name: str) -> str:
-        """Cancel a scheduled task by its id or name."""
+    async def cancel_scheduled_task(name: str) -> str:
+        """Cancel a scheduled task by name."""
         try:
-            record = tasks.cancel(id_or_name)
+            record = tasks.cancel(name)
         except TaskNotFound:
-            return _unknown(id_or_name)
+            return _unknown(name)
         return f"Cancelled scheduled task {_handle(record)}."
 
-    def _set_enabled(id_or_name: str, enabled: bool) -> str:
+    def _set_enabled(name: str, enabled: bool) -> str:
         """Render a set_enabled outcome. Shared by the two tools below, which stay separate because the
         model needs two names and two descriptions to choose between."""
         try:
-            result = tasks.set_enabled(id_or_name, enabled)
+            result = tasks.set_enabled(name, enabled)
         except TaskNotFound:
-            return _unknown(id_or_name)
+            return _unknown(name)
         handle = _handle(result.record)
         if not result.changed:
             return f"Scheduled task {handle} is already {'enabled' if enabled else 'disabled'}."
@@ -300,20 +330,20 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         return f"Enabled scheduled task {handle}."
 
     @tool
-    async def disable_scheduled_task(id_or_name: str) -> str:
-        """Disable a scheduled task by id or name: it stops firing but stays in the registry.
+    async def disable_scheduled_task(name: str) -> str:
+        """Disable a scheduled task by name: it stops firing but stays in the registry.
 
         Re-enable it later with ``enable_scheduled_task``. Use ``cancel_scheduled_task`` to remove it.
         """
-        return _set_enabled(id_or_name, False)
+        return _set_enabled(name, False)
 
     @tool
-    async def enable_scheduled_task(id_or_name: str) -> str:
-        """Re-enable a disabled scheduled task by id or name so it resumes firing on its schedule."""
-        return _set_enabled(id_or_name, True)
+    async def enable_scheduled_task(name: str) -> str:
+        """Re-enable a disabled scheduled task by name so it resumes firing on its schedule."""
+        return _set_enabled(name, True)
 
     @tool
-    async def run_scheduled_task(id_or_name: str) -> str:
+    async def run_scheduled_task(name: str) -> str:
         """Run an existing scheduled task now, without changing its schedule.
 
         Reproduces exactly what the task's next scheduled firing would do (a conversation of its own,
@@ -322,25 +352,25 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
         separate message shortly after, not as this tool's return value. Works on a disabled task too.
         """
         try:
-            record = tasks.run_now(id_or_name)
+            record = tasks.run_now(name)
         except TaskNotFound:
-            return _unknown(id_or_name)
+            return _unknown(name)
         handle = _handle(record)
         note = " (note: this task is disabled)" if not record.get("enabled", True) else ""
         return f"Running task {handle} now; its output will appear shortly in a new conversation.{note}"
 
     @tool
-    async def stop_scheduled_task(id_or_name: str) -> str:
-        """Stop a scheduled task's run that is happening right now, by id or name.
+    async def stop_scheduled_task(name: str) -> str:
+        """Stop a scheduled task's run that is happening right now, by name.
 
         Only affects a run in flight: the task stays on its schedule and will fire again as usual, so
         use ``disable_scheduled_task`` to keep it from coming back. The stopped run keeps whatever it had
         produced so far in its own conversation.
         """
         try:
-            result = tasks.stop(id_or_name)
+            result = tasks.stop(name)
         except TaskNotFound:
-            return _unknown(id_or_name)
+            return _unknown(name)
         handle = _handle(result.record)
         if result.stopped:
             runs = "1 run" if result.stopped == 1 else f"{result.stopped} runs"
