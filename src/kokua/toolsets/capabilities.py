@@ -14,11 +14,11 @@ anyway, exactly as it picks a skill from its catalogue.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING, Callable, Mapping
 
 from aimu.tools import tool
 
-from kokua.toolsets.registry import Setting, Toolset
+from kokua.toolsets.registry import Setting, Toolset, build_tools, select
 
 if TYPE_CHECKING:
     from kokua.toolsets.context import ToolsetContext
@@ -28,6 +28,67 @@ DEFAULT_MAX_DEPTH = 3
 #: The ``[capabilities]`` section of config.toml, owned here rather than by ``AssistantConfig``. Hot
 #: because a runaway composition is something a user wants to rein in mid-session, without a restart.
 CAPABILITIES_SETTINGS: tuple[Setting, ...] = (Setting("max_depth", int, DEFAULT_MAX_DEPTH, hot=True),)
+
+DEFAULT_WORKER_NAME = "composed"
+
+DEFAULT_WORKER_INSTRUCTIONS = (
+    "You are a sub-agent composed for one task. Complete it with the tools you have been given and "
+    "return a single, complete answer."
+)
+
+# Prefixed so the string can never equal an agent name from config.toml. `select` rejects an
+# entry_point_only toolset by comparing its `agent` argument to the entry point, and the worker's name
+# is chosen by the model: an unprefixed "assistant" would resolve `skills` for a worker and then reach
+# `build` with agent=None, where the skill script tool needs a live agent. A colon cannot appear in a
+# TOML bare key, so the two namespaces cannot meet.
+_SELECT_LABEL = "composed:{name}"
+
+
+def _compose_spec(
+    name: str,
+    tools: list[str],
+    instructions: str,
+    state,
+    *,
+    compose_tool: Callable | None,
+    model: str | None,
+) -> dict:
+    """The AIMU ``agent_types`` spec for one composed worker.
+
+    Raises ``ToolsetError`` when a name does not resolve, which the calling tool turns into text rather
+    than letting it propagate: a raising tool breaks the agent's tool loop.
+
+    ``compose_tool`` is placed, not built. Whether a worker may compose another is a question about the
+    depth budget, which belongs to the tool that owns the recursion; keeping it out of here means these
+    two functions are not mutually recursive and this one stays a pure translation from names to a spec.
+    """
+    from kokua.toolsets.context import ToolsetContext
+
+    config = state.config
+    selected = select(tools, state.registry, agent=_SELECT_LABEL.format(name=name), entry_point=config.entry_agent)
+    # agent=None is what a spawned worker always gets. The one toolset needing a live agent object is
+    # entry-point-only, and `select` above has already rejected it here.
+    built = build_tools(selected, ToolsetContext(state=state, agent=None))
+    if compose_tool is not None:
+        built = built + [compose_tool]
+    opener = instructions.strip() or DEFAULT_WORKER_INSTRUCTIONS
+    spec: dict = {
+        "system_message": "".join([opener] + [toolset.guidance for toolset in selected if toolset.guidance]),
+        "tools": built,
+    }
+    if model:
+        spec["model"] = model
+    # Resolved rather than declared, for the reason `build_agent_specs` resolves them: AIMU reads a
+    # missing key as "no tier", so an undeclared worker would skip the [assistant] defaults instead of
+    # inheriting them. Both accessors fall back to those defaults for a name absent from [agents.*],
+    # which a composed worker's always is.
+    thinking = config.thinking_for(name)
+    if thinking is not None:
+        spec["thinking"] = thinking
+    generation = config.generation_for(name)
+    if generation:
+        spec["generate_kwargs"] = generation
+    return spec
 
 
 def _catalogue(registry: Mapping[str, Toolset], filter_text: str) -> str:
