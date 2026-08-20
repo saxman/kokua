@@ -433,6 +433,94 @@ def test_rename_task_is_a_no_op_for_an_absent_task(tmp_path):
     assert [r["name"] for r in config_store.load_tasks(path)] == ["morning-brief"]
 
 
+# A comment above a task's header is the user's annotation of *that* task. tomlkit does not store it
+# next to the header, so these assert on the rendered text: the whole defect they guard is placement.
+_TWO_COMMENTED_TASKS = """[scheduling]
+
+# fires the daily digest, do not disable
+[scheduling.task.digest]
+prompt = "digest"
+schedule = { type = "daily", at = "09:00" }
+
+# weekly cleanup
+[scheduling.task.cleanup]
+prompt = "cleanup"
+schedule = { type = "weekly", day = "sun", at = "03:00" }
+"""
+
+
+def _line_above_header(text: str, name: str) -> str:
+    lines = text.splitlines()
+    return lines[lines.index(f"[scheduling.task.{name}]") - 1]
+
+
+def test_rename_task_keeps_each_comment_with_its_own_task(tmp_path):
+    path = _task_config(tmp_path, _TWO_COMMENTED_TASKS)
+    config_store.rename_task(path, "digest", "morning-digest")
+    text = path.read_text(encoding="utf-8")
+    assert _line_above_header(text, "morning-digest") == "# fires the daily digest, do not disable"
+    assert _line_above_header(text, "cleanup") == "# weekly cleanup"
+    assert [r["name"] for r in config_store.load_tasks(path)] == ["morning-digest", "cleanup"]
+
+
+def test_rename_task_leaves_the_table_where_it_was(tmp_path):
+    path = _task_config(tmp_path, _TWO_COMMENTED_TASKS)
+    config_store.rename_task(path, "digest", "morning-digest")
+    text = path.read_text(encoding="utf-8")
+    assert text.index("[scheduling.task.morning-digest]") < text.index("[scheduling.task.cleanup]")
+    assert text == _TWO_COMMENTED_TASKS.replace("[scheduling.task.digest]", "[scheduling.task.morning-digest]")
+
+
+def test_remove_task_takes_its_own_comment_and_leaves_the_neighbours(tmp_path):
+    path = _task_config(tmp_path, _TWO_COMMENTED_TASKS)
+    assert config_store.remove_task(path, "digest") is True
+    text = path.read_text(encoding="utf-8")
+    assert "do not disable" not in text
+    assert _line_above_header(text, "cleanup") == "# weekly cleanup"
+
+
+def test_remove_task_takes_the_comment_of_the_last_task_too(tmp_path):
+    path = _task_config(tmp_path, _TWO_COMMENTED_TASKS)
+    assert config_store.remove_task(path, "cleanup") is True
+    text = path.read_text(encoding="utf-8")
+    assert "weekly cleanup" not in text
+    assert _line_above_header(text, "digest") == "# fires the daily digest, do not disable"
+
+
+def test_a_comment_separated_by_a_blank_line_stays_with_the_task_above_it(tmp_path):
+    """The ambiguous case, resolved by adjacency: a blank line ends a task's own comment run, so a note
+    left below a task's keys reads as that task's and goes when it goes."""
+    body = (
+        "[scheduling.task.digest]\n"
+        'prompt = "digest"\n'
+        "# a parting note about digest\n"
+        "\n"
+        "# weekly cleanup\n"
+        "[scheduling.task.cleanup]\n"
+        'prompt = "cleanup"\n'
+    )
+    path = _task_config(tmp_path, body)
+    assert config_store.remove_task(path, "digest") is True
+    text = path.read_text(encoding="utf-8")
+    assert "a parting note about digest" not in text
+    assert _line_above_header(text, "cleanup") == "# weekly cleanup"
+
+
+@pytest.mark.parametrize("name", ["a.b", "morning brief", 'say "hi"', "2nd-run", "tab\tname"])
+def test_a_task_name_needing_a_quoted_key_survives_the_round_trip(tmp_path, name):
+    """Names come from a user or the model, and TOML needs a quoted key for a dot, a space, a quote, or
+    a leading digit. tomlkit has to quote it on write and tomllib has to read it back as one key."""
+    path = _task_config(tmp_path, "[assistant]\nmodel = 'm'\n")
+    config_store.write_task(path, name, {"name": name, "prompt": "p", "schedule": {"type": "interval", "seconds": 60}})
+    assert [r["name"] for r in config_store.load_tasks(path)] == [name]
+    config_store.rename_task(path, name, "plain")
+    assert [r["name"] for r in config_store.load_tasks(path)] == ["plain"]
+    config_store.rename_task(path, "plain", name)
+    assert [r["name"] for r in config_store.load_tasks(path)] == [name]
+    assert config_store.remove_task(path, name) is True
+    assert config_store.load_tasks(path) == []
+
+
 def test_task_tables_are_locked_against_programmatic_writes():
     assert config_store.is_locked("scheduling.task.morning-brief", "prompt") is True
     assert config_store.is_locked("scheduling.task", "anything") is True

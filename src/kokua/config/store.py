@@ -27,6 +27,8 @@ from urllib.parse import urlparse
 
 import tomlkit
 from tomlkit import TOMLDocument
+from tomlkit.container import Container
+from tomlkit.items import Comment, Null, Table, Whitespace
 
 from kokua.config import file as settings
 
@@ -264,30 +266,169 @@ def write_task(path: Path, name: str, record: dict) -> None:
     _write(path, doc)
 
 
+# --- Which task a comment belongs to -----------------------------------------------------------------
+#
+# tomlkit does not store the comment lines written above a ``[header]`` next to that header. It appends
+# them to whatever precedes the header in the document: the previous sibling table's own body when
+# there is one, and the enclosing section's body when the header opens its section. So deleting or
+# re-appending a task's table leaves those lines behind, where they become the comment of whichever
+# task now occupies the slot. A comment reading "do not disable" silently retitling a different task is
+# the one failure that would contradict the point of keeping tasks in a file the user can annotate, so
+# the helpers below move a task's comment deliberately.
+#
+# The rule they implement: a task's own comment is the unbroken run of comment lines directly above its
+# header. A blank line ends the run, so a comment separated from the header by one reads as a note on
+# whatever is above it and stays where it is. That separated case is genuinely ambiguous; this is the
+# reading a person scanning the file would give it.
+#
+# They edit ``Container.body`` in place, and blank a removed slot with ``Null`` (which renders as
+# nothing) instead of shortening the list, because a container keys its lookup map by body index. What
+# they do not repair is that map's *keys*, which a rename leaves naming the old table. That is safe only
+# because rendering reads the body and nothing else, and every caller here writes and discards the
+# document immediately: look a task up again after one of these and the lookup answers from before.
+
+
+def _index_in(body: list, name: str) -> Optional[int]:
+    """Where the sub-table named ``name`` sits in ``body``, or ``None``."""
+    for index, (key, item) in enumerate(body):
+        if key is not None and key.key == name and isinstance(item, Table):
+            return index
+    return None
+
+
+def _task_sections(doc: TOMLDocument) -> list[tuple[Container, list[tuple[list, int]]]]:
+    """Every ``[scheduling.task]`` container, each with the path of ``(body, index)`` steps reaching it.
+
+    The path is what lets ``_comment_slot`` find the body a task's comment lines actually live in.
+    A hand-edited file may split the section (``[scheduling.task.a]``, some other section, then
+    ``[scheduling.task.b]``), which tomlkit keeps as separate fragments, so this collects all of them
+    rather than the first.
+    """
+    frontier: list[tuple[Container, list[tuple[list, int]]]] = [(doc, [])]
+    for segment in ("scheduling", "task"):
+        deeper: list[tuple[Container, list[tuple[list, int]]]] = []
+        for container, chain in frontier:
+            body = container.body
+            for index, (key, item) in enumerate(body):
+                if key is not None and key.key == segment and isinstance(item, Table):
+                    deeper.append((item.value, [*chain, (body, index)]))
+        frontier = deeper
+    return frontier
+
+
+def _find_task(doc: TOMLDocument, name: str) -> Optional[tuple[Container, list[tuple[list, int]]]]:
+    """The container holding task ``name``, and the path of ``(body, index)`` steps down to the task."""
+    for container, chain in _task_sections(doc):
+        index = _index_in(container.body, name)
+        if index is not None:
+            return container, [*chain, (container.body, index)]
+    return None
+
+
+def _comment_run_start(body: list, position: int) -> int:
+    """Where the run of comment lines ending at ``position`` begins.
+
+    Walks back over ``Comment`` items only, so a blank line (a ``Whitespace``) or any real content ends
+    the run. Returns ``position`` itself when nothing there is a comment.
+    """
+    start = position
+    while start > 0 and body[start - 1][0] is None and isinstance(body[start - 1][1], Comment):
+        start -= 1
+    return start
+
+
+def _comment_slot(chain: list[tuple[list, int]]) -> Optional[tuple[list, int]]:
+    """The body list and position rendered immediately above the item ``chain`` ends at.
+
+    Walks outward for as long as the item is the first thing in its container, since that is exactly
+    when its comment lines were appended to the enclosing section instead of to a previous sibling.
+    Returns ``None`` when nothing at all precedes the item, which is to say it opens the file.
+    """
+    for body, index in reversed(chain):
+        if index > 0:
+            previous = body[index - 1][1]
+            if isinstance(previous, Table):
+                return previous.value.body, len(previous.value.body)
+            return body, index
+    return None
+
+
+def _take_comment_run(body: list, position: int) -> list:
+    """Blank the comment run ending at ``position`` out of ``body`` and return its items."""
+    start = _comment_run_start(body, position)
+    taken = [item for _, item in body[start:position]]
+    for index in range(start, position):
+        body[index] = (None, Null())
+    return taken
+
+
+def _as_one_item(items: list) -> Whitespace:
+    """The run as a single item, since one body slot holds exactly one.
+
+    ``Whitespace`` is the carrier because its two behaviors are the two wanted here: tomlkit emits its
+    string verbatim, so joining the run's own rendering reproduces the original lines exactly, and it
+    does not count as content, so a super table holding one still declines to print a header of its own.
+    """
+    return Whitespace("".join(item.as_string() for item in items))
+
+
+def _delete_task(container: Container, chain: list[tuple[list, int]]) -> None:
+    """Remove the task ``chain`` ends at, taking its own comment with it and leaving the next task's.
+
+    The trailing comment run inside the deleted table is the *next* table's comment, so it is re-homed
+    into the slot the deleted table vacated, which renders in the same place. The run leading the
+    deleted table is this task's own, and is taken out of wherever tomlkit put it.
+    """
+    body, index = chain[-1]
+    key, table = body[index]
+    successor_comment = _take_comment_run(table.value.body, len(table.value.body))
+    slot = _comment_slot(chain)
+    if slot is not None:
+        _take_comment_run(*slot)
+    container.remove(key)
+    if successor_comment:
+        body[index] = (None, _as_one_item(successor_comment))
+
+
 def remove_task(path: Path, name: str) -> bool:
-    """Delete ``[scheduling.task.<name>]``. Returns whether a table was actually removed."""
+    """Delete ``[scheduling.task.<name>]`` and the comment lines above it. Returns whether one was found.
+
+    A comment directly above the header is read as this task's and leaves with it; one separated from
+    the header by a blank line stays, along with every neighbouring task's.
+    """
     doc = _load(path)
-    tables = _task_tables(doc, create=False)
-    if tables is None or name not in tables:
+    found = _find_task(doc, name)
+    if found is None:
         return False
-    del tables[name]
+    _delete_task(*found)
     _write(path, doc)
     return True
 
 
 def rename_task(path: Path, old: str, new: str) -> None:
-    """Move a task's table to a new name, contents intact. A missing ``old`` is a no-op.
+    """Rename a task's table where it stands, contents, position, and comment intact.
 
-    The renamed table moves to the end of the section, which is the cost of tomlkit having no in-place
-    key rename; nothing else about the file changes.
+    The key is swapped in place rather than the table being deleted and re-appended at the end of the
+    section, so nothing else in the file moves and no comment changes hands. ``invalidate_display_name``
+    is what makes the header print the new key: a parsed table remembers the header text it came from
+    and would otherwise keep rendering the old name.
+
+    A missing ``old`` is a no-op. An existing ``new`` is deleted first, since two tables of one name is
+    not a file that can be read back.
     """
     doc = _load(path)
-    tables = _task_tables(doc, create=False)
-    if tables is None or old not in tables:
+    found = _find_task(doc, old)
+    if found is None:
         return
-    table = tables[old]
-    del tables[old]
-    tables[new] = table
+    if new != old:
+        collision = _find_task(doc, new)
+        if collision is not None:
+            _delete_task(*collision)
+    container, chain = found
+    body, index = chain[-1]
+    _, table = body[index]
+    body[index] = (tomlkit.key(new), table)
+    table.invalidate_display_name()
     _write(path, doc)
 
 
