@@ -181,6 +181,18 @@ class ConversationBook:
         owned.sort(key=lambda s: (s.metadata.get("created_at", ""), s.metadata.get("updated_at", ""), s.key))
         return owned
 
+    def retag_task(self, old_task_id: str, new_task_id: str) -> int:
+        """Re-point every conversation a task minted at the task's new name. Returns how many moved.
+
+        A task's name is its identity, so a rename would otherwise orphan its history: the sidebar
+        stops nesting the runs under their task, and retention stops counting them against its cap.
+        """
+        sessions = self.sessions_for_task(old_task_id)
+        for session in sessions:
+            session.metadata["task_id"] = new_task_id
+            self._store.save(session)
+        return len(sessions)
+
     def list(self) -> list[dict]:
         """All conversations as {id, title, updated_at, active, task_id}, most-recently-updated first.
 

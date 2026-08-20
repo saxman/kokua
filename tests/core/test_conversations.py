@@ -426,3 +426,25 @@ async def test_a_turn_with_reasoning_off_records_that_rather_than_nothing(tmp_pa
     assistant._book.record_turn_provenance([], "", 0, assistant._active_id, thinking=False)
 
     assert assistant._store.get(assistant._active_id).metadata["thinking"] == {"0": False}
+
+
+async def test_retag_task_repoints_every_conversation_the_task_minted(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    book = assistant._book
+
+    book.new_session(title="run 1", task_id="morning-brief")
+    book.new_session(title="run 2", task_id="morning-brief")
+    book.new_session(title="unrelated")
+
+    moved = book.retag_task("morning-brief", "daily-brief")
+
+    assert moved == 2
+    assert book.sessions_for_task("morning-brief") == []
+    assert len(book.sessions_for_task("daily-brief")) == 2
+
+
+async def test_retag_task_is_zero_when_the_task_minted_nothing(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    book = assistant._book
+
+    assert book.retag_task("never-ran", "renamed") == 0
