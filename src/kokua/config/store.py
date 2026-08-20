@@ -334,15 +334,23 @@ class AppliedSetting:
 
 
 def is_locked(section: str, key: str) -> bool:
-    """Whether only a hand-edit may change this key.
+    """Whether only a hand-edit or a dedicated tool may change this key.
 
     ``[agents.*]`` is locked wholesale, and by prefix rather than by an entry in :data:`LOCKED_KEYS`,
     because a section name is per-agent (``agents.<name>``) and so cannot be enumerated ahead of time.
     It declares what every agent can do, and ``update_config`` is a tool the assistant holds, so a
     writable agent table would let the assistant widen its own reach. Granting a capability stays a
     human decision.
+
+    ``[scheduling.task.*]`` is locked by prefix for a different reason: routing, not capability. The
+    assistant may change any task, but only through the scheduling tools, because every task write has
+    to be paired with the scheduler (un)arming that accompanies it. A bare ``update_config`` write
+    would edit the file and leave the running scheduler firing the old schedule. The parent
+    ``[scheduling]`` section stays writable: its ``max_task_conversations`` is an ordinary hot setting.
     """
-    return (section, key) in LOCKED_KEYS or section == "agents" or section.startswith("agents.")
+    if (section, key) in LOCKED_KEYS:
+        return True
+    return section in ("agents", "scheduling.task") or section.startswith(("agents.", "scheduling.task."))
 
 
 def read_text(path: Path) -> str | None:

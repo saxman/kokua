@@ -191,3 +191,11 @@ async def test_update_config_says_a_startup_only_assistant_key_waits_for_a_resta
 
     assert _read(path)["assistant"][key] == value
     assert "takes effect the next time Kokua restarts" in result
+
+
+async def test_update_config_points_a_task_edit_at_the_scheduling_tools(tmp_path):
+    path, _, update_config = _tools(tmp_path)
+    result = await update_config("scheduling.task.morning-brief", "prompt", "new text")
+    assert not path.exists()  # nothing written
+    assert "update_scheduled_task" in result
+    assert "security-critical" not in result

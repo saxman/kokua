@@ -431,3 +431,10 @@ def test_rename_task_is_a_no_op_for_an_absent_task(tmp_path):
     path = _task_config(tmp_path)
     config_store.rename_task(path, "nope", "other")
     assert [r["name"] for r in config_store.load_tasks(path)] == ["morning-brief"]
+
+
+def test_task_tables_are_locked_against_programmatic_writes():
+    assert config_store.is_locked("scheduling.task.morning-brief", "prompt") is True
+    assert config_store.is_locked("scheduling.task", "anything") is True
+    # The toolset's own setting in the parent section stays writable.
+    assert config_store.is_locked("scheduling", "max_task_conversations") is False

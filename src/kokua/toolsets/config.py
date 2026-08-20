@@ -99,7 +99,12 @@ def make_config_tools(
             applied = await config_store.apply_setting(
                 config_path, section, key, value, apply_hot, table=table, extra_schema=cold_schema
             )
-        except config_store.SettingLocked:
+        except config_store.SettingLocked as locked:
+            if locked.section.startswith("scheduling.task"):
+                return (
+                    f"[{locked.section}] is a scheduled task, not a setting. Use update_scheduled_task "
+                    "to change it, so its schedule is re-armed to match."
+                )
             return (
                 f"[{section}].{key} is security-critical and can only be changed by hand-editing "
                 "config.toml, not with this tool."
