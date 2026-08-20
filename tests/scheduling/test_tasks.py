@@ -735,3 +735,49 @@ def test_a_past_due_one_shot_is_retired_at_boot_without_a_fired_stamp(tmp_path):
     assert record["enabled"] is False
     assert "fired_at" not in record
     assert scheduler.jobs == {}
+
+
+# -- renaming ----------------------------------------------------------------------------------------
+
+
+def test_renaming_a_task_moves_its_table_and_its_conversations(tmp_path):
+    renames = []
+    scheduler, path, tasks = _make(tmp_path, rename_conversations=lambda old, new: renames.append((old, new)) or 2)
+    tasks.create("p", EVERY_MINUTE, name="morning-brief")
+
+    record, changed = tasks.update("morning-brief", new_name="daily-brief")
+
+    assert changed == ["name"]
+    assert record["name"] == "daily-brief"
+    assert [r["name"] for r in store.load_tasks(path)] == ["daily-brief"]
+    assert renames == [("morning-brief", "daily-brief")]
+
+
+def test_renaming_a_task_re_arms_it_under_the_new_job_name(tmp_path):
+    scheduler, path, tasks = _make(tmp_path)
+    tasks.create("p", EVERY_MINUTE, name="old")
+
+    tasks.update("old", new_name="new")
+
+    assert "old" not in scheduler.jobs
+    assert "new" in scheduler.jobs
+
+
+def test_renaming_onto_an_existing_name_is_refused_before_anything_moves(tmp_path):
+    scheduler, path, tasks = _make(tmp_path)
+    tasks.create("a", EVERY_MINUTE, name="first")
+    tasks.create("b", EVERY_MINUTE, name="second")
+
+    with pytest.raises(DuplicateName):
+        tasks.update("first", new_name="second")
+
+    assert {r["name"] for r in store.load_tasks(path)} == {"first", "second"}
+
+
+def test_a_rename_without_a_conversation_book_still_moves_the_task(tmp_path):
+    scheduler, path, tasks = _make(tmp_path)  # rename_conversations left unset
+    tasks.create("p", EVERY_MINUTE, name="a")
+
+    tasks.update("a", new_name="b")
+
+    assert [r["name"] for r in store.load_tasks(path)] == ["b"]
