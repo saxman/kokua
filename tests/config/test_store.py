@@ -355,6 +355,30 @@ def test_write_task_patches_in_place_and_keeps_the_tables_comments(tmp_path):
     assert "enabled = false" in text
 
 
+def test_write_task_leaves_an_unchanged_inline_table_and_its_comment_alone(tmp_path):
+    """A write that only changes `enabled` must not re-render `schedule`, an unrelated key whose value
+    did not change: re-rendering would turn its inline-table form into a nested `[...schedule]` table
+    and detach the comment written directly above it. This is the defect a plain-scalar comment
+    (`prompt`, in the other patch-in-place test) cannot pin, since a scalar's rendering does not
+    change on reassignment the way a table-valued key's does."""
+    path = _task_config(
+        tmp_path,
+        "[scheduling.task.morning-brief]\n"
+        'prompt = "Summarize my calendar"\n'
+        "# only in the morning\n"
+        'schedule = { type = "daily", at = "09:00" }\n',
+    )
+    record = config_store.load_tasks(path)[0]
+    record["enabled"] = False
+    config_store.write_task(path, "morning-brief", record)
+    text = path.read_text(encoding="utf-8")
+    assert 'schedule = { type = "daily", at = "09:00" }' in text
+    assert "[scheduling.task.morning-brief.schedule]" not in text
+    lines = text.splitlines()
+    schedule_line = next(i for i, line in enumerate(lines) if line.startswith("schedule ="))
+    assert lines[schedule_line - 1] == "# only in the morning"
+
+
 def test_write_task_omits_enabled_when_true_and_drops_none(tmp_path):
     path = _task_config(tmp_path, "[assistant]\nmodel = 'm'\n")
     config_store.write_task(

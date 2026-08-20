@@ -236,6 +236,13 @@ def write_task(path: Path, name: str, record: dict) -> None:
     one of its keys survives a write the app makes for an unrelated one. ``name`` is not written into
     the table: it is the key. ``enabled`` is written only when false, since an absent key already means
     enabled and a line saying so on every task is noise.
+
+    A key whose parsed value already equals the incoming one is left untouched rather than
+    reassigned. tomlkit's own containers compare equal to the plain dict/scalar ``parse_task``
+    produces, so this is a real value comparison, not a formatting one -- but reassigning even an
+    unchanged value replaces tomlkit's *rendering* of it (an inline ``schedule = { ... }`` becomes a
+    nested ``[...schedule]`` table) and detaches any comment written directly above that line. Only a
+    key whose value actually changed needs a new rendering.
     """
     doc = _load(path)
     tables = _task_tables(doc, create=True)
@@ -249,6 +256,8 @@ def write_task(path: Path, name: str, record: dict) -> None:
         if key != "name" and value is not None and not (key == "enabled" and value is True)
     }
     for key, value in written.items():
+        if key in table and table[key] == value:
+            continue
         table[key] = value
     for stale in [key for key in table if key not in written]:
         del table[stale]
