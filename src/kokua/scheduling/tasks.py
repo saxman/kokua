@@ -249,8 +249,8 @@ class TaskService:
         """Decide what happens to a task after one of its firings finishes.
 
         Re-read the file: a cancel during the run must win over the re-arm, and any edit is picked up.
-        A recurring task re-arms, a one-shot retires, and a read failure falls back to the schedule the
-        job was armed with, so the task survives a config the user is mid-edit on.
+        A recurring task re-arms, a one-shot is deleted, and a read failure falls back to the schedule
+        the job was armed with, so the task survives a config the user is mid-edit on.
         """
         try:
             current = self._lookup(name)
@@ -266,7 +266,7 @@ class TaskService:
         if current is None:
             return
         if current["schedule"].get("type") == "once":
-            # Task 6 adds real retirement; until then this matches the JSON registry's old behavior.
+            # Deleted rather than retired: retirement in place has no reader yet.
             store.remove_task(self.config_path, name)
         elif current.get("enabled", True):  # a disable during the run wins over the re-arm
             self._arm(current)
@@ -322,23 +322,28 @@ class TaskService:
         ``max_conversations`` left as ``None`` inherits the configured default at fire time, so a task
         created before the default changed follows the new one.
 
-        Raises :class:`ScheduleInvalid`, :class:`SchedulePast`, :class:`DuplicateName`, or
-        :class:`InvalidRetention`, each before anything is written, so a rejected call leaves the file
-        untouched.
+        Raises ``ValueError`` if ``name`` is empty or whitespace-only, since a blank identity is not a
+        name a rename could ever produce, and it would still be stamped as the ``task_id`` on every
+        conversation the task mints. Also raises :class:`ScheduleInvalid`, :class:`SchedulePast`,
+        :class:`DuplicateName`, or :class:`InvalidRetention`, each before anything is written, so a
+        rejected call leaves the file untouched.
         """
         delay = self._validate(schedule)
         self._validate_retention(max_conversations)
-        if self._lookup(name) is not None:
-            raise DuplicateName(name)
+        stripped_name = name.strip()
+        if not stripped_name:
+            raise ValueError("a task's name cannot be empty")
+        if self._lookup(stripped_name) is not None:
+            raise DuplicateName(stripped_name)
         record = {
-            "name": name,
+            "name": stripped_name,
             "prompt": prompt,
             "schedule": schedule,
             "max_conversations": max_conversations,
             "created_at": datetime.now().isoformat(),
             "enabled": True,
         }
-        store.write_task(self.config_path, name, record)
+        store.write_task(self.config_path, stripped_name, record)
         self._arm(record)
         return record, delay
 
@@ -409,8 +414,9 @@ class TaskService:
     def cancel(self, name: str) -> dict:
         """Disarm and delete a task's table. Returns the record as it was. Raises :class:`TaskNotFound`.
 
-        Deletes outright, unlike a spent one-shot, which is retired in place: cancelling is an explicit
-        instruction to forget the task, not a schedule reaching its end.
+        Deletes the table outright: cancelling is an explicit instruction to forget the task, distinct
+        from a spent one-shot reaching the end of its own schedule, even though both currently delete
+        the same way.
         """
         record = self._require(name)
         self.scheduler.cancel(name)

@@ -77,6 +77,17 @@ def test_create_rejects_a_duplicate_name(tmp_path):
         tasks.create("b", EVERY_MINUTE, name="dup")
 
 
+def test_create_rejects_an_empty_or_whitespace_only_name(tmp_path):
+    """A blank name is not one a rename could ever produce, and it would still be stamped as the
+    task_id on every conversation the task mints."""
+    scheduler, path, tasks = _make(tmp_path)
+
+    for bad_name in ("", "   "):
+        with pytest.raises(ValueError):
+            tasks.create("x", EVERY_MINUTE, name=bad_name)
+    assert store.load_tasks(path) == []
+
+
 def test_a_hand_written_task_is_armed_and_readable(tmp_path):
     body = _MINIMAL + '\n[scheduling.task.by-hand]\nprompt = "p"\nschedule = { type = "interval", seconds = 90 }\n'
     scheduler, path, tasks = _make(tmp_path, body=body)
@@ -277,6 +288,26 @@ async def test_a_read_failure_mid_session_skips_one_firing_and_re_arms(tmp_path)
 
     assert calls == []  # the firing was skipped, not run against a guess
     assert "live" in scheduler.jobs  # and the task is still armed for next time
+
+
+async def test_a_read_failure_after_the_run_still_re_arms_on_the_captured_schedule(tmp_path):
+    """The other half of the read-failure story: the initial lookup succeeds (so the firing runs), and
+    it is the post-run re-read inside ``_rearm`` that hits a broken file. Without the captured schedule
+    in ``_arm``'s callback, this is exactly the moment a recurring task would go silently unarmed."""
+    calls = []
+
+    async def _fire(prompt, *, task_name=None, task_id=None, max_conversations=0):
+        calls.append(prompt)
+        path.write_text("[scheduling.task.live\nbroken", encoding="utf-8")
+
+    scheduler, path, tasks = _make(tmp_path, fire=_fire)
+    tasks.create("a", EVERY_MINUTE, name="live")
+
+    _delay, job = scheduler.jobs["live"]
+    await job()
+
+    assert calls == ["a"]  # the firing itself ran, before the file broke
+    assert "live" in scheduler.jobs  # and it re-armed on the schedule it was armed with
 
 
 async def test_fire_passes_the_name_as_the_task_id_so_its_conversation_can_be_grouped(tmp_path):
