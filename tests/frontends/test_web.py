@@ -22,10 +22,6 @@ from aimu.models import (
     StreamingContentType,
 )
 
-pytestmark = pytest.mark.xfail(
-    reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md"
-)
-
 
 class _FakeWS:
     """Captures send_json frames; stands in for a Starlette WebSocket in unit tests."""
@@ -947,6 +943,7 @@ def _seed_task(config, task_id="t1", name="brief", enabled=True):
     )
 
 
+@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
 def test_ws_sends_tasks_on_connect(tmp_path):
     """The sidebar section is populated without the page having to ask, mirroring the settings push."""
     from starlette.testclient import TestClient
@@ -962,6 +959,7 @@ def test_ws_sends_tasks_on_connect(tmp_path):
     assert frame["items"][0]["max_conversations"] == 2 and "session_id" not in frame["items"][0]
 
 
+@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
 def test_ws_get_tasks_returns_the_registry(tmp_path):
     import json
 
@@ -977,6 +975,7 @@ def test_ws_get_tasks_returns_the_registry(tmp_path):
     assert [item["id"] for item in frame["items"]] == ["t1"]
 
 
+@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
 def test_ws_task_disable_applies_and_echoes_fresh_tasks(tmp_path):
     import json
 
@@ -994,6 +993,7 @@ def test_ws_task_disable_applies_and_echoes_fresh_tasks(tmp_path):
     assert scheduling.load(config.scheduled_tasks_path)[0]["enabled"] is False
 
 
+@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
 def test_ws_task_delete_removes_the_record(tmp_path):
     import json
 
@@ -1606,6 +1606,7 @@ def test_conversation_to_frames_omits_the_notice_by_default():
     assert not any(i["type"] == "notice" for i in items)
 
 
+@pytest.mark.xfail(reason="addressed by name in a later step; see docs/superpowers/plans/2026-08-19-tasks-in-config.md")
 def test_ws_task_stop_also_refreshes_the_conversation_list(tmp_path):
     """The panel decides whether to offer Stop from the running marker on a task's conversations, so a
     stop has to refresh that list too -- unlike the other task actions, which only touch the registry."""
