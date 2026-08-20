@@ -27,6 +27,12 @@ Neither does the clock: `time` is a toolset like any other, so an agent that wan
 declares it. Kokua refuses to start with no `[agents.*]` tables at all, because an agent is the only
 route from a capability to the model.
 
+One capability reaches past the rule while staying inside it. An agent whose table names `capabilities`
+can call `compose_worker` to build a sub-agent from anything installed except `skills` (entry-agent
+only) and `capabilities` itself (which would hand the worker a fresh composition budget), chosen per
+task rather than declared: the exception is entered by declaration, and what it grants dies with the
+task rather than widening any agent your config describes.
+
 ## One namespace
 
 Ask your install what it accepts:
@@ -44,7 +50,7 @@ from (`"stocks"`, not `"mcp:stocks"`), so this command is the one place provenan
 | Provider | What is in it |
 | --- | --- |
 | **AIMU capability** | the built-in tool groups (`web`, `fs`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`), plus `memory` and `documents` over AIMU's two stores and `skills` for skill authoring |
-| **core subsystem** | Kokua's own: `config`, `conversations`, `mcp-admin`, `planning`, `scheduling` |
+| **core subsystem** | Kokua's own: `capabilities`, `config`, `conversations`, `mcp-admin`, `planning`, `scheduling` |
 | **built-in toolset** | the two `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group: `aimu_agents`, `image` |
 | **skill** | one entry per skill in your skills folder, so an individual skill is declarable by name (see [add skills](add-skills.md)) |
 | **plugin** | every other `Toolset` installed under the `kokua.toolsets` entry-point group -- i.e. one a third party's package registered |
@@ -88,7 +94,7 @@ agent = "assistant"          # the entry agent, and the root of the delegation g
 [agents.assistant]
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
-tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "time"]
+tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "capabilities", "time"]
 delegates_to = ["researcher", "report-writer"]
 
 [agents.researcher]
@@ -134,7 +140,7 @@ An agent's full system message is: its own opener, then its toolsets' guidance i
 the delegation instructions if `delegates_to` is non-empty, and finally a "you are a lean supervisor,
 you MUST delegate" clause only when *every* toolset it declares is marked cross-cutting (something an
 agent holds to manage itself: memory, documents, skills, config, `mcp-admin`, scheduling,
-conversations, `planning`, the clock). Give that agent one domain toolset and the lean clause disappears, since it
+conversations, `planning`, `capabilities`, the clock). Give that agent one domain toolset and the lean clause disappears, since it
 would then contradict the tools the model can see.
 
 Note what `cross_cutting` is **not**: it is not a permission boundary. An agent whose table says

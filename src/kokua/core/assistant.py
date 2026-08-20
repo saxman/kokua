@@ -266,13 +266,15 @@ class Assistant:
         )
         for name in unreferenced_toolsets(config, state.registry):
             logger.warning(
-                "Toolset %r is provisioned but no [agents.*] table names it in `tools`, so it reaches no agent.",
+                "Toolset %r is provisioned but no [agents.*] table names it in `tools`, so it reaches no "
+                "agent of its own, only a worker composed for a single task.",
                 name,
             )
         for name in configured_but_undeclared(config):
             logger.warning(
                 "config.toml has a [%s] section, but no agent declares the %r toolset, so its settings are "
-                "not read and any command it offers does not exist. Add %r to [agents.%s].tools.",
+                "read only if a composed worker builds it, and any command it offers does not exist. "
+                "Add %r to [agents.%s].tools.",
                 name,
                 name,
                 name,

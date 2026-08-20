@@ -1,5 +1,8 @@
 """Each core subsystem declares its own toolset next to the tools it wraps."""
 
+import subprocess
+import sys
+
 from kokua.config.schema import AssistantConfig
 from kokua.toolsets.context import LiveState, ToolsetContext
 from kokua.toolsets.core import CORE_TOOLSETS
@@ -12,8 +15,24 @@ def _ctx(tmp_path, **state_kwargs) -> ToolsetContext:
     return ToolsetContext(state=state, agent=object())
 
 
-def test_the_five_core_toolsets_are_collected():
-    assert sorted(BY_NAME) == ["config", "conversations", "mcp-admin", "planning", "scheduling"]
+def test_the_six_core_toolsets_are_collected():
+    assert sorted(BY_NAME) == ["capabilities", "config", "conversations", "mcp-admin", "planning", "scheduling"]
+
+
+def test_importing_the_core_toolsets_does_not_pull_the_preflight_surface():
+    """`aimu.aio.tools.builtin` is the AIMU surface `aimu_compat.require_aimu` probes, and this module is
+    on the import path of `resolve_config`, which runs before that preflight on invocations such as
+    `kokua skills install`. Importing the surface here would turn an AIMU checkout missing it into a bare
+    ImportError at that point, instead of the actionable message the preflight prints, so any core toolset
+    needing it must import it inside the function that calls it.
+
+    Run in a child interpreter because this one has already imported the surface: the test suite exercises
+    the composition path directly, so an in-process `sys.modules` check would say nothing about the import
+    graph.
+    """
+    probe = "import sys; import kokua.toolsets.core; print('aimu.aio.tools.builtin' in sys.modules)"
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == "False"
 
 
 def test_the_planning_toolset_carries_a_workflow_and_no_tools(tmp_path):

@@ -40,10 +40,10 @@ built-in front ends lazily, and `kokua/__init__.py` exposes `Assistant` through 
 `import kokua` never pulls in `aimu.aio` or starlette for a caller that only wanted to list plugins.
 [`toolsets/image.py`](../../src/kokua/toolsets/image.py) exists as the template.
 
-This now reaches Kokua's *own* capabilities, not just third-party ones. `config`, `conversations`,
-`mcp-admin`, `planning`, and `scheduling` are each a `Toolset` declared in a `toolsets/` module,
-indexed in [`toolsets/core.py`](../../src/kokua/toolsets/core.py). Four of the five wrap one
-subsystem's logic as agent tools; the fifth, `planning`, wraps a `Workflow` instead -- a named turn
+This now reaches Kokua's *own* capabilities, not just third-party ones. `capabilities`, `config`,
+`conversations`, `mcp-admin`, `planning`, and `scheduling` are each a `Toolset` declared in a `toolsets/`
+module, indexed in [`toolsets/core.py`](../../src/kokua/toolsets/core.py). Five of the six wrap one
+subsystem's logic as agent tools; the sixth, `planning`, wraps a `Workflow` instead -- a named turn
 strategy an agent earns by declaring the toolset exactly the way it earns a tool, resolved into the
 agent's `/`-command from that same declared `tools` list (see
 [architecture.md](architecture.md#workflows)). memory, documents, and
@@ -70,6 +70,15 @@ used to be added to every agent in code. The shared state a toolset draws on is 
 some agent declared the toolset that needs them, and not otherwise. An unknown name raises rather than being
 dropped ([`toolsets/registry.py`](../../src/kokua/toolsets/registry.py)'s `select`), since a dropped name
 is a declaration the code silently overruled.
+
+The one exception is a *composed* worker. `compose_worker`
+([`toolsets/capabilities.py`](../../src/kokua/toolsets/capabilities.py)) draws from the whole registry
+rather than from a table, which is a code path granting a capability no `[agents.*]` table declared. It is
+an exception at one level and not at the next: only an agent whose own table names `capabilities` holds the
+tool at all, so the exception is still entered by declaration. What the rule protects is a *persistent*
+agent's reach, and a worker composed for one task is not an agent the config describes. Its reach is
+constructed per call and dies with the call. The call-time gate does not move either: a composed worker's
+`execute_python` is routed to the user by `[security] confirm_tools` exactly as a declared worker's is.
 
 **`cross_cutting` is not an authorization boundary,** and reading it as one would be a false security
 conclusion. It decides exactly one sentence of prompt guidance (whether an agent is told it is a lean
@@ -181,7 +190,8 @@ Each one excludes things, and most of what is absent from Kokua is absent for a 
 rules out a hardcoded tool registry, an `if config.enable_x` switchboard, and importing a front end's
 dependencies at core-import time. Its corollary, **declared and never defaulted**, additionally rules out
 a tool an agent gets without asking, a flag that grants capability, and a code path that filters a
-declaration it disagrees with. **`config.toml` as the single source** rules out a second settings
+declaration it disagrees with; the composed worker qualified under that corollary is the one exception,
+and it is entered by declaration. **`config.toml` as the single source** rules out a second settings
 store and rules out environment variables as a settings mechanism -- the three that exist
 (`KOKUA_HOME`, `KOKUA_CONFIG`, `KOKUA_EMAIL_PASSWORD`) are exactly the ones that *cannot* live in the
 file: the file's own location, twice, and a secret. **One directory the user owns** rules out writing
