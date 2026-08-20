@@ -319,6 +319,7 @@ level = "INFO"
 # max_depth bounds how far composition may nest: at 3 a chain reaches three workers, and the last of them
 # holds neither compose_worker nor list_capabilities, since a compose_worker with no way to look up
 # capability names is useless to whatever holds it. 0 switches composing off entirely. The cap is read
-# when compose_worker is called, so changing it with update_config applies to the next composition with no
-# restart; the web settings panel does not carry it.
+# when the compose_worker an agent holds is called, so changing it with update_config applies to the next
+# composition with no restart, though a chain already running keeps the count it started with; the web
+# settings panel does not carry it.
 # max_depth = 3

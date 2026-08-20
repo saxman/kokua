@@ -5,8 +5,13 @@ from aimu.tools import tool as aimu_tool
 from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
 
 from kokua.config.schema import AgentConfig, AssistantConfig
-from kokua.toolsets import capabilities
-from kokua.toolsets.capabilities import DEFAULT_WORKER_NAME, TOOLSET, _compose_spec, make_capability_tools
+from kokua.toolsets.capabilities import (
+    DEFAULT_WORKER_NAME,
+    TOOLSET,
+    _catalogue,
+    _compose_spec,
+    make_capability_tools,
+)
 from kokua.toolsets.context import LiveState, ToolsetContext
 from kokua.toolsets.registry import Toolset, ToolsetError, register
 
@@ -60,8 +65,13 @@ class _RecordingSpawn:
 
 
 def _recording(monkeypatch) -> _RecordingSpawn:
+    """Patches the factory where it is defined, since compose_worker imports it at call time.
+
+    That import is deliberately function-level, to keep the AIMU surface the startup preflight probes
+    off the module's import path, so there is no module attribute here to replace.
+    """
     spawn = _RecordingSpawn()
-    monkeypatch.setattr(capabilities, "make_async_subagent_tool", spawn)
+    monkeypatch.setattr("aimu.aio.tools.builtin.make_async_subagent_tool", spawn)
     return spawn
 
 
@@ -189,6 +199,16 @@ def test_compose_spec_rejects_naming_this_toolset_itself(tmp_path):
     assert "max_depth" in str(excinfo.value)
 
 
+@pytest.mark.parametrize("variant", ["Capabilities", "CAPABILITIES", " capabilities "])
+def test_compose_spec_rejects_naming_this_toolset_however_it_is_spelled(tmp_path, variant):
+    """An exact-match guard would let a variant spelling fall through to `select`, which answers an
+    unresolvable name by listing the available toolsets -- `capabilities` among them, re-advertising the
+    one name the guard exists to close."""
+    with pytest.raises(ToolsetError) as excinfo:
+        _spec(_state(tmp_path), tools=[variant])
+    assert "max_depth" in str(excinfo.value)
+
+
 def test_compose_spec_inherits_the_assistant_thinking_default(tmp_path):
     """A composed worker resolves its tuning through the same `thinking_for` call an undeclared worker
     does: the name is absent from [agents.*], so the [assistant] default applies with no special case."""
@@ -215,6 +235,20 @@ def test_compose_spec_hands_the_worker_a_composition_tool_when_given_one(tmp_pat
 
 def test_compose_spec_leaves_the_worker_without_one_by_default(tmp_path):
     assert _spec(_state(tmp_path))["tools"] == []
+
+
+def test_compose_spec_inherits_the_assistant_generation_defaults(tmp_path):
+    """The omission case alone would pass for an implementation that never wrote the key at all, so the
+    inheritance itself is pinned: a composed worker reads [assistant.generation] the way any agent
+    absent from [agents.*] does."""
+    spec = _spec(_state(tmp_path, generation={"temperature": 0.2}))
+    assert spec["generate_kwargs"] == {"temperature": 0.2}
+
+
+def test_the_catalogue_labels_an_entry_whose_provider_is_unrecorded(tmp_path):
+    """`LiveState.registry` is typed as a plain dict, so a state assembled by hand carries no provider
+    map; a missing label must degrade to an unlabeled line rather than break discovery."""
+    assert _catalogue({"web": _toolset("web")}, "") == "web [unknown]: web description"
 
 
 async def test_compose_worker_runs_the_worker_under_its_given_name(tmp_path, monkeypatch):

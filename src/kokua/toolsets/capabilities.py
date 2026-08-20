@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Mapping
 
-from aimu.aio.tools.builtin import make_async_subagent_tool
 from aimu.tools import tool
 
 from kokua.toolsets.registry import Setting, Toolset, ToolsetError, build_tools, select
@@ -66,7 +65,10 @@ def _compose_spec(
     among ``tools`` is one such rejection, checked before ``select`` runs so the message is specific
     rather than a generic resolution error: it is also the escape hatch that would defeat the depth
     cap, since a worker handed a fresh ``compose_worker`` of its own would read the cap again from
-    scratch instead of spending down the budget the caller already holds.
+    scratch instead of spending down the budget the caller already holds. That check strips and
+    lowercases each name, because a variant spelling falling through to ``select`` would be answered
+    with a list of available toolsets that names ``capabilities``, re-advertising the one name this
+    refuses.
 
     ``extra_tools`` is placed, not built. Whether a worker may compose another, and look itself up in
     the catalogue to do so, is a question about the depth budget, which belongs to the tool that owns
@@ -75,7 +77,7 @@ def _compose_spec(
     """
     from kokua.toolsets.context import ToolsetContext
 
-    if TOOLSET_NAME in tools:
+    if any(requested.strip().lower() == TOOLSET_NAME for requested in tools):
         raise ToolsetError(
             f"{TOOLSET_NAME!r} cannot be given to a composed worker: how deep composition may nest is "
             "governed by [capabilities].max_depth, not by naming this toolset, and a worker already "
@@ -148,7 +150,8 @@ def _make_list_tool(state: "LiveState") -> Callable:
 
     @tool
     async def list_capabilities(filter: str = "") -> str:
-        """List every capability installed on this machine, whether or not you currently hold it.
+        """List every capability installed on this machine other than this one, whether or not you
+        currently hold it.
 
         Each line is a capability name, the kind of provider it came from, and what it does. Use this
         when a task needs something none of your own tools and none of your named sub-agent roles
@@ -213,6 +216,13 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
             spec = _compose_spec(label, tools, instructions, state, extra_tools=extra_tools, model=model)
         except ToolsetError as error:
             return f"Could not compose {label!r}: {error}"
+        # Imported here rather than at module scope because aimu.aio.tools.builtin is the AIMU surface
+        # aimu_compat.require_aimu probes, and this module is reached whenever config is resolved (the
+        # settings table collects what every installed toolset declares), which happens on invocations
+        # that run before the preflight does. A module-scope import would turn a stale AIMU into a bare
+        # ImportError on those, instead of the fix the preflight prints.
+        from aimu.aio.tools.builtin import make_async_subagent_tool
+
         spawn = make_async_subagent_tool(
             model,
             agent_types={label: spec},

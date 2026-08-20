@@ -132,7 +132,8 @@ A connected-but-unreachable server is the failure mode this design invites, so K
 startup:
 
 ```
-Toolset 'stocks' is provisioned but no [agents.*] table names it in `tools`, so it reaches no agent.
+Toolset 'stocks' is provisioned but no [agents.*] table names it in `tools`, so it reaches no agent
+of its own, only a worker composed for a single task.
 ```
 
 That warning goes to `$KOKUA_HOME/data/logs/kokua.log`. There is no console log handler, so **it does not
