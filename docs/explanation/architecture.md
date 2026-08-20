@@ -55,7 +55,8 @@ src/kokua/
                  shared context-free reviewer), planning/ (runner.py's PlanningWorkflow, prompts.py,
                  critics.py's thin wrappers over the shared reviewer)
   mcp/           servers.py (connect, attach, reconnect, runtime add/remove), auth.py (ChatOAuth)
-  scheduling/    recurrence.py (pure schedule math), registry.py (the JSON file), tasks.py (TaskService)
+  scheduling/    recurrence.py (pure schedule math), tasks.py (TaskService, over the `[scheduling.task.*]`
+                 tables in config.toml)
   channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
   frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
   toolsets/      the one namespace of named capabilities
@@ -447,7 +448,8 @@ loop, the channel mirroring, and the persist path -- loops over that one instanc
 
 Everything lives under `~/.kokua` (override with `KOKUA_HOME`). `config.toml` sits at the root;
 `data/` holds only content: `sessions.json`, `skills/`, `memory/`, `documents/`, `downloads/`,
-`images/`, `scheduled_tasks.json`.
+`images/`. Scheduled tasks are the one declared, user-editable exception to that split: they live in
+`config.toml` as `[scheduling.task.<name>]` tables, not under `data/`.
 
 ## Images
 
@@ -539,20 +541,23 @@ inside itself. Three surfaces reach it and all three go through `TaskService.sto
 button, the `stop_scheduled_task` tool, and -- because the firing is now tracked like any other turn --
 `/stop` on a channel with no conversation list, where a firing runs in the conversation being viewed.
 
-`task_action` is the seam that keeps the panel honest. Every task mutation pairs a registry write with
-the scheduler (un)arming that must accompany it, and both the agent's tools and the panel go through the
-one `scheduling.TaskService` on `LiveState`, so the two cannot drift: a front end that edited
-`scheduled_tasks.json` directly would leave the in-memory scheduler firing a task the registry calls
-disabled. What they do *not* share is wording: the service returns records and raises `TaskError`, and
+`task_action` is the seam that keeps the panel honest. Every task mutation pairs a write to the task's
+`[scheduling.task.<name>]` table with the scheduler (un)arming that must accompany it, and both the
+agent's tools and the panel go through the one `scheduling.TaskService` on `LiveState`, so the two cannot
+drift: a front end that edited config.toml's task table directly would leave the in-memory scheduler
+firing a task the table calls disabled. What they do *not* share is wording: the service returns records
+and raises `TaskError`, and
 `task_action` returns nothing, because the panel answers with a refreshed task list rather than a
 sentence. The action name arrives from the browser, so it is looked up in a table and raises for anything
 else rather than being dispatched on.
 
 Grouping a task's conversations under it happens **on the page**, not in the core. `new_session` stamps
-`metadata["task_id"]` on any conversation a firing mints (the task's id, not its name, since a name is
-optional and `update_scheduled_task` can change it) and `ConversationBook.list()` projects it, but nothing
-is filtered there -- the agent's read-only conversation tools walk `sessions()` and still see every
-conversation. The page nests a conversation under a task when its `task_id` matches a task *currently in
+`metadata["task_id"]` on any conversation a firing mints, with the task's name -- its identity -- so a
+rename has to move that stamp too: `update_scheduled_task`'s `new_name` path calls
+`ConversationBook.retag_task` to re-point every conversation the old name owned before the table itself
+is renamed, which is what lets the sidebar keep a task's history nested under it across a rename.
+`ConversationBook.list()` projects `task_id`, but nothing is filtered there -- the agent's read-only
+conversation tools walk `sessions()` and still see every conversation. The page nests a conversation under a task when its `task_id` matches a task *currently in
 the list*. Requiring the task to be present is what makes
 deleting a task return its conversations to the chat list instead of hiding them: keying on `task_id`
 alone would leave an orphan unreachable from the sidebar. Because the nesting is client-side, a firing's
@@ -565,8 +570,8 @@ decorates each row with `running` from the `TurnTracker` (decorated there rather
 `ConversationBook.list`, which has no view of turn bookkeeping and needs none), and the page offers Stop on
 a task when any conversation nested under it is running. Nothing about
 running state reaches the `tasks` frame, so the core still never sends one -- which matters because the
-registry does not change when a run starts or stops, and a `tasks` frame is only ever a reply to something
-the page asked for.
+task's table does not change when a run starts or stops, and a `tasks` frame is only ever a reply to
+something the page asked for.
 
 **Retention.** Every firing mints its own conversation, and a task's `max_conversations` decides how
 many survive: `1` replaces the previous run, `0` keeps them all, and a record with no cap of its own
@@ -588,7 +593,7 @@ a turn's user message: a firing that raised before its user turn reached the tra
 would not build -- has no turn to key one to, and only its empty transcript says so. That the cap is enforced
 at a firing rather than at an edit is what makes lowering one non-destructive and leaves a disabled task
 whole. This is also why the record needs no `session_id`: nothing reuses a conversation, so a firing
-writes nothing back to the registry.
+writes nothing back to the task's table.
 
 A `tool` frame carries what the call returned as well as what it was asked to do (`response`, added to
 AIMU's base frame), because AIMU yields `TOOL_CALLING` only once the call has been dispatched. An error,

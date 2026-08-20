@@ -264,6 +264,26 @@ level = "INFO"
 # Like [planning] below, this section exists because the `scheduling` toolset declares it.
 # max_task_conversations = 3
 
+# Scheduled tasks are declared one table per task, and the table name is the task's identity: it is
+# what the sidebar shows, what `cancel_scheduled_task` takes, and what is stamped on every conversation
+# the task runs in. The assistant writes this section too, through its scheduling tools, which is why
+# `update_config` refuses it: a task write has to be paired with the scheduler arming that goes with it.
+#
+# schedule is one of:
+#   { type = "once",     at = "2026-08-20T09:00:00" }   # an ISO-8601 local datetime
+#   { type = "interval", seconds = 3600 }
+#   { type = "daily",    at = "09:00" }
+#   { type = "weekly",   day = "fri", at = "16:00" }     # day is mon/tue/wed/thu/fri/sat/sun
+#
+# A fired one-shot is not deleted: it is left here with `enabled = false` and a `fired_at` stamp, so
+# the run stays on the record and re-running it is a one-character edit.
+#
+# [scheduling.task.morning-brief]
+# prompt = "Summarize my calendar and any unread mail, and flag anything that needs a reply today."
+# schedule = { type = "daily", at = "09:00" }
+# enabled = true              # omit to leave it enabled; written as false when disabled or retired
+# max_conversations = 3       # omit to follow [scheduling].max_task_conversations above
+
 [planning]
 # Deep planning is a toolset: [agents.<name>].tools must list "planning" for the "/plan <task>" command
 # (and the web UI's Plan toggle) to exist at all. It drafts an explicit plan (which tools/skills/MCP

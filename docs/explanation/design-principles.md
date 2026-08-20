@@ -103,8 +103,18 @@ retired in favour of the file itself. Four things in the file are hand-edit only
 `[email] to` (the locked recipient), `[paths] data_dir` (where all state lives), and the whole
 `[agents.*]` section. That last one is locked by section prefix rather than by a key entry, since agent
 names cannot be enumerated ahead of time, and it is locked for the obvious reason: `update_config` is a
-tool the assistant holds, so a writable agent table would let the assistant widen its own reach. One of
-Kokua's own runtime-mutable settings is **one entry** in
+tool the assistant holds, so a writable agent table would let the assistant widen its own reach.
+
+`config.toml` also holds Kokua's declared scheduled tasks, one `[scheduling.task.<name>]` table per
+task, and `[scheduling.task.*]` is app-written the same way `[[mcp.server]]` is: the assistant's own
+scheduling tools write it, so a hand-written or hand-edited task is still just TOML with the app's
+comments preserved. It is locked against `update_config` too, but for a different reason than
+`[agents.*]`: not capability but routing. A task write has to be paired with the scheduler (un)arming
+that accompanies it, and a bare `update_config` write would land the TOML change while leaving the
+running scheduler firing (or not firing) the old schedule. The parent `[scheduling]` section stays
+ordinary and hot-appliable; only the per-task tables route through the scheduling tools instead.
+
+One of Kokua's own runtime-mutable settings is **one entry** in
 [`config/table.py`](../../src/kokua/config/table.py)'s `CORE_RUNTIME_SETTINGS`; a toolset's is one
 `Setting` on the toolset itself, in its own `[<name>]` section. `SettingsTable`, built at startup from
 both, is what drives the TOML schema, the panel sanitizer, the hot-apply set, the live-apply loop, the
@@ -124,6 +134,11 @@ locations -- the root, `data/`, and `config.toml` -- because those are the only 
 a single `[paths] data_dir` override moves all of them; adding a leaf function to `config/paths.py` would
 silently bypass that, which is why the module docstring says not to. `tests/conftest.py` redirecting
 `KOKUA_HOME` to a temp directory is sufficient isolation for the entire suite.
+
+Scheduled tasks are the one stated exception to "all state under `data/`": a `[scheduling.task.<name>]`
+table lives in `config.toml` itself, not in `data/`. A task is a declaration, the same kind of thing an
+`[agents.*]` table or `[[mcp.server]]` entry already is, and a user should be able to write and comment
+one the same way -- which content under `data/` is not meant to be.
 
 ## 5. A single user, one process, with concurrency rules written down
 

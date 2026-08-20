@@ -220,10 +220,6 @@ class AssistantConfig:
         return self.data_dir / "images"
 
     @property
-    def scheduled_tasks_path(self) -> Path:
-        return self.data_dir / "scheduled_tasks.json"
-
-    @property
     def logs_path(self) -> Path:
         """Directory for the rotating diagnostic log (kokua.log). See logging_setup.configure_logging."""
         return self.data_dir / "logs"

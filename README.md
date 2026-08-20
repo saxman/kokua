@@ -88,7 +88,7 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 
 ### Proactive work
 
-- **[Scheduled tasks](src/kokua/scheduling/).** Ask for something on a schedule ("every weekday at 9am, summarize my calendar") and the assistant persists it to `data/scheduled_tasks.json` via its own `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` tools; it survives restarts. Schedules are one-shot, interval, daily, or weekly.
+- **[Scheduled tasks](src/kokua/scheduling/).** Ask for something on a schedule ("every weekday at 9am, summarize my calendar") and the assistant persists it as a `[scheduling.task.<name>]` table in `config.toml` via its own `schedule_task` / `list_scheduled_tasks` / `cancel_scheduled_task` tools; it survives restarts. A task's table can also be hand-written or edited directly in `config.toml`, comments and all. Schedules are one-shot, interval, daily, or weekly.
 - **Where a task runs, and how much it keeps.** Every firing opens its own chat, nested under the task in the sidebar. Ask for a number and that task keeps only its newest N runs, deleting the older ones as it goes; 1 means each run replaces the last, 0 keeps everything. A task that names no number follows `[scheduling] max_task_conversations` (3 by default). Nothing is deleted until a firing succeeds, so a failed run never costs you the last good one.
 - **Pause, resume, dry-run.** `disable_scheduled_task` stops a task firing while keeping it; `enable_scheduled_task` resumes it; `run_scheduled_task` fires it now without touching its schedule, reproducing exactly what the scheduled run would do. Scheduled runs auto-deny the approval-gated tools, since nobody is present to approve them.
 - **Stop a run that is under way.** A task taking too long, or one you fired by mistake, can be stopped from its row in the sidebar or by asking in chat (`stop_scheduled_task`). That ends the run, not the task: it stays on its schedule and fires again as usual, and whatever the run produced before you stopped it stays in its own chat.
@@ -135,7 +135,7 @@ tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "
 delegates_to = ["researcher", "coder", "generalist"]
 ```
 
-`config.toml` is also **app-written**: the settings panel, the assistant's own `update_config` tool, and a runtime `add_mcp_server` all write back to it, with your comments preserved. There is no second settings store. Four things in it are hand-edit only and refused by `update_config`: `[security] confirm_tools`, `[email] to`, `[paths] data_dir`, and the whole `[agents.*]` section, so which capability an agent holds stays your decision.
+`config.toml` is also **app-written**: the settings panel, the assistant's own `update_config` tool, and a runtime `add_mcp_server` all write back to it, with your comments preserved. There is no second settings store. Four things in it are hand-edit only and refused by `update_config`: `[security] confirm_tools`, `[email] to`, `[paths] data_dir`, and the whole `[agents.*]` section, so which capability an agent holds stays your decision. `[scheduling.task.*]` is refused too, but for a different reason: the assistant writes scheduled tasks through its own scheduling tools instead, because a bare `update_config` write would edit the file without arming or disarming the scheduler to match.
 
 ### State
 
@@ -151,10 +151,9 @@ All state lives under `~/.kokua` (override the root with `$KOKUA_HOME`). The roo
     documents/           # saved documents
     downloads/           # generated files (e.g. PDFs), served at /download
     images/              # uploaded + generated images, served at /images
-    scheduled_tasks.json # durable scheduled tasks
 ```
 
-Point `data/` elsewhere with `[paths] data_dir`. Nothing is written to your working directory or inside the installed package.
+Point `data/` elsewhere with `[paths] data_dir`. Nothing is written to your working directory or inside the installed package. Scheduled tasks are the one exception to "content lives under `data/`": each is a `[scheduling.task.<name>]` table in `config.toml` itself, since a task is a declaration you should be able to write and comment like any other setting.
 
 ## Extending Kokua
 
@@ -205,7 +204,7 @@ core/         the transport-agnostic runtime: assistant, conversations, turns, i
 config/       the settings schema, the TOML file, the writers, the runtime-settings table
 workflows/    the workflow protocol (the two tiers) and planning/, the /plan pipeline it carries
 mcp/          remote MCP servers and their OAuth
-scheduling/   recurrence math, the durable task registry, the agent-facing tools
+scheduling/   recurrence math, the durable task lifecycle over config.toml, the agent-facing tools
 channels/     ChannelUI plus the concrete channels
 frontends/    cli, web        -- registered as plugins, exactly like a third party's would be
 toolsets/     aimu_agents, image

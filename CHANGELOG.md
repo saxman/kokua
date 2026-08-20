@@ -290,13 +290,23 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
 
 ### Proactive work: scheduled tasks
 
-- Durable, agent-managed tasks that fire an unprompted turn when due, persisted to
-  `data/scheduled_tasks.json` and re-armed at startup. Schedules are one-shot, interval, daily, or
-  weekly (no cron dependency).
+- Durable, agent-managed tasks that fire an unprompted turn when due, declared as
+  `[scheduling.task.<name>]` tables in `config.toml` and re-armed at startup. A task's **name** is its
+  identity: it is required, unique, the table key, and the handle every scheduling tool and the sidebar
+  use in place of an internal id. A table can be hand-written or hand-edited, comments and all, the same
+  way an `[[mcp.server]]` entry can; a malformed one is rejected at startup, naming the table rather than
+  becoming a task that silently never fires. Schedules are one-shot, interval, daily, or weekly (no cron
+  dependency).
 - Managed by the assistant through `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`,
   `update_scheduled_task`, `cancel_scheduled_task`, `disable_scheduled_task` / `enable_scheduled_task`
   (pause without losing the task), `run_scheduled_task` (run one now, reproducing a real firing, so
   a task can be dry-run before it is due), and `stop_scheduled_task` (end a run that is happening now).
+  `[scheduling.task.*]` is refused by `update_config`, even though the assistant writes it: a task
+  write has to be paired with the scheduler (un)arming that accompanies it, which a bare config write
+  would skip, so the scheduling tools are the only path in.
+- **A fired one-shot is retired in place, not deleted.** Its table stays, with `enabled = false` and a
+  `fired_at` stamp, so the run stays on the record and re-running it is a one-character edit.
+  `cancel_scheduled_task` still removes the table outright.
 - **A run in flight can be stopped**, from the task row in the web sidebar, by asking in chat, or with
   `/stop` on a channel where a firing runs in the conversation being viewed. Stopping ends that run
   only: the task stays on its schedule and fires again as usual, so a task that should not come back is
@@ -305,12 +315,14 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   is evicted before a report). A firing is never stopped from inside itself, which would cut its own turn
   off mid-tool-call. This is also why a firing runs in a child task: cancelling the scheduler's job
   would have disarmed the schedule as a side effect.
-- `update_scheduled_task` edits any subset of a task's fields in place, keeping its id, `created_at`,
-  and retention cap, and re-deriving the schedule fields you omit, so changing a weekly task's
-  time keeps its day. It re-arms only when the schedule actually changes, so editing a prompt never
-  restarts an interval countdown, and it rejects an invalid schedule, a past one-shot, or a name another
-  task holds without writing anything.
-- **Every firing runs in its own conversation**, stamped with the task's id, and a per-task
+- `update_scheduled_task` edits any subset of a task's fields in place, keeping its `created_at` and
+  retention cap, and re-deriving the schedule fields you omit, so changing a weekly task's time keeps
+  its day. It re-arms only when the schedule actually changes, so editing a prompt never restarts an
+  interval countdown, and it rejects an invalid schedule, a past one-shot, or a name another task
+  holds without writing anything. `new_name` renames a task: the rename moves its table in
+  `config.toml` and re-points the conversations it has already run, so its history follows it under
+  the new name.
+- **Every firing runs in its own conversation**, stamped with the task's name, and a per-task
   `max_conversations` says how many of them survive: `1` means each run replaces the one before it,
   `0` keeps every run forever, and a task that names no cap follows `[scheduling]
   max_task_conversations` (default 3), read at fire time so a change reaches the next firing without a
@@ -335,18 +347,25 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   conversation list so neither can crowd the other out. Creating and editing tasks stays in chat, where
   the model turns a natural-language schedule into a validated one.
 - The panel's actions and the agent's tools share one implementation (`scheduling.TaskService`), so a
-  registry write and the scheduler (un)arming that must accompany it can never come apart. They do not
+  table write and the scheduler (un)arming that must accompany it can never come apart. They do not
   share wording: the service returns records, and the panel and the model each phrase their own. The
   action name arrives from the browser and is allowlisted rather than dispatched on.
 - **Each task's conversations are nested under it** in that section and left out of the chat list, so
   the chat list holds only conversations you started. A conversation records the task that minted it
-  (`task_id` in its metadata), which is the durable link a task name is not. Grouping happens on the
+  (`task_id` in its metadata, set to the task's name -- its identity -- so a rename re-points every
+  conversation the old name owned before the table itself is renamed). Grouping happens on the
   page, not in the core: nothing is filtered out of `ConversationBook.list()`, so the agent's
   conversation tools still see every conversation. A conversation whose task has been deleted falls back
   into the chat list rather than becoming unreachable. Each nested row carries its own delete, like a
   chat row: a task that mints a conversation per firing accumulates them here, and the run being viewed
   is deletable too. Deleting the conversation a `target="task"` record remembers is safe -- its next
   firing mints a fresh one rather than failing.
+- **Breaking, and with no migration.** Scheduled tasks used to persist as JSON records in
+  `data/scheduled_tasks.json`, keyed by an internal uuid; they now live in `config.toml` as
+  `[scheduling.task.<name>]` tables, keyed by name. An existing `data/scheduled_tasks.json` is ignored
+  and left on disk rather than imported, and a conversation stamped with an old uuid `task_id` stops
+  grouping under its task, since nothing in `config.toml` matches that id any more. Re-create any tasks
+  you want to keep, or copy them into `config.toml` by hand.
 
 ### Workflows: a pluggable turn strategy
 
@@ -567,9 +586,10 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   `model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"`.
 - **All state under one directory you own**: `$KOKUA_HOME`, default `~/.kokua`, replacing the example's
   reliance on `aimu.paths.output`. `data/` holds content only -- conversations, memory, documents,
-  `images/`, `downloads/`, `logs/`, `scheduled_tasks.json`. Images and downloads live in their own
-  folders so the binary files never disturb the `DocumentStore`, which scans the documents folder as
-  text.
+  `images/`, `downloads/`, `logs/`. Images and downloads live in their own folders so the binary files
+  never disturb the `DocumentStore`, which scans the documents folder as text. Scheduled tasks are the
+  one declared exception: they live in `config.toml` itself, as `[scheduling.task.<name>]` tables, not
+  under `data/`.
 
 ### MCP
 
