@@ -22,7 +22,12 @@ from aimu.tools import tool
 from kokua.toolsets.registry import Setting, Toolset, ToolsetError, build_tools, select
 
 if TYPE_CHECKING:
+    from kokua.config.schema import AssistantConfig
     from kokua.toolsets.context import LiveState, ToolsetContext
+
+#: The registry name this toolset is installed under. Defined once so `TOOLSET` and the guard in
+#: `_compose_spec` that refuses to hand a worker this name cannot drift apart.
+TOOLSET_NAME = "capabilities"
 
 DEFAULT_MAX_DEPTH = 3
 
@@ -51,27 +56,38 @@ def _compose_spec(
     instructions: str,
     state: "LiveState",
     *,
-    compose_tool: Callable | None,
+    extra_tools: list | None,
     model: str | None,
 ) -> dict:
     """The AIMU ``agent_types`` spec for one composed worker.
 
     Raises ``ToolsetError`` when a name does not resolve, which the calling tool turns into text rather
-    than letting it propagate: a raising tool breaks the agent's tool loop.
+    than letting it propagate: a raising tool breaks the agent's tool loop. Naming this toolset itself
+    among ``tools`` is one such rejection, checked before ``select`` runs so the message is specific
+    rather than a generic resolution error: it is also the escape hatch that would defeat the depth
+    cap, since a worker handed a fresh ``compose_worker`` of its own would read the cap again from
+    scratch instead of spending down the budget the caller already holds.
 
-    ``compose_tool`` is placed, not built. Whether a worker may compose another is a question about the
-    depth budget, which belongs to the tool that owns the recursion; keeping it out of here means these
-    two functions are not mutually recursive and this one stays a pure translation from names to a spec.
+    ``extra_tools`` is placed, not built. Whether a worker may compose another, and look itself up in
+    the catalogue to do so, is a question about the depth budget, which belongs to the tool that owns
+    the recursion; keeping it out of here means these two functions are not mutually recursive and this
+    one stays a pure translation from names to a spec.
     """
     from kokua.toolsets.context import ToolsetContext
 
+    if TOOLSET_NAME in tools:
+        raise ToolsetError(
+            f"{TOOLSET_NAME!r} cannot be given to a composed worker: how deep composition may nest is "
+            "governed by [capabilities].max_depth, not by naming this toolset, and a worker already "
+            "receives its own discovery and composition tools when depth remains."
+        )
     config = state.config
     selected = select(tools, state.registry, agent=_SELECT_LABEL.format(name=name), entry_point=config.entry_agent)
     # agent=None is what a spawned worker always gets. The one toolset needing a live agent object is
     # entry-point-only, and `select` above has already rejected it here.
     built = build_tools(selected, ToolsetContext(state=state, agent=None))
-    if compose_tool is not None:
-        built = built + [compose_tool]
+    if extra_tools:
+        built = built + list(extra_tools)
     opener = instructions.strip() or DEFAULT_WORKER_INSTRUCTIONS
     spec: dict = {
         "system_message": "".join([opener] + [toolset.guidance for toolset in selected if toolset.guidance]),
@@ -93,32 +109,57 @@ def _compose_spec(
 
 
 def _catalogue(registry: Mapping[str, Toolset], filter_text: str) -> str:
-    """One line per registry entry: name, provider, description, sorted by name.
+    """One line per registry entry except this toolset's own, sorted by name: name, provider,
+    description.
 
     ``providers`` is read defensively because ``LiveState.registry`` is typed as a plain dict and a
     state built by hand may carry one; a missing provider map should degrade to an unlabeled line
-    rather than break discovery.
+    rather than break discovery. This toolset's own entry is left out: the agent reading the catalogue
+    already holds it, so listing it back is noise, and naming it to ``compose_worker`` only earns a
+    rejection.
     """
     providers = getattr(registry, "providers", {})
     needle = filter_text.strip().lower()
     lines = [
         f"{name} [{providers.get(name, 'unknown')}]: {registry[name].description}"
         for name in sorted(registry)
-        if not needle or needle in name.lower() or needle in registry[name].description.lower()
+        if name != TOOLSET_NAME
+        and (not needle or needle in name.lower() or needle in registry[name].description.lower())
     ]
     if not lines:
         return f"No capability matches {filter_text!r}. Call list_capabilities with no filter to see them all."
     return "\n".join(lines)
 
 
-def _max_depth(config) -> int:
+def _max_depth(config: "AssistantConfig") -> int:
     """The configured composition cap, floored at zero.
 
     Read from ``toolset_settings`` at call time rather than closed over at build time: ``build`` runs
     once per conversation agent, so a build-time read would leave a hot change stranded until restart.
     """
-    configured = config.toolset_settings.get("capabilities", {}).get("max_depth", DEFAULT_MAX_DEPTH)
+    configured = config.toolset_settings.get(TOOLSET_NAME, {}).get("max_depth", DEFAULT_MAX_DEPTH)
     return max(0, int(configured))
+
+
+def _make_list_tool(state: "LiveState") -> Callable:
+    """``list_capabilities``, factored out so the real agent and a composed worker with depth remaining
+    share one definition rather than each holding a copy that could drift.
+    """
+
+    @tool
+    async def list_capabilities(filter: str = "") -> str:
+        """List every capability installed on this machine, whether or not you currently hold it.
+
+        Each line is a capability name, the kind of provider it came from, and what it does. Use this
+        when a task needs something none of your own tools and none of your named sub-agent roles
+        cover, then pass the names you need to compose_worker.
+
+        Args:
+            filter: Optional. Show only capabilities whose name or description contains this text.
+        """
+        return _catalogue(state.registry, filter)
+
+    return list_capabilities
 
 
 def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model: str | None) -> Callable:
@@ -130,7 +171,11 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
 
     The recursion lives here and only here. Since a composed worker refers to no declared agent, there
     is no graph for ``validate_agents`` to prove acyclic, so this decrement is the whole termination
-    argument, and it is a closure variable precisely so nothing the model writes can influence it.
+    argument, and it is a closure variable precisely so nothing the model writes can influence it. That
+    is also why a worker is never handed this toolset's own name to select on its own behalf: naming it
+    would let a worker rebuild a fresh, full-budget ``compose_worker`` of its own, bypassing the count
+    entirely; ``_compose_spec`` refuses that name outright, and a worker that still has budget is
+    instead handed the pair of tools directly, below.
     """
 
     @tool
@@ -138,8 +183,8 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
         """Build a sub-agent with exactly the capabilities a task needs, run one task on it, and return
         its answer.
 
-        Prefer spawn_subagent and one of its named roles. Use this only when no role fits: it costs an
-        extra step, and a declared role carries instructions written for its job. Call
+        If a named sub-agent role fits, prefer spawn_subagent with it: it costs one fewer step and
+        carries instructions already written for its job. Use this when no role fits. Call
         list_capabilities first to see what the names are. The worker shares no history with you, so
         the task must be self-contained, and it is discarded afterwards.
 
@@ -158,15 +203,14 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
             )
         depth = _max_depth(state.config) if remaining_depth is None else remaining_depth
         if depth <= 0:
-            return (
-                "Composing a worker is switched off: [capabilities].max_depth is 0. Use spawn_subagent "
-                "and one of your named roles, or ask the user to raise the setting."
-            )
-        # A call spends one, so the worker gets a tool of its own only while a composition would remain
-        # after this one.
+            return "Composing a worker is switched off: [capabilities].max_depth is 0. Ask the user to raise it."
+        # A call spends one, so the worker gets discovery and a composition tool of its own only while a
+        # composition would remain after this one; the two are handed together because a compose_worker
+        # with no way to look up names is useless to whatever holds it.
         nested = _make_compose_tool(state, remaining_depth=depth - 1, model=model) if depth > 1 else None
+        extra_tools = [_make_list_tool(state), nested] if nested is not None else None
         try:
-            spec = _compose_spec(label, tools, instructions, state, compose_tool=nested, model=model)
+            spec = _compose_spec(label, tools, instructions, state, extra_tools=extra_tools, model=model)
         except ToolsetError as error:
             return f"Could not compose {label!r}: {error}"
         spawn = make_async_subagent_tool(
@@ -187,25 +231,11 @@ def make_capability_tools(ctx: "ToolsetContext") -> list:
     # is the fallback `make_delegation_tool` takes, for the same reason: with no default set, resolving
     # per composition would pick a model afresh each time instead of staying on the one in use.
     model = state.config.model or getattr(getattr(ctx.agent, "model_client", None), "model", None)
-
-    @tool
-    async def list_capabilities(filter: str = "") -> str:
-        """List every capability installed on this machine, whether or not you currently hold it.
-
-        Each line is a capability name, the kind of provider it came from, and what it does. Use this
-        when a task needs something none of your own tools and none of your named sub-agent roles
-        cover, then pass the names you need to compose_worker.
-
-        Args:
-            filter: Optional. Show only capabilities whose name or description contains this text.
-        """
-        return _catalogue(state.registry, filter)
-
-    return [list_capabilities, _make_compose_tool(state, remaining_depth=None, model=model)]
+    return [_make_list_tool(state), _make_compose_tool(state, remaining_depth=None, model=model)]
 
 
 TOOLSET = Toolset(
-    name="capabilities",
+    name=TOOLSET_NAME,
     description="Discover every installed capability and compose a sub-agent from the ones a task needs.",
     build=make_capability_tools,
     settings=CAPABILITIES_SETTINGS,

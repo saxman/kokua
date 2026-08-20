@@ -36,8 +36,8 @@ async def _sample_tool() -> str:
     return "ok"
 
 
-def _spec(state, *, name="quote-checker", tools=("web",), instructions="Check the quote.", compose_tool=None):
-    return _compose_spec(name, list(tools), instructions, state, compose_tool=compose_tool, model="ollama:test")
+def _spec(state, *, name="quote-checker", tools=("web",), instructions="Check the quote.", extra_tools=None):
+    return _compose_spec(name, list(tools), instructions, state, extra_tools=extra_tools, model="ollama:test")
 
 
 class _RecordingSpawn:
@@ -65,7 +65,7 @@ def _recording(monkeypatch) -> _RecordingSpawn:
     return spawn
 
 
-def _compose(state, monkeypatch, **kwargs):
+def _compose(state, monkeypatch):
     spawn = _recording(monkeypatch)
     return _tools_by_name(state)["compose_worker"], spawn
 
@@ -93,6 +93,15 @@ async def test_list_capabilities_says_so_when_nothing_matches(tmp_path):
     listing = await _tools_by_name(_state(tmp_path))["list_capabilities"](filter="zzz")
     assert "zzz" in listing
     assert "No capability" in listing
+
+
+async def test_list_capabilities_omits_its_own_entry(tmp_path):
+    """The agent reading the catalogue already holds this toolset; listing it back is noise, and it
+    would invite naming it to compose_worker, which only earns a rejection."""
+    sources = [("core", [_toolset("capabilities")]), ("AIMU capability", [_toolset("web")])]
+    listing = await _tools_by_name(_state(tmp_path, sources=sources))["list_capabilities"]()
+    assert "capabilities [" not in listing
+    assert "web [" in listing
 
 
 async def test_list_capabilities_never_builds_a_toolset(tmp_path):
@@ -171,6 +180,15 @@ def test_compose_spec_rejects_an_entry_point_only_capability_even_when_named_aft
         _spec(_state(tmp_path, sources=sources), name="assistant", tools=["skills"])
 
 
+def test_compose_spec_rejects_naming_this_toolset_itself(tmp_path):
+    """Naming `capabilities` among `tools` would let a worker rebuild a fresh, full-budget
+    `compose_worker` of its own, bypassing the depth count the caller already holds; the rejection is
+    checked ahead of `select`, so it fires whether or not `capabilities` is even installed here."""
+    with pytest.raises(ToolsetError) as excinfo:
+        _spec(_state(tmp_path), tools=["capabilities"])
+    assert "max_depth" in str(excinfo.value)
+
+
 def test_compose_spec_inherits_the_assistant_thinking_default(tmp_path):
     """A composed worker resolves its tuning through the same `thinking_for` call an undeclared worker
     does: the name is absent from [agents.*], so the [assistant] default applies with no special case."""
@@ -191,7 +209,7 @@ def test_compose_spec_carries_the_resolved_model(tmp_path):
 def test_compose_spec_hands_the_worker_a_composition_tool_when_given_one(tmp_path):
     """Whether a worker may compose again is the caller's decision, made from the depth count it holds;
     this function only places what it is handed."""
-    spec = _spec(_state(tmp_path), compose_tool=_sample_tool)
+    spec = _spec(_state(tmp_path), extra_tools=[_sample_tool])
     assert "_sample_tool" in {fn.__name__ for fn in spec["tools"]}
 
 
@@ -242,6 +260,16 @@ async def test_a_composed_worker_can_compose_again_while_depth_remains(tmp_path,
     assert "compose_worker" in {fn.__name__ for fn in worker_tools}
 
 
+async def test_a_worker_that_can_compose_again_can_also_look_names_up(tmp_path, monkeypatch):
+    """A nested compose_worker is useless without list_capabilities to find names with, so the two are
+    handed to a worker as a pair rather than compose_worker alone."""
+    state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 2}})
+    compose, spawn = _compose(state, monkeypatch)
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    worker_tools = spawn.calls[0]["agent_types"]["w"]["tools"]
+    assert "list_capabilities" in {fn.__name__ for fn in worker_tools}
+
+
 async def test_the_last_worker_in_the_chain_gets_no_composition_tool(tmp_path, monkeypatch):
     """The decrementing counter is the entire termination argument: at zero the worker keeps discovery
     and loses composition."""
@@ -250,6 +278,27 @@ async def test_the_last_worker_in_the_chain_gets_no_composition_tool(tmp_path, m
     await compose("w", "Do it.", ["web"], "Instructions.")
     worker_tools = spawn.calls[0]["agent_types"]["w"]["tools"]
     assert "compose_worker" not in {fn.__name__ for fn in worker_tools}
+
+
+async def test_the_decrement_reaches_a_second_level_of_composition(tmp_path, monkeypatch):
+    """The presence tests above only look one level deep, so writing `remaining_depth=depth` instead of
+    `depth - 1` (an infinite chain) would still pass every one of them. Driving the nested tool a second
+    worker deep is what actually pins the decrement, which is the whole termination argument."""
+    state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 3}})
+    compose, spawn = _compose(state, monkeypatch)
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    first_tools = {fn.__name__: fn for fn in spawn.calls[0]["agent_types"]["w"]["tools"]}
+    await first_tools["compose_worker"]("w2", "Do it.", ["web"], "Instructions.")
+    second_tools = spawn.calls[1]["agent_types"]["w2"]["tools"]
+    assert "compose_worker" in {fn.__name__ for fn in second_tools}
+
+    state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 2}})
+    compose, spawn = _compose(state, monkeypatch)
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    first_tools = {fn.__name__: fn for fn in spawn.calls[0]["agent_types"]["w"]["tools"]}
+    await first_tools["compose_worker"]("w2", "Do it.", ["web"], "Instructions.")
+    second_tools = spawn.calls[1]["agent_types"]["w2"]["tools"]
+    assert "compose_worker" not in {fn.__name__ for fn in second_tools}
 
 
 async def test_the_depth_cap_is_read_at_call_time_so_a_hot_change_reaches_a_built_agent(tmp_path, monkeypatch):
@@ -269,6 +318,17 @@ async def test_a_max_depth_of_zero_switches_composition_off(tmp_path, monkeypatc
     state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 0}})
     compose, spawn = _compose(state, monkeypatch)
     result = await compose("w", "Do it.", ["web"], "Instructions.")
+    assert "max_depth" in result
+    assert spawn.calls == []
+
+
+async def test_compose_worker_refuses_to_hand_a_worker_its_own_toolset_by_name(tmp_path, monkeypatch):
+    """Naming `capabilities` in `tools` is the escape hatch that would defeat the depth cap: a worker
+    handed that name would resolve a fresh, full-budget compose_worker of its own rather than the
+    depth-limited one this call would otherwise build, regardless of what the cap says."""
+    state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 1}})
+    compose, spawn = _compose(state, monkeypatch)
+    result = await compose("w", "Do it.", ["capabilities"], "Instructions.")
     assert "max_depth" in result
     assert spawn.calls == []
 
