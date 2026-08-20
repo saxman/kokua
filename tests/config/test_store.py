@@ -286,3 +286,124 @@ async def test_apply_setting_refuses_a_locked_key_and_rejects_a_bad_value(tmp_pa
         await config_store.apply_setting(path, "web", "port", "not-a-number", _noop_apply, table=core_table())
 
     assert not path.exists()
+
+
+# --- Scheduled task reads and writes -----------------------------------------------------------------
+
+_TASK_BODY = """# my assistant
+[assistant]
+model = "test-model"
+
+[scheduling]
+max_task_conversations = 5
+
+[scheduling.task.morning-brief]
+# the important one
+prompt = "Summarize my calendar"
+schedule = { type = "daily", at = "09:00" }
+"""
+
+
+def _task_config(tmp_path, body: str = _TASK_BODY):
+    path = tmp_path / "config.toml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_load_tasks_injects_the_name_from_the_key(tmp_path):
+    records = config_store.load_tasks(_task_config(tmp_path))
+    assert [r["name"] for r in records] == ["morning-brief"]
+    assert records[0]["schedule"] == {"type": "daily", "at": "09:00"}
+
+
+def test_load_tasks_is_empty_for_a_file_with_no_tasks(tmp_path):
+    assert config_store.load_tasks(_task_config(tmp_path, "[assistant]\nmodel = 'm'\n")) == []
+
+
+def test_load_tasks_raises_on_unparseable_toml(tmp_path):
+    with pytest.raises(settings.ConfigError, match="not valid TOML"):
+        config_store.load_tasks(_task_config(tmp_path, "[scheduling.task.x\nprompt = 'p'\n"))
+
+
+def test_load_tasks_raises_on_an_invalid_table(tmp_path):
+    body = "[scheduling.task.x]\nprompt = 'p'\nschedule = { type = 'nope' }\n"
+    with pytest.raises(settings.ConfigError, match="schedule.type must be one of"):
+        config_store.load_tasks(_task_config(tmp_path, body))
+
+
+def test_write_task_adds_a_table_and_keeps_the_rest_of_the_file(tmp_path):
+    path = _task_config(tmp_path)
+    config_store.write_task(
+        path,
+        "weekly-review",
+        {"name": "weekly-review", "prompt": "Review", "schedule": {"type": "weekly", "day": "fri", "at": "16:00"}},
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "# my assistant" in text
+    assert "# the important one" in text
+    assert "[scheduling.task.weekly-review]" in text
+    assert {r["name"] for r in config_store.load_tasks(path)} == {"morning-brief", "weekly-review"}
+
+
+def test_write_task_patches_in_place_and_keeps_the_tables_comments(tmp_path):
+    path = _task_config(tmp_path)
+    record = config_store.load_tasks(path)[0]
+    record["enabled"] = False
+    config_store.write_task(path, "morning-brief", record)
+    text = path.read_text(encoding="utf-8")
+    assert "# the important one" in text
+    assert "enabled = false" in text
+
+
+def test_write_task_omits_enabled_when_true_and_drops_none(tmp_path):
+    path = _task_config(tmp_path, "[assistant]\nmodel = 'm'\n")
+    config_store.write_task(
+        path,
+        "x",
+        {
+            "name": "x",
+            "prompt": "p",
+            "schedule": {"type": "interval", "seconds": 60},
+            "enabled": True,
+            "max_conversations": None,
+        },
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "enabled" not in text
+    assert "max_conversations" not in text
+
+
+def test_write_task_removes_a_key_the_record_no_longer_has(tmp_path):
+    path = _task_config(tmp_path)
+    config_store.write_task(
+        path,
+        "morning-brief",
+        {"name": "morning-brief", "prompt": "p", "schedule": {"type": "interval", "seconds": 60}, "enabled": False},
+    )
+    config_store.write_task(
+        path,
+        "morning-brief",
+        {"name": "morning-brief", "prompt": "p", "schedule": {"type": "interval", "seconds": 60}},
+    )
+    assert "enabled" not in path.read_text(encoding="utf-8")
+
+
+def test_remove_task_reports_whether_it_removed_one(tmp_path):
+    path = _task_config(tmp_path)
+    assert config_store.remove_task(path, "morning-brief") is True
+    assert config_store.remove_task(path, "morning-brief") is False
+    assert config_store.load_tasks(path) == []
+
+
+def test_rename_task_moves_the_table_with_its_contents(tmp_path):
+    path = _task_config(tmp_path)
+    config_store.rename_task(path, "morning-brief", "daily-brief")
+    records = config_store.load_tasks(path)
+    assert [r["name"] for r in records] == ["daily-brief"]
+    assert records[0]["prompt"] == "Summarize my calendar"
+
+
+def test_rename_task_is_a_no_op_for_an_absent_task(tmp_path):
+    path = _task_config(tmp_path)
+    config_store.rename_task(path, "nope", "other")
+    assert [r["name"] for r in config_store.load_tasks(path)] == ["morning-brief"]

@@ -19,6 +19,7 @@ toolset in ``toolsets/config.py`` words it for the model.
 from __future__ import annotations
 
 import logging
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -181,6 +182,104 @@ def remove_mcp_server(path: Path, url: str) -> bool:
             _write(path, doc)
             return True
     return False
+
+
+def _task_tables(doc: TOMLDocument, *, create: bool):
+    """The ``[scheduling.task]`` table holding one sub-table per task, or ``None`` when absent.
+
+    Walked segment by segment for the same reason ``_section_table`` is: assigning a dotted key would
+    write a quoted top-level header rather than the sub-table the reader looks in.
+    """
+    scheduling = doc.get("scheduling")
+    if scheduling is None:
+        if not create:
+            return None
+        scheduling = tomlkit.table(is_super_table=True)
+        doc["scheduling"] = scheduling
+    tables = scheduling.get("task")
+    if tables is None:
+        if not create:
+            return None
+        tables = tomlkit.table(is_super_table=True)
+        scheduling["task"] = tables
+    return tables
+
+
+def load_tasks(path: Path) -> list[dict]:
+    """Every ``[scheduling.task.*]`` table as a record, each validated by ``file.parse_task``.
+
+    Raises ``ConfigError`` rather than returning ``[]`` for an unreadable file, unlike the tolerant
+    read the JSON registry used to do. ``TaskService`` treats "no such task" as "it was cancelled" and
+    drops it, so swallowing a parse error would let a syntax slip anywhere in config.toml silently
+    delete a recurring task. The caller decides what to do with the failure instead.
+    """
+    text = read_text(path)
+    if text is None:
+        return []
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise settings.ConfigError(f"{path} is not valid TOML: {error}") from error
+    scheduling = data.get("scheduling")
+    tables = scheduling.get("task") if isinstance(scheduling, dict) else None
+    if tables is None:
+        return []
+    if not isinstance(tables, dict):
+        raise settings.ConfigError("[scheduling.task] must hold one table per task name")
+    return [settings.parse_task(name, spec) for name, spec in tables.items()]
+
+
+def write_task(path: Path, name: str, record: dict) -> None:
+    """Upsert ``[scheduling.task.<name>]``, leaving every other section and comment alone.
+
+    An existing table is patched key by key rather than replaced, so a comment the user wrote against
+    one of its keys survives a write the app makes for an unrelated one. ``name`` is not written into
+    the table: it is the key. ``enabled`` is written only when false, since an absent key already means
+    enabled and a line saying so on every task is noise.
+    """
+    doc = _load(path)
+    tables = _task_tables(doc, create=True)
+    table = tables.get(name)
+    if table is None:
+        table = tomlkit.table()
+        tables[name] = table
+    written = {
+        key: value
+        for key, value in record.items()
+        if key != "name" and value is not None and not (key == "enabled" and value is True)
+    }
+    for key, value in written.items():
+        table[key] = value
+    for stale in [key for key in table if key not in written]:
+        del table[stale]
+    _write(path, doc)
+
+
+def remove_task(path: Path, name: str) -> bool:
+    """Delete ``[scheduling.task.<name>]``. Returns whether a table was actually removed."""
+    doc = _load(path)
+    tables = _task_tables(doc, create=False)
+    if tables is None or name not in tables:
+        return False
+    del tables[name]
+    _write(path, doc)
+    return True
+
+
+def rename_task(path: Path, old: str, new: str) -> None:
+    """Move a task's table to a new name, contents intact. A missing ``old`` is a no-op.
+
+    The renamed table moves to the end of the section, which is the cost of tomlkit having no in-place
+    key rename; nothing else about the file changes.
+    """
+    doc = _load(path)
+    tables = _task_tables(doc, create=False)
+    if tables is None or old not in tables:
+        return
+    table = tables[old]
+    del tables[old]
+    tables[new] = table
+    _write(path, doc)
 
 
 # --- The programmatic-write policy and the apply path ------------------------------------------------
