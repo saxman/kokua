@@ -74,7 +74,7 @@ async def test_task_action_rejects_an_unknown_action(tmp_path):
         assistant.task_action("drop_table", "brief")
 
 
-async def test_create_arms_persisted_tasks_and_drops_past_once(tmp_path):
+async def test_create_arms_persisted_tasks_and_retires_past_once(tmp_path):
     cfg = _config(tmp_path)
     store.write_task(
         cfg.config_path,
@@ -87,8 +87,9 @@ async def test_create_arms_persisted_tasks_and_drops_past_once(tmp_path):
         },
     )
     await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
-    # Past-due one-shot was dropped during boot arming.
-    assert store.load_tasks(cfg.config_path) == []
+    # Past-due one-shot was retired in place during boot arming, not deleted.
+    record = store.load_tasks(cfg.config_path)[0]
+    assert record["name"] == "o" and record["enabled"] is False
 
 
 async def test_the_configured_default_cap_reaches_the_task_service(tmp_path):

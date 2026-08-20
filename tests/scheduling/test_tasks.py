@@ -4,6 +4,8 @@ These exercise ``TaskService`` directly, so they assert on records and raised er
 model reads are covered in ``tests/toolsets/test_scheduling.py``.
 """
 
+from datetime import datetime, timedelta
+
 import pytest
 
 from kokua.config import store
@@ -333,14 +335,15 @@ async def test_fire_rearms_a_recurring_task(tmp_path):
     assert "r" in scheduler.jobs and store.load_tasks(path)
 
 
-async def test_fire_drops_a_one_shot(tmp_path):
+async def test_fire_retires_a_one_shot(tmp_path):
     scheduler, path, tasks = _make(tmp_path)
     tasks.create("later", {"type": "once", "at": "2999-01-01T00:00:00"}, name="o")
 
     _delay, job = scheduler.jobs["o"]
     await job()
 
-    assert store.load_tasks(path) == []
+    record = store.load_tasks(path)[0]
+    assert record["name"] == "o" and record["enabled"] is False
 
 
 async def test_fire_passes_the_records_own_retention_cap(tmp_path):
@@ -494,7 +497,7 @@ def test_arm_all_skips_a_disabled_task_but_keeps_it(tmp_path):
     assert {r["name"] for r in store.load_tasks(path)} == {"off"}
 
 
-def test_arm_all_arms_the_live_and_drops_a_past_due_one_shot(tmp_path):
+def test_arm_all_arms_the_live_and_retires_a_past_due_one_shot(tmp_path):
     scheduler, path, tasks = _make(tmp_path)
     store.write_task(path, "keep", _persisted(EVERY_MINUTE))
     store.write_task(path, "stale", _persisted({"type": "once", "at": "2000-01-01T00:00:00"}))
@@ -502,7 +505,9 @@ def test_arm_all_arms_the_live_and_drops_a_past_due_one_shot(tmp_path):
     tasks.arm_all()
 
     assert "keep" in scheduler.jobs and "stale" not in scheduler.jobs
-    assert {r["name"] for r in store.load_tasks(path)} == {"keep"}
+    by_name = {r["name"]: r for r in store.load_tasks(path)}
+    assert set(by_name) == {"keep", "stale"}
+    assert by_name["stale"]["enabled"] is False
 
 
 # -- editing ---------------------------------------------------------------------------------------
@@ -683,3 +688,50 @@ def test_stop_raises_for_an_unknown_handle(tmp_path):
 
     with pytest.raises(TaskNotFound):
         tasks.stop("nope")
+
+
+async def test_a_fired_one_shot_is_retired_not_deleted(tmp_path):
+    calls = []
+
+    async def _fire(prompt, *, task_name=None, task_id=None, max_conversations=0):
+        calls.append(prompt)
+
+    scheduler, path, tasks = _make(tmp_path, fire=_fire)
+    schedule = {"type": "once", "at": (datetime.now() + timedelta(seconds=30)).isoformat()}
+    tasks.create("Remind me", schedule, name="standup")
+
+    await tasks._fire("standup", schedule, rearm=True)
+
+    record = store.load_tasks(path)[0]
+    assert record["name"] == "standup"
+    assert record["enabled"] is False
+    assert record["fired_at"]
+    assert calls == ["Remind me"]
+
+
+def test_a_retired_one_shot_is_not_armed_at_the_next_boot(tmp_path):
+    body = (
+        _MINIMAL + '\n[scheduling.task.spent]\nprompt = "p"\nenabled = false\n'
+        'schedule = { type = "once", at = "2020-01-01T00:00:00" }\n'
+    )
+    scheduler, path, tasks = _make(tmp_path, body=body)
+
+    tasks.arm_all()
+
+    assert scheduler.jobs == {}
+    assert store.load_tasks(path)[0]["name"] == "spent"  # still on disk, still readable
+
+
+def test_a_past_due_one_shot_is_retired_at_boot_without_a_fired_stamp(tmp_path):
+    body = (
+        _MINIMAL + '\n[scheduling.task.missed]\nprompt = "p"\n'
+        'schedule = { type = "once", at = "2020-01-01T00:00:00" }\n'
+    )
+    scheduler, path, tasks = _make(tmp_path, body=body)
+
+    tasks.arm_all()
+
+    record = store.load_tasks(path)[0]
+    assert record["enabled"] is False
+    assert "fired_at" not in record
+    assert scheduler.jobs == {}

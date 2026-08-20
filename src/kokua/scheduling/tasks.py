@@ -197,6 +197,20 @@ class TaskService:
 
     # -- arming and firing -----------------------------------------------------------------------
 
+    def _retire(self, record: dict, *, fired: bool = True) -> None:
+        """Mark a spent one-shot disabled in place, rather than deleting the table it lives in.
+
+        A task's table in config.toml may be something the user typed and commented, so a schedule
+        merely reaching its end must not erase it: the run stays auditable, and re-running it is a
+        one-character edit. ``arm_all`` already skips a disabled record, so nothing more is needed to
+        keep it from firing again. ``fired=False`` is a one-shot found past due at boot, which is
+        retired for the same reason but never ran.
+        """
+        record["enabled"] = False
+        if fired:
+            record["fired_at"] = datetime.now().isoformat()
+        store.write_task(self.config_path, record["name"], record)
+
     def _arm(self, record: dict) -> Optional[float]:
         """Schedule a record's next firing, returning the delay used, or ``None`` if it is past due.
 
@@ -249,8 +263,8 @@ class TaskService:
         """Decide what happens to a task after one of its firings finishes.
 
         Re-read the file: a cancel during the run must win over the re-arm, and any edit is picked up.
-        A recurring task re-arms, a one-shot is deleted, and a read failure falls back to the schedule
-        the job was armed with, so the task survives a config the user is mid-edit on.
+        A recurring task re-arms, a one-shot retires in place, and a read failure falls back to the
+        schedule the job was armed with, so the task survives a config the user is mid-edit on.
         """
         try:
             current = self._lookup(name)
@@ -266,8 +280,7 @@ class TaskService:
         if current is None:
             return
         if current["schedule"].get("type") == "once":
-            # Deleted rather than retired: retirement in place has no reader yet.
-            store.remove_task(self.config_path, name)
+            self._retire(current)
         elif current.get("enabled", True):  # a disable during the run wins over the re-arm
             self._arm(current)
 
@@ -277,8 +290,8 @@ class TaskService:
             if not record.get("enabled", True):
                 continue
             if self._arm(record) is None and record["schedule"].get("type") == "once":
-                store.remove_task(self.config_path, record["name"])
-                logger.info("Dropped past-due one-shot scheduled task %s", record["name"])
+                self._retire(record, fired=False)
+                logger.info("Retired past-due one-shot scheduled task %s", record["name"])
 
     # -- mutating --------------------------------------------------------------------------------
 
@@ -414,9 +427,9 @@ class TaskService:
     def cancel(self, name: str) -> dict:
         """Disarm and delete a task's table. Returns the record as it was. Raises :class:`TaskNotFound`.
 
-        Deletes the table outright: cancelling is an explicit instruction to forget the task, distinct
-        from a spent one-shot reaching the end of its own schedule, even though both currently delete
-        the same way.
+        Deletes the table outright: cancelling is an explicit instruction to forget the task, which is
+        why it differs from a spent one-shot reaching the end of its own schedule, which is left in
+        place rather than deleted.
         """
         record = self._require(name)
         self.scheduler.cancel(name)
