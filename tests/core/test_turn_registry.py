@@ -67,3 +67,40 @@ def test_for_task_reports_only_the_running_firings_of_that_task():
     assert {cid for cid, _ in tracker.for_task("t1")} == {"c1", "c2"}
     assert {cid for cid, _ in tracker.for_task("t2")} == {"c3"}
     assert tracker.for_task("nope") == []
+
+
+def test_live_keeps_a_turn_whose_entry_a_later_one_replaced():
+    """Replacing a conversation's entry does not end the turn it replaced, so the entries are not the
+    list of turns still running. Shutdown needs that list: it closes the session store, and a turn still
+    running when it does dies part way through the record it makes on its way down."""
+    tracker = TurnTracker()
+    first = _handle()
+    second = _handle()
+
+    tracker.add("c1", TurnInfo(handle=first, started=1.0, preview="first"))
+    tracker.add("c1", TurnInfo(handle=second, started=2.0, preview="second"))
+
+    assert tracker.get("c1").handle is second
+    assert tracker.live() == [first, second]
+
+
+def test_live_drops_a_displaced_turn_once_it_finishes():
+    """The displaced handle no longer matches its conversation's entry, so its own done-callback is the
+    only thing that can clear it. If it did not, shutdown would wait on a turn that already ended."""
+    tracker = TurnTracker()
+    first = _handle()
+    second = _handle()
+    tracker.add("c1", TurnInfo(handle=first, started=1.0, preview="first"))
+    tracker.add("c1", TurnInfo(handle=second, started=2.0, preview="second"))
+
+    tracker.remove_if("c1", first)
+
+    assert tracker.live() == [second]
+    assert tracker.get("c1").handle is second, "clearing a displaced turn must not evict the live entry"
+
+
+def test_live_omits_a_turn_that_has_already_finished():
+    tracker = TurnTracker()
+    tracker.add("c1", TurnInfo(handle=_handle(done=True), started=1.0, preview="done"))
+
+    assert tracker.live() == []

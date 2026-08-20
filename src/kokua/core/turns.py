@@ -85,14 +85,22 @@ Every rule here was learned from a bug. Read them before changing anything in th
    for invariant 5's reason.
    The tracker entry is added *inside* the gate, alongside the catch-up record and for the same reason:
    a firing queued behind a turn already running on this conversation would otherwise overwrite that
-   turn's entry, which is the one ``/stop`` and shutdown reach. A queued firing is therefore not yet
-   stoppable. The converse costs the same and only on a channel with no conversation list, where a firing
-   shares the viewed conversation: the serve loop tracks a reactive turn when it is *submitted* rather
-   than when it takes the gate, so a message sent during a firing replaces the firing's entry, and the
-   stop that message queued behind is the one a stop then reaches. Both follow from one entry per
-   conversation, which is what keeps a finished turn from ever cancelling a live one.
+   turn's entry, which is the one ``/stop`` reaches. A queued firing is therefore not yet stoppable. The
+   converse costs the same and only on a channel with no conversation list, where a firing shares the
+   viewed conversation: the serve loop tracks a reactive turn when it is *submitted* rather than when it
+   takes the gate, so a message sent during a firing replaces the firing's entry, and the stop that
+   message queued behind is the one a stop then reaches. Both follow from one entry per conversation,
+   which is what keeps a finished turn from ever cancelling a live one.
+
+   Shutdown is the one reader that must not follow that rule, because it closes the session store.
+   Replacing an entry does not end the turn it replaced, so the per-conversation entries are not the
+   list of turns still running; ``TurnTracker.live()`` is, and shutdown cancels and awaits that instead.
+   A turn left out of it is cancelled by the event loop after the store has closed, and the record
+   invariant 5 makes on the way down then raises ``I/O operation on closed file`` out of a task nobody
+   is watching, losing that turn's partial answer with it.
    (Regressions: ``test_a_running_firing_is_tracked_under_its_task_so_it_can_be_stopped``,
-   ``test_shutdown_cancellation_still_takes_the_firing_down_with_it``.)
+   ``test_shutdown_cancellation_still_takes_the_firing_down_with_it``,
+   ``test_shutdown_waits_for_a_turn_a_later_message_displaced``.)
 """
 
 from __future__ import annotations

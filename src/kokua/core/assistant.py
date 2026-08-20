@@ -451,14 +451,16 @@ class Assistant:
                 tg.create_task(self._serve_channel())
                 tg.create_task(self._scheduler.run())
         finally:
-            # Cancel every conversation's turn still running at shutdown and let the cancellations
-            # settle (each turn persists its partial state on stop), so no task is left pending.
-            turns = self._tracker.all()
-            for _conversation_id, info in turns:
-                if not info.handle.done:
-                    info.handle.cancel()
+            # Cancel every turn still running at shutdown and let the cancellations settle (each turn
+            # persists its partial state on stop), so no task is left pending. Read from `live()`, not
+            # from the per-conversation entries: a turn submitted while another was running on its
+            # conversation holds no entry, and one left running here is cancelled by the event loop
+            # after the `close()` below, part way through the record it makes on its way down.
+            turns = self._tracker.live()
+            for handle in turns:
+                handle.cancel()
             if turns:
-                await asyncio.gather(*(info.handle.task for _conversation_id, info in turns), return_exceptions=True)
+                await asyncio.gather(*(handle.task for handle in turns), return_exceptions=True)
             for conn in self._mcp_servers:
                 try:
                     await conn.client.aclose()

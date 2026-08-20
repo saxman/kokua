@@ -1556,3 +1556,22 @@ async def test_a_stopped_firing_says_so_where_the_user_can_see_it(tmp_path):
     await asyncio.wait_for(run, timeout=2.0)
 
     assert "(stopped)" in channel.sent
+
+
+async def test_shutdown_waits_for_a_turn_a_later_message_displaced(tmp_path):
+    """Shutdown closes the session store, so no turn may still be running when it does.
+
+    Two messages arriving back to back on one conversation each start a task, and the tracker holds one
+    entry per conversation, so the second submission replaces the first's. That replacement is
+    deliberate (see invariant 7), but it means the tracker is not the list of turns still in flight, and
+    shutdown was reading it as if it were: the displaced turn was neither cancelled nor awaited, so the
+    event loop cancelled it after the store had closed, and the provenance record every cancelled turn
+    makes on its way down raised `I/O operation on closed file` out of a task nobody was watching.
+    """
+    client = _BlockingStreamClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(["first", "second"]), client=client)
+
+    await asyncio.wait_for(assistant.run(), timeout=5.0)
+
+    turns = [task for task in asyncio.all_tasks() if "Assistant._handle" in repr(task.get_coro())]
+    assert not turns, f"{len(turns)} turn task(s) outlived the store: {turns}"
