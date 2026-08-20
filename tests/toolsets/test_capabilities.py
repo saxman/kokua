@@ -271,8 +271,9 @@ async def test_a_worker_that_can_compose_again_can_also_look_names_up(tmp_path, 
 
 
 async def test_the_last_worker_in_the_chain_gets_no_composition_tool(tmp_path, monkeypatch):
-    """The decrementing counter is the entire termination argument: at zero the worker keeps discovery
-    and loses composition."""
+    """The decrementing counter is the entire termination argument: at zero the worker gets neither
+    list_capabilities nor compose_worker, since discovery with no way to act on what it finds is
+    useless to the worker holding it."""
     state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 1}})
     compose, spawn = _compose(state, monkeypatch)
     await compose("w", "Do it.", ["web"], "Instructions.")
@@ -362,3 +363,11 @@ async def test_compose_worker_falls_back_to_the_agents_own_model_when_no_default
     tools = {fn.__name__: fn for fn in make_capability_tools(ToolsetContext(state=state, agent=_Agent()))}
     await tools["compose_worker"]("w", "Do it.", ["web"], "Instructions.")
     assert spawn.calls[0]["model"] == "ollama:resolved"
+
+
+def test_the_guidance_ranks_the_declared_roles_above_composing_one(tmp_path):
+    """Composition is the fallback, not the first move: spawn_subagent's roles carry instructions
+    written for their job, and an agent that composes by default pays an extra step for a worse worker."""
+    assert "spawn_subagent" in TOOLSET.guidance
+    assert "list_capabilities" in TOOLSET.guidance
+    assert "compose_worker" in TOOLSET.guidance

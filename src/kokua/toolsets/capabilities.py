@@ -234,10 +234,22 @@ def make_capability_tools(ctx: "ToolsetContext") -> list:
     return [_make_list_tool(state), _make_compose_tool(state, remaining_depth=None, model=model)]
 
 
+# Ranked deliberately. `spawn_subagent`'s roles and `compose_worker` are two routes to the same place,
+# and a model given both with nothing to choose between them picks arbitrarily. A declared role wins by
+# default because its instructions were written for its job, where a composed worker's are written in
+# the moment.
+CAPABILITIES_GUIDANCE = (
+    " You can see every capability installed on this machine, not only the ones you hold. When a task "
+    "needs something you lack, first check whether one of your `spawn_subagent` roles already covers "
+    "it. If none does, call `list_capabilities` to find the capability names, then `compose_worker` to "
+    "build a sub-agent holding exactly those and give it the task."
+)
+
 TOOLSET = Toolset(
     name=TOOLSET_NAME,
     description="Discover every installed capability and compose a sub-agent from the ones a task needs.",
     build=make_capability_tools,
+    guidance=CAPABILITIES_GUIDANCE,
     settings=CAPABILITIES_SETTINGS,
     # Discovering and composing is how an agent manages its own work rather than a domain capability,
     # so a lean supervisor declaring only it still reads as lean to the delegation guidance.
