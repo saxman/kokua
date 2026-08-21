@@ -204,7 +204,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             await websocket.close()
             return
         # Show the conversation list, the active conversation's history, the current settings, and the
-        # scheduled tasks on (re)connect, so the sidebar, chat, and settings panel are all populated.
+        # scheduled tasks on (re)connect, so a client's sidebar, chat, and settings view are all populated.
         await _sync_view(channel, assistant)
         await channel.send_settings(assistant.current_settings())
         # Unguarded, unlike the two `list_tasks` calls in the loop below: `Assistant.create` just armed

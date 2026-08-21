@@ -6,7 +6,7 @@ same way a tool is and no flag can disagree with the declaration.
 
 The ``[planning]`` config section is declared here too, which is what makes deep planning configurable
 the same way a third party's workflow would be: nothing about these five keys is known to
-``AssistantConfig``, the settings panel, or the persist path beyond the declaration below.
+``AssistantConfig``, the applier, or the persist path beyond the declaration below.
 
 The prompts and the reviewer vocabulary live with the workflow rather than here, unlike Kokua's
 tool-bearing toolsets, which own their model-facing strings: this toolset exposes no tool surface, so
@@ -29,7 +29,7 @@ PLANNING_WORKFLOW = Workflow(
 
 #: The ``[planning]`` section of config.toml, owned here rather than by ``AssistantConfig``: these keys
 #: exist because this toolset declares them, and the workflow reads them through ``ctx.settings``. The
-#: four flags are hot (the settings panel and ``update_config`` change them mid-session);
+#: four flags are hot (``update_config`` changes them mid-session);
 #: ``review_rounds`` is not, because a round budget is read once per turn and there is no live surface
 #: that offers it.
 PLANNING_SETTINGS: tuple[Setting, ...] = (

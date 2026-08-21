@@ -331,21 +331,8 @@ button.secondary, .notification-banner button { background: none; border-color: 
 .attach-previews .remove { position: absolute; top: -7px; right: -7px; width: 24px; height: 24px; padding: 0;
   border-radius: 50%; font-size: 0.85em; line-height: 24px; background: var(--fg-dim); color: var(--accent-fg); }
 .header-actions { display: flex; align-items: center; gap: 10px; }
-#settings-btn { background: none; border: none; color: var(--fg-faint); font-size: 1.15em; line-height: 1;
+/* Theme cycle button: a quiet header affordance, the page's only settings control. */
+#theme-btn { background: none; border: none; color: var(--fg-faint); font-size: 1.15em; line-height: 1;
   padding: 7px; cursor: pointer; border-radius: 6px; }
-#settings-btn:hover { color: var(--fg); background: var(--surface); }
-/* Settings modal */
+#theme-btn:hover { color: var(--fg); background: var(--surface); }
 .hidden { display: none !important; }
-.modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal-card { background: var(--surface); color: var(--fg); border: 1px solid var(--border); border-radius: 12px;
-  padding: 20px 22px; width: 440px; max-width: 92vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18); }
-.modal-card h2 { margin: 0 0 14px; font-size: 1.05em; }
-#settings-form { display: flex; flex-direction: column; gap: 10px; }
-#settings-form fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
-#settings-form legend { padding: 0 6px; font-size: 0.82em; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--fg-faint); }
-.field { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.9em; }
-.field input, .field select { width: 55%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--fg); font-size: 0.95em; }
-.check { display: flex; align-items: center; gap: 8px; font-size: 0.9em; }
-.hint { font-size: 0.78em; color: var(--fg-dim); margin: 2px 0 0; }
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }

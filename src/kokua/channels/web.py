@@ -579,7 +579,11 @@ class WebChannel(BaseWebChannel):
         await self.send_frame({"type": "history", "items": items})
 
     async def send_settings(self, values: dict) -> None:
-        """Send the current runtime settings so the page can populate its settings panel."""
+        """Send the current runtime settings, for a client that renders them.
+
+        Kokua's own page does not: it has no settings window, and its theme button is a per-browser
+        preference that never reaches the server. The frame stays part of the transport's contract.
+        """
         await self.send_frame({"type": "settings", "values": values})
 
     async def send_tasks(self, items: list[dict]) -> None:

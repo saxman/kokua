@@ -67,7 +67,10 @@
                 title="This conversation has a turn still running in the background">
             <span class="dot" aria-hidden="true"></span>working
           </span>
-          <button id="settings-btn" type="button" title="Settings">⚙</button>
+          <!-- Glyph, title, and aria-label are set by app.js from the stored choice; the markup
+               starts on the "auto" default the pre-paint script above assumes. -->
+          <button id="theme-btn" type="button" title="Theme: auto (system)"
+                  aria-label="Theme: auto (system)">◐</button>
         </span>
       </header>
       <div id="notifications"></div>
@@ -91,44 +94,6 @@
         </div>
       </form>
     </main>
-  </div>
-
-  <!-- Settings panel: display and planning prefs. Applied at runtime and persisted. The model is not
-       here: it comes from [assistant].model or an agent's own [agents.*] table, both read at startup. -->
-  <div id="settings-modal" class="modal hidden">
-    <div class="modal-card">
-      <h2>Settings</h2>
-      <form id="settings-form">
-        <fieldset>
-          <legend>Display</legend>
-          <label class="field">theme
-            <select id="set-theme">
-              <option value="auto">Auto (system)</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
-          </label>
-          <label class="check"><input id="set-show_thinking" type="checkbox" /> Show thinking</label>
-          <label class="check"><input id="set-show_tools" type="checkbox" /> Show tool calls</label>
-        </fieldset>
-        <fieldset>
-          <legend>Planning</legend>
-          <label class="check"><input id="set-plan_review" type="checkbox" /> Plan review by you (pause for your Approve / Edit / Reject)</label>
-          <label class="check"><input id="set-plan_review_agent" type="checkbox" /> Plan review by an agent (independent critic; re-plans on issues)</label>
-          <label class="check"><input id="set-result_review" type="checkbox" /> Result review by an agent (checks the answer before showing it; answer appears after review)</label>
-          <label class="check"><input id="set-show_reasoning" type="checkbox" /> Show all reasoning (stream every LLM call: planner, reviewers, executor, each version)</label>
-          <p class="hint">Turn on planning for a single request with the <strong>Plan</strong> toggle next to
-            the message box (or by sending "/plan &lt;task&gt;"); a planned turn drafts a plan first. These
-            options shape a planned turn: "By you" pauses for your Approve / Edit / Reject; "by an agent"
-            uses an independent reviewer (no human pause). With both plan reviews on, the agent's critique
-            is shown to you before you decide.</p>
-        </fieldset>
-        <div class="modal-actions">
-          <button type="submit">Save</button>
-          <button id="settings-cancel" type="button" class="secondary">Cancel</button>
-        </div>
-      </form>
-    </div>
   </div>
 
   <!-- Vendored markdown renderer + sanitizer + math typesetter (offline; see the pinned versions in

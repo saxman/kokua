@@ -30,7 +30,7 @@ class Setting:
     rejects a duplicate section for free.
 
     ``hot`` means the setting can change without a restart, reaching the running session through the
-    settings panel and ``update_config``. Being flagged here *is* what makes it hot; there is no second
+    ``update_config``. Being flagged here *is* what makes it hot; there is no second
     list to keep in step.
 
     This is the author's declaration, deliberately separate from ``config.table.RuntimeSetting``, which

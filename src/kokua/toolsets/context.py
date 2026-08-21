@@ -74,7 +74,7 @@ class LiveState:
     # them.
     refresh_workers: Optional[Callable[[Any], None]] = None
     # Every runtime-mutable setting this process knows, so the config toolset's update_config resolves a
-    # key against the same declarations the settings panel applies. Assigned by the composition root,
+    # key against the same declarations the applier uses. Assigned by the composition root,
     # which builds one table and shares it with the applier.
     settings_table: Optional[SettingsTable] = None
 

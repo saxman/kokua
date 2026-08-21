@@ -1,4 +1,4 @@
-"""The table of runtime-mutable settings, and the sanitizer for the settings panel.
+"""The table of runtime-mutable settings, and the sanitizer for an incoming settings payload.
 
 A *runtime* setting is one the user can change without restarting: the display flags, the planning
 flags, and whatever a toolset declared as hot. Everything else in ``config.toml`` is startup-only and

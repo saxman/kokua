@@ -151,8 +151,8 @@ for why that is the intended shape, and what the actual security boundary is.
 ### `[agents.*]` is hand-edit only
 
 The assistant holds `update_config`, so a writable agent table would let it widen its own reach.
-`update_config` refuses the whole section by prefix, and the web settings panel never touches it. Which
-capability an agent gets stays a human decision, made in the file.
+`update_config` refuses the whole section by prefix. Which capability an agent gets stays a human
+decision, made in the file.
 
 ## Where mistakes surface
 
@@ -252,12 +252,10 @@ core already parses (`assistant`, `email`, `security`, and the rest) is refused 
 silently taking over the core setting behind it.
 
 `hot=True` marks a setting the user can change without restarting, and the change reaches whatever reads
-it in the same session. Today that means `update_config`, always; the web settings panel only for the
-settings its markup names by hand (`web_static/index.html` and `app.js` carry the four `[planning]`
-keys), since it is not generated from the declared settings -- rendering a third party's setting there
-awaits that generalization. A hot setting with no input of its own is still correct, not half-wired:
-`[scheduling].max_task_conversations` is one, applied and persisted by `update_config` and simply absent
-from the panel, which is safe because the applier skips any setting the panel did not send. Leave `hot` off (the default) for a
+it in the same session. `update_config` is the one path that does this, and it works off the declared
+table rather than any hand-written markup, so a third party's hot setting is live the moment it is
+declared -- nothing to add to a front end. (The web UI has no settings window; the theme button in its
+header is a per-browser preference, not a `RuntimeSetting`.) Leave `hot` off (the default) for a
 value read once, with no live surface to offer it --
 `[planning].review_rounds` is that case, since a round budget is read once per turn. A `Setting`'s
 `kind` must be `bool`, `int`, or `str`; anything else fails at startup, naming the toolset and the

@@ -78,8 +78,8 @@ async def test_diag_reports_wedged_turn_with_stack(tmp_path):
 
 
 async def test_diag_reports_the_model_each_agent_runs_on(tmp_path):
-    """The model is not in the settings panel any more, so /diag is where a running session says which
-    one it is -- and with per-agent overrides, one line for the default is not the whole answer."""
+    """The model is read once at startup and shown nowhere in the UI, so /diag is where a running session
+    says which one it is -- and with per-agent overrides, one line for the default is not the whole answer."""
     from tests.channels import FakeChannel, example_agents
 
     agents = example_agents()

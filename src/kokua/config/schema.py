@@ -134,9 +134,9 @@ class AssistantConfig:
     agent_cache_cap: int = 8
     # Single root for all transient and user-provided content; the leaf paths below derive from it.
     data_dir: Path = field(default_factory=paths.data_dir)
-    # The config.toml this assistant reads and writes. The web settings panel, the add_mcp_server tool,
-    # and the assistant's own update_config tool all persist here; set from --config / $KOKUA_CONFIG by
-    # the CLI, else the default $KOKUA_HOME/config.toml.
+    # The config.toml this assistant reads and writes. The add_mcp_server tool and the assistant's own
+    # update_config tool both persist here; set from --config / $KOKUA_CONFIG by the CLI, else the
+    # default $KOKUA_HOME/config.toml.
     config_path: Path = field(default_factory=paths.config_path)
     # Tasks declared in [scheduling.task.<name>], keyed by name, validated at startup so a bad table
     # fails here rather than becoming a task that quietly never fires. TaskService does not read this:

@@ -5,9 +5,8 @@
 # optional and the value shown is the built-in default. Command-line flags override anything set here.
 # An unknown key or wrong-typed value is a hard error (startup fails and names the key).
 #
-# This file is the single source of settings: besides hand-editing, the web settings panel, the
-# add_mcp_server tool, and the assistant's own update_config tool write to it too (comments are
-# preserved). A few security-critical keys ([security].confirm_tools, [email].to, [paths].data_dir)
+# This file is the single source of settings: besides hand-editing, the add_mcp_server tool and the
+# assistant's own update_config tool write to it too (comments are preserved). A few security-critical keys ([security].confirm_tools, [email].to, [paths].data_dir)
 # and the whole [agents.*] section can only be changed by hand-editing, never by the assistant.
 
 [assistant]
@@ -93,8 +92,8 @@ agent_cache_cap = 8
 # context_length = 32768     # at least 1
 
 [display]
-# Stream the model's reasoning / tool calls into the channel. The web settings panel toggles these
-# at runtime; a change there is written straight back into these keys.
+# Stream the model's reasoning / tool calls into the channel. Both are hot: asking the assistant to
+# change one with update_config applies it from the next turn and writes it straight back here.
 show_thinking = true
 show_tools = true
 
@@ -292,7 +291,7 @@ level = "INFO"
 # keys are only read when an agent declares the toolset. A section named after a toolset is how a
 # third-party workflow ships its settings too, so nothing here is special-cased for planning.
 # plan_review pauses that planned turn for your Approve/Edit/Reject; off runs the plan autonomously.
-# plan_review is toggleable at runtime in the web settings panel.
+# plan_review is hot: update_config changes it mid-session, no restart.
 # plan_review = false
 # Adversarial review (both off by default). plan_review_agent: an independent, context-free agent critiques
 # the plan and Kokua re-plans on rejection. result_review: an independent agent checks the final answer
@@ -320,6 +319,5 @@ level = "INFO"
 # holds neither compose_worker nor list_capabilities, since a compose_worker with no way to look up
 # capability names is useless to whatever holds it. 0 switches composing off entirely. The cap is read
 # when the compose_worker an agent holds is called, so changing it with update_config applies to the next
-# composition with no restart, though a chain already running keeps the count it started with; the web
-# settings panel does not carry it.
+# composition with no restart, though a chain already running keeps the count it started with.
 # max_depth = 3

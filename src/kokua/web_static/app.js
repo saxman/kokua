@@ -305,52 +305,21 @@ try {
   if (localStorage.getItem("tasks-collapsed") === "true") setTasksExpanded(false);
 } catch (e) {}
 
-// --- Settings panel -----------------------------------------------------------------------
-const settingsBtn = document.getElementById("settings-btn");
-const settingsModal = document.getElementById("settings-modal");
-const settingsForm = document.getElementById("settings-form");
-const settingsCancel = document.getElementById("settings-cancel");
-
-function openSettings() {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "get_settings" }));
-  document.getElementById("set-theme").value = currentThemeChoice();  // client-side; not from the server
-  settingsModal.classList.remove("hidden");
-}
-function closeSettings() { settingsModal.classList.add("hidden"); }
-
-// Fill the form from a server settings frame.
-function populateSettings(values) {
-  document.getElementById("set-show_thinking").checked = !!values.show_thinking;
-  document.getElementById("set-show_tools").checked = !!values.show_tools;
-  document.getElementById("set-plan_review").checked = !!values["planning.plan_review"];
-  document.getElementById("set-plan_review_agent").checked = !!values["planning.plan_review_agent"];
-  document.getElementById("set-result_review").checked = !!values["planning.result_review"];
-  document.getElementById("set-show_reasoning").checked = !!values["planning.show_reasoning"];
-}
-
-settingsBtn.addEventListener("click", openSettings);
-settingsCancel.addEventListener("click", closeSettings);
-settingsModal.addEventListener("click", (e) => { if (e.target === settingsModal) closeSettings(); });
-
-settingsForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const values = {
-    show_thinking: document.getElementById("set-show_thinking").checked,
-    show_tools: document.getElementById("set-show_tools").checked,
-    "planning.plan_review": document.getElementById("set-plan_review").checked,
-    "planning.plan_review_agent": document.getElementById("set-plan_review_agent").checked,
-    "planning.result_review": document.getElementById("set-result_review").checked,
-    "planning.show_reasoning": document.getElementById("set-show_reasoning").checked,
-  };
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "settings", values }));
-  applyThemeChoice(document.getElementById("set-theme").value);  // client-side; not sent to the server
-  closeSettings();
-});
-
+// --- Theme -------------------------------------------------------------------------------
 // Theme is a per-browser preference (localStorage), applied pre-paint by the head script; the
-// settings panel's selector is the only control. "auto" follows the OS light/dark preference.
+// header button is the only control. The stored choice is "auto" (follow the OS, the default),
+// "light", or "dark" -- three states, so the button cycles rather than toggles, and what it shows
+// is the *choice* rather than the resolved theme (under "auto" those differ).
+const THEME_CYCLE = ["auto", "light", "dark"];
+const THEME_GLYPHS = { auto: "\u25d0", light: "\u2600", dark: "\u263e" };
+const THEME_LABELS = { auto: "auto (system)", light: "light", dark: "dark" };
+const themeBtn = document.getElementById("theme-btn");
+
 function currentThemeChoice() {
-  try { return localStorage.getItem("theme") || "auto"; } catch (e) { return "auto"; }
+  try {
+    const stored = localStorage.getItem("theme");
+    return THEME_CYCLE.includes(stored) ? stored : "auto";
+  } catch (e) { return "auto"; }
 }
 function applyThemeChoice(choice) {
   const dark = choice === "auto"
@@ -358,7 +327,18 @@ function applyThemeChoice(choice) {
     : choice === "dark";
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
   try { localStorage.setItem("theme", choice); } catch (e) {}
+  themeBtn.textContent = THEME_GLYPHS[choice];
+  const label = "Theme: " + THEME_LABELS[choice];
+  themeBtn.title = label;
+  themeBtn.setAttribute("aria-label", label);
 }
+themeBtn.addEventListener("click", () => {
+  const next = THEME_CYCLE[(THEME_CYCLE.indexOf(currentThemeChoice()) + 1) % THEME_CYCLE.length];
+  applyThemeChoice(next);
+});
+// The head script already resolved data-theme; this only brings the button in line with it.
+applyThemeChoice(currentThemeChoice());
+
 // While "auto" is active, track live OS theme changes.
 if (window.matchMedia) {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
@@ -971,8 +951,6 @@ ws.onmessage = (event) => {
     renderSubagent(frame, new Date());
   } else if (frame.type === "plan_review") {
     renderPlanReview(frame.plan, frame.critique);
-  } else if (frame.type === "settings") {
-    populateSettings(frame.values);
   } else if (frame.type === "conversations") {
     lastConversations = frame.items;
     renderSidebar();

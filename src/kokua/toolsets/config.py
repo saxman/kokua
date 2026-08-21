@@ -54,7 +54,7 @@ def make_config_tools(
 ) -> list[Callable]:
     """Build ``read_config`` / ``update_config`` bound to the config file, the live-apply callback, and
     the live settings table, so ``update_config`` resolves a key against the same declarations the
-    settings panel does.
+    applier does.
 
     The table is only half of those declarations: it holds hot settings, so the *cold* keys a toolset
     declared are resolved from ``startup_schema()``, computed once here. This module is above ``config/``

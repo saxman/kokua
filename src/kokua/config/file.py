@@ -289,7 +289,7 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     # at startup: an agent's client is built with it and nothing rebinds a live client to another model.
     ("assistant", "model"): ("model", (str,), "a string", None),
     # The default reasoning effort every agent runs at unless its own [agents.<name>].thinking overrides
-    # it. Startup-only, like the model above and for the same reason: the settings panel cannot write
+    # it. Startup-only, like the model above and for the same reason: no runtime writer can reach
     # [agents.*], so a live field there could only ever disagree with a declaration.
     ("assistant", "thinking"): (
         "thinking",

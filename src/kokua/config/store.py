@@ -1,7 +1,7 @@
 """Programmatic reads and comment-preserving writes to config.toml.
 
-The config file is both hand-authored and app-written (the web settings panel, the ``add_mcp_server``
-tool, and the assistant's own ``update_config`` tool all write it). stdlib ``tomllib`` only reads TOML,
+The config file is both hand-authored and app-written (the ``add_mcp_server`` tool and the assistant's
+own ``update_config`` tool both write it). stdlib ``tomllib`` only reads TOML,
 so writes go through ``tomlkit``, which patches the parsed document in place and so keeps the user's
 comments and formatting. ``settings.py`` still owns config reads and validation; this module owns the
 write path and the policy that guards it.

@@ -107,14 +107,18 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
   - **Agent-loop continuations are distinguished from user input.** The loop injects its own turns as
     `user`-role messages; these render as a dim `continuation` row showing the injected prompt rather
     than as the user's own turn. A proactive message keeps its uppercase label.
-  - **A settings panel** (gear button) changes the display preferences, the planning toggles, and the
-    theme at runtime. Server-backed changes take effect on the next turn and persist to `config.toml`.
-    The model and the reasoning effort are deliberately not here: both are read at startup, from
-    `[assistant].model` / `[assistant].thinking` or an agent's own `[agents.<name>]` keys, and the panel
-    cannot write the `[agents.*]` tables it would have to agree with. Change them in `config.toml` (or
-    have the assistant do it with `update_config`) and restart.
+  - **No settings window.** The page's one settings control is a theme button in the header, cycling
+    auto / light / dark; it is a per-browser `localStorage` preference applied before first paint and
+    never reaches the server. Everything else runtime-mutable -- the display preferences and the
+    planning toggles -- is changed by asking the assistant, whose `update_config` hot-applies the change
+    for the next turn and persists it to `config.toml`. That keeps one path for every hot setting,
+    including a third party toolset's, instead of a panel that could only show the ones its markup
+    named. (The `settings` / `get_settings` control frames remain part of the web transport's contract
+    for a front end that wants to render them.) The model and the reasoning effort are not
+    runtime-mutable at all: both are read at startup, from `[assistant].model` / `[assistant].thinking`
+    or an agent's own `[agents.<name>]` keys. Change them in `config.toml` and restart.
   - **Sampling parameters are AIMU's, not a Kokua setting.** There is no `[generation]` section and no
-    generation fields in the panel. AIMU 0.16.0 resolves generation kwargs through one precedence chain
+    generation fields anywhere in Kokua's settings. AIMU 0.16.0 resolves generation kwargs through one precedence chain
     (the client's fallbacks, then the model card's tuned profile, then `client.default_generate_kwargs`,
     then the per-call dict), and Kokua writing that third tier from config duplicated the chain while
     shadowing the card: a model whose card specifies a tuned `temperature` / `top_p` / `top_k` / `min_p`
@@ -429,8 +433,8 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   `config.toolset_settings["planning"][...]`. `config.toml` itself is unchanged -- the `[planning]`
   section still parses and still means the same thing, so no user action is needed -- but code that
   read those attributes directly has to change.
-- **The settings panel namespaces a contributed setting's key** (`planning.plan_review`) to keep two
-  toolsets from colliding in the one flat payload; Kokua's own core settings stay bare.
+- **A contributed setting's wire key is namespaced** (`planning.plan_review`) to keep two toolsets from
+  colliding in the one flat settings payload; Kokua's own core settings stay bare.
 - **Startup warns about a configured-but-undeclared toolset.** A `config.toml` section belonging to a
   toolset no agent's `tools` names is now its own warning, distinct from the provisioned-toolset
   warning below: the section still parses and seeds its declared defaults, but nothing reads them and
@@ -530,7 +534,7 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   onto it -- a worker declaring nothing runs on the default like any other undeclared agent. A declared
   model that AIMU cannot resolve fails startup naming the table it came from, rather than surfacing
   later as a failed spawn. Both are read once, at startup: no live client is ever rebound to another
-  model, which is why the model is not in the settings panel. `[assistant].thinking` follows the same
+  model, which is why the model is not a runtime setting. `[assistant].thinking` follows the same
   shape for reasoning effort (below).
 - **A default reasoning effort, with per-agent overrides.** `[assistant].thinking` is the effort every
   agent runs at; an agent that names its own `[agents.<name>].thinking` runs at that instead. The values

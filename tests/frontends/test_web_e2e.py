@@ -361,38 +361,43 @@ def test_sidebar_row_shows_the_conversation_age(page, live_server):
     expect(row.locator(".conv-age")).to_have_text("Aug 10")
 
 
-# --- Settings panel -------------------------------------------------------------------------------
+# --- Theme control --------------------------------------------------------------------------------
 
 
-def test_settings_panel_planning_checkbox_round_trips(page, live_server):
-    """A toolset-contributed setting's wire key is namespaced (`planning.plan_review`), not the bare
-    checkbox id (`set-plan_review`): this is the one automated guard on that wire format, since
-    `test_web.py` only exercises the server side against a fake socket and can't catch app.js reading
-    or writing the wrong key. Toggling the checkbox, saving, and reloading would silently do nothing
-    (the checkbox would render unchecked again) if app.js still spoke the flat `plan_review` key the
-    core settings (`show_thinking`, `show_tools`) keep."""
-    captured: list = []
-    url = live_server(delay=0.0, seed=captured.append)
-    _open(page, url)
+def test_theme_button_cycles_and_persists(page, live_server):
+    """The header button is the only theme control on the page, and it drives a three-state choice
+    (auto/light/dark) through a two-valued attribute (`data-theme` is only ever light or dark). That
+    mismatch is what this pins: `data-theme` follows the *resolved* theme while the button's glyph and
+    label follow the stored *choice*, so "auto" stays distinguishable from whichever mode the OS
+    resolved it to. The reload leg covers the hand-off to the pre-paint script in index.html, which
+    reads the same localStorage key independently of app.js -- a key rename in one and not the other
+    would show up here as a button that forgets what was picked.
+    """
+    _open(page, live_server(delay=0.0))
+    button = page.locator("#theme-btn")
+    html = page.locator("html")
 
-    page.click("#settings-btn")
-    checkbox = page.locator("#set-plan_review")
-    expect(checkbox).to_be_visible()
-    expect(checkbox).not_to_be_checked()
+    # Headless Chromium reports a light OS preference, so "auto" resolves to light here.
+    expect(button).to_have_attribute("title", "Theme: auto (system)")
+    expect(html).to_have_attribute("data-theme", "light")
 
-    checkbox.check()
-    page.locator("#settings-form button[type=submit]").click()
-    expect(page.locator("#settings-modal")).to_be_hidden()
+    button.click()
+    expect(button).to_have_attribute("title", "Theme: light")
+    expect(html).to_have_attribute("data-theme", "light")
 
-    # Reload and re-open: a fresh `get_settings` round trip must reflect what was saved.
+    button.click()
+    expect(button).to_have_attribute("title", "Theme: dark")
+    expect(html).to_have_attribute("data-theme", "dark")
+
+    # The explicit choice survives a reload, applied before first paint.
     page.reload()
     page.wait_for_selector("#conv-list li")
-    page.click("#settings-btn")
-    expect(page.locator("#set-plan_review")).to_be_checked()
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+    expect(page.locator("#theme-btn")).to_have_attribute("title", "Theme: dark")
 
-    written = captured[0].config_path.read_text(encoding="utf-8")
-    assert "[planning]" in written
-    assert "plan_review = true" in written
+    page.locator("#theme-btn").click()  # dark -> back to auto
+    expect(page.locator("#theme-btn")).to_have_attribute("title", "Theme: auto (system)")
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")
 
 
 def test_working_indicator_on_switch_into_running(page, live_server):

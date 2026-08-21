@@ -338,9 +338,8 @@ declared model string at startup (offline, no client and no key), so a typo name
 surfacing later as a failed spawn.
 
 Both are read once, at startup. No live client is rebound to another model, which is why the model is
-not a `RuntimeSetting` and not in the settings panel: the panel cannot write `[agents.*]`, so a field
-there could only disagree with a table it cannot change. It is an ordinary cold key, so `update_config`
-writes it and reports that a restart is needed.
+not a `RuntimeSetting`: a hot setting is one the change reaches in the same session, and this one cannot.
+It is an ordinary cold key, so `update_config` writes it and reports that a restart is needed.
 
 `/diag` reports the entry agent's model plus every override, since a running session otherwise has no
 surface that names one. `build.model_label` is the single renderer: the declared string when there is
@@ -444,9 +443,8 @@ next start) but not an agent's own `[agents.<name>.generation]`, which stays han
 of `[agents.*]`.
 
 `config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
-comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Three writers: the web
-settings panel, the `add_mcp_server`/`remove_mcp_server` tools, and the assistant's own
-`update_config`. `update_config` refuses the keys `config/store.py`'s `is_locked` guards (`confirm_tools`, `email.to`,
+comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Two writers: the
+`add_mcp_server`/`remove_mcp_server` tools, and the assistant's own `update_config`. `update_config` refuses the keys `config/store.py`'s `is_locked` guards (`confirm_tools`, `email.to`,
 `data_dir`) plus the whole `[agents.*]` section, matched by section prefix since agent names cannot be
 enumerated in advance, and applies hot-appliable keys live.
 
@@ -532,14 +530,20 @@ self-contained `web_static/index.html` served as package data, plus vendored `ma
 typeset after sanitization with `trust:false`. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under `/fonts/`.
 
-### The settings panel and the tasks section
+### The tasks section, and the settings frames behind it
 
-Two page surfaces are pure front-end concerns and deliberately absent from `RichChannel`: the settings
-panel (`settings` / `get_settings`) and the scheduled-tasks section (`tasks` / `get_tasks` / `task`).
-The core never sends either frame, so there is no capability for `ChannelUI` to probe and no fallback to
-document; `Assistant` exposes only accessors (`current_settings` / `apply_settings`,
-`list_tasks` / `task_action`) and `frontends/web.py`'s pump handles the control frames. A new transport
-that wants a task list implements its own; it is not a hole in the channel contract.
+Two page surfaces are pure front-end concerns and deliberately absent from `RichChannel`: the
+scheduled-tasks section (`tasks` / `get_tasks` / `task`) and the settings frames
+(`settings` / `get_settings`). The core never sends either, so there is no capability for `ChannelUI` to
+probe and no fallback to document; `Assistant` exposes only accessors (`list_tasks` / `task_action`,
+`current_settings` / `apply_settings`) and `frontends/web.py`'s pump handles the control frames. A new
+transport that wants a task list implements its own; it is not a hole in the channel contract.
+
+The shipped page uses only the first pair. There is no settings window: the header's theme button is a
+per-browser `localStorage` preference that never reaches the server, and the runtime-mutable settings
+are changed through `update_config`, which hot-applies them by the same `SettingsApplier` path. The
+`settings` / `get_settings` control frames remain part of the web transport's contract for a front end
+that wants them, and `tests/frontends/test_web.py` keeps covering the server half.
 
 **Stopping a run in flight.** A firing is a turn like any other, so stopping one is cancelling a task --
 but not the *scheduler's* task. `Scheduler.cancel` would reach the job running the firing and would also

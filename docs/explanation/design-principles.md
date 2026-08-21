@@ -105,8 +105,8 @@ writes. No parallel store, no process-only overrides, no settings that exist in 
 else.
 
 *How this cashes out:* [`config/store.py`](../../src/kokua/config/store.py) does comment-preserving
-`tomlkit` writes; three writers (the web settings panel, `add_mcp_server`, and the assistant's own
-`update_config` tool) land in that one file. A `runtime-settings.json` store used to exist and was
+`tomlkit` writes; two writers (`add_mcp_server` and the assistant's own `update_config` tool) land in
+that one file. A `runtime-settings.json` store used to exist and was
 retired in favour of the file itself. Four things in the file are hand-edit only, refused by
 `update_config` even behind the approval prompt: `[security] confirm_tools` (the gate itself),
 `[email] to` (the locked recipient), `[paths] data_dir` (where all state lives), and the whole
