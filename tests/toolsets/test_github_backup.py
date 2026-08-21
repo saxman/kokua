@@ -18,6 +18,7 @@ from kokua.toolsets.github_backup import (
     TOOLSET,
     TOOLSET_NAME,
     BackupError,
+    _error_detail,
     backup_paths,
     build,
     commit_and_push,
@@ -27,6 +28,38 @@ from kokua.toolsets.github_backup import (
 )
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="needs the git binary")
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_git(monkeypatch, tmp_path):
+    """Isolate every test in this module from the developer's own git configuration.
+
+    A global ``core.excludesFile`` that matches ``*.sqlite3``, or a global ``commit.gpgsign = true``,
+    would silently change what these tests observe (a smaller changed-file count, or every
+    commit-writing test failing outright) without the module under test being at fault. Pointing git at
+    empty global and system config files is what makes the fixes for those two hazards, in the module
+    itself, the only thing keeping this suite green.
+    """
+    empty = tmp_path / "empty-gitconfig"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(empty))
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """Make it impossible, not just conventional, for a test in this module to reach github.com.
+
+    ``remote_url`` is the one seam through which a real hostname could ever enter this module's git
+    calls. Patching it to fail here, for every test rather than only the ones that call ``_point_at``,
+    turns this module's opening claim that nothing here reaches the network into something the test
+    runner enforces rather than something a future test could forget.
+    """
+
+    def _forbidden(repo: str) -> str:
+        raise AssertionError(f"remote_url({repo!r}) was not redirected by _point_at before use")
+
+    monkeypatch.setattr("kokua.toolsets.github_backup.remote_url", _forbidden)
 
 
 def _config(tmp_path: Path, **settings) -> AssistantConfig:
@@ -287,12 +320,18 @@ def test_a_diverged_remote_is_reported_and_never_forced(tmp_path, monkeypatch):
     _run_git("add", "-A", cwd=other)
     _run_git("-c", "user.name=T", "-c", "user.email=t@e", "commit", "--amend", "-m", "rewritten", cwd=other)
     _run_git("push", "--force", "origin", "HEAD:main", cwd=other)
+    remote_sha_after_rewrite = _run_git("rev-parse", "--short", "main", cwd=bare)
 
     (config.documents_path / "new.md").write_text("new", encoding="utf-8")
     mirror_state(config, tree)
     with pytest.raises(BackupError) as raised:
         commit_and_push(tree, "main")
-    assert "push" in str(raised.value)
+    # "push" alone is not evidence: it is the step label on every push failure, this one included, so an
+    # auth error or a missing origin would pass just as well. The actual rejection text is what proves
+    # this is the diverged-history case and not something else that happens to share the word "push".
+    message = str(raised.value)
+    assert "rejected" in message or "fetch first" in message
+    assert _run_git("rev-parse", "--short", "main", cwd=bare) == remote_sha_after_rewrite
 
 
 @needs_git
@@ -304,3 +343,109 @@ def test_head_sha_is_empty_before_the_first_commit(tmp_path, monkeypatch):
     ensure_clone(tree, "you/kokua-backup", "main")
 
     assert head_sha(tree) == ""
+
+
+def test_error_detail_prefers_the_error_line_over_a_trailing_hint():
+    """Git's diagnosis comes first and its "hint:" footnotes come last; the tail is the wrong end to read."""
+    stderr = (
+        " ! [rejected]        HEAD -> main (fetch first)\n"
+        "error: failed to push some refs to 'file:///tmp/remote.git'\n"
+        "hint: Updates were rejected because the remote contains work that you do not\n"
+        "hint: have locally. This is usually caused by another repository pushing to\n"
+        "hint: the same ref. If you want to integrate the remote changes, use\n"
+        "hint: 'git pull' before pushing again.\n"
+        "hint: See the 'Note about fast-forwards' in 'git push --help' for details.\n"
+    )
+    assert _error_detail(stderr, "") == "! [rejected]        HEAD -> main (fetch first)"
+
+
+def test_error_detail_falls_back_to_the_last_line_when_nothing_looks_like_an_error():
+    assert _error_detail("just some output\nwith no error marker\n", "") == "with no error marker"
+
+
+def test_error_detail_falls_back_to_stdout_when_stderr_is_empty():
+    assert _error_detail("", "fatal: from stdout for some reason\n") == "fatal: from stdout for some reason"
+
+
+@needs_git
+def test_add_ignores_an_inherited_global_excludes_file(tmp_path, monkeypatch):
+    """A developer's own ``*.sqlite3`` in a global git ignore must not silently drop the memory store.
+
+    Without clearing ``core.excludesFile`` on the add, ``git add -A`` would honor this inherited global
+    and the backup would report success while quietly omitting the memory database from the commit.
+    """
+    global_ignore = tmp_path / "global-gitignore"
+    global_ignore.write_text("*.sqlite3\n", encoding="utf-8")
+    global_config = tmp_path / "global-gitconfig-with-excludes"
+    global_config.write_text(f"[core]\n\texcludesFile = {global_ignore}\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+
+    bare = _bare_remote(tmp_path)
+    _point_at(monkeypatch, bare)
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+    tree = tmp_path / "data/backup"
+
+    ensure_clone(tree, "you/kokua-backup", "main")
+    mirror_state(config, tree)
+    result = commit_and_push(tree, "main")
+
+    assert result is not None
+    tracked = _run_git("ls-tree", "-r", "--name-only", "main", cwd=bare).splitlines()
+    assert "data/memory/chroma.sqlite3" in tracked
+
+
+@needs_git
+def test_commit_succeeds_despite_an_inherited_global_gpgsign(tmp_path, monkeypatch):
+    """An unattended backup must not fail because some global config expects a tty to sign with.
+
+    Without setting ``commit.gpgsign=false`` alongside the identity, a global ``commit.gpgsign = true``
+    would fail every commit this module writes, with no terminal there to answer a signing prompt.
+    """
+    global_config = tmp_path / "global-gitconfig-with-gpgsign"
+    global_config.write_text(
+        "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /nonexistent-gpg-binary\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+
+    bare = _bare_remote(tmp_path)
+    _point_at(monkeypatch, bare)
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+    tree = tmp_path / "data/backup"
+
+    ensure_clone(tree, "you/kokua-backup", "main")
+    mirror_state(config, tree)
+    result = commit_and_push(tree, "main")
+
+    assert result is not None
+
+
+@needs_git
+def test_ensure_clone_raises_on_a_genuine_fetch_failure(tmp_path, monkeypatch):
+    """An auth or network fetch failure must not be read as "the remote is empty".
+
+    Swallowing every fetch failure that way would leave the branch unborn, and because ensure_clone
+    returns early once .git exists, the tree would never retry: the next run's push would be rejected as
+    non-fast-forward, or the run would report an empty diff and the user would be told the backup is
+    fine when the remote was never reached at all.
+    """
+    from kokua.toolsets import github_backup
+
+    monkeypatch.setattr(github_backup, "remote_url", lambda repo: (tmp_path / "does-not-exist.git").as_uri())
+    tree = tmp_path / "data/backup"
+
+    with pytest.raises(BackupError, match="fetch"):
+        ensure_clone(tree, "you/kokua-backup", "main")
+
+
+@needs_git
+def test_ensure_clone_tolerates_a_genuinely_empty_remote(tmp_path, monkeypatch):
+    """The one fetch failure that must not raise: an empty remote has no ref yet, by design."""
+    bare = _bare_remote(tmp_path)
+    _point_at(monkeypatch, bare)
+    tree = tmp_path / "data/backup"
+
+    ensure_clone(tree, "you/kokua-backup", "main")
+
+    assert (tree / ".git").is_dir()

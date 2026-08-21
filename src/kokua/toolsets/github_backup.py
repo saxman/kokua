@@ -122,12 +122,26 @@ def _credential_args() -> list[str]:
     return ["-c", "credential.helper=", "-c", f"credential.helper={_CREDENTIAL_HELPER}"]
 
 
-def _git(tree: Path, *args: str, label: str, check: bool = True) -> subprocess.CompletedProcess:
+def _error_detail(stderr: str, stdout: str) -> str:
+    """The one line from git's own output most likely to tell a user what went wrong.
+
+    Git puts its own diagnosis first (an ``error:``, ``fatal:``, or `` ! [rejected]`` line) and any
+    ``hint:`` advice that explains it last. Taking the last line, as a naive tail would, hands the user
+    the hint instead of the error it is a footnote to.
+    """
+    lines = [line for line in (stderr or stdout).strip().splitlines() if line.strip()]
+    for line in lines:
+        if line.lstrip().startswith(("error:", "fatal:", "!")):
+            return line.strip()
+    return lines[-1].strip() if lines else "no output"
+
+
+def _git(tree: Path, *args: str, label: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run one git command in ``tree``, raising :class:`BackupError` with git's own message on failure.
 
     ``GIT_TERMINAL_PROMPT=0`` is what keeps an unattended backup from hanging: without it, a credential
     git cannot satisfy makes it block on an interactive prompt that nobody is there to answer, and the
-    scheduled turn never ends. Failing is the required behaviour; hanging is not.
+    scheduled turn never ends. Failing is the required behavior; hanging is not.
 
     ``label`` names the step for the error message, because the first argument is often ``-c`` and
     "git -c failed" tells a reader nothing.
@@ -143,12 +157,15 @@ def _git(tree: Path, *args: str, label: str, check: bool = True) -> subprocess.C
             timeout=GIT_TIMEOUT_SECONDS,
         )
     except FileNotFoundError as error:
+        # subprocess.run raises the same exception whether ``git`` is missing or ``cwd`` is: without this
+        # check, a deleted working tree would be misreported as an absent git binary.
+        if not tree.is_dir():
+            raise BackupError(f"the backup working tree {tree} does not exist") from error
         raise BackupError("git is not installed, or not on PATH") from error
     except subprocess.TimeoutExpired as error:
         raise BackupError(f"git {label} timed out after {GIT_TIMEOUT_SECONDS} seconds") from error
     if check and result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip().splitlines()
-        raise BackupError(f"git {label} failed: {detail[-1] if detail else 'no output'}")
+        raise BackupError(f"git {label} failed: {_error_detail(result.stderr, result.stdout)}")
     return result
 
 
@@ -170,6 +187,13 @@ def ensure_clone(tree: Path, repo: str, branch: str) -> None:
     fetched = _git(tree, *_credential_args(), "fetch", "--depth", "1", "origin", branch, label="fetch", check=False)
     if fetched.returncode == 0:
         _git(tree, "reset", "--hard", "FETCH_HEAD", label="reset")
+    elif "couldn't find remote ref" not in fetched.stderr:
+        # "couldn't find remote ref" is genuinely an empty remote and is fine to continue past with an
+        # unborn branch. Anything else (a network error, a bad token) must not be read that way: this
+        # function returns early on every later call once .git exists, so swallowing the failure here
+        # would leave the branch unborn for good, and the next push would be rejected as non-fast-forward
+        # with nothing left to retry the fetch.
+        raise BackupError(f"git fetch failed: {_error_detail(fetched.stderr, fetched.stdout)}")
 
 
 def head_sha(tree: Path) -> str:
@@ -188,8 +212,12 @@ def commit_and_push(tree: Path, branch: str) -> tuple[str, int] | None:
     Never ``--force``. A rejected push means the remote diverged, and reconciling that is the user's
     call: a mirror that can overwrite remote history is not a backup.
     """
-    _git(tree, "add", "-A", label="add")
-    staged = _git(tree, "diff", "--cached", "--name-only", label="diff", check=False)
+    # core.excludesFile is cleared the same way the credential helper is: an inherited global (a stray
+    # `*.sqlite3` in the developer's own ignore file, say) would otherwise silently drop a file from the
+    # backup, reporting success with a changed-file count that looks entirely plausible. The in-tree
+    # .gitignore at the repository root is untouched and still excludes whatever the user puts there.
+    _git(tree, "-c", "core.excludesFile=", "add", "-A", label="add")
+    staged = _git(tree, "diff", "--cached", "--name-only", label="diff")
     changed = [line for line in staged.stdout.splitlines() if line.strip()]
     if not changed:
         return None
@@ -200,6 +228,10 @@ def commit_and_push(tree: Path, branch: str) -> tuple[str, int] | None:
         f"user.name={COMMIT_NAME}",
         "-c",
         f"user.email={COMMIT_EMAIL}",
+        # An inherited commit.gpgsign=true would otherwise fail every commit with no tty to answer the
+        # signing prompt: the machine needs no git configuration of its own, for identity or for this.
+        "-c",
+        "commit.gpgsign=false",
         "commit",
         "-m",
         f"Kokua backup {stamp}",
