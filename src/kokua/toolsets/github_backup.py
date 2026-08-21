@@ -19,7 +19,10 @@ scope that token to the backup repository alone.
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -31,6 +34,17 @@ from kokua.toolsets.registry import Setting, Toolset
 TOOLSET_NAME = "github_backup"
 TOKEN_ENV = "GITHUB_BACKUP_TOKEN"
 DEFAULT_BRANCH = "main"
+
+GIT_TIMEOUT_SECONDS = 300
+COMMIT_NAME = "Kokua"
+COMMIT_EMAIL = "kokua@localhost"
+
+# The helper names the environment variable rather than carrying its value, so the token appears in no
+# argv (which `ps` shows to every process of this user) and never lands in .git/config. The empty first
+# value clears any inherited system or global helper (the macOS keychain, typically), which would
+# otherwise be consulted first and could answer with a stale credential. It runs through a shell, so
+# this works on macOS and Linux, and on Windows wherever git-bash is present.
+_CREDENTIAL_HELPER = f'!f() {{ echo username=x-access-token; echo "password=${TOKEN_ENV}"; }}; f'
 
 
 class BackupError(RuntimeError):
@@ -93,6 +107,106 @@ def mirror_state(config: AssistantConfig, tree: Path) -> None:
         elif source.is_file():
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
+
+
+def remote_url(repo: str) -> str:
+    """The HTTPS remote for ``owner/name``.
+
+    A named function rather than an inline f-string because it is the seam the test suite replaces with
+    a local path, which is what lets the git plumbing be exercised for real without a network.
+    """
+    return f"https://github.com/{repo}.git"
+
+
+def _credential_args() -> list[str]:
+    return ["-c", "credential.helper=", "-c", f"credential.helper={_CREDENTIAL_HELPER}"]
+
+
+def _git(tree: Path, *args: str, label: str, check: bool = True) -> subprocess.CompletedProcess:
+    """Run one git command in ``tree``, raising :class:`BackupError` with git's own message on failure.
+
+    ``GIT_TERMINAL_PROMPT=0`` is what keeps an unattended backup from hanging: without it, a credential
+    git cannot satisfy makes it block on an interactive prompt that nobody is there to answer, and the
+    scheduled turn never ends. Failing is the required behaviour; hanging is not.
+
+    ``label`` names the step for the error message, because the first argument is often ``-c`` and
+    "git -c failed" tells a reader nothing.
+    """
+    environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=tree,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as error:
+        raise BackupError("git is not installed, or not on PATH") from error
+    except subprocess.TimeoutExpired as error:
+        raise BackupError(f"git {label} timed out after {GIT_TIMEOUT_SECONDS} seconds") from error
+    if check and result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        raise BackupError(f"git {label} failed: {detail[-1] if detail else 'no output'}")
+    return result
+
+
+def ensure_clone(tree: Path, repo: str, branch: str) -> None:
+    """Make ``tree`` a working tree tracking ``repo``, in sync with the remote branch. Idempotent.
+
+    The fetch-and-reset is what keeps the first push to an already-populated repository a fast-forward.
+    On an empty repository the fetch fails harmlessly and the branch stays unborn until the first
+    commit creates it.
+
+    ``git init`` plus ``git checkout -b`` rather than ``git init -b``, which needs git 2.28 or newer.
+    """
+    if (tree / ".git").is_dir():
+        return
+    tree.mkdir(parents=True, exist_ok=True)
+    _git(tree, "init", label="init")
+    _git(tree, "checkout", "-b", branch, label="checkout", check=False)
+    _git(tree, "remote", "add", "origin", remote_url(repo), label="remote add")
+    fetched = _git(tree, *_credential_args(), "fetch", "--depth", "1", "origin", branch, label="fetch", check=False)
+    if fetched.returncode == 0:
+        _git(tree, "reset", "--hard", "FETCH_HEAD", label="reset")
+
+
+def head_sha(tree: Path) -> str:
+    """The short SHA at HEAD, or an empty string when the branch is still unborn."""
+    result = _git(tree, "rev-parse", "--short", "HEAD", label="rev-parse", check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def commit_and_push(tree: Path, branch: str) -> tuple[str, int] | None:
+    """Stage, commit, and push. Returns ``(short SHA, files changed)``, or ``None`` if nothing changed.
+
+    The empty-diff check earns its place: a daily task would otherwise write an empty commit every day,
+    and a history where every entry is identical cannot answer the one question it exists for, which is
+    when something actually changed.
+
+    Never ``--force``. A rejected push means the remote diverged, and reconciling that is the user's
+    call: a mirror that can overwrite remote history is not a backup.
+    """
+    _git(tree, "add", "-A", label="add")
+    staged = _git(tree, "diff", "--cached", "--name-only", label="diff", check=False)
+    changed = [line for line in staged.stdout.splitlines() if line.strip()]
+    if not changed:
+        return None
+    stamp = datetime.now().isoformat(timespec="seconds")
+    _git(
+        tree,
+        "-c",
+        f"user.name={COMMIT_NAME}",
+        "-c",
+        f"user.email={COMMIT_EMAIL}",
+        "commit",
+        "-m",
+        f"Kokua backup {stamp}",
+        label="commit",
+    )
+    _git(tree, *_credential_args(), "push", "origin", f"HEAD:{branch}", label="push")
+    return head_sha(tree), len(changed)
 
 
 def build(config: AssistantConfig, *, verify: Callable[[str, str], None] = verify_repo_private) -> list:
