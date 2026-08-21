@@ -152,8 +152,8 @@ ordinary and hot-appliable; only the per-task tables route through the schedulin
 One of Kokua's own runtime-mutable settings is **one entry** in
 [`config/table.py`](../../src/kokua/config/table.py)'s `CORE_RUNTIME_SETTINGS`; a toolset's is one
 `Setting` on the toolset itself, in its own `[<name>]` section. `SettingsTable`, built at startup from
-both, is what drives the TOML schema, the panel sanitizer, the hot-apply set, the live-apply loop, the
-channel mirroring, and the persist path at once -- and `tests/config/test_table.py` fails if a
+both, is what drives the TOML schema, the incoming-payload sanitizer, the hot-apply set, the live-apply
+loop, the channel mirroring, and the persist path at once -- and `tests/config/test_table.py` fails if a
 `CORE_RUNTIME_SETTINGS` entry is not also a real config field and documented in `config.example.toml`
 under its own `[section]`.
 
@@ -253,8 +253,8 @@ here:
 - A new transport is a `FrontEnd`. A new capability is a `Toolset`. Neither is a core change, and
   neither reaches an agent until an `[agents.*]` table names it.
 - A new runtime setting for a *toolset* is one `Setting` on the toolset and nothing else. For Kokua's
-  own it is one `CORE_RUNTIME_SETTINGS` entry, one `AssistantConfig` field, and one input in the web
-  panel. If either takes more edits than that, the table needs fixing, not working around.
+  own it is one `CORE_RUNTIME_SETTINGS` entry and one `AssistantConfig` field. If either takes more
+  edits than that, the table needs fixing, not working around.
 - Anything that writes state derives its path from `AssistantConfig`, never from a new function in
   `config/paths.py`.
 - Anything touching turn concurrency updates the invariants block in `core/turns.py`, in the same

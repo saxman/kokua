@@ -1,8 +1,13 @@
 # Architecture
 
 Kokua wraps [AIMU](https://saxman.info/aimu/) primitives into a single-user, always-on personal
-assistant. The design goal is a small core with capability pushed into plugins; see
-[design principles](design-principles.md) for why.
+assistant. The design goal is a small core with capability pushed into plugins, and behind that goal is
+the reason the project exists: people should be able to learn how an agentic system works by reading,
+running, and extending a real one. See
+[why Kokua exists](design-principles.md#why-kokua-exists) and the six principles that serve it.
+
+This page is the reading path for the first of those three. It goes in dependency order rather than
+alphabetically, so each section can assume the one above it.
 
 The AIMU pieces Kokua is built from are its
 [personal-assistant primitives](https://saxman.info/aimu/how-to/build-personal-assistant/): a `Channel`
@@ -248,7 +253,7 @@ plugin toolset instead. Either way it reaches an agent only when a `[agents.*]` 
 
 The split earns its keep where the two readers diverge. A scheduled task's next firing is a `status` to
 `TaskService`, "~3600s" to the model, and "in 1h" in the sidebar; when the service returned one sentence,
-the web panel was showing prose written to steer a model.
+the sidebar was showing prose written to steer a model.
 
 ### Reading across conversations
 
@@ -437,10 +442,9 @@ nests a dotted TOML header like `[assistant.generation]` inside `assistant`, so 
 `[assistant]` would read it as one key holding a table rather than as its own section. `_sections`
 re-enters it as `assistant.generation`, which is what lets one schema entry per parameter serve it and
 what makes an unknown key inside it report `[assistant.generation].<key>` rather than a generic
-`[assistant]` type complaint. Read only at startup, like the model and the reasoning effort: there is no
-settings-panel field for it, and `update_config` can write the default tier (a cold key, applying on the
-next start) but not an agent's own `[agents.<name>.generation]`, which stays hand-edit only like the rest
-of `[agents.*]`.
+`[assistant]` type complaint. Read only at startup, like the model and the reasoning effort: `update_config` can write the default
+tier (a cold key, applying on the next start) but not an agent's own `[agents.<name>.generation]`, which
+stays hand-edit only like the rest of `[agents.*]`.
 
 `config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
 comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Two writers: the
@@ -450,8 +454,10 @@ enumerated in advance, and applies hot-appliable keys live.
 
 Which settings are hot is not a list maintained by hand in several places: it is
 `config/table.py`'s `SettingsTable`, built once at startup from `CORE_RUNTIME_SETTINGS` plus every
-toolset's own hot `Setting`s, and every consumer -- the schema, the panel sanitizer, the live-apply
-loop, the channel mirroring, and the persist path -- loops over that one instance.
+toolset's own hot `Setting`s, and every consumer -- the schema, the incoming-payload sanitizer, the
+live-apply loop, the channel mirroring, and the persist path -- loops over that one instance. The
+sanitizer predates the removal of the web settings window and outlived it: `update_config` is now its
+only caller, so "panel" in the surrounding code names a surface that no longer exists.
 
 ## State
 

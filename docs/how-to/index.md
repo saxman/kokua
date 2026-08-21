@@ -3,6 +3,11 @@
 Task-oriented recipes for giving Kokua new capability. Each guide answers one question: how do I add
 *this*?
 
+Extending Kokua is one of the three ways to learn from it, alongside reading it and running it (see
+[why Kokua exists](../explanation/design-principles.md#why-kokua-exists)). These guides are the short
+path through the third: each ends with something of yours running, and none of them asks you to change
+Kokua's core.
+
 All three share a single rule, which is the thing to understand before reading any of them. **A
 capability is declared, never defaulted.** Every capability an agent can hold is a named *toolset* in one
 namespace, and a built-in tool group, an installed plugin toolset, and a connected MCP server all reach an
@@ -30,7 +35,7 @@ would hand a worker a fresh composition budget.
   `kokua config init` scaffolds for you.
 - [Architecture](../explanation/architecture.md) and
   [design principles](../explanation/design-principles.md) explain *why* the core is shaped this way,
-  which is the better read if a guide's rule looks arbitrary.
+  and why it is shaped to be read. Either is the better next stop if a guide's rule looks arbitrary.
 - Kokua is a thin application over [AIMU](https://saxman.info/aimu/), so most capability questions are
   really AIMU questions. Its [how-to guides](https://saxman.info/aimu/how-to/) cover the primitives:
   providers and models, the `@tool` decorator, MCP, skills, sub-agents, and memory.

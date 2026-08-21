@@ -1,20 +1,34 @@
 # Contributing to Kokua
 
-Thanks for your interest. Kokua is a small, hackable application built on [AIMU](https://saxman.info/aimu/).
+Thanks for your interest. Kokua is a small, hackable personal assistant built on
+[AIMU](https://saxman.info/aimu/), and it exists so people can learn how agentic systems work by
+reading, running, and extending a real one. That goal is what most of the conventions below are
+protecting, so it is worth reading
+[why Kokua exists](docs/explanation/design-principles.md#why-kokua-exists) before your first change:
+a contribution that makes the system harder to follow costs more than the capability it adds.
 
 ## Setup
 
-Kokua needs AIMU's latest features from a sibling `../aimu` checkout, which `[tool.uv.sources]`
-pins as an editable install:
-
 ```bash
-uv sync --all-extras        # installs Kokua plus the editable ../aimu
+uv sync --all-extras --no-sources     # AIMU from PyPI; enough to work on Kokua alone
 ```
 
-Without `uv`, install AIMU from source first (see the README), then Kokua:
+Kokua and AIMU are developed together, so `[tool.uv.sources]` points AIMU at a sibling `../aimu`
+checkout installed editable. Drop `--no-sources` if you have that checkout and want your AIMU edits
+picked up live:
 
 ```bash
-pip install -e ../aimu      # a local AIMU checkout (sibling dir)
+git clone https://github.com/saxman/aimu    # sibling of kokua/
+uv sync --all-extras                        # installs ../aimu editable
+```
+
+A path source is installed without being checked against the `aimu>=0.18.0` specifier, so a sibling on
+an older branch is the failure mode to expect. Startup's preflight (`kokua.aimu_compat`) catches it and
+names the fix rather than failing on an import.
+
+Without `uv`:
+
+```bash
 pip install -e '.[web,dev]'
 ```
 
@@ -33,9 +47,10 @@ network, or API keys.
 
 ## Design principles
 
-Read [docs/explanation/design-principles.md](docs/explanation/design-principles.md) first. Six
-principles decide what belongs in this repository; a change that serves none of them is probably a
-plugin rather than a core change, and principle 2 exists to make that an easy answer.
+Read [docs/explanation/design-principles.md](docs/explanation/design-principles.md) first. It opens
+with why Kokua exists, then the six principles that serve it: 1 and 2 keep Kokua readable, 3 and 4 keep
+it observable, 5 and 6 keep it runnable by anyone who clones it. A change that serves none of them is
+probably a plugin rather than a core change, and principle 2 exists to make that an easy answer.
 
 ## Where does it go?
 
@@ -45,12 +60,17 @@ does.
 | Subpackage | Holds |
 |---|---|
 | `core/` | the transport-agnostic runtime: the assistant, conversations, turns, human decisions, runtime settings, agent building |
-| `config/` | the settings schema, the TOML file, the writers, and the runtime-settings table |
-| `planning/` | the `/plan` pipeline and the context-free reviewer agents |
+| `config/` | the settings schema, the TOML file, the writers, the write policy, and the runtime-settings table |
+| `workflows/` | the workflow protocol and its two tiers, the shared reviewer, and `planning/`, the `/plan` pipeline |
 | `mcp/` | remote MCP servers and their OAuth |
-| `scheduling/` | recurrence math, the durable task registry, and the agent-facing tools |
+| `scheduling/` | recurrence math and the durable task lifecycle over `config.toml` |
 | `channels/` | `ChannelUI` plus the concrete channels |
-| `frontends/`, `toolsets/` | the toolset registry plus the built-in plugins |
+| `frontends/` | `cli` and `web`, registered as plugins exactly as a third party's would be |
+| `toolsets/` | the registry, Kokua's six core toolsets, the AIMU wrappers, and the two plugin toolsets |
+
+**Agent tools live under `toolsets/`, and only there.** A module defining an `@aimu.tool` is a toolset
+module and nothing else is, so `grep -rl '@tool' src/kokua/` should only ever find files in that one
+directory.
 
 `cli.py`, `plugins.py`, `images.py`, `logging_setup.py`, `config.example.toml` and `web_static/` stay
 at the package root: entry points and package-data paths point at them.
@@ -63,11 +83,15 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 - Plain Python: dataclasses, functions, type hints. Keep the core small; push capability into plugins.
 - Add a **front end** (a new transport) or a **toolset** (a named capability an agent can declare) as a
   plugin, in its own package or under `src/kokua/frontends` / `src/kokua/toolsets`, registered via the
-  `kokua.frontends` / `kokua.toolsets` entry-point groups. See `src/kokua/toolsets/example.py` for the
-  template. Neither reaches an agent until an `[agents.*]` table in `config.toml` names it.
-- A new **runtime setting** is one entry in `config/table.py`'s `RUNTIME_SETTINGS`, one
-  `AssistantConfig` field, and one input in the web panel. If it takes more edits than that, fix the
-  table rather than working around it. Tests enforce the first two.
+  `kokua.frontends` / `kokua.toolsets` entry-point groups. See
+  [`src/kokua/toolsets/image.py`](src/kokua/toolsets/image.py) for the template: one tool, and a
+  `build` that returns nothing when its prerequisite is missing. Neither reaches an agent until an
+  `[agents.*]` table in `config.toml` names it.
+- A new **runtime setting** for a *toolset* is one `kokua.toolsets.Setting` on the toolset and nothing
+  else. For one of Kokua's own it is one `CORE_RUNTIME_SETTINGS` entry in `config/table.py` and one
+  `AssistantConfig` field. If either takes more edits than that, fix the table rather than working
+  around it. `tests/config/test_table.py` enforces that a core entry is a real config field and is
+  documented in `config.example.toml` under its own section.
 - Anything that writes **state** derives its path from `AssistantConfig`, never from a new function in
   `config/paths.py`.
 - Anything touching **turn concurrency** updates the invariants block at the top of `core/turns.py`, in
