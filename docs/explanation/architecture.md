@@ -638,7 +638,8 @@ inside that turn's own task.
 
 Muting a turn is not losing it. Every turn frame is also folded into a per-conversation
 `_CatchUpRecord`, which models the page's own append rules (consecutive thinking text collects into one
-foldable; answer text collects into one open `partial` bubble that floats below later reasoning) and is
+foldable; answer text collects into an open `partial` bubble that any other block closes, so prose keeps
+the place it arrived in and the tokens after that block open a new bubble below it) and is
 appended to the items of the `history` frame a switch-in sends. That is why a conversation whose turn is
 still running replays the turn so far and then streams the rest into the same bubble: none of it is in
 the store until `_persist`, and a `history` frame replaces the transcript wholesale. Riding on the

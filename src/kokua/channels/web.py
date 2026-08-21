@@ -158,9 +158,11 @@ def conversation_to_frames(
 ) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
-    Mirrors the live stream order per assistant message: reasoning, then tool calls, then the answer,
-    each gated by the same ``show_thinking`` / ``show_tools`` flags the live stream uses. The system
-    message is omitted (live chat shows none).
+    Mirrors the live stream order per assistant message: reasoning, then the answer, then the tool calls,
+    each gated by the same ``show_thinking`` / ``show_tools`` flags the live stream uses. That is the
+    order the message was written in -- a model emits its prose and then the calls it decided to make --
+    so a reload leaves a turn where the user watched it arrive instead of sinking its prose below the
+    cards. The system message is omitted (live chat shows none).
 
     A ``role: "tool"`` message is not replayed as an item of its own, but its content is rejoined to the
     call it answers (see :func:`_tool_results_by_call_id`) and rides that call's item as ``response``, so
@@ -254,6 +256,9 @@ def conversation_to_frames(
                 continue
             if show_thinking and message.get("thinking"):
                 add({"type": "thinking", "text": message["thinking"]}, ts)
+            text = _text_of(message.get("content"))
+            if text:
+                add({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE}, ts)
             if show_tools:
                 for call in message.get("tool_calls") or []:
                     fn = call.get("function", {})
@@ -269,9 +274,6 @@ def conversation_to_frames(
                         },
                         ts,
                     )
-            text = _text_of(message.get("content"))
-            if text:
-                add({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE}, ts)
         elif role == "tool":
             # Tool results are otherwise not replayed, but a generate_image result carries an /images/
             # reference the user asked to see, so surface it as an image (regardless of show_tools).
@@ -292,10 +294,11 @@ class _CatchUpRecord:
     catches up, after which live frames stream into the same bubble.
 
     Items follow the page's own append rules, so the replay reads like the render it stands in for:
-    consecutive thinking text collects into one foldable; answer text collects into one still-open
-    ``partial`` bubble that floats to the end each time it grows (matching the page moving the streaming
-    bubble below any later reasoning); anything else closes the thinking block; and ``phase``, ``done``,
-    and ``message`` close the answer too, as ``finalizeStreaming()`` does on the page.
+    consecutive thinking text collects into one foldable; answer text collects into a still-open
+    ``partial`` bubble that any other block closes, so the prose keeps the place it arrived in and the
+    tokens after that block open a new bubble below it (matching what the page renders); anything else
+    closes the thinking block; and ``phase``, ``done``, and ``message`` close the answer too, as
+    ``finalizeStreaming()`` does on the page.
     """
 
     def __init__(self):
@@ -326,25 +329,38 @@ class _CatchUpRecord:
             return
         self._thinking = None
         if kind == "token":
+            # Anything else the turn emitted since the last token ends the answer segment it interrupted
+            # (`self._items[-1]` is that block, not the open bubble): what follows is a new answer below
+            # it. Compared by identity, not equality, since two segments can hold the same text.
+            if self._partial is not None and self._items[-1] is not self._partial:
+                self._close_partial(ts)
             if self._partial is None:
                 self._partial = {"type": "partial", "text": ""}  # unstamped: it is still being written
-                self._items.append(self._partial)
-            elif self._items[-1] is not self._partial:
-                # Float the answer below later reasoning, as the page does. By identity, not equality:
-                # a `phase` closes one partial and the next answer opens another, and two of them can
-                # hold the same text.
-                self._items = [item for item in self._items if item is not self._partial]
                 self._items.append(self._partial)
             self._partial["text"] += frame.get("text", "")
             return
         if kind in ("phase", "done", "message"):
-            self._partial = None
+            self._close_partial(ts)
         if kind == "done":
             return  # a terminator has no rendered form to replay
         item = {**frame, "ts": ts}
         if kind == "image":
             item["from"] = "assistant"  # a live image frame is always generated; replay aligns on this
         self._items.append(item)
+
+    def _close_partial(self, ts: str) -> None:
+        """Finish the open answer segment, in place, as the finished bubble it now is.
+
+        A closed segment replays as a ``message`` rather than staying a ``partial``: it wants the markdown
+        render and the timestamp the page gives a bubble at ``finalizeStreaming()``, and leaving it a
+        ``partial`` would also make the replay re-open it as the bubble live tokens stream into, so the
+        next segment's text would land in the wrong one.
+        """
+        if self._partial is None:
+            return
+        self._partial["type"] = "message"
+        self._partial["ts"] = ts
+        self._partial = None
 
     def items(self) -> list[dict]:
         """The recorded items, copied so a replay cannot be mutated by the turn still running."""

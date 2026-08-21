@@ -473,11 +473,12 @@ async def test_switching_back_mid_turn_replays_the_turn_so_far():
         streaming_conversation.reset(token)
 
     items = ws.frames[-1]["items"]
-    assert [item["type"] for item in items] == ["user", "thinking", "partial"]
+    # The answer replays as a finished `message`: `send` ended with a `done`, which finalizes the bubble
+    # here exactly as it does on the page. A turn still mid-answer leaves it an unstamped `partial`.
+    assert [item["type"] for item in items] == ["user", "thinking", "message"]
     assert items[0]["text"] == "ping"
     assert items[1]["text"] == "hmm"
     assert items[2]["text"] == "seen unseen"  # both halves: the one the user saw and the muted one
-    assert "ts" not in items[2]  # still being written, so it carries no completion caption
 
 
 async def test_a_muted_turns_catch_up_keeps_the_tool_output():
@@ -505,9 +506,13 @@ async def test_a_muted_turns_catch_up_keeps_the_tool_output():
     assert tool["response"] == "4"
 
 
-async def test_the_replayed_answer_floats_below_later_reasoning():
-    """`partial` mirrors the page's own append rule -- the answer bubble moves below a tool call that
-    arrives after it -- so a replay reads in the order a live render would have produced."""
+async def test_the_replayed_answer_keeps_its_place_above_a_later_tool_call():
+    """`partial` mirrors the page's own append rule -- a tool call closes the answer segment above it and
+    the next tokens open a new bubble below -- so a replay reads in the order a live render produced.
+
+    The closed segment replays as a `message`, not a second `partial`: it is finished prose, so it wants
+    the markdown render and the timestamp a finished bubble gets. Only a segment still being written into
+    stays a `partial` (see the phase/tool test below, whose turn has no terminator)."""
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
@@ -529,8 +534,9 @@ async def test_the_replayed_answer_floats_below_later_reasoning():
         streaming_conversation.reset(token)
 
     items = ws.frames[-1]["items"]
-    assert [item["type"] for item in items] == ["user", "tool", "partial"]
-    assert items[-1]["text"] == "first second"  # one bubble, sitting after the tool call
+    assert [item["type"] for item in items] == ["user", "message", "tool", "message"]
+    assert items[1]["text"] == "first "  # written before the call, and still above it
+    assert items[-1]["text"] == "second"
 
 
 async def test_a_persisted_turn_is_not_replayed_twice():
@@ -677,8 +683,8 @@ def test_conversation_to_frames_full_replay():
     assert items == [
         {"type": "user", "text": "what's 2+2?"},
         {"type": "thinking", "text": "adding the numbers"},
-        {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": "4"},
         {"type": "message", "text": "4", "proactive": False},
+        {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": "4"},
     ]
 
 
@@ -1598,9 +1604,32 @@ async def test_a_second_answer_after_a_phase_replays_as_its_own_bubble():
     await channel.send_history([], {})
 
     items = ws.frames[-1]["items"]
-    assert [item["type"] for item in items] == ["user", "partial", "phase", "tool", "partial"]
+    assert [item["type"] for item in items] == ["user", "message", "phase", "message", "tool", "partial"]
     assert items[1]["text"] == "same"  # the first answer stayed where the phase closed it
-    assert items[4]["text"] == "same more"  # the second floated below the tool call
+    assert items[3]["text"] == "same"  # the second stayed where the tool call closed it
+    assert items[5]["text"] == " more"
+
+
+def test_conversation_to_frames_replays_an_answer_above_the_calls_it_preceded():
+    """A stored assistant message holds its prose and the calls it went on to make, and the prose came
+    first: the model wrote it, then called the tools. Replay has to keep that order, or a reload
+    rearranges a turn the user watched arrive the other way round."""
+    messages = [
+        {"role": "user", "content": "change both tasks"},
+        {
+            "role": "assistant",
+            "content": "I see both tasks.",
+            "thinking": "which two?",
+            "tool_calls": [{"id": "1", "function": {"name": "update_scheduled_task", "arguments": {"name": "news"}}}],
+        },
+        {"role": "tool", "tool_call_id": "1", "content": "updated"},
+        {"role": "assistant", "content": "Both are changed."},
+    ]
+
+    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+
+    assert [item["type"] for item in items] == ["user", "thinking", "message", "tool", "message"]
+    assert items[2]["text"] == "I see both tasks."
 
 
 def test_conversation_to_frames_closes_a_failed_turn_with_its_reason():

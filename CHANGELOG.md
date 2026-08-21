@@ -72,6 +72,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
     output cannot inject scripts or markup, and links open with `rel="noopener"`. LaTeX math is typeset
     with vendored KaTeX after sanitization, with `trust:false` and a `maxExpand` cap; a malformed
     expression is left as source text rather than breaking the row.
+  - **A turn renders in the order it was produced.** An answer the model wrote before calling a tool
+    stays above the card for that call: the block closes the answer bubble, and the tokens that follow
+    open a new one below it. A turn that says something, calls a tool, and then says more therefore
+    reads top to bottom in all three renderings -- live streaming, a background turn's catch-up replay,
+    and a reloaded transcript, where a stored assistant message's prose replays ahead of the
+    `tool_calls` it carries rather than behind them.
   - **Auxiliary blocks fold, and the folded line carries the call.** Thinking, tool calls,
     verbose-trace phases, sub-agent cards, drafted plans, and agent-loop continuation markers render
     collapsed behind a one-line header: the kind word, then the call with its condensed arguments, then

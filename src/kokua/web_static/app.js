@@ -919,21 +919,21 @@ ws.onmessage = (event) => {
     thinkingBlock = null;
     renderTool(frame.name, frame.arguments, new Date(), { response: frame.response });
   } else if (frame.type === "loop") {
-    // Agent-loop continuation boundary. Leave streamingBubble open so the answer keeps
-    // accumulating and floats below this marker (same float-to-bottom rule as tool blocks).
+    // Agent-loop continuation boundary. Like a tool block, it ends the answer segment above it: the
+    // next tokens open their own bubble below this marker.
     thinkingBlock = null;
     renderLoop(frame.text, new Date());
   } else if (frame.type === "token") {
     thinkingBlock = null;
+    // A block that landed since the last token (a tool call, a loop marker, an image) ended the answer
+    // segment it interrupted, so close that bubble and start a new one below. Moving the old bubble
+    // down instead would drag prose the user already watched arrive underneath the cards it preceded.
+    if (streamingBubble && log.lastElementChild !== streamingBubble) finalizeStreaming();
     if (!streamingBubble) {
       streamingBubble = addBubble("assistant", "");
       streamingText = "";
-    } else if (log.lastElementChild !== streamingBubble) {
-      // New answer content after an intervening thinking/tool block: float the answer
-      // to the bottom so it never sits above later reasoning.
-      log.appendChild(streamingBubble);  // moves the existing node to the end
     }
-    // Stream as plain text; partial markdown can't be rendered until the turn finishes.
+    // Stream as plain text; partial markdown can't be rendered until the segment finishes.
     streamingText += frame.text;
     streamingBubble.textContent = streamingText;
     autoscroll();
@@ -947,7 +947,8 @@ ws.onmessage = (event) => {
     finalizeStreaming();
     renderPhase(frame.label, frame.detail, new Date());
   } else if (frame.type === "image") {
-    // A generated image finished (or the assistant surfaced one). Float it below any open answer.
+    // A generated image finished (or the assistant surfaced one). It lands below the answer so far, and
+    // closes it: whatever the assistant writes about the image belongs under the image.
     thinkingBlock = null;
     addImageBubble(frame.url, "assistant", new Date());
   } else if (frame.type === "message") {

@@ -56,14 +56,24 @@ class _SlowClient(MockAsyncModelClient):
 
     `tool_response`, if given, streams one TOOL_CALLING chunk carrying it ahead of the reply. AIMU yields
     that phase only once a call has returned, so the chunk carries the call and its result together --
-    which is what a live tool card renders from."""
+    which is what a live tool card renders from. `tool_between` streams the same chunk *between* the
+    reply and the tail instead, which is the shape of a turn that says something, calls a tool, and then
+    says more -- the one that tells you whether the first half keeps its place above the card."""
 
-    def __init__(self, delay: float = 0.0, reply: str = REPLY, tail: str = "", tool_response: str = ""):
+    def __init__(
+        self,
+        delay: float = 0.0,
+        reply: str = REPLY,
+        tail: str = "",
+        tool_response: str = "",
+        tool_between: str = "",
+    ):
         super().__init__([])
         self._delay = delay
         self._reply = reply
         self._tail = tail
         self._tool_response = tool_response
+        self._tool_between = tool_between
 
     async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
         if stream:
@@ -82,6 +92,11 @@ class _SlowClient(MockAsyncModelClient):
             )
         yield StreamChunk(StreamingContentType.GENERATING, self._reply)  # renders now in the viewed conversation
         await asyncio.sleep(self._delay)  # hold the turn open so a test can switch away mid-reply
+        if self._tool_between:
+            yield StreamChunk(
+                StreamingContentType.TOOL_CALLING,
+                {"name": "get_webpage", "arguments": {"url": "u"}, "response": self._tool_between},
+            )
         if self._tail:
             yield StreamChunk(StreamingContentType.GENERATING, self._tail)  # arrives after that switch
         self.messages.append({"role": "assistant", "content": self._reply + self._tail})
@@ -106,13 +121,15 @@ def live_server():
     """
     started: list[tuple] = []
 
-    def start(delay: float = 0.0, seed=None, tail: str = "", tool_response: str = "") -> str:
+    def start(delay: float = 0.0, seed=None, tail: str = "", tool_response: str = "", tool_between: str = "") -> str:
         config = AssistantConfig(agents=example_agents(), entry_agent="assistant", load_plugins=False)
         if seed is not None:
             seed(config)
         app = build_app(
             config,
-            client_factory=lambda conversation_id: _SlowClient(delay, tail=tail, tool_response=tool_response),
+            client_factory=lambda conversation_id: _SlowClient(
+                delay, tail=tail, tool_response=tool_response, tool_between=tool_between
+            ),
         )
         port = _free_port()
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
@@ -145,6 +162,25 @@ def test_send_message_renders_reply(page, live_server):
     page.click("#send")
     expect(page.locator(".bubble.user", has_text="ping")).to_be_visible()
     expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+
+
+def test_an_answer_stays_above_a_tool_call_that_followed_it(page, live_server):
+    """A turn that writes prose, calls a tool, then writes more renders in that order. The answer bubble
+    the user watched arrive first must not be relocated below the card when the second half starts
+    streaming: the page closes the first bubble at the boundary and opens a second one under the card."""
+    _open(page, live_server(delay=0.0, tail="And here is what it said.", tool_between="the page body"))
+    page.fill("#msg", "fetch it")
+    page.click("#send")
+
+    tail = page.locator(".bubble.assistant", has_text="And here is what it said.")
+    expect(tail).to_be_visible(timeout=10_000)
+    blocks = page.locator("#log > .bubble")
+    # user, the first answer, the tool card, the second answer -- in the order they were emitted.
+    expect(blocks).to_have_count(4)
+    expect(blocks.nth(1)).to_contain_text(REPLY)
+    expect(blocks.nth(2)).to_have_class(re.compile(r"\btool\b"))
+    expect(blocks.nth(3)).to_contain_text("And here is what it said.")
+    expect(blocks.nth(1)).not_to_contain_text("And here is what it said.")
 
 
 def test_send_and_stop_swap_places(page, live_server):
