@@ -122,7 +122,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
     (the client's fallbacks, then the model card's tuned profile, then `client.default_generate_kwargs`,
     then the per-call dict), and Kokua writing that third tier from config duplicated the chain while
     shadowing the card: a model whose card specifies a tuned `temperature` / `top_p` / `top_k` / `min_p`
-    lost it to whatever the panel had. `[generation]` gets no special handling on the way out: it is now
+    lost it to whatever that section set. `[generation]` gets no special handling on the way out: it is now
     an unrecognized section, so a stale one left in a `config.toml` fails to load the way any unknown key
     does, and deleting it is the fix.
   - Reloading the page replays the prior conversation, including reasoning and tool calls when
@@ -423,8 +423,8 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   default, hot=...), ...)` on a `Toolset` gives it a `[<name>]` section -- always named after the
   toolset itself, so the namespace's existing duplicate-name check also keeps two toolsets from
   claiming one section, and a name colliding with a section Kokua's own core already parses is refused
-  at startup. `hot=True` is what makes a setting reach the web panel and `update_config` live; a cold
-  one is a startup-only key like any other. Deep planning is the first user: `toolsets/planning.py`
+  at startup. `hot=True` is what lets `update_config` change a setting live; a cold one is a
+  startup-only key like any other. Deep planning is the first user: `toolsets/planning.py`
   declares `[planning]`'s five keys (`plan_review`, `plan_review_agent`, `result_review`,
   `show_reasoning` hot; `review_rounds` cold), and a workflow reads its own section as attributes
   through `WorkflowContext.settings`.
@@ -510,8 +510,8 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   entry-point group `kokua.tools` is `kokua.toolsets`, and `src/kokua/toolpacks/` is `src/kokua/toolsets/`.
 - **One runtime-settings table.** `config/table.py`'s `SettingsTable` -- built at startup from
   `CORE_RUNTIME_SETTINGS` plus every installed toolset's own hot `Setting`s -- is the single
-  declaration of what can change without a restart, driving the TOML schema, the panel sanitizer, the
-  hot-apply set, the live-apply loop, the channel mirroring, and the persist path at once. Adding one of
+  declaration of what can change without a restart, driving the TOML schema, the incoming-payload
+  sanitizer, the hot-apply set, the live-apply loop, the channel mirroring, and the persist path at once. Adding one of
   Kokua's own is one `CORE_RUNTIME_SETTINGS` entry; adding a toolset's is one `Setting` on the toolset
   and nothing else. Both are enforced by tests.
 - **The assistant can inspect and repair its own configuration**: `read_config` / `update_config`.
@@ -544,7 +544,7 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   agent runs at; an agent that names its own `[agents.<name>].thinking` runs at that instead. The values
   are AIMU's own four: unset sends nothing (each model keeps its own behavior), `false` asks the model
   not to reason, `true` reasons at the model's default effort, and `"low"` / `"medium"` / `"high"` request
-  a level. Startup-only with no panel field, for the same reason the model is. An unrecognized level
+  a level. Startup-only and not a runtime setting, for the same reason the model is. An unrecognized level
   fails startup naming the table, since AIMU would otherwise raise on it only once a request was built,
   and `"xhigh"` is a plausible typo (it is Qwen's own effort ceiling).
   Resolution tests "is it declared" rather than "is it truthy", which the model can afford and this
@@ -572,7 +572,7 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   instead. The result reaches three places: the entry agent's client (`build_model_client`), each
   spawned worker's spec (the *resolved* value, like `thinking`, so an undeclared worker still inherits
   the default rather than skipping it), and the two planning reviewers, which get the `[assistant]` tier
-  only, being no agent's own table. Startup-only with no panel field, like the model and the effort, and
+  only, being no agent's own table. Startup-only and not a runtime setting, like the model and the effort, and
   `[assistant.generation]` is the first dotted sub-table `config/file.py`'s section loader handles, which
   is what lets a schema entry per parameter serve it instead of the flat-key loop reading it as one
   `[assistant]` key holding a table.
@@ -597,8 +597,8 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   each card asks for, but it is a real change in their output. The example config's `ollama:qwen3:8b` is
   not one of them -- that card declares no sampling profile at all, so nothing about it changes.
 - **`/diag` names the models, the reasoning effort, and the generation parameters in play**: the entry
-  agent's first, then each agent that declares its own. None has a panel field and all are read only at
-  startup, so this is where a running session says what they are. With nothing declared, the model line
+  agent's first, then each agent that declares its own. None is a runtime setting and all are read only
+  at startup, so this is where a running session says what they are. With nothing declared, the model line
   reports what AIMU resolved onto the live client, and the thinking and generation lines are omitted
   rather than reading "unset" on every `/diag`; an agent that overrides the default generation tier shows
   only the keys it declares, not the merged result, since what a table declares is what a reader checks
