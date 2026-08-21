@@ -19,6 +19,7 @@ scope that token to the backup repository alone.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import shutil
@@ -102,9 +103,10 @@ def verify_repo_private(repo: str, token: str) -> None:
     repository is the memory store, saved documents, and every conversation transcript, so pushing to a
     public repository has to be impossible rather than merely discouraged. That is also why every
     ambiguous outcome fails closed as a refusal instead of being read charitably: a redirect is refused
-    rather than followed, a response that will not parse as JSON is a failure rather than a pass, and a
-    ``private`` value that is anything other than the literal boolean ``True`` (a missing key, ``null``,
-    or a truthy string like ``"false"``) is treated as not private.
+    rather than followed, a response that never finishes reading (truncated, timed out, or simply not
+    valid JSON) is a failure rather than a pass, and a ``private`` value that is anything other than the
+    literal boolean ``True`` (a missing key, ``null``, or a truthy string like ``"false"``) is treated as
+    not private.
 
     Stdlib rather than ``httpx`` or ``requests``, both of which are only transitively present here, since
     this is a single GET.
@@ -138,8 +140,12 @@ def verify_repo_private(repo: str, token: str) -> None:
         raise BackupError(f"GitHub returned HTTP {error.code} for {repo!r}") from error
     except urllib.error.URLError as error:
         raise BackupError(f"could not reach api.github.com: {error.reason}") from error
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise BackupError(f"GitHub's response for {repo!r} could not be read as JSON") from error
+    except (json.JSONDecodeError, UnicodeDecodeError, http.client.HTTPException, TimeoutError) as error:
+        # http.client.HTTPException covers a body cut short against its own Content-Length
+        # (IncompleteRead), and TimeoutError covers one that stalls past API_TIMEOUT_SECONDS: neither is
+        # a JSONDecodeError, but both are the same kind of failure this clause exists for, a read that
+        # never produced a usable body, so the message says "read" rather than naming JSON specifically.
+        raise BackupError(f"GitHub's response for {repo!r} could not be read: {error}") from error
     if not isinstance(payload, dict) or payload.get("private") is not True:
         raise BackupError(
             f"repository {repo!r} is not confirmed private. Kokua backs up your memory, documents and "

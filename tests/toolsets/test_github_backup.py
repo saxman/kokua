@@ -7,10 +7,13 @@ api.github.com.
 
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import shutil
+import socket
 import subprocess
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -577,6 +580,71 @@ def test_a_non_object_response_body_is_a_backup_error(monkeypatch):
     _patch_open(monkeypatch, _fake_response(b"[1, 2, 3]"))
     with pytest.raises(BackupError):
         verify_repo_private("you/kokua-backup", "token")
+
+
+def _truncated_server() -> int:
+    """A local server that declares a Content-Length larger than the bytes it actually sends.
+
+    Standing in for a connection that drops mid-response: reading past what the server actually sent
+    raises `http.client.IncompleteRead` from inside `json.load`'s own read of the response, which is
+    the shape this test exists to prove is caught rather than left to escape as a raw exception. A real
+    socket, bound to loopback only, is what makes this a genuine `http.client.IncompleteRead` rather
+    than a stand-in for one; the module never learns the difference between this and api.github.com.
+    """
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def serve() -> None:
+        connection, _ = server.accept()
+        try:
+            connection.recv(4096)
+            body = b'{"private": true}'
+            # Content-Length promises 100 bytes more than `body` actually holds, then the connection
+            # closes, which is what turns the short read into IncompleteRead instead of a clean EOF.
+            header = f"HTTP/1.1 200 OK\r\nContent-Length: {len(body) + 100}\r\nConnection: close\r\n\r\n"
+            connection.sendall(header.encode("ascii") + body)
+        finally:
+            connection.close()
+            server.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return port
+
+
+def test_a_truncated_response_body_is_a_backup_error_not_a_traceback(monkeypatch):
+    """`http.client.IncompleteRead` subclasses `HTTPException`, not `URLError`, so it escaped both of
+    this function's original except clauses and would have reached the model as a raw traceback."""
+    port = _truncated_server()
+
+    def open_(request, timeout=None):
+        # http.client.HTTPConnection rather than urllib.request.urlopen: build_opener is monkeypatched
+        # module-globally by _patch_open, so a call to urlopen from inside this fake would recurse into
+        # the very same patch instead of reaching a real opener.
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+        connection.request("GET", "/")
+        return connection.getresponse()
+
+    _patch_open(monkeypatch, open_)
+
+    with pytest.raises(BackupError) as raised:
+        verify_repo_private("you/kokua-backup", "token")
+    assert "could not be read" in str(raised.value)
+
+
+def test_a_response_that_times_out_partway_through_is_a_backup_error(monkeypatch):
+    """`TimeoutError` subclasses `OSError`, not `urllib.error.URLError`, so a read that stalls past
+    `API_TIMEOUT_SECONDS` escaped this function's except clauses the same way a truncated one did."""
+
+    def open_(request, timeout=None):
+        raise TimeoutError("timed out")
+
+    _patch_open(monkeypatch, open_)
+
+    with pytest.raises(BackupError) as raised:
+        verify_repo_private("you/kokua-backup", "token")
+    assert "could not be read" in str(raised.value)
 
 
 @pytest.mark.parametrize("code", [403, 404])
