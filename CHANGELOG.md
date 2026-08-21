@@ -303,11 +303,18 @@ so they appear in `--list-toolsets` alongside anything you install -- grouped un
   own runs on. The
   caveats are documented in the module: the prebuilts are synchronous, so a nested run gets no sub-agent
   card, no `/stop`, and no approval gate on its workers.
-- **`example`**: the template for writing your own.
-
+- **`github_backup`**: one tool, `backup_kokua_state`, mirrors `config.toml`, `sessions.json`, the
+  memory store, saved documents, and authored skills into a private GitHub repository as a git commit,
+  pushing from a working tree under `data/backup`. It takes no arguments, which is what lets it run
+  ungated and therefore from a scheduled task; the repository and branch come from `[github_backup]` and
+  the token from `$GITHUB_BACKUP_TOKEN`, which never reaches a command line or `.git/config`. A public
+  repository is refused, an unchanged state makes no commit, and a diverged remote is reported rather
+  than force-pushed. The toolset offers no tool until `repo` is set. Logs, downloads, and images are
+  excluded, and an in-tree `.gitignore` excludes anything further. Restore is manual: see
+  [Back up to GitHub](docs/how-to/back-up-to-github.md).
 Nothing a toolset contributes reaches an agent until that agent's `tools` list names it, and startup logs
 a warning for a third-party plugin toolset (or a configured MCP server) nothing names, since it was
-provisioned specifically to be reachable -- these five ship regardless of what any agent declares, so an
+provisioned specifically to be reachable -- these three ship regardless of what any agent declares, so an
 unnamed one among them is not that kind of news; see "Startup warns about a provisioned toolset" below.
 
 ### Proactive work: scheduled tasks

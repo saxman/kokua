@@ -51,7 +51,7 @@ from (`"stocks"`, not `"mcp:stocks"`), so this command is the one place provenan
 | --- | --- |
 | **AIMU capability** | the built-in tool groups (`web`, `fs`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`), plus `memory` and `documents` over AIMU's two stores and `skills` for skill authoring |
 | **core subsystem** | Kokua's own: `capabilities`, `config`, `conversations`, `mcp-admin`, `planning`, `scheduling` |
-| **built-in toolset** | the two `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group: `aimu_agents`, `image` |
+| **built-in toolset** | the three `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group: `aimu_agents`, `github_backup`, `image` |
 | **skill** | one entry per skill in your skills folder, so an individual skill is declarable by name (see [add skills](add-skills.md)) |
 | **plugin** | every other `Toolset` installed under the `kokua.toolsets` entry-point group -- i.e. one a third party's package registered |
 | **MCP server** | one per `[[mcp.server]]` table, named by its required `name` |
@@ -289,7 +289,7 @@ looks up. And `WorkflowContext.settings` is attribute access over the carrying t
 section -- see [own a config section](#own-a-config-section) above for how to declare what is in it. See
 [`workflows/protocol.py`](../../src/kokua/workflows/protocol.py) for the full contract.
 
-Kokua's own two toolsets register exactly this way in its
+Kokua's own three toolsets register exactly this way in its
 [`pyproject.toml`](../../pyproject.toml). If the built-in path and the plugin path ever diverge, the
 plugin path is the broken one.
 

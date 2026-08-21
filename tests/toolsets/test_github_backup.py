@@ -1,8 +1,16 @@
-"""The github_backup toolset: the configuration gate, the mirror, the git plumbing, and the tool.
+"""The github_backup toolset: the configuration gate, the visibility check, the mirror, the git
+plumbing, and the tool.
 
-Nothing here reaches the network. Git runs against a bare repository in tmp_path over a file:// URL,
-and the GitHub visibility check is the injectable seam `build` takes, so the suite never calls
-api.github.com.
+Nothing here leaves this machine, by two different routes. Git runs against a bare repository in
+tmp_path over a file:// URL, `remote_url` being the seam that redirects it. The visibility check is
+covered directly instead, by replacing the `build_opener` it builds its own opener from, since
+installing the redirect refusal means there is no `urlopen` call to patch; `run_backup` and `build`
+additionally take that whole check as an injectable `verify` argument, which is what lets the
+end-to-end tests exercise the git path without a stub response at all.
+
+Two tests do open a loopback socket, and deliberately: a truncated response has to be a genuine
+`http.client.IncompleteRead` raised out of a real read to prove the module catches it, so "no network"
+here means nothing off 127.0.0.1, and never api.github.com.
 """
 
 from __future__ import annotations

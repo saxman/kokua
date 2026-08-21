@@ -73,7 +73,7 @@ src/kokua/
     capabilities.py, config.py, conversations.py, mcp_admin.py, planning.py, scheduling.py -- Kokua's
                    own six, each wrapping one subsystem's logic as agent tools (planning wraps a
                    workflow instead, and capabilities wraps the registry itself)
-    aimu_agents.py, image.py -- plugins, like a third party's
+    aimu_agents.py, github_backup.py, image.py -- plugins, like a third party's
 ```
 
 `tests/` mirrors this layout.
@@ -286,7 +286,7 @@ is the seam it would land behind.
 ## Plugins
 
 Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`) and `kokua.toolsets`
-(a `Toolset` with `build(ctx)`). The built-in `cli`/`web` front ends and the two plugin toolsets are
+(a `Toolset` with `build(ctx)`). The built-in `cli`/`web` front ends and the three plugin toolsets are
 registered in Kokua's own `pyproject.toml` exactly as a third party would register theirs;
 `plugins.py` discovers them at runtime, and `kokua.plugins` re-exports `Toolset` and `ToolsetContext`
 as the public surface a third party imports. Add a transport or new tools as a plugin, not by editing

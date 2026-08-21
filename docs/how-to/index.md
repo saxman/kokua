@@ -26,6 +26,8 @@ would hand a worker a fresh composition budget.
   a skill gets there (by hand, `author_skill`, `add_skill_script`).
 - [Add an MCP service](add-mcp-services.md): `[[mcp.server]]` and the runtime `add_mcp_server` tool,
   authentication, and what persists across a restart.
+- [Back up to GitHub](back-up-to-github.md): the `github_backup` toolset, a private repository and a
+  scoped token, and the scheduled task that runs it unattended.
 
 ## Beyond these guides
 

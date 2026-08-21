@@ -102,7 +102,7 @@ change. Full rationale, with the code that backs each claim, is in
    `isinstance(channel, WebChannel)` in `core/` or `workflows/`.
 2. **Grow by plugin, not by core change.** Capability arrives as a `FrontEnd` or a `Toolset`. A third
    party's arrives through the `kokua.frontends` / `kokua.toolsets` entry-point groups, and Kokua's own
-   front ends and its two plugin toolsets (`aimu_agents`, `image`) register there identically. Kokua's *core* capabilities
+   front ends and its three plugin toolsets (`aimu_agents`, `github_backup`, `image`) register there identically. Kokua's *core* capabilities
    (`capabilities`, `config`, `conversations`, `mcp-admin`, `planning`, `scheduling`, and the AIMU
    wrappers `memory` / `documents` / `skills`) are the same kind of object, resolved through the same registry
    and named in the same namespace -- but they do not arrive by the same route: `build_registry` adds them as their
@@ -176,7 +176,7 @@ src/kokua/
                 agents (build_registry, validate_agents, prompt assembly, delegation),
                 builtin (AIMU groups/stores/skills), core (an index over Kokua's six),
                 capabilities, config, conversations, mcp_admin, planning, scheduling -- Kokua's own six,
-                aimu_agents, image -- plugins, like a third party's
+                aimu_agents, github_backup, image -- plugins, like a third party's
 ```
 
 `tests/` mirrors this layout. Public import surface: `kokua.plugins`, `kokua.config`, `kokua.core`,

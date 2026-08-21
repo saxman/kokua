@@ -34,9 +34,9 @@ FRONTEND_GROUP = "kokua.frontends"
 TOOLSET_GROUP = "kokua.toolsets"
 
 # This project's own distribution name (see kokua/__init__.py's version("kokua")). Kokua's own built-in
-# toolsets (aimu_agents, image) register under TOOLSET_GROUP exactly as a third-party plugin would;
-# own_distribution_toolset_names tells those apart from a real third party's by checking which
-# distribution registered the entry point, so a third one added later needs no update here.
+# toolsets (aimu_agents, github_backup, image) register under TOOLSET_GROUP exactly as a third-party
+# plugin would; own_distribution_toolset_names tells those apart from a real third party's by checking
+# which distribution registered the entry point, so a fourth one added later needs no update here.
 _OWN_DISTRIBUTION = "kokua"
 
 __all__ = [

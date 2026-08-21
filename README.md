@@ -151,6 +151,7 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 - **[PDFs](skills/markdown-to-pdf/).** The `markdown-to-pdf` skill renders Markdown to a PDF in `data/downloads/`, handing back the `/download/<name>` link the web UI serves. Install it with `kokua skills install markdown-to-pdf` and name it in an agent's `tools`. It ships as a skill rather than a toolset because its script declares `fpdf2` and `markdown` inline (PEP 723) and `uv` resolves them per run, so neither is a Kokua dependency. Give it to an agent that also has `fs` and `compute`, which is what runs the script.
 - **[Email](skills/email-report/).** The `email-report` skill mails information to you (digests, summaries, reports), written in Markdown and delivered as formatted HTML with a plain-text fallback, optionally attaching files already in `data/downloads/` or `data/images/`. It can only email **you**: the address comes from the host's configuration and the script has no recipient flag at all. Configure `[email]` (`host`, `port`, `from`, `to`, `use_ssl`) and put the password in `$KOKUA_EMAIL_PASSWORD`, never in the config file (for Gmail, an App Password). Kokua passes those settings to the script's environment, so the script never re-derives your config. Without host, `to`, and the password it sends nothing and says so. Install with `kokua skills install email-report`, name it in an agent's `tools`, and give that agent `fs` and `compute` so it can run the script.
 - **[AIMU agents](src/kokua/toolsets/aimu_agents.py).** The `aimu_agents` toolset mounts AIMU's prebuilt orchestrators (`code_review`, `research_report`, `create_content`) and is the worked example of wiring an agent built with AIMU into Kokua: any `Runner` exposes `.run(task) -> str`, so a toolset is the whole bridge and the core learns nothing new. Nothing is mounted until you ask for it: name it in an agent's `tools` in `config.toml`. They are synchronous, so a nested run gets no sub-agent card, no `/stop`, and no approval gate on its workers; and an agent declaring `fs` + `compute` is a stronger reviewer than the tool-less `CodeReviewAgent`. Copy the shape, not necessarily the agents.
+- **[Backup](src/kokua/toolsets/github_backup.py).** The `github_backup` toolset copies Kokua's own durable state (config.toml, memory, documents, authored skills, conversation transcripts) into a **private** GitHub repository as a git commit, and makes no commit when nothing changed. The tool takes no arguments at all: the repository, branch, and file list come from `[github_backup]` in `config.toml`, which is what makes it safe to run without per-call approval, and therefore usable from a scheduled task (a proactive turn auto-denies gated tools). The token comes from `$GITHUB_BACKUP_TOKEN`, never the config file, and never reaches a command line. Kokua refuses a public repository, and never force-pushes: a diverged remote is reported for you to reconcile. Logs, downloads, and generated images are left out. Restore is manual and documented. See [Back up to GitHub](docs/how-to/back-up-to-github.md).
 
 ### In the browser
 
@@ -208,7 +209,7 @@ Kokua discovers two kinds of plugin at runtime through Python entry points, so a
 - **Front ends** (`kokua.frontends` group): how the assistant runs -- terminal, web, a future Telegram or Slack. A front end is a `kokua.plugins.FrontEnd` whose `run(config, args)` drives the assistant.
 - **Toolsets** (`kokua.toolsets` group): one named capability an agent can declare. A toolset is a `kokua.plugins.Toolset` whose `build(ctx)` returns [`@aimu.tool`](https://saxman.info/aimu/how-to/add-custom-tool/) callables, plus an optional `guidance` string appended to the prompt of any agent holding it. Installing it puts the name in the namespace; an agent still has to declare it.
 
-The built-in `cli` / `web` front ends and Kokua's two built-in toolsets are registered exactly this way in Kokua's own `pyproject.toml` -- if the built-in path and the plugin path ever diverge, the plugin path is the broken one. To add your own from another package:
+The built-in `cli` / `web` front ends and Kokua's three built-in toolsets are registered exactly this way in Kokua's own `pyproject.toml` -- if the built-in path and the plugin path ever diverge, the plugin path is the broken one. To add your own from another package:
 
 ```toml
 # in your package's pyproject.toml
@@ -253,7 +254,7 @@ mcp/          remote MCP servers and their OAuth
 scheduling/   recurrence math, the durable task lifecycle over config.toml, the agent-facing tools
 channels/     ChannelUI plus the concrete channels
 frontends/    cli, web        -- registered as plugins, exactly like a third party's would be
-toolsets/     aimu_agents, image
+toolsets/     aimu_agents, github_backup, image
 ```
 
 Outside `src/`, the repository also carries `skills/`: Agent Skills Kokua ships as content rather than as

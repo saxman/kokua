@@ -1,7 +1,10 @@
 """Back up Kokua's own state to a private GitHub repository, as a git commit.
 
 Contributes one tool, ``backup_kokua_state``, that mirrors an allowlist of ``$KOKUA_HOME`` paths into a
-git working tree under the data directory, commits what changed, and pushes.
+git working tree under the data directory, commits what changed, and pushes. It refuses a repository
+GitHub does not report as private, makes no commit when nothing changed, and never force-pushes: a
+diverged remote is reported for the user to reconcile by hand, since a mirror that can overwrite remote
+history is not a backup.
 
 The tool takes **no arguments**, and that is the whole safety argument. The repository, the branch, and
 the files copied all come from ``config.toml``, so the model cannot redirect the capability and there is
