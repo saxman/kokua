@@ -12,11 +12,13 @@ import json
 import shutil
 import subprocess
 import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
 
 from kokua.config import AssistantConfig
+from kokua.toolsets import github_backup
 from kokua.toolsets.github_backup import (
     TOKEN_ENV,
     TOOLSET,
@@ -480,8 +482,8 @@ def test_git_pins_the_locale_so_message_matching_stays_untranslated(tmp_path, mo
     assert captured["env"]["LANGUAGE"] == ""
 
 
-def _fake_urlopen(payload: dict):
-    """Stand in for urllib.request.urlopen, returning `payload` as a JSON body."""
+def _fake_response(body: bytes):
+    """Stand in for the opener's `.open()`, returning `body` verbatim as the response."""
 
     class _Response(io.BytesIO):
         def __enter__(self):
@@ -490,7 +492,12 @@ def _fake_urlopen(payload: dict):
         def __exit__(self, *exception):
             return False
 
-    return lambda request, timeout=None: _Response(json.dumps(payload).encode("utf-8"))
+    return lambda request, timeout=None: _Response(body)
+
+
+def _fake_urlopen(payload: object):
+    """Stand in for the opener's `.open()`, returning `payload` JSON-encoded as the response body."""
+    return _fake_response(json.dumps(payload).encode("utf-8"))
 
 
 def _fake_http_error(code: int):
@@ -500,29 +507,82 @@ def _fake_http_error(code: int):
     return raise_it
 
 
-def test_a_private_repository_is_accepted(monkeypatch):
-    from kokua.toolsets import github_backup
+def _patch_open(monkeypatch, open_):
+    """Route the module's one network call through `open_`, standing in for the opener it builds.
 
-    monkeypatch.setattr(github_backup.urllib.request, "urlopen", _fake_urlopen({"private": True}))
+    `verify_repo_private` builds its own opener rather than calling `urlopen` directly, since installing
+    the redirect refusal (`_RefuseRedirect`) needs `build_opener`. That makes `build_opener` the seam to
+    patch: patching `urlopen` alone would leave a real, network-reaching opener answering the call.
+    """
+
+    class _Opener:
+        def open(self, request, timeout=None):
+            return open_(request, timeout)
+
+    monkeypatch.setattr(github_backup.urllib.request, "build_opener", lambda *handlers: _Opener())
+
+
+def test_a_private_repository_is_accepted(monkeypatch):
+    _patch_open(monkeypatch, _fake_urlopen({"private": True}))
     assert verify_repo_private("you/kokua-backup", "token") is None
 
 
 def test_a_public_repository_is_refused(monkeypatch):
     """Memory, documents and transcripts go into this repository. Public is never the right answer."""
-    from kokua.toolsets import github_backup
-
-    monkeypatch.setattr(github_backup.urllib.request, "urlopen", _fake_urlopen({"private": False}))
+    _patch_open(monkeypatch, _fake_urlopen({"private": False}))
     with pytest.raises(BackupError) as raised:
         verify_repo_private("you/kokua-backup", "token")
-    assert "public" in str(raised.value)
+    assert "private" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"private": "false"},  # the sharpest case: reads as "not private" to a human, and `not "false"`
+        # evaluates to `False`, so a bare truthiness test would have accepted it.
+        {"private": "true"},
+        {"private": 1},
+        {"private": None},
+        {},
+    ],
+)
+def test_a_non_true_private_value_is_refused(monkeypatch, payload):
+    """Only the literal boolean `True` counts as confirmation. Anything else fails closed."""
+    _patch_open(monkeypatch, _fake_urlopen(payload))
+    with pytest.raises(BackupError) as raised:
+        verify_repo_private("you/kokua-backup", "token")
+    assert "private" in str(raised.value)
+
+
+def test_the_refusal_message_does_not_assert_public_when_it_is_merely_unconfirmed(monkeypatch):
+    """A missing or malformed `private` key means GitHub's answer was not a confirmation, not that the
+    repository is known to be public; the message must not claim more than that."""
+    _patch_open(monkeypatch, _fake_urlopen({}))
+    with pytest.raises(BackupError) as raised:
+        verify_repo_private("you/kokua-backup", "token")
+    assert "public" not in str(raised.value)
+
+
+def test_an_unparseable_response_body_is_a_backup_error_not_a_traceback(monkeypatch):
+    """`backup_kokua_state` catches only `BackupError`; a `json.JSONDecodeError` escaping this function
+    would reach the model as a raw traceback instead of the intended "Backup failed: ..." sentence."""
+    _patch_open(monkeypatch, _fake_response(b"not json"))
+    with pytest.raises(BackupError):
+        verify_repo_private("you/kokua-backup", "token")
+
+
+def test_a_non_object_response_body_is_a_backup_error(monkeypatch):
+    """A bare JSON array parses without error but has no `.get`, so this is a distinct failure mode
+    from a body that fails to parse at all, and must be caught the same way."""
+    _patch_open(monkeypatch, _fake_response(b"[1, 2, 3]"))
+    with pytest.raises(BackupError):
+        verify_repo_private("you/kokua-backup", "token")
 
 
 @pytest.mark.parametrize("code", [403, 404])
 def test_a_repository_the_token_cannot_see_is_refused(monkeypatch, code):
     """GitHub answers 404 for both "no such repo" and "your token cannot see it", so the message says so."""
-    from kokua.toolsets import github_backup
-
-    monkeypatch.setattr(github_backup.urllib.request, "urlopen", _fake_http_error(code))
+    _patch_open(monkeypatch, _fake_http_error(code))
     with pytest.raises(BackupError) as raised:
         verify_repo_private("you/kokua-backup", "token")
     assert "not found" in str(raised.value)
@@ -530,17 +590,13 @@ def test_a_repository_the_token_cannot_see_is_refused(monkeypatch, code):
 
 
 def test_a_rejected_token_says_so(monkeypatch):
-    from kokua.toolsets import github_backup
-
-    monkeypatch.setattr(github_backup.urllib.request, "urlopen", _fake_http_error(401))
+    _patch_open(monkeypatch, _fake_http_error(401))
     with pytest.raises(BackupError) as raised:
         verify_repo_private("you/kokua-backup", "token")
     assert TOKEN_ENV in str(raised.value)
 
 
 def test_the_request_carries_the_token_as_a_bearer_header(monkeypatch):
-    from kokua.toolsets import github_backup
-
     seen = {}
 
     def capture(request, timeout=None):
@@ -548,8 +604,79 @@ def test_the_request_carries_the_token_as_a_bearer_header(monkeypatch):
         seen["auth"] = request.get_header("Authorization")
         return _fake_urlopen({"private": True})(request, timeout)
 
-    monkeypatch.setattr(github_backup.urllib.request, "urlopen", capture)
+    _patch_open(monkeypatch, capture)
     verify_repo_private("you/kokua-backup", "s3cret")
 
     assert seen["url"] == "https://api.github.com/repos/you/kokua-backup"
     assert seen["auth"] == "Bearer s3cret"
+
+
+def test_the_redirect_handler_refuses_rather_than_following():
+    """`redirect_request` is the exact seam `urlopen` calls before ever resending a header to the
+    redirect target. Raising here, rather than the default of following, is what stops the
+    `Authorization` bearer token from ever reaching a second host (the class of bug CVE-2023-32681
+    fixed in `requests`). Exercised directly, with no opener involved, so this genuinely proves the
+    handler itself refuses rather than the surrounding test double."""
+    handler = github_backup._RefuseRedirect()
+    request = urllib.request.Request("https://api.github.com/repos/you/kokua-backup")
+
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        handler.redirect_request(
+            request, None, 301, "Moved Permanently", {}, "https://api.github.com/repositories/12345"
+        )
+
+    assert raised.value.code == 301
+
+
+def test_verify_repo_private_builds_its_opener_with_the_redirect_refusal(monkeypatch):
+    """The unit test above proves the handler refuses; this proves `verify_repo_private` actually wires
+    it into the opener it uses for the real call, rather than the two having drifted apart."""
+    captured = {}
+
+    def fake_build_opener(*handlers):
+        captured["handlers"] = handlers
+        return type("_Opener", (), {"open": staticmethod(_fake_urlopen({"private": True}))})()
+
+    monkeypatch.setattr(github_backup.urllib.request, "build_opener", fake_build_opener)
+
+    verify_repo_private("you/kokua-backup", "token")
+
+    assert github_backup._RefuseRedirect in captured["handlers"]
+
+
+def test_a_redirected_repository_is_refused_with_a_rename_hint(monkeypatch):
+    """The realistic trigger for a redirect here is GitHub renaming the repository; the message should
+    say so rather than reporting a bare, unexplained HTTP failure."""
+    _patch_open(monkeypatch, _fake_http_error(301))
+    with pytest.raises(BackupError) as raised:
+        verify_repo_private("you/kokua-backup", "token")
+    assert "renamed" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "repo",
+    [
+        "",
+        "missing-a-slash",
+        "you/",
+        "/kokua-backup",
+        "you/kokua-backup/extra",
+        "you/kokua-backup\nwith-a-newline",
+    ],
+)
+def test_a_malformed_repo_is_refused_before_any_request_is_built(monkeypatch, repo):
+    """`[github_backup].repo` is writable by the assistant through `update_config`, so a value with an
+    embedded newline or other control character can arrive here from a model turn. Unvalidated, it would
+    reach `http.client`'s CRLF-injection guard as a raw `ValueError` rather than a `BackupError`. Failing
+    before any opener is built, rather than merely by the time the network call raises, is what this test
+    checks: the assertion below would raise `AssertionError` if validation did not come first.
+    """
+
+    def _forbidden(*handlers):
+        raise AssertionError("a malformed repo must be rejected before any opener is built")
+
+    monkeypatch.setattr(github_backup.urllib.request, "build_opener", _forbidden)
+
+    with pytest.raises(BackupError) as raised:
+        verify_repo_private(repo, "token")
+    assert "github_backup" in str(raised.value)

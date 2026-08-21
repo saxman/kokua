@@ -55,16 +55,61 @@ class BackupError(RuntimeError):
     """A backup could not complete. The message is written to be read by the user, not parsed."""
 
 
+# Every status urllib.request.HTTPRedirectHandler would otherwise follow transparently.
+_REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
+
+
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse a redirect instead of replaying credentials at whatever host it names.
+
+    The default redirect handling resends every header from the original request, including the bearer
+    token in ``Authorization``, to wherever the response's ``Location`` points, with no check that the
+    destination is still api.github.com. That is the class of header-replay bug CVE-2023-32681 fixed in
+    ``requests``. Refusing outright is simpler than following and then checking the new host, and it
+    also produces the better message for the case this realistically hits: GitHub answers a renamed
+    repository with a redirect, and the user needs telling that ``[github_backup].repo`` wants updating,
+    not to have the redirect followed silently.
+
+    Raising here, rather than returning ``None`` (which would hand the caller the redirect response
+    body as though it were the answer), is what turns the refusal into the same ``HTTPError`` shape
+    :func:`verify_repo_private` already branches on by status code.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(newurl, code, msg, headers, fp)
+
+
+def _validate_repo(repo: str) -> None:
+    """Raise unless ``repo`` is a plausible ``owner/name`` pair, before it reaches a URL or a header.
+
+    ``[github_backup].repo`` is not merely something a human typed once: ``update_config`` is a tool the
+    assistant holds, so a value containing a newline or other control character can arrive here from a
+    model turn. Unvalidated, that reaches ``http.client``'s CRLF-injection guard as a raw ``ValueError``
+    instead of the ``BackupError`` every other failure in this function raises, breaking the contract
+    ``backup_kokua_state`` relies on to turn any failure into a sentence rather than a traceback.
+    """
+    parts = repo.split("/")
+    shape_is_valid = len(parts) == 2 and all(parts)
+    characters_are_clean = all(character.isprintable() and not character.isspace() for character in repo)
+    if not (shape_is_valid and characters_are_clean):
+        raise BackupError(f"[github_backup].repo is {repo!r}, not a valid 'owner/name' repository")
+
+
 def verify_repo_private(repo: str, token: str) -> None:
-    """Raise unless ``repo`` exists, is reachable with ``token``, and is private.
+    """Raise unless ``repo`` exists, is reachable with ``token``, and is confirmed private.
 
     The one network call in an otherwise subprocess-only module, and it is worth it: what goes into this
     repository is the memory store, saved documents, and every conversation transcript, so pushing to a
-    public repository has to be impossible rather than merely discouraged.
+    public repository has to be impossible rather than merely discouraged. That is also why every
+    ambiguous outcome fails closed as a refusal instead of being read charitably: a redirect is refused
+    rather than followed, a response that will not parse as JSON is a failure rather than a pass, and a
+    ``private`` value that is anything other than the literal boolean ``True`` (a missing key, ``null``,
+    or a truthy string like ``"false"``) is treated as not private.
 
     Stdlib rather than ``httpx`` or ``requests``, both of which are only transitively present here, since
     this is a single GET.
     """
+    _validate_repo(repo)
     request = urllib.request.Request(
         f"https://api.github.com/repos/{repo}",
         headers={
@@ -73,10 +118,16 @@ def verify_repo_private(repo: str, token: str) -> None:
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
+    opener = urllib.request.build_opener(_RefuseRedirect)
     try:
-        with urllib.request.urlopen(request, timeout=API_TIMEOUT_SECONDS) as response:
+        with opener.open(request, timeout=API_TIMEOUT_SECONDS) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as error:
+        if error.code in _REDIRECT_CODES:
+            raise BackupError(
+                f"GitHub redirected {repo!r} instead of answering (HTTP {error.code}). The repository "
+                "may have been renamed; check that [github_backup].repo still matches"
+            ) from error
         if error.code in (403, 404):
             raise BackupError(
                 f"repository {repo!r} was not found. Either it does not exist, or ${TOKEN_ENV} does not "
@@ -87,10 +138,12 @@ def verify_repo_private(repo: str, token: str) -> None:
         raise BackupError(f"GitHub returned HTTP {error.code} for {repo!r}") from error
     except urllib.error.URLError as error:
         raise BackupError(f"could not reach api.github.com: {error.reason}") from error
-    if not payload.get("private"):
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise BackupError(f"GitHub's response for {repo!r} could not be read as JSON") from error
+    if not isinstance(payload, dict) or payload.get("private") is not True:
         raise BackupError(
-            f"repository {repo!r} is public. Kokua backs up your memory, documents and conversation "
-            "transcripts, so it pushes only to a private repository"
+            f"repository {repo!r} is not confirmed private. Kokua backs up your memory, documents and "
+            "conversation transcripts, so it pushes only to a repository GitHub reports as private"
         )
 
 
