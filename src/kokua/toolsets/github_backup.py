@@ -19,6 +19,8 @@ scope that token to the backup repository alone.
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from typing import Callable
 
 from aimu.tools import tool
@@ -49,6 +51,48 @@ def settings_for(config: AssistantConfig) -> tuple[str, str]:
     """This toolset's ``(repo, branch)``, with the branch falling back when the key is blank."""
     section = config.toolset_settings.get(TOOLSET_NAME, {})
     return section.get("repo", ""), section.get("branch") or DEFAULT_BRANCH
+
+
+def backup_paths(config: AssistantConfig) -> list[tuple[Path, str]]:
+    """Each source path and where it lands in the repository.
+
+    An explicit allowlist rather than a walk of the state directory, which is what keeps the exclusions
+    (rotating logs, binary downloads and images, the working tree itself) a consequence of this list
+    instead of a second list that could drift from it.
+
+    Addressed through ``AssistantConfig`` properties so a ``[paths] data_dir`` override moves all of it
+    at once. The repository layout mirrors ``$KOKUA_HOME``, so restoring is copying these back with
+    nothing to interpret.
+    """
+    return [
+        (config.config_path, "config.toml"),
+        (config.sessions_path, "data/sessions.json"),
+        (config.memory_path, "data/memory"),
+        (config.documents_path, "data/documents"),
+        (config.skills_dir, "data/skills"),
+    ]
+
+
+def mirror_state(config: AssistantConfig, tree: Path) -> None:
+    """Copy the allowlist into ``tree``, replacing each destination rather than merging into it.
+
+    Replacing is what makes a deleted source file disappear from the backup; merging would leave it in
+    the repository forever, and a copy that only ever grows is not a copy. Only the destinations named
+    in :func:`backup_paths` are touched, so a ``README.md`` or a ``.gitignore`` the user added at the
+    repository root survives every run (and the ``.gitignore`` is how anything further is excluded,
+    since ``git add -A`` honours it).
+    """
+    for source, relative in backup_paths(config):
+        destination = tree / relative
+        if destination.is_dir():
+            shutil.rmtree(destination)
+        elif destination.exists():
+            destination.unlink()
+        if source.is_dir():
+            shutil.copytree(source, destination, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        elif source.is_file():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
 
 
 def build(config: AssistantConfig, *, verify: Callable[[str, str], None] = verify_repo_private) -> list:
