@@ -8,9 +8,10 @@ installing the redirect refusal means there is no `urlopen` call to patch; `run_
 additionally take that whole check as an injectable `verify` argument, which is what lets the
 end-to-end tests exercise the git path without a stub response at all.
 
-Two tests do open a loopback socket, and deliberately: a truncated response has to be a genuine
+One test does open a loopback socket, and deliberately: a truncated response has to be a genuine
 `http.client.IncompleteRead` raised out of a real read to prove the module catches it, so "no network"
-here means nothing off 127.0.0.1, and never api.github.com.
+here means nothing off 127.0.0.1, and never api.github.com. (Its sibling, the stalled read, needs no
+socket: a `TimeoutError` raised from the fake opener is the same escape route.)
 """
 
 from __future__ import annotations

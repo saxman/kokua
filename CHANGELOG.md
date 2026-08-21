@@ -312,6 +312,7 @@ so they appear in `--list-toolsets` alongside anything you install -- grouped un
   than force-pushed. The toolset offers no tool until `repo` is set. Logs, downloads, and images are
   excluded, and an in-tree `.gitignore` excludes anything further. Restore is manual: see
   [Back up to GitHub](docs/how-to/back-up-to-github.md).
+
 Nothing a toolset contributes reaches an agent until that agent's `tools` list names it, and startup logs
 a warning for a third-party plugin toolset (or a configured MCP server) nothing names, since it was
 provisioned specifically to be reachable -- these three ship regardless of what any agent declares, so an

@@ -266,7 +266,7 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 
 ### Kokua
 
-- 📘 [How-to guides](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace, declaring an agent, writing a toolset) · [add a skill](docs/how-to/add-skills.md) · [add an MCP service](docs/how-to/add-mcp-services.md).
+- 📘 [How-to guides](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace, declaring an agent, writing a toolset) · [add a skill](docs/how-to/add-skills.md) · [add an MCP service](docs/how-to/add-mcp-services.md) · [back up to GitHub](docs/how-to/back-up-to-github.md).
 - 💡 [Design principles](docs/explanation/design-principles.md): why Kokua exists, and the six principles that serve it, each with the code that backs it and the patterns it excludes.
 - 🏗️ [Architecture](docs/explanation/architecture.md): module layout, control flow, and the concurrency model.
 - ⚙️ [Configuration reference](docs/reference/configuration.md): every `config.toml` key, what it accepts, which apply live, and who may write each. Short form: [`config.example.toml`](src/kokua/config.example.toml).

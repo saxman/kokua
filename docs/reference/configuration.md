@@ -581,8 +581,10 @@ Declared by the `github_backup` toolset: an agent's `tools` must list `github_ba
 | `repo` | string | `""` | no | `owner/name` of the backup repository. Required: with it blank the toolset offers no tool at all, the same gate the `image` toolset applies to its model env var |
 | `branch` | string | `"main"` | no | the branch backups are pushed to |
 
-Both keys need a restart to apply, since `build` reads them once when the toolset's tools are assembled
-for an agent.
+Both keys need a restart to apply. Neither is hot, so an `update_config` write reaches the file without
+reaching the `AssistantConfig` the running process holds; `repo` is additionally read only once, in
+`build`, when the toolset's tools are assembled for an agent. (`branch` is read per call, but off that
+same unchanged in-memory copy, which is why it needs the restart too.)
 
 The push token is **not** a config key. It is read from the `GITHUB_BACKUP_TOKEN` environment variable,
 fixed rather than named in `config.toml`, so that repointing `repo` (which `update_config` can do, since

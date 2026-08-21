@@ -35,12 +35,14 @@ Everything else under `data/` is left out on purpose:
 | `data/logs/` | rotating, noisy, and rewritten on every run |
 | `data/downloads/` | generated artifacts such as rendered PDFs |
 | `data/images/` | generated and attached images, which are binary and bulky |
+| `data/mcp-oauth/` | the OAuth tokens Kokua holds for your MCP servers, which are credentials |
 | `data/backup/` | the working tree the backup itself pushes from |
 | `.git/` and `__pycache__/` inside any copied directory | tooling artifacts, not state to restore |
 
-No credential is copied, because Kokua keeps none in `config.toml`: your model API keys, your mail
-password, and the backup token itself are all environment variables, and an MCP server's `token_env`
-names a variable rather than holding its value. The file does still describe you (your email address,
+No credential is copied. Kokua keeps none in `config.toml` to begin with (your model API keys, your
+mail password, and the backup token itself are all environment variables, and an MCP server's
+`token_env` names a variable rather than holding its value), and the one place it does persist a
+credential, `data/mcp-oauth/`, is excluded above. `config.toml` does still describe you (your address,
 the servers you connect to, what your scheduled tasks say), and in any case that is not the reason the
 repository has to be private. Your memory, your documents, and your transcripts are.
 
@@ -107,17 +109,21 @@ repo = "you/kokua-backup"
 applies to its model environment variable, so a default install never shows the model a backup tool it
 has nowhere to send.
 
-**Neither key applies live.** Both are read once when an agent's tools are assembled, so restart Kokua
-after editing.
+**Neither key applies live**, so restart Kokua after editing either. Neither is declared a hot
+setting, which means an `update_config` write reaches the file but never the `AssistantConfig` the
+running process is holding; `repo` is read once on top of that, when an agent's tools are assembled.
 
 ## 5. Give an agent the toolset
 
-A capability is declared, never defaulted, so installing the toolset is not enough. Name it in the
-`tools` list of the agent you talk to:
+A capability is declared, never defaulted, so installing the toolset is not enough. Add
+`"github_backup"` to the `tools` list of the agent you talk to. Add, not replace: every name in that
+list is valid on its own, so dropping one loses a capability silently rather than failing at startup.
 
 ```toml
 [agents.assistant]
-tools = ["memory", "documents", "skills", "config", "scheduling", "github_backup", "time"]
+# what `kokua config init` writes, with one name appended
+tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations",
+         "planning", "capabilities", "time", "github_backup"]
 ```
 
 `[agents.*]` is **hand-edit only** by design: `update_config` refuses the whole section by prefix,
@@ -194,16 +200,16 @@ Prefer `{ type = "interval", seconds = 3600 }` or a weekly schedule if a day fee
 ## Excluding anything further
 
 Commit a `.gitignore` at the **root of the backup repository**. Kokua stages with `git add -A`, which
-honours it, and the mirror only ever replaces the five destinations in the table above, so your
+honours it, and the mirror only ever replaces the five destinations it copies, so your
 `.gitignore` survives every run. Add it before your first backup where you can: git keeps tracking a
 file it is already tracking, ignore rule or not, so excluding something after the fact also takes a
 `git rm --cached` in `data/backup`.
 
-That in-tree file is deliberately the only ignore file in play. Kokua clears `core.excludesFile` for its
-own git calls, so a pattern in *your global* ignore file (a stray `*.sqlite3`, say) cannot silently drop
-part of the memory store from a backup that then reports success with a plausible-looking file count.
-The exclusions you write in the repository are honoured; the ones you wrote years ago for your own
-development machine are not.
+The exclusions you write in the repository are honoured. The ones you wrote years ago for your own
+development machine are not, and that is deliberate: Kokua clears `core.excludesFile` for its own git
+calls, so a pattern in your *global* ignore file (a stray `*.sqlite3`, say) cannot silently drop part
+of the memory store from a backup that still reports success with a plausible-looking file count.
+Git's own per-repository `.git/info/exclude` is untouched and still applies, if you use it.
 
 ## Restoring
 
@@ -233,6 +239,10 @@ Three notes:
   aside first instead.
 - **Restoring an older commit** is `git checkout <sha>` in the clone before you copy. Every backup is an
   ordinary commit, so `git log` is your list of restore points.
+- **Your MCP servers will need re-authenticating.** Their OAuth tokens live in `data/mcp-oauth/`, which
+  is not backed up (they are credentials, and the whole point of the token discipline here is that
+  credentials do not go into the repository). Their `[[mcp.server]]` entries come back with
+  `config.toml`, so you reconnect and authorize once each, rather than reconfiguring anything.
 
 ## Troubleshooting
 

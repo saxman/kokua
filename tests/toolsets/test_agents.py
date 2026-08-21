@@ -190,11 +190,11 @@ def test_unreferenced_toolsets_ignores_unnamed_builtin_and_core_groups():
 
 
 def test_unreferenced_toolsets_is_silent_on_the_real_shipped_config():
-    """The regression this guards: Kokua's own built-in toolsets (aimu_agents, image) register under the
-    real `kokua.toolsets` entry-point group -- neither `load_plugins=False` nor
-    a monkeypatched `discover_toolsets` (both used above) exercises that path -- and the shipped
-    config.example.toml deliberately declares none of them. Without excluding Kokua's own distribution
-    from the warning, every default install would log five warnings about toolsets nobody chose to skip."""
+    """The regression this guards: Kokua's own built-in toolsets (aimu_agents, github_backup, image)
+    register under the real `kokua.toolsets` entry-point group, a path neither `load_plugins=False` nor a
+    monkeypatched `discover_toolsets` (both used above) exercises, and the shipped config.example.toml
+    deliberately declares none of them. Without excluding Kokua's own distribution from the warning, every
+    default install would log three warnings about toolsets nobody chose to skip."""
     from tests.channels import example_agents
 
     config = AssistantConfig(agents=example_agents(), entry_agent="assistant", load_plugins=True)
