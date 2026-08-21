@@ -153,11 +153,6 @@ def verify_repo_private(repo: str, token: str) -> None:
         )
 
 
-def run_backup(config: AssistantConfig, *, verify: Callable[[str, str], None] = verify_repo_private) -> str:
-    """Run one backup and return the sentence describing what happened."""
-    raise NotImplementedError
-
-
 def settings_for(config: AssistantConfig) -> tuple[str, str]:
     """This toolset's ``(repo, branch)``, with the branch falling back when the key is blank."""
     section = config.toolset_settings.get(TOOLSET_NAME, {})
@@ -343,6 +338,45 @@ def commit_and_push(tree: Path, branch: str) -> tuple[str, int] | None:
     )
     _git(tree, *_credential_args(), "push", "origin", f"HEAD:{branch}", label="push")
     return head_sha(tree), len(changed)
+
+
+def run_backup(config: AssistantConfig, *, verify: Callable[[str, str], None] = verify_repo_private) -> str:
+    """Run one backup and return the sentence describing what happened.
+
+    Every refusal is raised as :class:`BackupError` rather than returned, so the caller decides how to
+    present it. :func:`build`'s tool turns it into text, because a tool that raises breaks the agent's
+    tool loop and a scheduled turn would then have nothing to report.
+
+    ``repo`` is validated here directly, ahead of the token lookup, rather than left to ``verify`` to
+    discover: ``verify`` is the seam the test suite (and a future caller) can replace with a stub, and a
+    stub that approves everything would otherwise let a malformed value reach :func:`remote_url` and a
+    live git command unvetted.
+
+    Ordered so that nothing is written before the repository has been vetted: a refused backup must
+    leave no working tree behind for the next run to inherit.
+    """
+    repo, branch = settings_for(config)
+    if not repo:
+        raise BackupError("no repository is configured. Set [github_backup].repo in config.toml")
+    _validate_repo(repo)
+    token = os.environ.get(TOKEN_ENV)
+    if not token:
+        raise BackupError(
+            f"the ${TOKEN_ENV} environment variable is not set. It needs a GitHub token with "
+            "`contents: write` on the backup repository"
+        )
+    verify(repo, token)
+
+    tree = config.data_dir / "backup"
+    ensure_clone(tree, repo, branch)
+    mirror_state(config, tree)
+    committed = commit_and_push(tree, branch)
+    if committed is None:
+        previous = head_sha(tree) or "no commits yet"
+        return f"Nothing to back up: Kokua's state is unchanged since the last backup ({previous})."
+    sha, changed = committed
+    plural = "" if changed == 1 else "s"
+    return f"Backed up to {repo}@{branch}: {changed} file{plural} changed, commit {sha}."
 
 
 def build(config: AssistantConfig, *, verify: Callable[[str, str], None] = verify_repo_private) -> list:

@@ -35,6 +35,7 @@ from kokua.toolsets.github_backup import (
     ensure_clone,
     head_sha,
     mirror_state,
+    run_backup,
     verify_repo_private,
 )
 
@@ -748,3 +749,158 @@ def test_a_malformed_repo_is_refused_before_any_request_is_built(monkeypatch, re
     with pytest.raises(BackupError) as raised:
         verify_repo_private(repo, "token")
     assert "github_backup" in str(raised.value)
+
+
+def _accepts_anything(repo: str, token: str) -> None:
+    """A verify seam that approves, standing in for the api.github.com call."""
+
+
+@needs_git
+def test_a_backup_reports_the_repository_the_branch_and_the_commit(tmp_path, monkeypatch):
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    _point_at(monkeypatch, _bare_remote(tmp_path))
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+
+    message = run_backup(config, verify=_accepts_anything)
+
+    assert message.startswith("Backed up to you/kokua-backup@main:")
+    assert "5 file" in message
+
+
+@needs_git
+def test_an_unchanged_state_reports_the_last_commit_and_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    _point_at(monkeypatch, _bare_remote(tmp_path))
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+    run_backup(config, verify=_accepts_anything)
+
+    message = run_backup(config, verify=_accepts_anything)
+
+    assert message.startswith("Nothing to back up")
+    assert head_sha(config.data_dir / "backup") in message
+
+
+@needs_git
+def test_the_working_tree_lives_under_the_data_directory(tmp_path, monkeypatch):
+    """So a [paths] data_dir override moves it too, and it stays outside the allowlist."""
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    _point_at(monkeypatch, _bare_remote(tmp_path))
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+
+    run_backup(config, verify=_accepts_anything)
+
+    assert (config.data_dir / "backup" / ".git").is_dir()
+
+
+def test_a_missing_token_is_refused_by_name(tmp_path, monkeypatch):
+    monkeypatch.delenv(TOKEN_ENV, raising=False)
+    config = _config(tmp_path, repo="you/kokua-backup")
+    with pytest.raises(BackupError) as raised:
+        run_backup(config, verify=_accepts_anything)
+    assert TOKEN_ENV in str(raised.value)
+
+
+def test_a_missing_repository_is_refused_by_key(tmp_path, monkeypatch):
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    config = _config(tmp_path)
+    with pytest.raises(BackupError) as raised:
+        run_backup(config, verify=_accepts_anything)
+    assert "[github_backup].repo" in str(raised.value)
+
+
+def test_a_malformed_repository_is_refused_even_when_verify_approves_everything(tmp_path, monkeypatch):
+    """`verify` is the seam every test (and any future caller) can replace with a stub. If run_backup
+    relied on `verify` alone to validate `repo`, a stub that approves everything would let a malformed
+    value reach `remote_url` and a live git command unchecked. `run_backup` must check it directly."""
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    config = _config(tmp_path, repo="not-a-valid-repo-name")
+
+    with pytest.raises(BackupError) as raised:
+        run_backup(config, verify=_accepts_anything)
+
+    assert "github_backup" in str(raised.value)
+    assert not (config.data_dir / "backup").exists()
+
+
+def test_the_verifier_runs_before_anything_is_written(tmp_path, monkeypatch):
+    """A refused repository must leave no working tree behind, or the next run inherits half a clone."""
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    config = _config(tmp_path, repo="you/kokua-backup")
+
+    def refuse(repo, token):
+        raise BackupError("repository 'you/kokua-backup' is public")
+
+    with pytest.raises(BackupError):
+        run_backup(config, verify=refuse)
+    assert not (config.data_dir / "backup").exists()
+
+
+def test_the_tool_returns_a_failure_as_text_rather_than_raising(tmp_path, monkeypatch):
+    """A tool that raises breaks the agent's tool loop, so every failure comes back as a sentence."""
+    monkeypatch.delenv(TOKEN_ENV, raising=False)
+    (backup_kokua_state,) = build(_config(tmp_path, repo="you/kokua-backup"), verify=_accepts_anything)
+
+    result = backup_kokua_state()
+
+    assert result.startswith("Backup failed:")
+    assert TOKEN_ENV in result
+
+
+def test_the_tool_takes_no_arguments():
+    """Zero arguments is what makes this safe to run ungated, and so safe to schedule."""
+    import inspect
+
+    (backup_kokua_state,) = build(_config(Path("/nonexistent"), repo="you/kokua-backup"), verify=_accepts_anything)
+    assert list(inspect.signature(backup_kokua_state).parameters) == []
+
+
+@needs_git
+def test_the_token_never_reaches_a_command_line(tmp_path, monkeypatch):
+    """`ps` shows argv to every process of this user, so the token must only ever be in the environment."""
+    from kokua.toolsets import github_backup
+
+    monkeypatch.setenv(TOKEN_ENV, "s3cret-token-value")
+    _point_at(monkeypatch, _bare_remote(tmp_path))
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+
+    recorded: list[list[str]] = []
+    real_run = subprocess.run
+
+    def recording_run(args, **kwargs):
+        recorded.append(list(args))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(github_backup.subprocess, "run", recording_run)
+    run_backup(config, verify=_accepts_anything)
+
+    assert recorded, "no git command ran, so this proves nothing"
+    assert not any("s3cret-token-value" in argument for call in recorded for argument in call)
+    # The helper carries the variable's name, which is how the value stays out of argv.
+    assert any(TOKEN_ENV in argument for call in recorded for argument in call)
+
+
+@needs_git
+def test_no_git_command_ever_forces(tmp_path, monkeypatch):
+    from kokua.toolsets import github_backup
+
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    _point_at(monkeypatch, _bare_remote(tmp_path))
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+
+    recorded: list[list[str]] = []
+    real_run = subprocess.run
+
+    def recording_run(args, **kwargs):
+        recorded.append(list(args))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(github_backup.subprocess, "run", recording_run)
+    run_backup(config, verify=_accepts_anything)
+
+    forcing = [call for call in recorded if "--force" in call or "-f" in call]
+    assert forcing == []
