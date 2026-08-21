@@ -479,7 +479,11 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   comment-preserving (via `tomlkit`, since stdlib `tomllib` cannot write TOML), so hand-written comments
   and layout survive an app write; a fresh file is seeded from the shipped example.
   `kokua config init` scaffolds `$KOKUA_HOME/config.toml` from `config.example.toml`, where every key
-  sits at its built-in default, documented.
+  sits at its built-in default with a line of description. The long form, with what each key accepts,
+  which keys apply live, and who may write each one, is
+  [docs/reference/configuration.md](docs/reference/configuration.md). The example file stays short on
+  purpose: `read_config` hands the assistant the scaffolded file, so its comments occupy the model's
+  context on every configuration question.
 - **Strict parsing**: an unknown key or non-table section fails fast with a `ConfigError` naming the
   key, so typos and removed keys surface immediately instead of being silently ignored.
 - **`[agents.*]` describes every agent, and replaces the per-role vocabulary this line of development

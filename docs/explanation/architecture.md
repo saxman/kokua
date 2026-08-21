@@ -20,7 +20,7 @@ src/kokua/
   plugins.py           entry-point discovery for front ends and toolsets
   images.py            the on-disk image store and the /images/<name> reference
   logging_setup.py     rotating file log + a SIGUSR1 thread-stack dump
-  config.example.toml  every key at its default, documented
+  config.example.toml  every key, one line each (long form: docs/reference/configuration.md)
   web_static/          the single-page web UI plus vendored marked/DOMPurify/KaTeX
 
   core/          the transport-agnostic runtime

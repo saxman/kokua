@@ -10,7 +10,7 @@
 
 [![CI](https://github.com/saxman/kokua/actions/workflows/ci.yml/badge.svg)](https://github.com/saxman/kokua/actions/workflows/ci.yml) ![GitHub License](https://img.shields.io/github/license/saxman/kokua) ![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fsaxman%2Fkokua%2Frefs%2Fheads%2Fmain%2Fpyproject.toml) [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-[Design principles](docs/explanation/design-principles.md) · [Architecture](docs/explanation/architecture.md) · [Configuration](src/kokua/config.example.toml) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+[Design principles](docs/explanation/design-principles.md) · [Architecture](docs/explanation/architecture.md) · [Configuration](docs/reference/configuration.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -120,7 +120,7 @@ Settings come from a TOML file, so you don't repeat flags. Precedence, highest f
 kokua config init           # writes the documented example; --force to overwrite
 ```
 
-The scaffold comments every key at its default, so changing a default in a later release still reaches keys you left commented, and it ships the four `[agents.*]` tables live rather than commented, since an agent is the one thing Kokua cannot default. See [`config.example.toml`](src/kokua/config.example.toml) for the full set, and [set up a toolset](docs/how-to/set-up-toolsets.md) for the walkthrough of declaring an agent.
+The scaffold comments every key at its default, so changing a default in a later release still reaches keys you left commented, and it ships the four `[agents.*]` tables live rather than commented, since an agent is the one thing Kokua cannot default. See [`config.example.toml`](src/kokua/config.example.toml) for the full set at a glance, the [configuration reference](docs/reference/configuration.md) for what each key accepts and when it applies, and [set up a toolset](docs/how-to/set-up-toolsets.md) for the walkthrough of declaring an agent.
 
 An agent table is a handful of keys:
 
@@ -222,7 +222,7 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 - 📘 [How-to guides](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace, declaring an agent, writing a toolset) · [add a skill](docs/how-to/add-skills.md) · [add an MCP service](docs/how-to/add-mcp-services.md).
 - 💡 [Design principles](docs/explanation/design-principles.md): the six that decide what belongs in the core, each with the code that backs it and the patterns it excludes.
 - 🏗️ [Architecture](docs/explanation/architecture.md): module layout, control flow, and the concurrency model.
-- ⚙️ [`config.example.toml`](src/kokua/config.example.toml): every setting, documented at its default.
+- ⚙️ [Configuration reference](docs/reference/configuration.md): every `config.toml` key, what it accepts, which apply live, and who may write each. Short form: [`config.example.toml`](src/kokua/config.example.toml).
 - 🧩 [`toolsets/image.py`](src/kokua/toolsets/image.py): the toolset template.
 - 🧩 [`skills/dice-roller/`](skills/dice-roller/): the skill template, for capability that needs no packaging.
 - 📋 [CHANGELOG](CHANGELOG.md) · [TODO](TODO.md): what changed, and what's known but not yet scheduled.

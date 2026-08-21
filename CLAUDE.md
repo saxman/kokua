@@ -128,7 +128,10 @@ capability pushed into plugins.
 The full narrative -- module-by-module layout, control flow, config layering, images, MCP, planning,
 the web front end -- lives in
 [docs/explanation/architecture.md](docs/explanation/architecture.md). Keep it current there; this
-section is a map, not a second copy.
+section is a map, not a second copy. Every `config.toml` key is documented in
+[docs/reference/configuration.md](docs/reference/configuration.md); `config.example.toml` carries only a
+line per key, because `read_config` hands the assistant the scaffolded file and its comments sit in the
+model's context on every configuration question. A new or changed key goes in both.
 
 ```
 src/kokua/

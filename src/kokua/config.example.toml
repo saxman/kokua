@@ -1,44 +1,25 @@
 # Kokua configuration. Run `kokua config init` to write this to $KOKUA_HOME/config.toml (default
-# ~/.kokua/config.toml), copy it there yourself, or point at it with --config PATH or $KOKUA_CONFIG.
-# The file itself is REQUIRED and Kokua will not start without it, because the [agents.*] tables below
-# exist nowhere else and the assistant cannot work without at least one. Every individual key is
-# optional and the value shown is the built-in default. Command-line flags override anything set here.
-# An unknown key or wrong-typed value is a hard error (startup fails and names the key).
+# ~/.kokua/config.toml), or point at it with --config PATH or $KOKUA_CONFIG. The file is REQUIRED
+# (the [agents.*] tables exist nowhere else), every individual key is optional, and a command-line flag
+# beats a value here. An unknown key or a wrong-typed value fails startup, naming the key.
 #
-# This file is the single source of settings: besides hand-editing, the add_mcp_server tool and the
-# assistant's own update_config tool write to it too (comments are preserved). A few security-critical keys ([security].confirm_tools, [email].to, [paths].data_dir)
-# and the whole [agents.*] section can only be changed by hand-editing, never by the assistant.
+# The assistant's update_config tool and add_mcp_server write here too, preserving comments.
+# Hand-edit only, refused to the assistant: [security].confirm_tools, [email].to, [paths].data_dir,
+# and all of [agents.*]. [scheduling.task.*] changes through the scheduling tools instead.
+#
+# Full reference: https://github.com/saxman/kokua/blob/main/docs/reference/configuration.md
 
 [assistant]
-# The default model every agent runs on, e.g. "ollama:qwen3:8b". An agent that declares its own
-# `model` below runs on that instead; this is what the rest fall back to. Read at startup only, so a
-# change here (by hand, or through the assistant's update_config) takes effect on the next start.
-#
-# Unset -> $AIMU_LANGUAGE_MODEL, else the first already-running local model found (a running Ollama
-# server, then a local OpenAI-compatible server). A cloud model is never auto-selected. Startup fails
-# with an actionable message if nothing can be resolved.
-#
-# For a remote/custom OpenAI-compatible server (llama.cpp llama-server, vLLM, LM Studio, SGLang,
-# HF-Serve), append "@<base_url>" to override the endpoint, and for a model id not built into AIMU add
-# ";<flags>" (comma-separated from tools,thinking,vision,audio,structured) to declare its capabilities:
-#   model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"
-#   model = "openai-compat:my-model@http://gpu-box:9000/v1;tools,thinking"
+# Default model for every agent; an agent's own `model` wins. Restart to apply.
+# Unset: $AIMU_LANGUAGE_MODEL, else a running local server (never a cloud model), else startup fails.
+# Append "@<base_url>" for a custom endpoint, ";<flags>" (tools,thinking,vision,audio,structured) for
+# a model id AIMU does not know: "openai-compat:my-model@http://gpu-box:9000/v1;tools,thinking".
 # model = "ollama:qwen3:8b"
 
-# The default reasoning effort every agent runs at. An agent that declares its own `thinking` below
-# runs at that instead. Read at startup only, like `model` above and for the same reason: the settings
-# panel cannot write [agents.*], so a live field there could only ever disagree with a declaration.
-#
-# Unset (the default) sends nothing, leaving each model at its own behavior. Otherwise:
-#   thinking = false      # do not reason
-#   thinking = true       # reason, at the model's own default effort
-#   thinking = "low"      # reason at this effort; also "medium" and "high"
-#
-# Two caveats. A level is advisory on a model whose card does not declare effort-level support: AIMU
-# warns once and reasoning is still on, just not at the level asked for. And `false` additionally
-# selects the model card's instruct-mode sampling profile where the card specifies one (the Qwen
-# 3.5/3.6/3.8 cards do; most models have a single profile and are unaffected), since a model's
-# thinking-mode and non-thinking-mode sampling defaults are usually different.
+# Default reasoning effort; an agent's own `thinking` wins. Restart to apply.
+# Unset sends nothing. false = do not reason, true = the model's own effort, or "low"/"medium"/"high".
+# A level is advisory on a model whose card lacks effort support (AIMU warns; reasoning stays on), and
+# false also selects the card's instruct-mode sampling profile where it has one.
 # thinking = "high"
 
 # Fallback opener for any agent below that sets no `system_message` of its own.
@@ -53,34 +34,16 @@ concurrent_tools = true
 # Discover toolset plugins via the "kokua.toolsets" entry-point group.
 load_plugins = true
 
-# Max per-conversation agents kept live in memory (AgentRegistry LRU cap). Evicted agents rebuild
-# from persisted state on next access, so the cap bounds memory, not correctness.
+# Max per-conversation agents kept live in memory; an evicted one rebuilds from persisted state.
 agent_cache_cap = 8
 
-# Generation parameters for every agent, each overridable per key by an agent's own
-# [agents.<name>.generation] table below. Startup-only, like `model` and `thinking` above. This is the
-# last thing in [assistant] because it is a sub-table: any plain [assistant] key written after the
-# header below would belong to it instead.
-#
-# Only the keys you set here are sent. That matters: this tier sits above the model card's own tuned
-# profile in AIMU's precedence chain, so a value set here replaces the card's recommendation for that
-# one parameter and leaves the rest of the card's profile in force. Setting nothing keeps the whole
-# profile.
-#
-# A parameter a backend cannot take is dropped with a warning naming where to set it instead (Ollama has
-# no min_p, the Anthropic API has no penalties), so a value that works locally does not break a cloud
-# model, it just stops applying. That warning goes to the rotating log only (data/logs/kokua.log under
-# your Kokua home), not to the chat or the terminal, so look there if a parameter you set has no effect.
-#
-# max_tokens and context_length are different knobs, and they interact. max_tokens caps *generated*
-# tokens; context_length sizes the whole window, which the prompt and the generated tokens share. With
-# the window at 32768 and the cap at 4096, roughly 28k is left for the system prompt, the tool block,
-# and the conversation. Note also that AIMU's own fallback sets max_tokens = 1024 on Anthropic,
-# the OpenAI-compatible family, and llama.cpp, which is low for a turn carrying tool results.
-#
-# context_length is set per request only on Ollama's native API. Elsewhere the window is fixed at load
-# time, at server launch (--ctx-size / --max-model-len), or by the vendor, and the key is dropped with
-# a warning naming that remedy.
+# Generation parameters for every agent, per-key overridable by [agents.<name>.generation]. Restart to
+# apply, and keep this sub-table LAST in [assistant] (a plain key after the header would join it).
+# ONLY the keys you set are sent: this tier sits above the model card's tuned profile, so each one set
+# replaces the card's value for that parameter alone. A parameter the backend cannot take (min_p on
+# Ollama, penalties on Anthropic) is dropped, warning only to data/logs/kokua.log. max_tokens caps
+# generated tokens; context_length sizes the window they share with the prompt, and applies per request
+# on Ollama only (elsewhere the window is fixed at model load or server launch).
 # [assistant.generation]
 # temperature = 0.7          # 0.0 to 2.0
 # top_p = 0.9                # 0.0 to 1.0
@@ -92,46 +55,27 @@ agent_cache_cap = 8
 # context_length = 32768     # at least 1
 
 [display]
-# Stream the model's reasoning / tool calls into the channel. Both are hot: asking the assistant to
-# change one with update_config applies it from the next turn and writes it straight back here.
+# Stream the model's reasoning / tool calls into the channel. Both apply live (no restart).
 show_thinking = true
 show_tools = true
 
-# Every agent, declared whole. An agent's `tools` list IS its capability: nothing is added in code, so a
-# toolset you delete from a list is gone and one you add is there on the next start.
+# Every agent, declared whole, and hand-edit only. An agent's `tools` list IS its capability: nothing is
+# added in code, and nothing is implicit, including the clock (declare "time" to get it).
 #
-# There is one namespace for every capability, so a name in `tools` may be an AIMU built-in tool group
-# ("web", "fs", "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own
-# ("memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations"), an installed
-# plugin toolset ("aimu_agents", "image"), a skill in your skills folder named by its own name, or an MCP
-# server configured under [[mcp.server]] below, named by
-# its `name`. The agent does not say which; run `kokua --list-toolsets` for every name this install
-# accepts here, grouped by what provides it. An unknown name is a startup error that lists the valid ones,
-# so a typo can never quietly leave an agent with a smaller toolset than you wrote.
+# One namespace covers everything, so a `tools` entry may be an AIMU built-in group ("web", "fs",
+# "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own ("memory",
+# "documents", "skills", "capabilities", "config", "conversations", "mcp-admin", "planning",
+# "scheduling"), a plugin toolset ("aimu_agents", "image"), a skill by name, or an MCP server by its
+# [[mcp.server]] name. `kokua --list-toolsets` lists them; an unknown name fails startup.
 #
-# `model` overrides [assistant].model for one agent -- a cheap fast worker under an expensive supervisor,
-# or a vision model for the one agent that needs it. It is resolved per agent and never inherited: a
-# delegator that pins a model does not drag its workers onto it, so a worker declaring no `model` runs on
-# the [assistant].model default like every other undeclared agent. A model string AIMU cannot resolve
-# fails startup naming the table it came from.
-#
-# A non-empty `delegates_to` is what makes an agent delegate: it gets a `spawn_subagent(agent_type, task)`
-# tool offering exactly the agents it names, each built from its own table. A worker's gated-tool calls
-# (the confirm_tools below, e.g. execute_python) are routed to you for approval, not run unattended.
-# The graph must be acyclic. `description` is the label the delegator sees in its worker menu, and
-# `system_message` is optional (see [assistant].system_message above).
-#
-# Nothing is implicit, including the clock: "time" is added to no agent in code, which is why every agent
-# below lists it. An installed plugin toolset and a configured MCP server likewise do nothing until some
-# agent names them, and startup warns about one nothing names.
-#
-# This whole section can only be changed by hand-editing this file. `update_config` is a tool the
-# assistant holds, so a writable agent table would let the assistant widen its own reach; granting a
-# capability stays your decision.
+# `model` / `thinking` / `generation` override the [assistant] defaults for one agent and are never
+# inherited by its workers. A non-empty `delegates_to` gives the agent spawn_subagent(agent_type, task)
+# over exactly the agents it names (acyclic; a worker's gated calls still come to you), and
+# `description` is the label a delegator sees.
 
 [agents.assistant]
-# The agent you talk to (see [assistant].agent above). It keeps the cross-cutting tools it needs to
-# manage itself and hands specialized work to the three workers below.
+# The agent you talk to (see [assistant].agent above): cross-cutting tools to manage itself, plus three
+# workers for specialized work.
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "capabilities", "time"]
@@ -146,10 +90,8 @@ system_message = """\
 You are a research sub-agent. Investigate the task with web search and page lookups, verify claims \
 against sources rather than memory, and return a concise, well-organized findings summary that names \
 its sources."""
-# An agent may override any of [assistant.generation]'s keys, per key: what it does not name, it
-# inherits from that default (and what neither sets, the model card decides). Hand-edit only, like the
-# rest of an agent's table. Written last in the agent's table for the reason [assistant.generation] is:
-# a plain [agents.researcher] key after this header would belong to the sub-table instead.
+# Overrides [assistant.generation] per key; what it does not name, it inherits. Keep it last in the
+# agent's table, for the reason [assistant.generation] is last in [assistant].
 # [agents.researcher.generation]
 # temperature = 0.2
 # context_length = 131072
@@ -168,9 +110,7 @@ system_message = """\
 You are a general-purpose sub-agent. Complete the self-contained task you are given and return a \
 single, complete answer."""
 
-# More agents to copy. Each mixes built-in groups, MCP servers, and plugin toolsets in the one list --
-# `reviewer` below is the worked example of mounting an agent built with AIMU, via the `aimu_agents`
-# toolset (see README, "Toolsets").
+# More agents to copy, each mixing built-in groups, MCP servers, and plugin toolsets in the one list.
 # [agents.stock-trader]
 # description = "Looks up quotes and places trades."
 # tools = ["stocks", "compute", "time"]   # "stocks" matches [[mcp.server]].name below
@@ -181,26 +121,16 @@ single, complete answer."""
 # description = "Reviews code for security, performance, and readability."
 # tools = ["aimu_agents", "time"]
 
-# Images: the assistant reads images you attach (web upload / paste, or the CLI `/attach <path>`
-# command); a vision-capable model is needed (Claude models qualify). It can also generate images when
-# the AIMU_IMAGE_MODEL env var is set (e.g. "gemini:nano-banana" or a HuggingFace diffusers "hf:<repo>"),
-# via the `image` toolset an agent has to name; without that env var the toolset offers no tool at all.
-# Uploaded and generated images are stored under data/images and served by the web UI at /images;
-# sessions keep only a small reference, not inline data.
-#
-# The generative built-in groups ("audio", "speech", "transcription") each require their AIMU_*_MODEL env
-# var too: there is no default, so the tool raises if it is unset rather than downloading weights you did
-# not ask for. Values and accepted formats: https://saxman.info/aimu/reference/env-vars/
+# Images: the assistant reads what you attach (web upload/paste, or the CLI `/attach <path>`) given a
+# vision-capable model, and generates images through the `image` toolset when $AIMU_IMAGE_MODEL is set
+# (without it the toolset offers no tool). The "audio", "speech", and "transcription" groups likewise
+# need their own AIMU_*_MODEL var. Formats: https://saxman.info/aimu/reference/env-vars/
 
-# Remote MCP servers to connect at startup. Each server is its own [[mcp.server]] table.
-# `url` and `name` are both required: `name` is how the server enters the toolset namespace, so it is
-# what an agent lists in its `tools` above, and a server no agent can name reaches no agent. `token_env`
-# (optional) names an environment variable holding a bearer token, read at startup so the secret stays
-# out of this file; omit it for an unauthenticated server (or one that uses the OAuth flow, which
-# triggers automatically on an auth challenge). Servers you add at runtime with the add_mcp_server tool
-# are appended here automatically, with a `name` derived from the host (and a numeric suffix if that name
-# is taken), so the file always loads; that name still reaches no agent until you add it to a `tools` list
-# above yourself.
+# Remote MCP servers to connect at startup, one [[mcp.server]] table each. `url` and `name` are
+# required; `name` is how the server enters the toolset namespace, so an agent's `tools` must list it
+# for the server to reach anything. `token_env` names an env var holding a bearer token (omit it when
+# unauthenticated, or for OAuth, which triggers on an auth challenge). The add_mcp_server tool appends
+# servers here with a host-derived name; that name reaches no agent until you add it above and restart.
 # [[mcp.server]]
 # url = "https://api.githubcopilot.com/mcp/"
 # name = "github"
@@ -211,14 +141,14 @@ single, complete answer."""
 # name = "stocks"
 
 [security]
-# Tools that require interactive confirmation before each call (terminal y/N, or Allow/Deny in the
-# web UI). These run with full machine access. Set to [] to disable approval. Proactive (unprompted)
-# turns auto-deny these regardless. `update_config` is here because it lets the assistant rewrite this
-# file (except the security-critical keys and [agents.*], which it can never change).
+# Tools requiring confirmation before each call (terminal y/N, or Allow/Deny in the web UI). These run
+# with full machine access. [] disables approval; proactive turns auto-deny these regardless. Gating is
+# by tool name, so a worker's call is routed to you too. Hand-edit only.
 confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
 
 [paths]
 # Absolute override for where all transient + user content lives. Default: $KOKUA_HOME/data.
+# Hand-edit only. Set $KOKUA_HOME instead to move config.toml along with it.
 # data_dir = "/path/to/kokua-data"
 
 [frontend]
@@ -226,56 +156,43 @@ confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update
 name = "cli"
 
 [web]
-# Bind address for the web front end (ignored by other front ends).
+# Bind address for the web front end (ignored by other front ends). Kokua has no authentication of its
+# own, so a routable address exposes an assistant holding your machine's tools.
 host = "127.0.0.1"
 port = 8000
 
 [logging]
-# Level for the rotating diagnostic log at $KOKUA_HOME/data/logs/kokua.log (5 files x 2 MB). Records
-# turn lifecycle (submitted / lock acquired / done / error) so a hung turn is visible after the fact.
-# The `/diag` chat command reports live turn + lock state and dumps a wedged turn's async stack;
-# `kill -USR1 <pid>` dumps all thread stacks. One of DEBUG, INFO, WARNING, ERROR.
+# Level for the rotating log at <data_dir>/logs/kokua.log (5 files x 2 MB), which records the turn
+# lifecycle. One of DEBUG, INFO, WARNING, ERROR. For live state use the `/diag` chat command.
 level = "INFO"
 
 [email]
-# Let the assistant email information to you (digests, summaries, reports) via SMTP, through the
-# `email-report` skill (`kokua skills install email-report`, then name it in an agent's `tools` above,
-# alongside `fs` and `compute` so that agent can run its script). The assistant can ONLY email `to`
-# below: Kokua passes these settings to the script's environment and the script has no recipient flag,
-# so it can never mail arbitrary people. Sending is UNGATED (no per-send confirmation) so
-# scheduled/proactive turns can send. The script sends nothing, and says so, unless `host` and `to` are
-# set AND the KOKUA_EMAIL_PASSWORD environment variable is present.
-#
-# The password is read from KOKUA_EMAIL_PASSWORD, NEVER from this file (adding it here is a config error).
-# For Gmail / Google Workspace, use an App Password. Leave everything unset to disable email.
+# Lets the assistant email you, through the `email-report` skill (`kokua skills install email-report`,
+# then name it in an agent's `tools` beside `fs` and `compute`). It can ONLY send to `to`, which is why
+# sending needs no per-call approval and scheduled turns can use it. The password comes from
+# $KOKUA_EMAIL_PASSWORD, never this file; for Gmail use an App Password. Nothing is sent unless `host`,
+# `to`, and that variable are all present.
 # host = "smtp.gmail.com"
 # port = 587                    # 587 with STARTTLS (default), or 465 with use_ssl = true
 # username = "you@example.com"  # SMTP login user; defaults to `from`, then `to`
 # from = "you@example.com"      # From: header; defaults to `to`
-# to = "you@example.com"        # the ONLY address the assistant can send to
+# to = "you@example.com"        # the ONLY address the assistant can send to; hand-edit only
 # use_ssl = false               # false -> STARTTLS on connect; true -> implicit TLS (SMTP_SSL)
 
 [scheduling]
-# How many conversations a scheduled task keeps. Every firing runs in its own conversation; once a task
-# has more than this, its oldest are deleted after the next firing succeeds. 1 means each run replaces
-# the one before it; 0 keeps every run forever. A task can override this for itself (the
-# `max_conversations` argument of `schedule_task`), and this is what the ones that do not follow.
-# Like [planning] below, this section exists because the `scheduling` toolset declares it.
+# How many conversations a scheduled task keeps (each firing runs in its own; the oldest are deleted
+# after the next success). 1 replaces each run with the next; 0 keeps everything. A task can override
+# this with schedule_task's `max_conversations`. Applies live. Declared by the `scheduling` toolset.
 # max_task_conversations = 3
 
-# Scheduled tasks are declared one table per task, and the table name is the task's identity: it is
-# what the sidebar shows, what `cancel_scheduled_task` takes, and what is stamped on every conversation
-# the task runs in. The assistant writes this section too, through its scheduling tools, which is why
-# `update_config` refuses it: a task write has to be paired with the scheduler arming that goes with it.
-#
-# schedule is one of:
+# Scheduled tasks, one table per task, the table name being the task's identity (what the sidebar shows
+# and what cancel_scheduled_task takes). Written by the scheduling tools rather than update_config, so
+# arming stays paired with the write. A fired one-shot stays here with enabled = false and a `fired_at`
+# stamp. Task turns are proactive, so gated tools auto-deny inside them. `schedule` is one of:
 #   { type = "once",     at = "2026-08-20T09:00:00" }   # an ISO-8601 local datetime
 #   { type = "interval", seconds = 3600 }
 #   { type = "daily",    at = "09:00" }
 #   { type = "weekly",   day = "fri", at = "16:00" }     # day is mon/tue/wed/thu/fri/sat/sun
-#
-# A fired one-shot is not deleted: it is left here with `enabled = false` and a `fired_at` stamp, so
-# the run stays on the record and re-running it is a one-character edit.
 #
 # [scheduling.task.morning-brief]
 # prompt = "Summarize my calendar and any unread mail, and flag anything that needs a reply today."
@@ -284,40 +201,25 @@ level = "INFO"
 # max_conversations = 3       # omit to follow [scheduling].max_task_conversations above
 
 [planning]
-# Deep planning is a toolset: [agents.<name>].tools must list "planning" for the "/plan <task>" command
-# (and the web UI's Plan toggle) to exist at all. It drafts an explicit plan (which tools/skills/MCP
-# services to use or build) before doing the work.
-# Every key below belongs to that toolset: this section exists because the toolset declares it, and the
-# keys are only read when an agent declares the toolset. A section named after a toolset is how a
-# third-party workflow ships its settings too, so nothing here is special-cased for planning.
-# plan_review pauses that planned turn for your Approve/Edit/Reject; off runs the plan autonomously.
-# plan_review is hot: update_config changes it mid-session, no restart.
+# Declared by the `planning` toolset: an agent's `tools` must list "planning" for "/plan <task>" to
+# exist. It drafts an explicit plan (which tools/skills/MCP services to use or build) before working.
+# plan_review pauses the planned turn for your Approve/Edit/Reject; off runs the plan autonomously.
 # plan_review = false
-# Adversarial review (both off by default). plan_review_agent: an independent, context-free agent critiques
-# the plan and Kokua re-plans on rejection. result_review: an independent agent checks the final answer
-# before it is shown -- this runs the answer non-streamed -- and Kokua revises on rejection. review_rounds
-# bounds each replan/revise loop.
+# Adversarial review: plan_review_agent has an independent, context-free agent critique the plan (Kokua
+# re-plans on rejection), result_review has one check the final answer before it is shown, running that
+# answer non-streamed (Kokua revises on rejection), and review_rounds bounds each loop.
 # plan_review_agent = false
 # result_review = false
-# review_rounds = 2
-# Verbose trace: stream every LLM call in a planned turn (planner, each reviewer's prose reasoning +
-# verdict, executor, every revision) under labeled phase headers, showing each intermediate version.
-# Overrides result_review's "hide until vetted" gate. Off by default.
+# review_rounds = 2           # the one key here needing a restart; the rest apply live
+# Stream every LLM call in a planned turn (planner, reviewers, executor, each revision) under labeled
+# phase headers. Overrides result_review's hide-until-vetted gate.
 # show_reasoning = false
 
 [capabilities]
-# Capability discovery is a toolset: [agents.<name>].tools must list "capabilities" for the agent to see
-# what is installed beyond its own tools. It gets two tools -- list_capabilities reads the registry (every
-# installed capability except this one, which the agent reading it already holds), and compose_worker
-# builds a sub-agent holding exactly the capabilities one task needs and runs it.
-# Unlike the workers in [agents.*], a composed worker is not declared anywhere: its capabilities are
-# chosen per task from everything installed. It runs on [assistant].model with the [assistant] thinking
-# and generation defaults, and its tools still go through [security].confirm_tools, so execute_python and
-# add_mcp_server still ask you first. Composing itself is not in the shipped [security].confirm_tools, so
-# it does not ask; add compose_worker there to gate that too.
-# max_depth bounds how far composition may nest: at 3 a chain reaches three workers, and the last of them
-# holds neither compose_worker nor list_capabilities, since a compose_worker with no way to look up
-# capability names is useless to whatever holds it. 0 switches composing off entirely. The cap is read
-# when the compose_worker an agent holds is called, so changing it with update_config applies to the next
-# composition with no restart, though a chain already running keeps the count it started with.
+# Declared by the `capabilities` toolset: an agent's `tools` must list "capabilities" to get
+# list_capabilities (what else is installed) and compose_worker (build a sub-agent holding exactly what
+# one task needs, and run it). A composed worker runs on the [assistant] defaults and still obeys
+# [security].confirm_tools; composing itself is ungated unless you add compose_worker there.
+# max_depth bounds nesting: at 3 the last worker in a chain holds neither tool, 0 switches composing
+# off. Applies live, to the next composition.
 # max_depth = 3

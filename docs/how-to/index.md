@@ -24,8 +24,10 @@ would hand a worker a fresh composition budget.
 
 ## Beyond these guides
 
-- Every setting, documented at its default, is in
-  [`config.example.toml`](../../src/kokua/config.example.toml). Run `kokua config init` to scaffold it.
+- [Configuration reference](../reference/configuration.md): every `config.toml` key, what it accepts,
+  which keys apply live, and who may write each one. Its short form is
+  [`config.example.toml`](../../src/kokua/config.example.toml), one line per key, which
+  `kokua config init` scaffolds for you.
 - [Architecture](../explanation/architecture.md) and
   [design principles](../explanation/design-principles.md) explain *why* the core is shaped this way,
   which is the better read if a guide's rule looks arbitrary.
