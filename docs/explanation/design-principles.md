@@ -1,10 +1,30 @@
 # Design principles
 
+## Why Kokua exists
+
+Kokua exists so people can learn how agentic systems work.
+
+It is a real assistant, not a demo. It authors and runs its own skills, connects to tool services,
+delegates to sub-agents, and schedules its own work, because a toy cannot teach what real work costs.
+It is designed to be understood: the machinery is meant to be followed, not taken on faith.
+
+**Read it.** A core small enough to hold in your head, each module saying why it is shaped as it is.
+**Run it.** Reasoning, tool calls, results, and sub-agent cards are on by default, so you watch the
+loop instead of inferring it. **Extend it.** Capability arrives through the same seam Kokua's own
+capabilities use, so what you read is what you would write.
+
+## The six principles
+
 Kokua is an *application*, not a library. It is built on [AIMU](https://saxman.info/aimu/) and
 inherits [AIMU's six library-level principles](https://saxman.info/aimu/explanation/design-principles/)
 wholesale: plain Python, plain data, uniform interfaces, progressive disclosure, direct paths, loud
 failures. What follows are the six that are Kokua's own, the ones that decide what belongs in this
 repository at all.
+
+Each of them serves the vision above, and they group in threes: **1 and 2 keep Kokua readable**,
+**3 and 4 keep it observable**, and **5 and 6 keep it runnable** by anyone who clones it. Every
+principle carries a *how this cashes out* paragraph naming the files that back it, because a
+principle you cannot check against code is a slogan.
 
 They are ordered from foundation to consequence: read top to bottom and the shape of the app falls
 out.
@@ -15,6 +35,10 @@ The assistant knows a `Channel`, not a terminal and not a socket. Every transpor
 lives on the channel or degrades, once and visibly, to plain text. A new front end implements AIMU's
 `Channel` and works immediately; implementing more of the rich-frame surface makes it nicer, never
 functional-versus-broken.
+
+This is also what keeps the core readable. The runtime a newcomer has to hold in their head is the
+assistant, the turn runner, and one channel contract; everything about terminals, sockets, and
+browsers sits outside it.
 
 *How this cashes out:* `Assistant` takes a `Channel`, and [frontends/cli.py](../../src/kokua/frontends/cli.py)
 and [frontends/web.py](../../src/kokua/frontends/web.py) share it unchanged.
@@ -30,7 +54,8 @@ the core *does* rather than how it renders, it is a named boolean -- `supports_c
 
 Capability arrives as an entry-point-registered `FrontEnd` or `Toolset`, from any installed package.
 Kokua's own front ends and toolsets register exactly the way a third party's would; if the built-in
-path and the plugin path ever diverge, the plugin path is the broken one.
+path and the plugin path ever diverge, the plugin path is the broken one. That symmetry is what makes
+a built-in toolset worth reading as a template: the code you study is the code you would write.
 
 *How this cashes out:* `pyproject.toml`'s `kokua.frontends` and `kokua.toolsets` groups list
 `kokua.frontends.web:FRONTEND` and `kokua.toolsets.image:TOOLSET` in the same table a third party's
@@ -102,7 +127,8 @@ to turn approval off, so this backstop is a default a user can remove, not a wal
 
 One settings file, hand-authorable and app-writable, with its comments preserved across the app's own
 writes. No parallel store, no process-only overrides, no settings that exist in memory and nowhere
-else.
+else. One file is also what makes a running system's whole configuration legible at once: read
+`config.toml` and there is nothing else to know.
 
 *How this cashes out:* [`config/store.py`](../../src/kokua/config/store.py) does comment-preserving
 `tomlkit` writes; two writers (`add_mcp_server` and the assistant's own `update_config` tool) land in
@@ -134,7 +160,10 @@ under its own `[section]`.
 ## 4. All state under one directory the user owns
 
 `$KOKUA_HOME` (default `~/.kokua`): `config.toml` at the root, content under `data/`. Nothing is
-written inside the installed package, into a hidden cache, or split across XDG directories.
+written inside the installed package, into a hidden cache, or split across XDG directories. Which
+makes an agent's entire state inspectable with `ls`: the conversations it has had, the facts it
+remembers, the skills it wrote for itself, the images it made. Nothing the assistant knows is hidden
+in a store you cannot open.
 
 *How this cashes out:* [`config/paths.py`](../../src/kokua/config/paths.py) holds exactly three
 locations -- the root, `data/`, and `config.toml` -- because those are the only ones that must resolve
@@ -154,7 +183,9 @@ one the same way -- which content under `data/` is not meant to be.
 One process serving one person is what makes a live scheduler, per-conversation agents, and
 last-writer-wins config writes reasonable. Kokua is not multi-tenant and does not pretend to be. But
 turns *are* concurrent, and every rule that makes that safe is named, next to the code, with the bug
-it prevents.
+it prevents. One process is also what makes a single turn followable end to end: one asyncio loop you
+can attach a debugger to, rather than a request landing in whichever worker happened to pick it up.
+The invariants block is a teaching artifact as much as a safety one.
 
 *How this cashes out:* [`core/turns.py`](../../src/kokua/core/turns.py) opens with a
 `## Concurrency invariants` block -- seven rules, each stating what breaks without it, including a
@@ -172,7 +203,9 @@ turns cannot clobber each other's prompt. The web front end refuses a second con
 The default test suite is mock-only: no network, no API keys, no provider, and a temp `$KOKUA_HOME`.
 Anything needing a browser or a live model is opt-in and never gates the default run. This is a
 design constraint on the code, not just a habit in the tests -- it is *why* the model client is
-injectable and why the builders are free functions rather than methods on the assistant.
+injectable and why the builders are free functions rather than methods on the assistant. It is also
+what keeps the project approachable: clone it, `uv sync`, `uv run pytest`, and the whole suite passes
+with no key, no network, and no model. Nothing stands between reading the code and running it.
 
 *How this cashes out:* `Assistant.create(config, channel, client=..., client_factory=...)` exists so
 a test can inject. [`core/build.py`](../../src/kokua/core/build.py) is free functions taking a config
@@ -201,13 +234,18 @@ queue. **Verifiable without a model** rules out any test that needs a model or a
 touches the real `~/.kokua`, and any code path reachable only with a live provider.
 
 None of these are missing because they were hard. They are missing because they would make Kokua a
-different kind of program.
+different kind of program, and most of them would make it a harder one to learn from.
 
 ## What this means for contributing
 
-Before proposing a change, ask which principle it serves. A change that serves none of them is
-probably a plugin, not a core change -- and principle 2 exists to make that an easy answer rather than
-a rejection.
+Two questions, in this order. First: does this make Kokua easier to learn from? A capability whose
+behavior can only be discovered by running it, an abstraction that saves lines at the cost of a
+reader's jump, a subsystem that grows what a newcomer must hold in their head without demonstrating
+anything new about agentic systems: each of those fails this question before any principle is
+consulted.
+
+Second: which principle does it serve? A change that serves none of them is probably a plugin, not a
+core change, and principle 2 exists to make that an easy answer rather than a rejection.
 
 The harder question is which principle a change *violates*. Some concrete forms that question takes
 here:
@@ -229,8 +267,10 @@ If you cannot tell which principle applies, the principles are not doing their j
 
 **"Failures reach the user, not just the log."** This is a goal, not a description: today a bad model
 string or a malformed config can still surface as a stack trace or a silent failure rather than a
-message in the chat. It is [TODO.md](../../TODO.md) item 1. Six honest principles beat seven with one
-aspirational; when that item lands, this becomes the seventh.
+message in the chat. It is on the [backlog](../../TODO.md) rather than in the code, which is why it is
+here and not above: six honest principles beat seven with one aspirational. It matters more than a
+polish item under the vision at the top of this page, since a failure you cannot see is a failure you
+cannot learn from. When it lands, it becomes the seventh.
 
 ## See also
 

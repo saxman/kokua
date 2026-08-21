@@ -768,9 +768,11 @@ notice on startup.
   `ChannelUI` is the one adapter that probes each optional channel capability once and gives every rich
   frame a documented fallback, so there is no `isinstance(channel, WebChannel)` in `core/` or
   `workflows/`. `channels/protocol.py` declares the rich surface for documentation and typing.
-- The six principles that decide what belongs in the core, each with the code that backs it, are in
-  [docs/explanation/design-principles.md](docs/explanation/design-principles.md); the architecture
-  narrative is in [docs/explanation/architecture.md](docs/explanation/architecture.md).
+- **Why Kokua exists**, and the six principles that serve it, are in
+  [docs/explanation/design-principles.md](docs/explanation/design-principles.md): the project's purpose
+  is that people can learn how agentic systems work by reading, running, and extending a real one, and
+  each principle carries the code that backs it. The architecture narrative is in
+  [docs/explanation/architecture.md](docs/explanation/architecture.md).
 - Task-oriented guides for the three ways to add capability are in
   [docs/how-to/](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace,
   declaring an agent, writing a toolset), [add a skill](docs/how-to/add-skills.md), and

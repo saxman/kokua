@@ -3,10 +3,10 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/kokua-horizontal-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/kokua-horizontal-light.svg">
-  <img alt="Kokua" src="docs/assets/kokua-horizontal-light.svg" width="420">
+  <img alt="Kokua: understandable agents" src="docs/assets/kokua-horizontal-light.svg" width="275">
 </picture>
 
-**A personal AI assistant that extends itself.**
+**A personal AI assistant built to be understood and extended.**
 
 [![CI](https://github.com/saxman/kokua/actions/workflows/ci.yml/badge.svg)](https://github.com/saxman/kokua/actions/workflows/ci.yml) ![GitHub License](https://img.shields.io/github/license/saxman/kokua) ![Python Version from PEP 621 TOML](https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fsaxman%2Fkokua%2Frefs%2Fheads%2Fmain%2Fpyproject.toml) [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
@@ -14,7 +14,7 @@
 
 </div>
 
-**Kokua** (Hawaiian: *help, assistance*) is a hackable, modular personal-assistant application (OpenClaw / Hermes Agent style) built on the [AIMU](https://saxman.info/aimu/) library. It runs an always-on assistant that chats with you, authors and runs its own skills, connects to remote tool services, delegates independent subtasks to isolated sub-agents, schedules its own proactive work, and remembers facts and documents across conversations.
+**Kokua** (Hawaiian: *help, assistance*) exists so people can learn how agentic systems work. It is a hackable, modular personal-assistant application (OpenClaw / Hermes Agent style) built on the [AIMU](https://saxman.info/aimu/) library, and a real one rather than a demo: an always-on assistant that chats with you, authors and runs its own skills, connects to remote tool services, delegates independent subtasks to isolated sub-agents, schedules its own proactive work, and remembers facts and documents across conversations. Every one of those mechanisms is there to be read, run, and extended.
 
 Kokua **extends itself**: it writes and runs new skills to take on capabilities it didn't ship with, and grows its reach by connecting to remote MCP services on its own. Where it can't extend itself, you extend it: front ends and toolsets are **plugins** you add by installing a package, never by editing the core.
 
@@ -27,9 +27,41 @@ kokua config init                  # scaffold ~/.kokua/config.toml, every key do
 
 It runs as a single user in a single process, and can run code and connect to remote services with your privileges (see [Security](#security)).
 
-## Why Kokua
+## Why Kokua exists
 
-Kokua is small on purpose. Six principles decide what belongs in the core: a **transport-agnostic core** that knows a channel rather than a terminal or a socket, **growth by plugin** rather than core change, **`config.toml` as the single source of settings** that the app itself writes, **all state under one directory you own**, **a single user and one process with concurrency rules written down**, and **verifiability without a model**. These sit on top of, and inherit, [AIMU's six library-level principles](https://saxman.info/aimu/explanation/design-principles/). The reasoning behind each of Kokua's, and the patterns each one excludes, is on the [design principles](docs/explanation/design-principles.md) page; the shape that falls out of them is in [architecture](docs/explanation/architecture.md).
+Kokua exists so people can learn how agentic systems work. It is a real assistant rather than a demo, because a toy cannot teach what real work costs, and it is designed to be understood: the machinery is meant to be followed, not taken on faith. There are three ways in.
+
+### Read it
+
+The core is small enough to hold in your head, and each module opens by saying why it is shaped the way it is rather than restating what it does. A reading order:
+
+| Start here | What it teaches |
+| --- | --- |
+| [core/assistant.py](src/kokua/core/assistant.py) | The composition root and the serve loop. Which AIMU primitives an assistant is actually made of, and how they are wired together. |
+| [core/turns.py](src/kokua/core/turns.py) | What one turn is, reactive and proactive. It opens with seven concurrency invariants, each naming the bug it prevents. |
+| [toolsets/registry.py](src/kokua/toolsets/registry.py), then [toolsets/image.py](src/kokua/toolsets/image.py) | How a capability becomes a tool an agent holds: one flat namespace, then the smallest complete toolset in the repo. |
+| [channels/ui.py](src/kokua/channels/ui.py) | How a core that knows no transport still renders richly. Every optional frame is degraded once, at construction. |
+| [workflows/planning/runner.py](src/kokua/workflows/planning/runner.py) | An agentic loop with more structure than chat: draft a plan, review it, execute it, review the result. |
+
+Then [architecture](docs/explanation/architecture.md) for the whole map, and [design principles](docs/explanation/design-principles.md) for why the boundaries fall where they do. `tests/` mirrors `src/kokua/` exactly, so a module's tests are its second explanation.
+
+### Run it
+
+```bash
+kokua --frontend web
+```
+
+Reasoning, tool calls, tool results, sub-agent cards, and plan phases are all visible by default, because `show_thinking` and `show_tools` start on. You watch the loop instead of inferring it: what the model was thinking, which tool it chose, what arguments it passed, what came back, and what it did next. Ask for something on a schedule and watch the task fire on its own. Send `/plan <task>` and the assistant shows you the plan it drafted before it acts on it; turn on adversarial review and *Show all reasoning* (see [Deep planning](#deep-planning)) and every call in that turn, planner through reviewer through executor, streams under its own labeled phase. `/diag` reports the in-flight turn and the gate state even when a turn is stuck, and `kokua --list-toolsets` prints every capability this install can offer, grouped by what provides it.
+
+The entire state of a running assistant is plain files under `~/.kokua`, so you can read what it remembers while it is still running.
+
+### Extend it
+
+Capability arrives through the same seam Kokua's own capabilities use, so the code you read is the code you would write. [`toolsets/image.py`](src/kokua/toolsets/image.py) is one tool and a `build()` in 85 lines, registered through the same entry point a third party's package would use. [`skills/dice-roller/`](skills/dice-roller/) is the same idea with no packaging at all: a `SKILL.md` and a script. [Set up a toolset](docs/how-to/set-up-toolsets.md) is the full walkthrough. Nothing in the core changes for either.
+
+### What keeps it that way
+
+Kokua is small on purpose. Six principles decide what belongs in the core: a **transport-agnostic core** that knows a channel rather than a terminal or a socket, **growth by plugin** rather than core change, **`config.toml` as the single source of settings** that the app itself writes, **all state under one directory you own**, **a single user and one process with concurrency rules written down**, and **verifiability without a model**. The first two keep Kokua readable, the next two keep it observable, and the last two keep it runnable by anyone who clones it. These sit on top of, and inherit, [AIMU's six library-level principles](https://saxman.info/aimu/explanation/design-principles/). The reasoning behind each of Kokua's, and the patterns each one excludes, is on the [design principles](docs/explanation/design-principles.md) page; the shape that falls out of them is in [architecture](docs/explanation/architecture.md).
 
 The practical consequence: the assistant core is a few hundred lines that knows nothing about terminals or browsers, and adding a transport or a capability means shipping a package, not patching Kokua.
 
@@ -220,7 +252,7 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 ### Kokua
 
 - 📘 [How-to guides](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace, declaring an agent, writing a toolset) · [add a skill](docs/how-to/add-skills.md) · [add an MCP service](docs/how-to/add-mcp-services.md).
-- 💡 [Design principles](docs/explanation/design-principles.md): the six that decide what belongs in the core, each with the code that backs it and the patterns it excludes.
+- 💡 [Design principles](docs/explanation/design-principles.md): why Kokua exists, and the six principles that serve it, each with the code that backs it and the patterns it excludes.
 - 🏗️ [Architecture](docs/explanation/architecture.md): module layout, control flow, and the concurrency model.
 - ⚙️ [Configuration reference](docs/reference/configuration.md): every `config.toml` key, what it accepts, which apply live, and who may write each. Short form: [`config.example.toml`](src/kokua/config.example.toml).
 - 🧩 [`toolsets/image.py`](src/kokua/toolsets/image.py): the toolset template.

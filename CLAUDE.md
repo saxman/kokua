@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## What this project is for
+
+**Kokua exists so people can learn how agentic systems work.** It is a real assistant rather than a
+demo, because a toy cannot teach what real work costs, and it is designed to be understood: the
+machinery is meant to be followed, not taken on faith. People learn from it three ways, and all three
+are load-bearing. They **read it** (a core small enough to hold in your head, each module saying why it
+is shaped as it is), they **run it** (reasoning, tool calls, results, sub-agent cards, and plan phases
+on by default, so the loop is watched rather than inferred), and they **extend it** (capability arrives
+through the same seam Kokua's own capabilities use, so what you read is what you would write). The full
+statement, and the six principles that serve it, are in
+[docs/explanation/design-principles.md](docs/explanation/design-principles.md).
+
+Three consequences for work in this repository:
+
+- **Docs are part of the change, not a follow-up.** A behavior change that lands without its
+  explanation is unfinished. `README.md`, `CHANGELOG.md`, and the relevant page under `docs/` go in the
+  same commit as the code.
+- **Between two working designs, take the one a newcomer follows faster.** An abstraction that saves
+  lines and costs a reader a jump is a bad trade here even when it is the tidier code.
+- **Growth has to teach something.** A change that enlarges what a newcomer must hold in their head
+  without demonstrating something new about agentic systems is a plugin, not a core change.
+
 ## Commands
 
 ```bash
@@ -69,9 +91,11 @@ Consequences for working in this repo:
 
 ## Design principles
 
-Six principles decide what belongs in this repository. Check a proposed change against them; a change
-that serves none is probably a plugin, not a core change. Full rationale, with the code that backs
-each claim, is in [docs/explanation/design-principles.md](docs/explanation/design-principles.md).
+Six principles decide what belongs in this repository, and each of them serves the goal above: 1 and 2
+keep Kokua readable, 3 and 4 keep it observable, 5 and 6 keep it runnable by anyone who clones it.
+Check a proposed change against them; a change that serves none is probably a plugin, not a core
+change. Full rationale, with the code that backs each claim, is in
+[docs/explanation/design-principles.md](docs/explanation/design-principles.md).
 
 1. **A small, transport-agnostic core.** The assistant knows a `Channel`, not a terminal or a socket.
    Every optional rich frame degrades once, in `ChannelUI`, to a documented fallback. No
@@ -189,8 +213,11 @@ manual browser check.
 
 ## Conventions
 
-Use English punctuation (no em dashes) and inclusive terminology (allowlist/blocklist, primary/replica,
-main branch). Keep the core small; prefer a plugin over a core change.
+**No em dashes.** Not in prose, docstrings, comments, commit messages, or user-facing strings. Recast
+the sentence with a comma, a colon, a semicolon, or parentheses; do not substitute a `--` for the dash
+you wanted. (Existing `--` in the docs predates this rule and is fine to leave in place; convert it
+when you are editing that text anyway.) Use inclusive terminology as well (allowlist/blocklist,
+primary/replica, main branch). Keep the core small; prefer a plugin over a core change.
 
 **Agent tools live under `toolsets/`, and only there.** A module that defines an `@aimu.tool` is a
 toolset module; nothing else contains one, so `grep -rl '@tool' src/kokua/` should only ever find files
