@@ -66,7 +66,7 @@ does.
 | `scheduling/` | recurrence math and the durable task lifecycle over `config.toml` |
 | `channels/` | `ChannelUI` plus the concrete channels |
 | `frontends/` | `cli` and `web`, registered as plugins exactly as a third party's would be |
-| `toolsets/` | the registry, Kokua's six core toolsets, the AIMU wrappers, and the two plugin toolsets |
+| `toolsets/` | the registry, Kokua's six core toolsets, the AIMU wrappers, and the three plugin toolsets |
 
 **Agent tools live under `toolsets/`, and only there.** A module defining an `@aimu.tool` is a toolset
 module and nothing else is, so `grep -rl '@tool' src/kokua/` should only ever find files in that one

@@ -21,6 +21,7 @@ def test_registry_contains_every_provider():
         "scheduling",
         "conversations",
         "aimu_agents",
+        "github_backup",
         "image",
     ):
         assert name in registry, name
