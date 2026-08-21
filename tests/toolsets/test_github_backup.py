@@ -7,14 +7,18 @@ api.github.com.
 
 from __future__ import annotations
 
+import io
+import json
 import shutil
 import subprocess
+import urllib.error
 from pathlib import Path
 
 import pytest
 
 from kokua.config import AssistantConfig
 from kokua.toolsets.github_backup import (
+    TOKEN_ENV,
     TOOLSET,
     TOOLSET_NAME,
     BackupError,
@@ -26,6 +30,7 @@ from kokua.toolsets.github_backup import (
     ensure_clone,
     head_sha,
     mirror_state,
+    verify_repo_private,
 )
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="needs the git binary")
@@ -473,3 +478,78 @@ def test_git_pins_the_locale_so_message_matching_stays_untranslated(tmp_path, mo
 
     assert captured["env"]["LC_ALL"] == "C"
     assert captured["env"]["LANGUAGE"] == ""
+
+
+def _fake_urlopen(payload: dict):
+    """Stand in for urllib.request.urlopen, returning `payload` as a JSON body."""
+
+    class _Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exception):
+            return False
+
+    return lambda request, timeout=None: _Response(json.dumps(payload).encode("utf-8"))
+
+
+def _fake_http_error(code: int):
+    def raise_it(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, code, "boom", {}, None)
+
+    return raise_it
+
+
+def test_a_private_repository_is_accepted(monkeypatch):
+    from kokua.toolsets import github_backup
+
+    monkeypatch.setattr(github_backup.urllib.request, "urlopen", _fake_urlopen({"private": True}))
+    assert verify_repo_private("you/kokua-backup", "token") is None
+
+
+def test_a_public_repository_is_refused(monkeypatch):
+    """Memory, documents and transcripts go into this repository. Public is never the right answer."""
+    from kokua.toolsets import github_backup
+
+    monkeypatch.setattr(github_backup.urllib.request, "urlopen", _fake_urlopen({"private": False}))
+    with pytest.raises(BackupError) as raised:
+        verify_repo_private("you/kokua-backup", "token")
+    assert "public" in str(raised.value)
+
+
+@pytest.mark.parametrize("code", [403, 404])
+def test_a_repository_the_token_cannot_see_is_refused(monkeypatch, code):
+    """GitHub answers 404 for both "no such repo" and "your token cannot see it", so the message says so."""
+    from kokua.toolsets import github_backup
+
+    monkeypatch.setattr(github_backup.urllib.request, "urlopen", _fake_http_error(code))
+    with pytest.raises(BackupError) as raised:
+        verify_repo_private("you/kokua-backup", "token")
+    assert "not found" in str(raised.value)
+    assert TOKEN_ENV in str(raised.value)
+
+
+def test_a_rejected_token_says_so(monkeypatch):
+    from kokua.toolsets import github_backup
+
+    monkeypatch.setattr(github_backup.urllib.request, "urlopen", _fake_http_error(401))
+    with pytest.raises(BackupError) as raised:
+        verify_repo_private("you/kokua-backup", "token")
+    assert TOKEN_ENV in str(raised.value)
+
+
+def test_the_request_carries_the_token_as_a_bearer_header(monkeypatch):
+    from kokua.toolsets import github_backup
+
+    seen = {}
+
+    def capture(request, timeout=None):
+        seen["url"] = request.full_url
+        seen["auth"] = request.get_header("Authorization")
+        return _fake_urlopen({"private": True})(request, timeout)
+
+    monkeypatch.setattr(github_backup.urllib.request, "urlopen", capture)
+    verify_repo_private("you/kokua-backup", "s3cret")
+
+    assert seen["url"] == "https://api.github.com/repos/you/kokua-backup"
+    assert seen["auth"] == "Bearer s3cret"

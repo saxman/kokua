@@ -19,9 +19,12 @@ scope that token to the backup repository alone.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -36,6 +39,7 @@ TOKEN_ENV = "GITHUB_BACKUP_TOKEN"
 DEFAULT_BRANCH = "main"
 
 GIT_TIMEOUT_SECONDS = 300
+API_TIMEOUT_SECONDS = 30
 COMMIT_NAME = "Kokua"
 COMMIT_EMAIL = "kokua@localhost"
 
@@ -52,8 +56,42 @@ class BackupError(RuntimeError):
 
 
 def verify_repo_private(repo: str, token: str) -> None:
-    """Raise unless ``repo`` exists, is reachable with ``token``, and is private."""
-    raise NotImplementedError
+    """Raise unless ``repo`` exists, is reachable with ``token``, and is private.
+
+    The one network call in an otherwise subprocess-only module, and it is worth it: what goes into this
+    repository is the memory store, saved documents, and every conversation transcript, so pushing to a
+    public repository has to be impossible rather than merely discouraged.
+
+    Stdlib rather than ``httpx`` or ``requests``, both of which are only transitively present here, since
+    this is a single GET.
+    """
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=API_TIMEOUT_SECONDS) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code in (403, 404):
+            raise BackupError(
+                f"repository {repo!r} was not found. Either it does not exist, or ${TOKEN_ENV} does not "
+                "grant access to it (GitHub answers the same way for both)"
+            ) from error
+        if error.code == 401:
+            raise BackupError(f"GitHub rejected ${TOKEN_ENV}") from error
+        raise BackupError(f"GitHub returned HTTP {error.code} for {repo!r}") from error
+    except urllib.error.URLError as error:
+        raise BackupError(f"could not reach api.github.com: {error.reason}") from error
+    if not payload.get("private"):
+        raise BackupError(
+            f"repository {repo!r} is public. Kokua backs up your memory, documents and conversation "
+            "transcripts, so it pushes only to a private repository"
+        )
 
 
 def run_backup(config: AssistantConfig, *, verify: Callable[[str, str], None] = verify_repo_private) -> str:
