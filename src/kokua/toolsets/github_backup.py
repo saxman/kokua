@@ -145,8 +145,14 @@ def _git(tree: Path, *args: str, label: str, check: bool = True) -> subprocess.C
 
     ``label`` names the step for the error message, because the first argument is often ``-c`` and
     "git -c failed" tells a reader nothing.
+
+    ``LC_ALL=C`` (with ``LANGUAGE`` cleared, since gettext lets it override ``LC_ALL``) pins git's
+    output to the untranslated message set. Both :func:`_error_detail` and the empty-remote check in
+    :func:`ensure_clone` parse that output by matching English substrings; on a git built with NLS
+    (most Linux distributions ship one), an unpinned locale would translate those messages, the matches
+    would silently stop firing, and the failure they exist to catch would go uncaught again.
     """
-    environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C", "LANGUAGE": ""}
     try:
         result = subprocess.run(
             ["git", *args],
@@ -189,10 +195,11 @@ def ensure_clone(tree: Path, repo: str, branch: str) -> None:
         _git(tree, "reset", "--hard", "FETCH_HEAD", label="reset")
     elif "couldn't find remote ref" not in fetched.stderr:
         # "couldn't find remote ref" is genuinely an empty remote and is fine to continue past with an
-        # unborn branch. Anything else (a network error, a bad token) must not be read that way: this
-        # function returns early on every later call once .git exists, so swallowing the failure here
-        # would leave the branch unborn for good, and the next push would be rejected as non-fast-forward
-        # with nothing left to retry the fetch.
+        # unborn branch. Anything else (a network error, a bad token) must not be read that way. .git is
+        # already created by this point, so a swallowed failure here would not merely delay a retry: this
+        # function returns early on every later call, so the tree would keep looking cloned while never
+        # having actually synced. Raising here is what turns that silent wedge into a loud first-run
+        # failure instead of a backup that quietly never reaches the remote.
         raise BackupError(f"git fetch failed: {_error_detail(fetched.stderr, fetched.stdout)}")
 
 

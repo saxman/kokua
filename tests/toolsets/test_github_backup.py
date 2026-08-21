@@ -19,6 +19,7 @@ from kokua.toolsets.github_backup import (
     TOOLSET_NAME,
     BackupError,
     _error_detail,
+    _git,
     backup_paths,
     build,
     commit_and_push,
@@ -449,3 +450,26 @@ def test_ensure_clone_tolerates_a_genuinely_empty_remote(tmp_path, monkeypatch):
     ensure_clone(tree, "you/kokua-backup", "main")
 
     assert (tree / ".git").is_dir()
+
+
+def test_git_pins_the_locale_so_message_matching_stays_untranslated(tmp_path, monkeypatch):
+    """_error_detail and the empty-remote check in ensure_clone both match untranslated git output.
+
+    A git built with NLS (most Linux distributions ship one) would translate "fatal:", "error:", and
+    "couldn't find remote ref" under an inherited locale, and those matches would stop firing with
+    nothing raised to say so. This asserts the pin directly (`_git` fakes `subprocess.run` and inspects
+    the environment it was called with), since the git installed here carries no locale data and so
+    cannot demonstrate the mistranslation the pin prevents.
+    """
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _git(tmp_path, "status", label="status")
+
+    assert captured["env"]["LC_ALL"] == "C"
+    assert captured["env"]["LANGUAGE"] == ""
