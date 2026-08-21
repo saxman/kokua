@@ -3,19 +3,19 @@
 A *runtime* setting is one the user can change without restarting: the display flags, the planning
 flags, and whatever a toolset declared as hot. Everything else in ``config.toml`` is startup-only and
 is declared in ``config.file._STARTUP_SCHEMA`` instead. The model is one of those, not a runtime
-setting, however much it reads like one: nothing rebinds a live client, so a panel field or a hot
-``update_config`` write for it could only report a change it had not made (see
+setting, however much it reads like one: nothing rebinds a live client, so a hot ``update_config``
+write for it could only report a change it had not made (see
 ``core.settings_runtime``, which says the same from the applying end).
 
 The table is the single declaration of that set. It drives, in one place, what used to be repeated
-across nine sites: the TOML schema entry, the panel payload sanitizer, the hot-appliable key set that
-``update_config`` checks, the settings dict the panel reads back, the live-apply loop, the
+across nine sites: the TOML schema entry, the incoming-payload sanitizer, the hot-appliable key set that
+``update_config`` checks, the settings dict a client reads back, the live-apply loop, the
 channel-mirroring of the display flags, and the persist loop.
 
 A runtime setting may be Kokua's own or a toolset's, and the two are added differently:
 
 - **Kokua's own** is one entry in :data:`CORE_RUNTIME_SETTINGS` plus one field in ``AssistantConfig``
-  (plus one input in the web panel) -- ``tests/`` asserts the first two stay in step.
+  -- ``tests/`` asserts the two stay in step.
 - **A toolset's** is one ``kokua.toolsets.Setting`` on the toolset and nothing else: it lives in
   ``config.toolset_settings[<toolset>]`` rather than in an ``AssistantConfig`` field, and
   ``config.settings_sources`` turns it into the :class:`RuntimeSetting` this table holds.
@@ -30,7 +30,7 @@ tier from ``[assistant.generation]`` and each ``[agents.<name>.generation]``, wh
 declared once in ``config/file.py`` (the one table both tiers validate against) and read at startup
 only, and it writes *only* the keys those tables name -- an absent key stays absent from the
 request, which is what leaves a card's own profile in force. Do not move them here, and do not give
-them a panel field: a panel input always holds a value, so the tier would be written whether or not
+them a runtime setting: one always holds a value, so the tier would be written whether or not
 the user asked for anything, and since it sits above the card it would shadow every card's tuned
 profile. That is exactly the regression an earlier ``[generation]`` section caused. Startup-only
 cold keys are what keep "absent means absent" true.
@@ -46,7 +46,7 @@ TYPE_LABELS = {bool: "a boolean", str: "a string", int: "an integer"}
 
 @dataclass(frozen=True)
 class RuntimeSetting:
-    """One setting the web panel and ``update_config`` can change without a restart.
+    """One setting ``update_config``, or a settings client, can change without a restart.
 
     ``section`` and ``key`` locate it in config.toml (``key`` defaults to ``field``). Where the value
     *lives* depends on ``toolset``: a core setting is an ``AssistantConfig`` attribute named ``field``,
@@ -72,10 +72,10 @@ class RuntimeSetting:
 
     @property
     def wire_key(self) -> str:
-        """This setting's key in the settings-panel payload.
+        """This setting's key in the settings payload.
 
         A contributed setting is namespaced by its toolset, because two toolsets may reasonably both
-        want a ``review_rounds`` and the panel is one flat object. Core settings stay bare so the
+        want a ``review_rounds`` and the payload is one flat object. Core settings stay bare so the
         existing payload shape is unchanged.
         """
         return f"{self.toolset}.{self.toml_key}" if self.toolset else self.field
@@ -124,7 +124,7 @@ CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = (
 
 
 def _coerce_runtime(value: Any, setting: RuntimeSetting) -> Optional[Any]:
-    """Coerce a panel value for a runtime setting; return None to drop it."""
+    """Coerce an incoming value for a runtime setting; return None to drop it."""
     if setting.kind is bool:
         return value if isinstance(value, bool) else None
     if setting.kind is int:
@@ -152,7 +152,7 @@ class SettingsTable:
     One TOML key may be declared once. Two entries for a ``[section].key`` is a ``ValueError`` here rather
     than a last-wins lookup, because the two would disagree about where the value lives: a core entry
     writes an ``AssistantConfig`` attribute and a contributed one writes ``toolset_settings``, and the
-    panel would carry both keys, apply both, and persist the key twice.
+    payload would carry both keys, apply both, and persist the key twice.
     """
 
     def __init__(self, settings: Sequence[RuntimeSetting]):
@@ -165,7 +165,7 @@ class SettingsTable:
                 raise ValueError(
                     f"two runtime settings claim [{setting.section}].{setting.toml_key}: "
                     f"{_declared_by(existing)} and {_declared_by(setting)}. One TOML key gets one "
-                    "declaration: the panel payload, the live-apply path and the persist path all resolve "
+                    "declaration: the settings payload, the live-apply path and the persist path all resolve "
                     "it through this table, so two entries would apply and write the key twice, to "
                     "different destinations, and the loser would then be invisible."
                 )
@@ -198,8 +198,8 @@ class SettingsTable:
     def sanitize(self, raw: dict) -> dict:
         """Keep only known keys, coerce types, drop None / junk.
 
-        Accepts the panel's wire shape (one key per setting's ``wire_key``) and returns the same shape
-        with only the values that survived validation.
+        Accepts the wire shape (one key per setting's ``wire_key``) and returns the same shape with
+        only the values that survived validation.
         """
         result: dict = {}
         for setting in self.settings:

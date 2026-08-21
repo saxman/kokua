@@ -1,19 +1,20 @@
 """Applying a settings change to a running assistant, and persisting it to config.toml.
 
 Everything here is driven by the :class:`~kokua.config.table.SettingsTable` it is handed: reading the
-panel's values back, applying them live, mirroring the display flags onto the channel, and writing them
+current values back, applying them live, mirroring the display flags onto the channel, and writing them
 to their own ``[section].key``. Adding a setting -- Kokua's own or a toolset's -- touches none of this
 code, and a setting a toolset owns is applied and persisted exactly the way a core one is.
 
 The model is deliberately absent: every agent's model comes from its own ``[agents.*]`` table or the
 ``[assistant].model`` default, both read at startup, and no live client is ever rebound to another one.
-A panel field for it could only disagree with a table the panel cannot write.
+Offering it as a runtime setting could only report a change it had not made, against a table this path
+cannot write.
 
 Sampling parameters are not here either, and for the same reason, but they are set elsewhere: AIMU owns
 their precedence chain (client fallbacks, then the model card's tuned profile, then
 ``client.default_generate_kwargs``, then the per-call dict), and ``[assistant.generation]`` plus each
 ``[agents.<name>.generation]`` write that third tier at startup, with only the keys those tables name. A
-panel field would always hold a value, so it would write the tier even when the user asked for nothing,
+runtime setting always holds a value, so it would write the tier even when the user asked for nothing,
 shadowing the card's tuned profile -- which is why that tier is startup-only and not a runtime setting.
 """
 
@@ -62,13 +63,13 @@ class SettingsApplier:
     # --- read ------------------------------------------------------------------------------------
 
     def current(self) -> dict:
-        """The effective runtime settings for the web panel."""
+        """The effective runtime settings, in the wire shape a settings client reads."""
         return {s.wire_key: s.read(self._config, self._ui.display_flag) for s in self._table.settings}
 
     # --- write -----------------------------------------------------------------------------------
 
     async def apply_and_persist(self, incoming: dict) -> None:
-        """Apply a settings-panel change at runtime and write it to config.toml so it survives restarts."""
+        """Apply an incoming settings payload at runtime and write it to config.toml so it survives restarts."""
         applied = await self.apply(self._table.sanitize(incoming))
         self.persist(applied)
 
@@ -95,7 +96,7 @@ class SettingsApplier:
     async def apply_one(self, section: str, key: str, value) -> None:
         """Apply one hot ``update_config`` change live (no persist; the tool writes disk itself).
 
-        Builds the panel-shaped settings dict for the single change and applies it. Raises if it cannot
+        Builds the wire-shaped settings dict for the single change and applies it. Raises if it cannot
         be applied, so the tool skips persisting a change that did not take.
         """
         applied: dict = {}

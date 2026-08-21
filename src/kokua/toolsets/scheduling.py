@@ -397,7 +397,9 @@ def make_scheduling_tools(tasks: TaskService) -> list[Callable]:
 
 #: The ``[scheduling]`` section of config.toml. Hot because ``update_config`` should be able to change
 #: it mid-session: ``TaskService`` reads it at fire time rather than caching it, so the next firing
-#: follows the new value. It has no settings-panel input, whose fields are written by hand.
+#: follows the new value. A task's own ``[scheduling.task.*]`` table is not hot in this sense: it is
+#: locked against ``update_config`` and written through the scheduling tools, which arm the scheduler
+#: to match.
 SCHEDULING_SETTINGS: tuple[Setting, ...] = (
     Setting("max_task_conversations", int, DEFAULT_MAX_TASK_CONVERSATIONS, hot=True),
 )

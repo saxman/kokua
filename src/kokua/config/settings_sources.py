@@ -25,7 +25,7 @@ def declared_settings(toolsets) -> Iterator[tuple]:
     The single seam every consumer below goes through, so a bad declaration fails once, at startup, naming
     the toolset that has to change. Validated here rather than in ``Toolset`` itself because none of these
     rules is knowable from one ``Setting`` alone: two of them need the config sections the core already
-    parses, and the third needs the kinds the schema and the panel sanitizer can actually handle.
+    parses, and the third needs the kinds the schema and the payload sanitizer can actually handle.
 
     Two toolsets sharing a name are rejected here too, before either's settings (if any) are inspected:
     the normal namespace collision check runs later, in ``build_registry``, well after this module would

@@ -68,7 +68,7 @@ class Assistant:
         self._ui = ChannelUI(channel)
         # The live settings table: Kokua's own entries plus whatever the installed toolsets declared.
         # Built here because the applier below needs it, and shared with the config toolset through
-        # LiveState so a hot `update_config` resolves against the same table the panel does.
+        # LiveState so a hot `update_config` resolves against the same table `apply_settings` does.
         self._settings_table = build_settings_table()
         # One reporter for this connection (Assistant.create runs once per WebSocket connection): every
         # conversation's spawn_subagent reports through it, and it resolves the turn to record into
@@ -183,7 +183,7 @@ class Assistant:
         assistant._workflows = commands
         assistant._undeclared_workflow_commands = undeclared_commands
         initial_id = assistant._book.adopt_most_recent()
-        # config.toml is the single source of settings: the panel and update_config write it, and the
+        # config.toml is the single source of settings: update_config writes it, and the
         # CLI already loaded it into `config` at startup. Just mirror the display flags onto the channel.
         # Over CORE_RUNTIME_SETTINGS, not the live table: a contributed entry's value lives in
         # `config.toolset_settings`, not as a `config` attribute, so `getattr(config, setting.field)`
@@ -409,11 +409,11 @@ class Assistant:
             info.handle.cancel()
 
     def current_settings(self) -> dict:
-        """The effective runtime settings for the web panel to display."""
+        """The effective runtime settings, in the wire shape a settings client reads."""
         return self._settings.current()
 
     async def apply_settings(self, incoming: dict) -> None:
-        """Apply a settings-panel change at runtime and persist it to config.toml."""
+        """Apply an incoming settings payload at runtime and persist it to config.toml."""
         await self._settings.apply_and_persist(incoming)
 
     def list_tasks(self) -> list[dict]:

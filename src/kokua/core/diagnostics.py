@@ -30,8 +30,8 @@ def format_task_stack(task) -> str:
 def _model_line(config: AssistantConfig, entry_model: str) -> str:
     """The models this session is running on: the entry agent's, then each worker that overrides it.
 
-    Worth a line because the model is read only at startup and has no panel field, so a running session
-    would otherwise not say which one it is. Only agents that declare their own appear after the first:
+    Worth a line because the model is read only at startup and is not a runtime setting, so a running
+    session would otherwise not say which one it is. Only agents that declare their own appear after the first:
     listing every agent would repeat the default once per table and bury the exception among them.
     """
     overrides = [f"{name}: {agent.model}" for name, agent in sorted(config.agents.items()) if agent.model]
@@ -51,7 +51,7 @@ def _render_thinking(value) -> str:
 def _thinking_line(config: AssistantConfig) -> Optional[str]:
     """The reasoning effort in play, or ``None`` when nothing is declared anywhere.
 
-    Worth a line for the same reason the model is: it is read only at startup and has no panel field.
+    Worth a line for the same reason the model is: read only at startup, and not a runtime setting.
     Omitted entirely in the common case, where every agent is at AIMU's own default and a line saying so
     would be noise on every ``/diag``. Tested against ``is not None`` throughout, so an agent declaring
     ``thinking = false`` appears rather than being read as undeclared.
@@ -75,8 +75,8 @@ def _render_generation(parameters: dict) -> str:
 def _generation_line(config: AssistantConfig) -> Optional[str]:
     """The generation parameters in play, or ``None`` when nothing is declared anywhere.
 
-    Worth a line for the reason the model and the effort are: read only at startup, with no panel
-    field, so a running session would otherwise not say what it is sampling at. Each agent that
+    Worth a line for the reason the model and the effort are: read only at startup, and not runtime
+    settings, so a running session would otherwise not say what it is sampling at. Each agent that
     overrides the default shows only its own keys, not the merged result, because what a table declares
     is what a reader is checking against the file.
     """
