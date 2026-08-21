@@ -368,8 +368,18 @@ def run_backup(config: AssistantConfig, *, verify: Callable[[str, str], None] = 
     verify(repo, token)
 
     tree = config.data_dir / "backup"
-    ensure_clone(tree, repo, branch)
-    mirror_state(config, tree)
+    try:
+        ensure_clone(tree, repo, branch)
+        mirror_state(config, tree)
+    except OSError as error:
+        # Everything past this point already raises BackupError (_git does its own catching), but
+        # ensure_clone's tree.mkdir and mirror_state's copytree/rmtree/copy2 do not: mkdir can collide
+        # with a stray file at `tree` or a read-only data_dir, and mirror_state copies out of a live
+        # Chroma directory, where a WAL or temp file can vanish between the copytree scan and the copy
+        # (shutil.Error, itself an OSError, is copytree's own way of reporting that). Left uncaught,
+        # either would escape backup_kokua_state, whose only handler is for BackupError, and break the
+        # agent's tool loop in exactly the unattended, scheduled turn that has no one to see a traceback.
+        raise BackupError(f"could not prepare the backup working tree: {error}") from error
     committed = commit_and_push(tree, branch)
     if committed is None:
         previous = head_sha(tree) or "no commits yet"

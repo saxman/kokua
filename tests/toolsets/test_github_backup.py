@@ -765,7 +765,23 @@ def test_a_backup_reports_the_repository_the_branch_and_the_commit(tmp_path, mon
     message = run_backup(config, verify=_accepts_anything)
 
     assert message.startswith("Backed up to you/kokua-backup@main:")
-    assert "5 file" in message
+    assert "5 files changed" in message
+
+
+@needs_git
+def test_a_backup_of_one_changed_file_reports_the_singular(tmp_path, monkeypatch):
+    """The plural rendering is pinned above; this pins the branch `commit_and_push` takes when there is
+    exactly one changed file, which "5 file" in message would have passed just as happily without."""
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    _point_at(monkeypatch, _bare_remote(tmp_path))
+    config = _config(tmp_path, repo="you/kokua-backup")
+    config.config_path.parent.mkdir(parents=True, exist_ok=True)
+    config.config_path.write_text("[assistant]\n", encoding="utf-8")
+
+    message = run_backup(config, verify=_accepts_anything)
+
+    assert "1 file changed" in message
+    assert "1 files changed" not in message
 
 
 @needs_git
@@ -778,8 +794,9 @@ def test_an_unchanged_state_reports_the_last_commit_and_writes_nothing(tmp_path,
 
     message = run_backup(config, verify=_accepts_anything)
 
+    previous = head_sha(config.data_dir / "backup")
     assert message.startswith("Nothing to back up")
-    assert head_sha(config.data_dir / "backup") in message
+    assert previous and previous in message
 
 
 @needs_git
@@ -836,6 +853,36 @@ def test_the_verifier_runs_before_anything_is_written(tmp_path, monkeypatch):
     with pytest.raises(BackupError):
         run_backup(config, verify=refuse)
     assert not (config.data_dir / "backup").exists()
+
+
+@needs_git
+def test_a_mirror_failure_is_reported_as_a_backup_error_not_a_traceback(tmp_path, monkeypatch):
+    """mirror_state copies out of a live Chroma directory, where a file can vanish mid-copy; a dangling
+    symlink reproduces the same shutil.Error shape without depending on a real race. Left uncaught, this
+    would escape backup_kokua_state (which catches only BackupError) as a raw traceback instead of the
+    "Backup failed: ..." sentence the tool promises."""
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    _point_at(monkeypatch, _bare_remote(tmp_path))
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+    (config.documents_path / "dangling").symlink_to(config.documents_path / "does-not-exist")
+
+    with pytest.raises(BackupError) as raised:
+        run_backup(config, verify=_accepts_anything)
+    assert "backup working tree" in str(raised.value)
+
+
+def test_a_working_tree_creation_failure_is_reported_as_a_backup_error_not_a_traceback(tmp_path, monkeypatch):
+    """ensure_clone's tree.mkdir can collide with a stray file already at that path (or a read-only
+    data_dir); either raises a plain OSError subclass that must not escape as a raw traceback either."""
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    config = _config(tmp_path, repo="you/kokua-backup")
+    config.data_dir.mkdir(parents=True, exist_ok=True)
+    (config.data_dir / "backup").write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(BackupError) as raised:
+        run_backup(config, verify=_accepts_anything)
+    assert "backup working tree" in str(raised.value)
 
 
 def test_the_tool_returns_a_failure_as_text_rather_than_raising(tmp_path, monkeypatch):
