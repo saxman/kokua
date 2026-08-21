@@ -27,7 +27,8 @@ Two rules run through the whole file and explain most of what follows:
   [`[security]`](#security) · [`[paths]`](#paths) · [`[frontend]`](#frontend) · [`[web]`](#web) ·
   [`[logging]`](#logging) · [`[email]`](#email) · [`[scheduling]`](#scheduling) ·
   [`[scheduling.task.<name>]`](#schedulingtaskname) · [`[planning]`](#planning) ·
-  [`[capabilities]`](#capabilities) · [toolset sections in general](#toolset-sections)
+  [`[capabilities]`](#capabilities) · [`[github_backup]`](#github_backup) ·
+  [toolset sections in general](#toolset-sections)
 - [Environment variables](#environment-variables)
 - [Command-line flags](#command-line-flags)
 
@@ -278,10 +279,10 @@ list is gone, and one you add is there on the next start.
 There is one namespace for every capability, so a name may be an AIMU built-in tool group (`web`, `fs`,
 `compute`, `time`, `misc`, `audio`, `speech`, `transcription`), one of Kokua's own (`memory`,
 `documents`, `skills`, `capabilities`, `config`, `conversations`, `mcp-admin`, `planning`, `scheduling`),
-an installed plugin toolset (`aimu_agents`, `image`), a skill in your skills folder named by its own
-name, or an MCP server configured under `[[mcp.server]]`, named by its `name`. The list does not say
-which kind a name is. Run `kokua --list-toolsets` for every name this install accepts, grouped by what
-provides it.
+an installed plugin toolset (`aimu_agents`, `github_backup`, `image`), a skill in your skills folder
+named by its own name, or an MCP server configured under `[[mcp.server]]`, named by its `name`. The list
+does not say which kind a name is. Run `kokua --list-toolsets` for every name this install accepts,
+grouped by what provides it.
 
 An unknown name is a startup error listing the valid ones, so a typo can never quietly leave an agent
 with a smaller toolset than you wrote. Nothing is implicit, including the clock: `time` is added to no
@@ -570,6 +571,29 @@ whatever holds it. `0` switches composing off entirely. The cap is read when `co
 so an `update_config` change applies to the next composition with no restart, though a chain already
 running keeps the count it started with.
 
+## `[github_backup]`
+
+Declared by the `github_backup` toolset: an agent's `tools` must list `github_backup` for
+`backup_kokua_state` to exist. The tool takes no arguments; everything it needs comes from here.
+
+| Key | Type | Default | Hot | Meaning |
+| --- | --- | --- | --- | --- |
+| `repo` | string | `""` | no | `owner/name` of the backup repository. Required: with it blank the toolset offers no tool at all, the same gate the `image` toolset applies to its model env var |
+| `branch` | string | `"main"` | no | the branch backups are pushed to |
+
+Both keys need a restart to apply, since `build` reads them once when the toolset's tools are assembled
+for an agent.
+
+The push token is **not** a config key. It is read from the `GITHUB_BACKUP_TOKEN` environment variable,
+fixed rather than named in `config.toml`, so that repointing `repo` (which `update_config` can do, since
+this section is not hand-edit-only) can never widen the capability past whatever repository that one
+token already writes. Scope the token, a fine-grained GitHub PAT with `contents: write`, to the backup
+repository alone.
+
+The repository must be private. Kokua checks before it ever pushes and refuses to back up into a public
+one. A backup copies `config.toml`, the memory store, saved documents, authored skills, and the
+conversation transcripts, as a single git commit.
+
 ## Toolset sections
 
 `[scheduling]`, `[planning]`, and `[capabilities]` are not special cases in the config layer. A section
@@ -596,6 +620,7 @@ Kokua reads these directly; none of them has a `config.toml` key.
 | `KOKUA_HOME` | root for all state. Default `~/.kokua`. Holds `config.toml` and `data/`, so it must resolve before the file is read, which is why it is not a setting |
 | `KOKUA_CONFIG` | path to the config file, below `--config` and above the default location |
 | `KOKUA_EMAIL_PASSWORD` | SMTP password for [`[email]`](#email). Never read from the file |
+| `GITHUB_BACKUP_TOKEN` | push token for [`[github_backup]`](#github_backup). Fixed here rather than a config key, so a repointed `repo` can't widen the capability past what the token already writes |
 | `AIMU_LANGUAGE_MODEL` | the model to use when `[assistant].model` is unset, before the running-local-server search |
 | `AIMU_IMAGE_MODEL` | required by the `image` toolset, which offers no tool at all without it. For example `gemini:nano-banana`, or a HuggingFace diffusers `hf:<repo>` |
 | `AIMU_AUDIO_MODEL`, `AIMU_SPEECH_MODEL`, `AIMU_TRANSCRIPTION_MODEL` | required by the `audio`, `speech`, and `transcription` built-in groups respectively |

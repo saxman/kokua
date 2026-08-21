@@ -199,6 +199,10 @@ level = "INFO"
 # schedule = { type = "daily", at = "09:00" }
 # enabled = true              # omit to leave it enabled; written as false when disabled or retired
 # max_conversations = 3       # omit to follow [scheduling].max_task_conversations above
+#
+# [scheduling.task.kokua-backup]
+# prompt = "Back up Kokua's state with the backup_kokua_state tool, and tell me the result in one line."
+# schedule = { type = "daily", at = "03:00" }
 
 [planning]
 # Declared by the `planning` toolset: an agent's `tools` must list "planning" for "/plan <task>" to
@@ -223,3 +227,13 @@ level = "INFO"
 # max_depth bounds nesting: at 3 the last worker in a chain holds neither tool, 0 switches composing
 # off. Applies live, to the next composition.
 # max_depth = 3
+
+[github_backup]
+# Back up Kokua's own state (config.toml, memory, documents, skills, conversation transcripts) to a
+# private GitHub repository as a git commit, when you ask or when a scheduled task fires. Declared by
+# the `github_backup` toolset: an agent's `tools` must list "github_backup" for backup_kokua_state to
+# exist, and this key must be set or the toolset offers no tool at all. The repository MUST be private;
+# Kokua checks and refuses otherwise. The token comes from $GITHUB_BACKUP_TOKEN (a fine-grained PAT
+# with `contents: write`, scoped to this repository alone), never this file. Restart to apply.
+# repo = "you/kokua-backup"
+# branch = "main"
