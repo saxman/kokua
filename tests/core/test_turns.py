@@ -11,7 +11,7 @@ from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
 from kokua.toolsets.planning import PLANNING_WORKFLOW
-from kokua.workflows import Workflow
+from kokua.workflows import Workflow, WorkflowResult
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config, example_agents, planning_settings
 from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
 from tests.helpers import MockAsyncModelClient
@@ -1300,6 +1300,105 @@ async def test_a_turn_records_the_thinking_it_ran_at(tmp_path):
     await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
 
     assert assistant._store.get(assistant._active_id).metadata["thinking"]["0"] == "high"
+
+
+async def test_a_turn_runs_at_the_effort_its_message_asked_for(tmp_path):
+    """A per-turn request beats both config tiers, and the run is what has to see it: the agent's own
+    `thinking` field stays at the configured effort, so only the per-run argument carries the request."""
+    seen = []
+    agents = example_agents()
+    agents["assistant"].thinking = "low"
+    config = _config(tmp_path, thinking="low", agents=agents)
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient(["hi"]))
+    agent = assistant._book.agent_for(assistant._active_id)
+    original_run = agent.run
+
+    async def recording_run(task, **kwargs):
+        seen.append(kwargs.get("thinking"))
+        return await original_run(task, **kwargs)
+
+    agent.run = recording_run
+
+    await assistant._handle(
+        ChannelMessage(text="hello", channel="fake", metadata={"thinking": "high"}),
+        conversation_id=assistant._active_id,
+    )
+
+    assert seen == ["high"]
+    assert agent.thinking == "low", "the request is per run, not a mutation of the agent"
+
+
+async def test_a_turn_records_the_effort_its_message_asked_for(tmp_path):
+    config = _config(tmp_path, thinking="low")
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient(["hi"]))
+
+    await assistant._handle(
+        ChannelMessage(text="hello", channel="fake", metadata={"thinking": "high"}),
+        conversation_id=assistant._active_id,
+    )
+
+    assert assistant._store.get(assistant._active_id).metadata["thinking"]["0"] == "high"
+
+
+async def test_a_message_can_ask_for_no_reasoning_at_all(tmp_path):
+    """`off` is a request, not the absence of one, so it has to beat a configured level and be
+    distinguishable in the record from a turn that asked for nothing."""
+    config = _config(tmp_path, thinking="high")
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient(["hi"]))
+
+    await assistant._handle(
+        ChannelMessage(text="hello", channel="fake", metadata={"thinking": "off"}),
+        conversation_id=assistant._active_id,
+    )
+
+    assert assistant._store.get(assistant._active_id).metadata["thinking"]["0"] is False
+
+
+async def test_an_unrecognized_effort_request_leaves_the_configured_one_in_force(tmp_path):
+    config = _config(tmp_path, thinking="low")
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient(["hi"]))
+
+    await assistant._handle(
+        ChannelMessage(text="hello", channel="fake", metadata={"thinking": "xhigh"}),
+        conversation_id=assistant._active_id,
+    )
+
+    assert assistant._store.get(assistant._active_id).metadata["thinking"]["0"] == "low"
+
+
+class _QuietRichRunner:
+    """A rich workflow that commits a turn and does nothing else, for testing what the core records
+    around a workflow rather than what any particular workflow does."""
+
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    async def run_turn(self):
+        self.ctx.publish_user_index(0)
+        return WorkflowResult(committed=True, user_index=0)
+
+
+async def test_a_workflow_turn_ignores_and_does_not_record_an_effort_request(tmp_path):
+    """A workflow runs its own agents at their declared efforts, so a request that rides a workflow turn
+    applies to nothing. Recording it anyway would make the transcript claim an effort the turn never
+    ran at, which is the one thing this record exists to get right."""
+    config = _config(tmp_path, thinking="low")
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient(["unused"]))
+    workflow = Workflow(
+        name="quiet",
+        description="Q.",
+        command="quiet",
+        usage="/quiet <x>",
+        build=lambda ctx: _QuietRichRunner(ctx),
+    )
+
+    await assistant._handle(
+        ChannelMessage(text="hello", channel="fake", metadata={"thinking": "high"}),
+        conversation_id=assistant._active_id,
+        workflow=workflow,
+    )
+
+    assert assistant._store.get(assistant._active_id).metadata["thinking"]["0"] == "low"
 
 
 async def test_a_spawn_card_records_the_workers_own_thinking(tmp_path):

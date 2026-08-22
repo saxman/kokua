@@ -109,7 +109,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.aio import ModelConnectionError, RunHandle
@@ -117,6 +117,7 @@ from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import Session
 
 from kokua.channels.web import proactive_turn, streaming_conversation
+from kokua.config.file import thinking_request
 from kokua.core.build import model_label
 from kokua.core.errors import describe_error
 from kokua.core.messages import derive_title, resolve_user_index
@@ -195,6 +196,14 @@ class TurnRunner:
         """Run a user-initiated turn and send its reply. See the module's concurrency invariants."""
         started = time.monotonic()
         agent = self._book.agent_for(conversation_id)
+        # The effort this turn runs at, resolved once so the run and the record cannot disagree. A
+        # per-turn request rides the message (the web composer's picker, the CLI's /think) and applies to
+        # the entry agent's own run, which is the plain-turn branch below. A workflow drives its agents at
+        # the efforts their tables declare, so a request arriving on a workflow turn applies to nothing,
+        # and recording it would make the transcript claim an effort the turn never ran at.
+        declared = self._config.thinking_for(self._config.entry_agent)
+        requested = thinking_request(msg.metadata.get("thinking")) if workflow is None else None
+        thinking = declared if requested is None else requested
         self._book.pin(conversation_id)  # invariant 2
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
@@ -231,7 +240,7 @@ class TurnRunner:
                         # has to be behind it.
                         base_len = len(agent.model_client.messages)
                         try:
-                            stream = await agent.run(msg.text, stream=True, images=msg.images)
+                            stream = await agent.run(msg.text, stream=True, images=msg.images, thinking=thinking)
                             await self._ui.send(stream, reply_to=msg)
                         finally:
                             # Resolved after the run, not taken as base_len itself: the user message
@@ -245,7 +254,7 @@ class TurnRunner:
                     # propagate straight past a record placed after -- see invariant 5. Keep the
                     # partial state (the agent snapshots it in a finally), and return so the daemon
                     # keeps serving.
-                    self._record_provenance(conversation_id, user_index)
+                    self._record_provenance(conversation_id, user_index, thinking=thinking)
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                     try:
                         await self._ui.send("(stopped)", reply_to=msg)
@@ -254,19 +263,21 @@ class TurnRunner:
                     await self._persist(conversation_id)
                     return
                 except ModelConnectionError as exc:
-                    self._record_provenance(conversation_id, user_index)  # before the send: invariant 5
+                    # before the send: invariant 5
+                    self._record_provenance(conversation_id, user_index, thinking=thinking)
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
                     await self._ui.send(
                         f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
                     )
                 except Exception as exc:
-                    self._record_provenance(conversation_id, user_index)  # before the send: invariant 5
+                    # before the send: invariant 5
+                    self._record_provenance(conversation_id, user_index, thinking=thinking)
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"failed: {describe_error(exc)}"
                     await self._ui.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
                 else:
-                    self._record_provenance(conversation_id, user_index)
+                    self._record_provenance(conversation_id, user_index, thinking=thinking)
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
                 await self._persist(conversation_id)
@@ -325,20 +336,29 @@ class TurnRunner:
         finally:
             ctx.publish_user_index(resolve_user_index(ctx.agent.model_client.messages, base_len))
 
-    def _record_provenance(self, conversation_id: str, user_index: int, failure: Optional[str] = None) -> None:
+    def _record_provenance(
+        self,
+        conversation_id: str,
+        user_index: int,
+        failure: Optional[str] = None,
+        *,
+        thinking: Optional[Union[bool, str]],
+    ) -> None:
         """Persist what produced this turn: whatever its spawns reported, the model that answered, the
-        reasoning effort it ran at, and why it stopped if it ended in an error. Synchronous, so it also
-        runs on the cancelled path where an await could be cut short.
+        reasoning effort it ran at, and why it stopped early if it did. Synchronous, so it also runs on
+        the cancelled path where an await could be cut short.
 
-        The effort comes from the config rather than the live agent's field, because the two cannot
-        disagree (``wire_agent`` sets the field from this same call) and the config is reachable without
-        resolving the conversation's agent."""
+        ``thinking`` is passed in rather than read from the config here, and is keyword-only and required
+        so no caller can forget it. A turn can now carry its own effort request, so the config says what a
+        turn *would* have run at and this record has to say what it *did*. Each caller resolves the value
+        once and hands the same one to the run and to this record, which is what keeps the two in step.
+        """
         self._book.record_turn_provenance(
             subagent_events.get() or [],
             self._answering_model(conversation_id),
             user_index,
             conversation_id,
-            thinking=self._config.thinking_for(self._config.entry_agent),
+            thinking=thinking,
             failure=failure,
         )
 
@@ -578,7 +598,12 @@ class TurnRunner:
         # whichever conversation the user is viewing rather than to this one. Before the persist,
         # and synchronously, for invariant 5's reason.
         self._record_provenance(
-            conversation_id, resolve_user_index(agent.model_client.messages, start), failure=failure
+            conversation_id,
+            resolve_user_index(agent.model_client.messages, start),
+            failure=failure,
+            # An unattended run has no message from a user and so carries no request: the configured
+            # effort is both what it would run at and what it did.
+            thinking=self._config.thinking_for(self._config.entry_agent),
         )
         await self._persist(conversation_id)
         if stopped:
