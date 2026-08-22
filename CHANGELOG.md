@@ -309,8 +309,13 @@ so they appear in `--list-toolsets` alongside anything you install -- grouped un
   ungated and therefore from a scheduled task; the repository and branch come from `[github_backup]` and
   the token from `$GITHUB_BACKUP_TOKEN`, which never reaches a command line or `.git/config`. A public
   repository is refused, an unchanged state makes no commit, and a diverged remote is reported rather
-  than force-pushed. The toolset offers no tool until `repo` is set. Logs, downloads, and images are
-  excluded, and an in-tree `.gitignore` excludes anything further. Restore is manual: see
+  than force-pushed. Three things keep the reported outcome honest across runs: repointing `repo` at a
+  second repository is refused while `data/backup` still tracks the first (Kokua will not verify one
+  repository and push to another), a commit an earlier push failed to deliver is pushed rather than
+  reported as an existing backup, and one lock serialises the working tree so two concurrent turns
+  cannot push a half-copied memory store as a success. The toolset offers no tool until `repo` is set.
+  Logs, downloads, and images are excluded, and an in-tree `.gitignore` excludes anything further.
+  Restore is manual: see
   [Back up to GitHub](docs/how-to/back-up-to-github.md).
 
 Nothing a toolset contributes reaches an agent until that agent's `tools` list names it, and startup logs

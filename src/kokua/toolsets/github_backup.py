@@ -6,6 +6,12 @@ GitHub does not report as private, makes no commit when nothing changed, and nev
 diverged remote is reported for the user to reconcile by hand, since a mirror that can overwrite remote
 history is not a backup.
 
+Two rules keep what it reports true across runs, and both need state the working tree carries from one
+run to the next. It pushes only to the repository it verified, so a ``repo`` repointed after the tree
+exists is refused rather than sent to the remote the first run recorded. And it calls a commit backed up
+only once the remote is known to have it, so a push that failed last night is retried rather than
+reported as an existing backup.
+
 The tool takes **no arguments**, and that is the whole safety argument. The repository, the branch, and
 the files copied all come from ``config.toml``, so the model cannot redirect the capability and there is
 nothing a per-call approval would protect. That is what earns it a place outside
@@ -27,6 +33,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -90,7 +97,7 @@ def _validate_repo(repo: str) -> None:
     assistant holds, so a value containing a newline or other control character can arrive here from a
     model turn. Unvalidated, that reaches ``http.client``'s CRLF-injection guard as a raw ``ValueError``
     instead of the ``BackupError`` every other failure in this function raises, breaking the contract
-    ``backup_kokua_state`` relies on to turn any failure into a sentence rather than a traceback.
+    ``backup_kokua_state`` relies on to turn any failure into a sentence the user can act on.
     """
     parts = repo.split("/")
     shape_is_valid = len(parts) == 2 and all(parts)
@@ -190,6 +197,11 @@ def mirror_state(config: AssistantConfig, tree: Path) -> None:
     in :func:`backup_paths` are touched, so a ``README.md`` or a ``.gitignore`` the user added at the
     repository root survives every run (and the ``.gitignore`` is how anything further is excluded,
     since ``git add -A`` honours it).
+
+    A dangling symlink under a copied directory is skipped rather than allowed to fail the copy. It is
+    a permanent condition, not a passing one: without this, one stale link left in ``data/documents``
+    would fail every backup from then on, and a backup that has stopped running is worse than a link
+    that does not resolve.
     """
     for source, relative in backup_paths(config):
         destination = tree / relative
@@ -198,7 +210,12 @@ def mirror_state(config: AssistantConfig, tree: Path) -> None:
         elif destination.exists():
             destination.unlink()
         if source.is_dir():
-            shutil.copytree(source, destination, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+            shutil.copytree(
+                source,
+                destination,
+                ignore=shutil.ignore_patterns(".git", "__pycache__"),
+                ignore_dangling_symlinks=True,
+            )
         elif source.is_file():
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
@@ -257,12 +274,18 @@ def _git(tree: Path, *args: str, label: str, check: bool = True) -> subprocess.C
             text=True,
             timeout=GIT_TIMEOUT_SECONDS,
         )
-    except FileNotFoundError as error:
-        # subprocess.run raises the same exception whether ``git`` is missing or ``cwd`` is: without this
-        # check, a deleted working tree would be misreported as an absent git binary.
+    except OSError as error:
+        # Every way starting a subprocess can fail arrives here, not only a missing binary: a git that
+        # exists but is not executable (PermissionError), or a machine out of descriptors or memory at
+        # fork time. Catching the whole class is what leaves no gap in this module's rule that a failure
+        # reaches the caller as a BackupError carrying a sentence.
         if not tree.is_dir():
+            # subprocess.run raises FileNotFoundError whether ``git`` is missing or ``cwd`` is: without
+            # this check, a deleted working tree would be misreported as an absent git binary.
             raise BackupError(f"the backup working tree {tree} does not exist") from error
-        raise BackupError("git is not installed, or not on PATH") from error
+        if isinstance(error, FileNotFoundError):
+            raise BackupError("git is not installed, or not on PATH") from error
+        raise BackupError(f"git {label} could not be started: {error}") from error
     except subprocess.TimeoutExpired as error:
         raise BackupError(f"git {label} timed out after {GIT_TIMEOUT_SECONDS} seconds") from error
     if check and result.returncode != 0:
@@ -277,9 +300,26 @@ def ensure_clone(tree: Path, repo: str, branch: str) -> None:
     On an empty repository the fetch fails harmlessly and the branch stays unborn until the first
     commit creates it.
 
+    An existing tree is checked against the configured repository rather than trusted. ``origin`` is
+    whatever the *first* run recorded, and ``[github_backup].repo`` can change afterwards, by hand or
+    through ``update_config``. Left unchecked, :func:`verify_repo_private` would clear the new
+    repository while the push went to the old one and the reported name was the new one: the migration
+    would silently not happen, and a repository that has since been made public would keep receiving
+    transcripts on the strength of a different repository's privacy. Refusing, rather than quietly
+    repointing ``origin``, is the safe half of that: repointing a tree full of one repository's history
+    at another is a merge the user has to be the one to intend.
+
     ``git init`` plus ``git checkout -b`` rather than ``git init -b``, which needs git 2.28 or newer.
     """
     if (tree / ".git").is_dir():
+        recorded = _git(tree, "remote", "get-url", "origin", label="remote get-url").stdout.strip()
+        wanted = remote_url(repo)
+        if recorded != wanted:
+            raise BackupError(
+                f"the backup working tree {tree} pushes to {recorded}, but [github_backup].repo now "
+                f"names {repo!r} ({wanted}). Kokua will not push to one repository while checking "
+                f"another is private: remove {tree} and the next backup clones the new repository"
+            )
         return
     tree.mkdir(parents=True, exist_ok=True)
     _git(tree, "init", label="init")
@@ -304,15 +344,46 @@ def head_sha(tree: Path) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def _push(tree: Path, branch: str) -> None:
+    """Push HEAD to the remote branch. Never ``--force``.
+
+    A rejected push means the remote diverged, and reconciling that is the user's call: a mirror that
+    can overwrite remote history is not a backup.
+    """
+    _git(tree, *_credential_args(), "push", "origin", f"HEAD:{branch}", label="push")
+
+
+def push_unpushed_commits(tree: Path, branch: str) -> str:
+    """Push, and return the short SHA, when HEAD has not reached the remote. Empty string otherwise.
+
+    A push can fail on its own (an expired token, no network at 3am) while the commit it was carrying
+    stays in the tree. Nothing about the tree then looks wrong: the next run finds the mirror identical,
+    makes no commit, and would report that local-only SHA as a completed backup, which is the worst
+    thing this feature could say. ``refs/remotes/origin/<branch>`` is the tree's own record of what the
+    remote had, updated by the fetch and by every successful push, so comparing HEAD against it is what
+    separates "already backed up" from "backed up nowhere".
+
+    Retrying the push rather than only reporting it is what makes a transient failure self-healing,
+    which is the point for a task that fires unattended. It costs nothing in safety: this is the same
+    never-forced push, so a genuine divergence still refuses and still reaches the user as a sentence.
+    """
+    local = _git(tree, "rev-parse", "HEAD", label="rev-parse", check=False)
+    if local.returncode != 0:
+        return ""  # an unborn branch has nothing to push
+    remote = _git(tree, "rev-parse", f"refs/remotes/origin/{branch}", label="rev-parse", check=False)
+    if remote.returncode == 0 and remote.stdout.strip() == local.stdout.strip():
+        return ""
+    _push(tree, branch)
+    return head_sha(tree)
+
+
 def commit_and_push(tree: Path, branch: str) -> tuple[str, int] | None:
     """Stage, commit, and push. Returns ``(short SHA, files changed)``, or ``None`` if nothing changed.
 
     The empty-diff check earns its place: a daily task would otherwise write an empty commit every day,
     and a history where every entry is identical cannot answer the one question it exists for, which is
-    when something actually changed.
-
-    Never ``--force``. A rejected push means the remote diverged, and reconciling that is the user's
-    call: a mirror that can overwrite remote history is not a backup.
+    when something actually changed. Returning ``None`` says only that this run found nothing to commit,
+    not that the remote is up to date; :func:`push_unpushed_commits` is what answers the second question.
     """
     # core.excludesFile is cleared the same way the credential helper is: an inherited global (a stray
     # `*.sqlite3` in the developer's own ignore file, say) would otherwise silently drop a file from the
@@ -339,16 +410,25 @@ def commit_and_push(tree: Path, branch: str) -> tuple[str, int] | None:
         f"Kokua backup {stamp}",
         label="commit",
     )
-    _git(tree, *_credential_args(), "push", "origin", f"HEAD:{branch}", label="push")
+    _push(tree, branch)
     return head_sha(tree), len(changed)
+
+
+# One working tree serves every caller, and callers can overlap: turns on different conversations run
+# concurrently, AIMU dispatches a synchronous tool through asyncio.to_thread, and a scheduled 3am firing
+# does not wait for the user's own request to finish. Most interleavings would fail loudly on git's
+# index.lock, but a `git add -A` racing another thread's rmtree and copytree would stage a half-copied
+# memory store and push it as a success, which is the same lie as an unpushed commit reported as backed
+# up. Serialising is cheaper than making the tree work safe to interleave, and a second caller waiting
+# then finding nothing changed is the correct answer for it anyway.
+_TREE_LOCK = threading.Lock()
 
 
 def run_backup(config: AssistantConfig, *, verify: Callable[[str, str], None] = verify_repo_private) -> str:
     """Run one backup and return the sentence describing what happened.
 
     Every refusal is raised as :class:`BackupError` rather than returned, so the caller decides how to
-    present it. :func:`build`'s tool turns it into text, because a tool that raises breaks the agent's
-    tool loop and a scheduled turn would then have nothing to report.
+    present it. :func:`build`'s tool turns it into text.
 
     ``repo`` is validated here directly, ahead of the token lookup, rather than left to ``verify`` to
     discover: ``verify`` is the seam the test suite (and a future caller) can replace with a stub, and a
@@ -371,25 +451,31 @@ def run_backup(config: AssistantConfig, *, verify: Callable[[str, str], None] = 
     verify(repo, token)
 
     tree = config.data_dir / "backup"
-    try:
-        ensure_clone(tree, repo, branch)
-        mirror_state(config, tree)
-    except OSError as error:
-        # Everything past this point already raises BackupError (_git does its own catching), but
-        # ensure_clone's tree.mkdir and mirror_state's copytree/rmtree/copy2 do not: mkdir can collide
-        # with a stray file at `tree` or a read-only data_dir, and mirror_state copies out of a live
-        # Chroma directory, where a WAL or temp file can vanish between the copytree scan and the copy
-        # (shutil.Error, itself an OSError, is copytree's own way of reporting that). Left uncaught,
-        # either would escape backup_kokua_state, whose only handler is for BackupError, and break the
-        # agent's tool loop in exactly the unattended, scheduled turn that has no one to see a traceback.
-        raise BackupError(f"could not prepare the backup working tree: {error}") from error
-    committed = commit_and_push(tree, branch)
-    if committed is None:
-        previous = head_sha(tree) or "no commits yet"
-        return f"Nothing to back up: Kokua's state is unchanged since the last backup ({previous})."
-    sha, changed = committed
-    plural = "" if changed == 1 else "s"
-    return f"Backed up to {repo}@{branch}: {changed} file{plural} changed, commit {sha}."
+    with _TREE_LOCK:
+        try:
+            ensure_clone(tree, repo, branch)
+            mirror_state(config, tree)
+        except OSError as error:
+            # Every git command raises BackupError of its own (_git catches OSError as well as a
+            # timeout), but ensure_clone's tree.mkdir and mirror_state's copytree/rmtree/copy2 do not:
+            # mkdir can collide with a stray file at `tree` or a read-only data_dir, and mirror_state
+            # copies out of a live Chroma directory, where a WAL or temp file can vanish between the
+            # copytree scan and the copy (shutil.Error, itself an OSError, is copytree's own way of
+            # reporting that). Left uncaught, either would escape backup_kokua_state, whose only handler
+            # is for BackupError, and cost the user the sentence that says what to fix.
+            raise BackupError(f"could not prepare the backup working tree: {error}") from error
+        committed = commit_and_push(tree, branch)
+        if committed is None:
+            pushed = push_unpushed_commits(tree, branch)
+            if pushed:
+                return (
+                    f"Kokua's state is unchanged, but commit {pushed} had not reached {repo}@{branch}; pushed it now."
+                )
+            previous = head_sha(tree) or "no commits yet"
+            return f"Nothing to back up: Kokua's state is unchanged since the last backup ({previous})."
+        sha, changed = committed
+        plural = "" if changed == 1 else "s"
+        return f"Backed up to {repo}@{branch}: {changed} file{plural} changed, commit {sha}."
 
 
 def build(config: AssistantConfig, *, verify: Callable[[str, str], None] = verify_repo_private) -> list:
@@ -397,6 +483,14 @@ def build(config: AssistantConfig, *, verify: Callable[[str, str], None] = verif
 
     Gated on ``repo`` for the reason ``image`` gates on its model env var: a default install has nowhere
     to push, so the model is never shown an option it cannot fulfill.
+
+    The tool catches :class:`BackupError` and returns its message. Not because an exception would break
+    anything: AIMU's tool loop catches every exception a tool raises and hands the model
+    ``Tool '<name>' raised an error: ...``. What that generic line loses is the whole value of these
+    messages. Each one names the key to edit, the variable to export, or the divergence to reconcile,
+    and the ``Backup failed:`` prefix is what the how-to's troubleshooting table is written against. A
+    turn that fires at 3am has one line of output for the user to find later; it should be the one that
+    says what to do.
 
     ``verify`` is injected so the suite can exercise the whole path without reaching api.github.com.
     """
@@ -421,9 +515,15 @@ def build(config: AssistantConfig, *, verify: Callable[[str, str], None] = verif
     return [backup_kokua_state]
 
 
+# Guidance is a fixed string on the Toolset, read once when a system message is assembled, so it cannot
+# be gated on `repo` the way `build` is. It says so instead: an agent holding this toolset with `repo`
+# blank has no `backup_kokua_state` in its schema, and being told what to do about that is more use than
+# being promised a tool that is not there.
 GUIDANCE = (
     " You can back up Kokua's own state (its configuration, memory, documents, skills, and conversation "
-    "transcripts) to the user's private GitHub repository by calling `backup_kokua_state`. It takes no "
+    "transcripts) to the user's private GitHub repository by calling `backup_kokua_state`. That tool "
+    "exists only once [github_backup].repo names a repository in config.toml: if you do not have it, say "
+    "that the key needs setting and a restart, rather than copying the files some other way. It takes no "
     "arguments; the repository and the files copied are fixed by the user's configuration."
 )
 

@@ -23,6 +23,7 @@ import shutil
 import socket
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -36,6 +37,7 @@ from kokua.toolsets.github_backup import (
     TOOLSET,
     TOOLSET_NAME,
     BackupError,
+    _credential_args,
     _error_detail,
     _git,
     backup_paths,
@@ -44,6 +46,7 @@ from kokua.toolsets.github_backup import (
     ensure_clone,
     head_sha,
     mirror_state,
+    push_unpushed_commits,
     run_backup,
     verify_repo_private,
 )
@@ -110,6 +113,14 @@ def test_the_toolset_declares_its_two_settings():
 def test_the_toolset_is_named_for_its_config_section():
     # A toolset's settings section is always its own name, so these cannot be allowed to drift apart.
     assert TOOLSET.name == TOOLSET_NAME
+
+
+def test_the_guidance_does_not_promise_a_tool_that_a_blank_repo_leaves_unbuilt():
+    """`build` gates the tool on `repo`, but `guidance` is a fixed string on the Toolset, read once when
+    a system message is assembled, so it cannot be gated alongside. An agent that declares this toolset
+    with `repo` blank would otherwise be told to call a tool its schema does not contain, which is why
+    the sentence has to carry the condition itself."""
+    assert "[github_backup].repo" in TOOLSET.guidance
 
 
 def _seed_state(config: AssistantConfig) -> None:
@@ -217,18 +228,36 @@ def test_mirror_tolerates_a_source_that_does_not_exist_yet(tmp_path):
     assert not (tree / "data/documents").exists()
 
 
+def test_a_dangling_symlink_is_skipped_rather_than_failing_every_backup(tmp_path):
+    """A stale symlink under documents or skills is a permanent condition, not a passing one.
+
+    `copytree` raises `shutil.Error` on one by default, so a single dead link would fail every run from
+    then on: not a backup that failed tonight, a backup that has stopped happening. Skipping the link is
+    the lesser loss, since what it pointed at is not there to copy either way."""
+    config = _config(tmp_path)
+    _seed_state(config)
+    (config.documents_path / "dangling").symlink_to(config.documents_path / "does-not-exist")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+
+    mirror_state(config, tree)
+
+    assert [entry.name for entry in (tree / "data/documents").iterdir()] == ["notes.md"]
+
+
 def _run_git(*args: str, cwd: Path | None = None) -> str:
     """Run git for test setup, failing loudly. Not the module's runner; tests must not depend on it."""
     done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
     return done.stdout.strip()
 
 
-def _bare_remote(tmp_path: Path) -> Path:
+def _bare_remote(tmp_path: Path, name: str = "remote.git") -> Path:
     """An empty bare repository whose HEAD points at main, to stand in for the GitHub repo.
 
-    `git symbolic-ref` rather than `git init -b`, which needs git 2.28 or newer.
+    `git symbolic-ref` rather than `git init -b`, which needs git 2.28 or newer. `name` is for the
+    tests that need two of these, standing in for two different GitHub repositories.
     """
-    bare = tmp_path / "remote.git"
+    bare = tmp_path / name
     _run_git("init", "--bare", str(bare))
     _run_git("symbolic-ref", "HEAD", "refs/heads/main", cwd=bare)
     return bare
@@ -493,6 +522,61 @@ def test_git_pins_the_locale_so_message_matching_stays_untranslated(tmp_path, mo
 
     assert captured["env"]["LC_ALL"] == "C"
     assert captured["env"]["LANGUAGE"] == ""
+
+
+def test_git_disables_the_terminal_prompt_so_an_unattended_run_cannot_hang(tmp_path, monkeypatch):
+    """Without GIT_TERMINAL_PROMPT=0, a credential git cannot satisfy makes it block on a prompt.
+
+    Nobody is there to answer one at 3am, so the scheduled turn would never end. This is the defense
+    that turns a bad credential into an error, and nothing else in the suite would notice its removal.
+    """
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    _git(tmp_path, "status", label="status")
+
+    assert captured["env"]["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_a_failure_to_start_git_at_all_is_still_a_backup_error(tmp_path, monkeypatch):
+    """A git that exists but is not executable raises PermissionError, not FileNotFoundError.
+
+    So do a machine out of file descriptors and one out of memory at fork time. Catching only the
+    missing-binary case would let those escape as something other than the sentence this module
+    promises for every failure.
+    """
+
+    def fake_run(cmd, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(BackupError) as raised:
+        _git(tmp_path, "status", label="status")
+
+    assert "status" in str(raised.value)
+
+
+def test_the_credential_helper_clears_an_inherited_one_and_names_the_variable(tmp_path):
+    """Both halves of `_credential_args` are load-bearing on the unattended path.
+
+    The empty entry resets git's helper list, so an inherited keychain helper cannot answer first with
+    a stale credential; git applies these in order, which is why the clearing entry has to come first.
+    The helper that follows carries the *name* of the environment variable, which is how the token
+    stays out of argv and out of .git/config.
+    """
+    args = _credential_args()
+
+    assert args[:2] == ["-c", "credential.helper="]
+    assert args[2] == "-c"
+    helper = args[3]
+    assert helper.startswith("credential.helper=")
+    assert TOKEN_ENV in helper
 
 
 def _fake_response(body: bytes):
@@ -809,6 +893,136 @@ def test_an_unchanged_state_reports_the_last_commit_and_writes_nothing(tmp_path,
 
 
 @needs_git
+def test_repointing_the_repository_refuses_the_working_tree_the_old_one_left(tmp_path, monkeypatch):
+    """The repository Kokua verifies and the repository it pushes to must be the same one.
+
+    `origin` is whatever the first run recorded, and `[github_backup].repo` can change afterwards, by
+    hand or through `update_config`. Unchecked, a repointed key means the privacy of the new repository
+    is verified while the push goes to the old one and the sentence names the new one: the migration
+    silently does not happen, and an old repository that has since been made public keeps receiving
+    transcripts. Two runs are what it takes to see this, which is why per-run tests could not."""
+    old = _bare_remote(tmp_path, "old.git")
+    new = _bare_remote(tmp_path, "new.git")
+    remotes = {"you/old": old, "you/new": new}
+    monkeypatch.setattr(github_backup, "remote_url", lambda repo: remotes[repo].as_uri())
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    config = _config(tmp_path, repo="you/old")
+    _seed_state(config)
+    run_backup(config, verify=_accepts_anything)
+
+    config.toolset_settings[TOOLSET_NAME]["repo"] = "you/new"
+    (config.documents_path / "second.md").write_text("more", encoding="utf-8")
+
+    with pytest.raises(BackupError) as raised:
+        run_backup(config, verify=_accepts_anything)
+
+    message = str(raised.value)
+    assert "old.git" in message and "new.git" in message  # both, so the user can see which is which
+    assert str(config.data_dir / "backup") in message  # and what to remove to complete the move
+    assert _run_git("rev-list", "--count", "main", cwd=old) == "1"  # nothing further reached the old one
+    assert _run_git("rev-list", "--all", "--count", cwd=new) == "0"  # and nothing at all reached the new
+
+
+@needs_git
+def test_a_commit_that_never_reached_the_remote_is_not_reported_as_a_backup(tmp_path, monkeypatch):
+    """A push can fail on its own (a diverged remote, an expired token, no network at 3am) with the
+    commit already written locally.
+
+    Nothing about the tree looks wrong afterwards, so the next run finds the mirror unchanged, makes no
+    commit, and would report that local-only SHA as a completed backup: silent success on a broken
+    backup. The empty diff is measured against the last commit, never against the remote, so only a run
+    that inherits the previous run's state can catch it. `refs/remotes/origin/<branch>`, which both the
+    fetch and the push maintain, is what the check compares HEAD against."""
+    bare = _bare_remote(tmp_path)
+    _point_at(monkeypatch, bare)
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+    run_backup(config, verify=_accepts_anything)
+
+    # Taking the remote away is what an expired token or a dead network looks like to the push.
+    unreachable = tmp_path / "unreachable.git"
+    bare.rename(unreachable)
+    (config.documents_path / "second.md").write_text("more", encoding="utf-8")
+    with pytest.raises(BackupError, match="push"):
+        run_backup(config, verify=_accepts_anything)
+    stranded = head_sha(config.data_dir / "backup")
+    unreachable.rename(bare)
+
+    message = run_backup(config, verify=_accepts_anything)
+
+    assert not message.startswith("Nothing to back up")
+    assert stranded in message
+    assert _run_git("rev-parse", "--short", "main", cwd=bare) == stranded
+
+
+@needs_git
+def test_nothing_is_pushed_again_when_the_remote_already_has_head(tmp_path, monkeypatch):
+    """The retry must stay quiet on the ordinary unchanged run, or every no-op backup would push and
+    every no-op backup would claim it had rescued something."""
+    bare = _bare_remote(tmp_path)
+    _point_at(monkeypatch, bare)
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+    run_backup(config, verify=_accepts_anything)
+
+    assert push_unpushed_commits(config.data_dir / "backup", "main") == ""
+
+
+@needs_git
+def test_two_concurrent_backups_do_not_share_the_working_tree(tmp_path, monkeypatch):
+    """One working tree serves every caller, and callers overlap: turns on different conversations run
+    concurrently, AIMU dispatches a synchronous tool through a thread, and a 3am firing does not wait
+    for the user's own request to finish.
+
+    Most interleavings would fail loudly on git's index.lock, but a `git add -A` racing another thread's
+    rmtree and copytree would stage a half-copied memory store and push it as a success. Holding each
+    mirror open is what makes an unserialised second caller observable inside it."""
+    bare = _bare_remote(tmp_path)
+    _point_at(monkeypatch, bare)
+    monkeypatch.setenv(TOKEN_ENV, "token")
+    config = _config(tmp_path, repo="you/kokua-backup")
+    _seed_state(config)
+    run_backup(config, verify=_accepts_anything)  # the clone is established before the race
+
+    real_mirror = github_backup.mirror_state
+    counter = threading.Lock()
+    inside = 0
+    most_inside_at_once = 0
+
+    def slow_mirror(config_, tree):
+        nonlocal inside, most_inside_at_once
+        with counter:
+            inside += 1
+            most_inside_at_once = max(most_inside_at_once, inside)
+        try:
+            time.sleep(0.1)
+            real_mirror(config_, tree)
+        finally:
+            with counter:
+                inside -= 1
+
+    monkeypatch.setattr(github_backup, "mirror_state", slow_mirror)
+    failures: list[BaseException] = []
+
+    def backup() -> None:
+        try:
+            run_backup(config, verify=_accepts_anything)
+        except BaseException as error:  # noqa: BLE001 - the thread reports, the assertion decides
+            failures.append(error)
+
+    threads = [threading.Thread(target=backup) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert failures == []
+    assert most_inside_at_once == 1
+
+
+@needs_git
 def test_the_working_tree_lives_under_the_data_directory(tmp_path, monkeypatch):
     """So a [paths] data_dir override moves it too, and it stays outside the allowlist."""
     monkeypatch.setenv(TOKEN_ENV, "token")
@@ -865,16 +1079,21 @@ def test_the_verifier_runs_before_anything_is_written(tmp_path, monkeypatch):
 
 
 @needs_git
-def test_a_mirror_failure_is_reported_as_a_backup_error_not_a_traceback(tmp_path, monkeypatch):
-    """mirror_state copies out of a live Chroma directory, where a file can vanish mid-copy; a dangling
-    symlink reproduces the same shutil.Error shape without depending on a real race. Left uncaught, this
-    would escape backup_kokua_state (which catches only BackupError) as a raw traceback instead of the
-    "Backup failed: ..." sentence the tool promises."""
+def test_a_mirror_failure_is_reported_as_a_backup_error(tmp_path, monkeypatch):
+    """mirror_state copies out of a live Chroma directory, where a write-ahead or temp file can vanish
+    between copytree's scan and its copy. `shutil.Error` is how copytree reports that, and it is an
+    OSError rather than a BackupError, so uncaught it would escape backup_kokua_state (whose only
+    handler is for BackupError) and cost the user the sentence that says what to fix. Raised from a
+    stubbed copytree, since a real mid-copy race cannot be staged reliably."""
     monkeypatch.setenv(TOKEN_ENV, "token")
     _point_at(monkeypatch, _bare_remote(tmp_path))
     config = _config(tmp_path, repo="you/kokua-backup")
     _seed_state(config)
-    (config.documents_path / "dangling").symlink_to(config.documents_path / "does-not-exist")
+
+    def vanishing_copytree(*args, **kwargs):
+        raise shutil.Error("[('data/memory/chroma.sqlite3-wal', '...', 'No such file or directory')]")
+
+    monkeypatch.setattr(github_backup.shutil, "copytree", vanishing_copytree)
 
     with pytest.raises(BackupError) as raised:
         run_backup(config, verify=_accepts_anything)
@@ -895,7 +1114,12 @@ def test_a_working_tree_creation_failure_is_reported_as_a_backup_error_not_a_tra
 
 
 def test_the_tool_returns_a_failure_as_text_rather_than_raising(tmp_path, monkeypatch):
-    """A tool that raises breaks the agent's tool loop, so every failure comes back as a sentence."""
+    """Every failure comes back as a sentence, and the sentence is the point.
+
+    Not because an exception would break anything: AIMU's tool loop catches whatever a tool raises and
+    hands the model `Tool '<name>' raised an error: ...`. What that generic line loses is the message
+    naming the key to edit or the variable to export, and the `Backup failed:` prefix the how-to's
+    troubleshooting table is written against."""
     monkeypatch.delenv(TOKEN_ENV, raising=False)
     (backup_kokua_state,) = build(_config(tmp_path, repo="you/kokua-backup"), verify=_accepts_anything)
 

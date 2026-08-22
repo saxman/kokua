@@ -586,6 +586,12 @@ reaching the `AssistantConfig` the running process holds; `repo` is additionally
 `build`, when the toolset's tools are assembled for an agent. (`branch` is read per call, but off that
 same unchanged in-memory copy, which is why it needs the restart too.)
 
+Changing `repo` after a backup has run takes one more step: delete the `data/backup` working tree.
+Its `origin` is whatever the first run recorded, and Kokua refuses to push to that while checking a
+different repository's privacy, so a repointed key fails with a message naming both until the tree is
+gone. The next backup then clones the new repository from scratch, carrying none of the old
+repository's history with it.
+
 The push token is **not** a config key. It is read from the `GITHUB_BACKUP_TOKEN` environment variable,
 fixed rather than named in `config.toml`, so that repointing `repo` (which `update_config` can do, since
 this section is not hand-edit-only) can never widen the capability past whatever repository that one

@@ -50,6 +50,15 @@ A copy that only ever grows is not a copy, so each run *replaces* the destinatio
 merging into them: delete a document and it disappears from the next backup too. Anything else you put
 at the repository root, a `README.md` of your own for instance, is never touched.
 
+Two things to know about the memory store in particular. Nothing pauses it for the copy, so a memory
+written while the backup is running can land in the repository as an internally inconsistent snapshot of
+the database; a restore from that commit may lose the most recent facts, or in the worst case need the
+store rebuilt. Run the task at an hour when you are not using Kokua, and treat any single commit as
+likely-good rather than guaranteed-good. It is also a binary file: git cannot store a small delta of it,
+so every day the memory changes recommits the whole database. A store of 50 MB backed up daily is
+roughly 50 MB of repository growth per changed day, which is worth a glance at your repository size
+after a few months.
+
 ## 1. Create a private repository
 
 On GitHub, create a new repository and set its visibility to **Private**. Initializing it with a README
@@ -107,7 +116,9 @@ repo = "you/kokua-backup"
 
 `repo` is required. With it blank the toolset offers no tool at all, the same gate the `image` toolset
 applies to its model environment variable, so a default install never shows the model a backup tool it
-has nowhere to send.
+has nowhere to send. The assistant is told as much: the toolset's guidance names this key, so an agent
+holding the toolset with `repo` blank asks you to set it rather than inventing another way to copy the
+files.
 
 **Neither key applies live**, so restart Kokua after editing either. Neither is declared a hot
 setting, which means an `update_config` write reaches the file but never the `AssistantConfig` the
@@ -163,6 +174,17 @@ Nothing to back up: Kokua's state is unchanged since the last backup (3f2a1bc).
 
 That is the empty-diff check working. A history where every entry is identical cannot answer the one
 question a backup history exists to answer, which is when something actually changed.
+
+Occasionally you will see a third answer instead:
+
+```
+Kokua's state is unchanged, but commit 3f2a1bc had not reached you/kokua-backup@main; pushed it now.
+```
+
+That means an earlier run committed but its push did not land (an expired token, or no network at 3am),
+so the commit sat on this machine. Kokua compares what it has against what the remote is known to have
+before it tells you a backup is current, and pushes the difference rather than reporting a local-only
+commit as a completed backup. If the push fails again you get the failure, not this sentence.
 
 ## 7. Run it on a schedule
 
@@ -228,7 +250,10 @@ cp /tmp/kokua-restore/config.toml ~/.kokua/config.toml
 cp -R /tmp/kokua-restore/data/. ~/.kokua/data/
 ```
 
-Start Kokua and the memory, documents, skills, and conversations are as they were at that commit.
+Start Kokua and the documents, skills, and conversations are as they were at that commit. The memory
+store is too, with the caveat above: it was copied live, so a commit written during a memory write can
+hold a database missing its most recent writes. If Kokua reports a memory problem after a restore, try
+the previous commit.
 
 Three notes:
 
@@ -256,13 +281,14 @@ sentences say.
 | `the $GITHUB_BACKUP_TOKEN environment variable is not set` | Step 3, or the export did not reach Kokua's process. Restart it from a shell where `echo $GITHUB_BACKUP_TOKEN` prints something. |
 | `no repository is configured. Set [github_backup].repo` | `repo` is blank. What you are more likely to hit is no backup tool at all, since a blank `repo` at startup means the toolset builds nothing and the assistant will simply say it has no such tool. Either way, step 4, and restart: the key is not hot. |
 | `[github_backup].repo is '...', not a valid 'owner/name' repository` | The value is not a plain `owner/name` pair, or it contains whitespace or a control character. It is checked for shape before any URL or header is built, so a bad value fails here rather than deeper in. |
-| `repository '...' is not confirmed private` | GitHub did not answer that this repository is private. Change the repository's visibility to Private, or point `repo` at one that is. Kokua fails closed here: an answer it cannot read as private is treated as not private. |
+| `repository '...' is not confirmed private` | GitHub did not answer that this repository is private. Change the repository's visibility to Private, or point `repo` at one that is **and delete `data/backup`** (see the row below). Kokua fails closed here: an answer it cannot read as private is treated as not private. |
 | `GitHub rejected $GITHUB_BACKUP_TOKEN` | HTTP 401. The token is wrong, revoked, or expired. Fine-grained tokens expire; generate a new one. |
 | `repository '...' was not found. Either it does not exist, or $GITHUB_BACKUP_TOKEN does not grant access to it` | HTTP 403 or 404, and GitHub answers identically for both, which is why the message names both. The usual cause is a token scoped to a different repository, or one missing `Contents: Read and write`. |
-| `GitHub redirected '...' instead of answering` | **Your repository was probably renamed** (or transferred), and GitHub is answering with a redirect to its new location. Update `[github_backup].repo` to the new `owner/name` and restart. Kokua refuses to follow the redirect rather than following it: the default redirect handling replays every header, `Authorization` included, at whatever host the response names, which is a credential leak waiting for a bad `Location`. |
+| `GitHub redirected '...' instead of answering` | **Your repository was probably renamed** (or transferred), and GitHub is answering with a redirect to its new location. Update `[github_backup].repo` to the new `owner/name`, delete `data/backup`, and restart. Kokua refuses to follow the redirect rather than following it: the default redirect handling replays every header, `Authorization` included, at whatever host the response names, which is a credential leak waiting for a bad `Location`. |
+| `the backup working tree ... pushes to ..., but [github_backup].repo now names ...` | **You repointed `repo`, and `data/backup` still tracks the old repository.** Kokua refuses rather than pushing to one repository while checking that a different one is private, which would report the new name, push to the old one, and leave the move silently undone. Delete `data/backup` and the next backup clones the new repository from scratch. It will not carry the old repository's history across; if you want that, push it yourself before you delete the tree. |
 | `GitHub's response for '...' could not be read` | The response was truncated, stalled past 30 seconds, or was not valid JSON. Nearly always transient; try again. Kokua treats an unreadable answer as a refusal rather than reading it charitably, since this is the check standing between your transcripts and a public repository. |
 | `could not reach api.github.com: ...` | Network or DNS. The reason from the socket layer is included. |
-| `could not prepare the backup working tree: ...` | A filesystem error while cloning or mirroring: a permission problem, a full disk, a stray file where `data/backup` should be, or a live Chroma write-ahead file that vanished between being listed and being copied. The last of those is transient and the next run usually succeeds. |
+| `could not prepare the backup working tree: ...` | A filesystem error while cloning or mirroring. Only one cause is transient: a live Chroma write-ahead file that vanished between being listed and being copied, where the next run usually succeeds. A permission problem, a full disk, or a stray file where `data/backup` should be will fail every run until you fix it, so if you see this twice, read the rest of the message rather than waiting. (A dangling symlink under `data/documents` or `data/skills` used to belong on this list; it is now skipped, since one stale link should not stop your backups.) |
 | `git push failed: ! [rejected] ...` | **The remote has commits your backup tree does not.** Kokua never passes `--force`: a mirror that can overwrite remote history is not a backup, and reconciling a divergence is your call, not a tool's. Sort it out by hand in `data/backup` (`git pull --rebase`, or inspect and reset), or, if you would rather start clean, delete `data/backup` and let the next run re-clone. |
 | `git <step> timed out after 300 seconds` | A very large first push, or a stalled network. The step is named so you can tell a fetch from a push. |
 | `the backup working tree ... does not exist` | Something removed `data/backup` mid-run. The next run re-creates it. |
