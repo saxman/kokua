@@ -145,7 +145,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
 - **Every agent is declared whole in `config.toml`.** One `[agents.<name>]` table per agent, carrying a
   `description` (the label a delegator sees), a `system_message`, a `tools` list of toolset names, and a
   `delegates_to` list. `[assistant].agent` names the **entry agent**, the one you talk to and the root of
-  the delegation graph. `assistant`, `researcher`, `coder`, and `generalist` ship as live tables in
+  the delegation graph. `assistant`, `researcher`, and `coder` ship as live tables in
   `config.example.toml`, which is what `kokua config init` writes, and are edited, deleted, or added to
   like any other setting. Nothing about an agent is defaulted in code, so **Kokua refuses to start
   without a config file, with one that defines no agents, or with one whose `[assistant].agent` names no

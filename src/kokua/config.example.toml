@@ -75,12 +75,13 @@ show_tools = true
 # `description` is the label a delegator sees.
 
 [agents.assistant]
-# The agent you talk to (see [assistant].agent above): cross-cutting tools to manage itself, plus three
-# workers for specialized work.
+# The agent you talk to (see [assistant].agent above): cross-cutting tools to manage itself, plus two
+# workers for specialized work. Anything neither specialist covers, it composes a worker for on the
+# spot with `capabilities`, so there is no catch-all role here to route to instead.
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "capabilities", "time"]
-delegates_to = ["researcher", "coder", "generalist"]
+delegates_to = ["researcher", "coder"]
 
 [agents.researcher]
 description = "Research specialist: gather and verify information from the web."
@@ -103,13 +104,6 @@ tools = ["fs", "compute", "time"]
 system_message = """\
 You are a coding sub-agent. Complete the task by reading and writing files and running code (Python, \
 shell, or calculations). Report exactly what you did and the concrete result."""
-
-[agents.generalist]
-description = "General-purpose helper with the full built-in toolset; use when no specialist fits."
-tools = ["web", "fs", "compute", "misc", "time"]
-system_message = """\
-You are a general-purpose sub-agent. Complete the self-contained task you are given and return a \
-single, complete answer."""
 
 # More agents to copy, each mixing built-in groups, MCP servers, and plugin toolsets in the one list.
 # [agents.stock-trader]

@@ -166,8 +166,10 @@ At least one agent is therefore required, and `Assistant.create` refuses a confi
 
 What the *shipped* config declares is a lean entry agent: `kokua config init` gives
 `[agents.assistant]` the cross-cutting toolsets (memory, documents, skills, config, `mcp-admin`,
-scheduling, conversations, `planning`, `capabilities`, the clock) and no domain toolset, delegating web,
-filesystem, and compute work to `researcher`, `coder`, and `generalist`. That keeps the always-on agent's
+scheduling, conversations, `planning`, `capabilities`, the clock) and no domain toolset, delegating web
+work to `researcher` and filesystem and compute work to `coder`. There is deliberately no catch-all role
+alongside them: a task neither specialist covers is what `compose_worker` is for, and a `generalist`
+declared next to it would claim the same slot more cheaply and win. That keeps the always-on agent's
 tool context small, and the prompt tells it so: `assemble_system_message` adds the "you are a lean
 supervisor, you MUST delegate" clause only when every toolset the agent declared is `cross_cutting`. But
 that is a property of the config, not a law of the code. Give `[agents.assistant]` a

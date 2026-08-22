@@ -171,9 +171,9 @@ server an injection vector as well as an ordinary trust decision.
 - Because `add_mcp_server` lets the assistant expand its own reach, it is gated by default, and proactive
   or backgrounded turns auto-deny it. A scheduled task cannot connect a new server unattended, and even an
   approved connection cannot reach an agent without your hand-edit.
-- A server reaches only the agents that name it. Prefer a narrow agent over adding the server to
-  `generalist`: that is the practical use of the "an agent must name it" rule, rather than an obstacle to
-  work around.
+- A server reaches only the agents that name it. Prefer a narrow agent, or a worker composed for the one
+  task, over adding the server to a broad role every delegation can reach: that is the practical use of
+  the "an agent must name it" rule, rather than an obstacle to work around.
 
 ## Write your own server
 
