@@ -312,7 +312,14 @@ def ensure_clone(tree: Path, repo: str, branch: str) -> None:
     ``git init`` plus ``git checkout -b`` rather than ``git init -b``, which needs git 2.28 or newer.
     """
     if (tree / ".git").is_dir():
-        recorded = _git(tree, "remote", "get-url", "origin", label="remote get-url").stdout.strip()
+        # "config --get" rather than "remote get-url": the latter expands an "insteadOf" rewrite from
+        # the user's own git config (e.g. rewriting https://github.com/ to git@github.com:), so it can
+        # return a URL that never matches ``wanted`` even though origin still points at the same
+        # repository. This module deliberately neutralizes the user's git config everywhere else
+        # (core.excludesFile, commit.gpgsign, the credential helper, the locale); reading the raw
+        # configured value here keeps that discipline instead of letting the config back in through
+        # this one comparison.
+        recorded = _git(tree, "config", "--get", "remote.origin.url", label="remote url").stdout.strip()
         wanted = remote_url(repo)
         if recorded != wanted:
             raise BackupError(

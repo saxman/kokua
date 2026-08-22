@@ -924,6 +924,32 @@ def test_repointing_the_repository_refuses_the_working_tree_the_old_one_left(tmp
 
 
 @needs_git
+def test_an_insteadof_rewrite_is_not_read_as_a_repointed_repository(tmp_path, monkeypatch):
+    """`git remote get-url` expands an `insteadOf` rewrite from the user's own git config (a common
+    setup maps `https://github.com/` to `git@github.com:`), so it can return a URL that never equals
+    `remote_url(repo)` even though origin still names the same repository. Unfixed, this guard would
+    refuse every second run for such a developer, telling them to remove the working tree when doing so
+    would not help: the next run recreates it, and the run after refuses identically.
+
+    The autouse `_hermetic_git` fixture points `GIT_CONFIG_GLOBAL` at an empty file, which is exactly
+    why this bug survived the rest of the suite; this test deliberately opts back into a rewrite to
+    cover it.
+    """
+    bare = _bare_remote(tmp_path)
+    _point_at(monkeypatch, bare)
+    tree = tmp_path / "data/backup"
+    ensure_clone(tree, "you/kokua-backup", "main")
+
+    rewrite_config = tmp_path / "global-gitconfig-with-insteadof"
+    rewrite_config.write_text(
+        f'[url "git@example.com:you/kokua-backup.git"]\n\tinsteadOf = {bare.as_uri()}\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(rewrite_config))
+
+    ensure_clone(tree, "you/kokua-backup", "main")  # must not raise despite the rewritten remote URL
+
+
+@needs_git
 def test_a_commit_that_never_reached_the_remote_is_not_reported_as_a_backup(tmp_path, monkeypatch):
     """A push can fail on its own (a diverged remote, an expired token, no network at 3am) with the
     commit already written locally.
