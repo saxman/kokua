@@ -73,11 +73,17 @@ def _parse_control(raw: str) -> Optional[dict]:
     return None
 
 
-def _parse_image_input(raw: str) -> Optional[tuple[str, list[str]]]:
-    """Return ``(text, image_data_urls)`` for an ``{"type": "input", ...}`` frame carrying images, else None.
+def _parse_input(raw: str) -> Optional[tuple[str, list[str], Optional[str]]]:
+    """Return ``(text, image_data_urls, thinking)`` for an ``{"type": "input", ...}`` frame, else None.
 
-    An input frame without images returns None so it falls through to the ordinary text path (the page
-    only sends this frame shape when at least one image is attached)."""
+    The page sends this shape whenever a message carries anything beyond its own text: attached images,
+    a per-turn reasoning effort, or both. A frame carrying neither still parses, into an empty list and a
+    None, because declining it here would drop its text back to the plain-string path, which would then
+    feed the raw JSON to the model as if the user had typed it.
+
+    A non-string ``thinking`` is dropped rather than passed on. The core normalizes the value anyway, so
+    this is not the check that makes it safe; it is what keeps a malformed frame from travelling.
+    """
     try:
         obj = json.loads(raw)
     except (ValueError, TypeError):
@@ -85,10 +91,9 @@ def _parse_image_input(raw: str) -> Optional[tuple[str, list[str]]]:
     if not (isinstance(obj, dict) and obj.get("type") == "input"):
         return None
     images_field = obj.get("images")
-    if not isinstance(images_field, list) or not images_field:
-        return None
-    urls = [u for u in images_field if isinstance(u, str)]
-    return str(obj.get("text", "")), urls
+    urls = [u for u in images_field if isinstance(u, str)] if isinstance(images_field, list) else []
+    thinking = obj.get("thinking")
+    return str(obj.get("text", "")), urls, thinking if isinstance(thinking, str) else None
 
 
 async def _sync_view(channel: WebChannel, assistant: Assistant) -> None:
@@ -213,15 +218,15 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
 
         async def pump() -> None:
             # Conversation controls (new/select/delete) are handled here and never reach the channel; an
-            # "input" frame carrying attached images is decoded to on-disk files and fed with its text; all
-            # other frames (chat, "/stop", approval "y"/"n") are fed to the channel as today. On
-            # disconnect, the sentinel ends receive(), stopping the scheduler and assistant.run().
+            # "input" frame carrying attached images or a per-turn reasoning effort is decoded and fed with
+            # its text; all other frames (chat, "/stop", approval "y"/"n") are fed to the channel as today.
+            # On disconnect, the sentinel ends receive(), stopping the scheduler and assistant.run().
             try:
                 while True:
                     raw = await websocket.receive_text()
-                    image_input = _parse_image_input(raw)
-                    if image_input is not None:
-                        text, data_urls = image_input
+                    parsed = _parse_input(raw)
+                    if parsed is not None:
+                        text, data_urls, thinking = parsed
                         # Save each upload to disk, then hand the agent the filesystem paths (AIMU
                         # base64-inlines them for the model; persistence later compacts them back to the
                         # same /images/<hash> reference). Undecodable data URLs are dropped.
@@ -230,7 +235,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                             reference = images.save_data_url(config.images_path, data_url)
                             if reference:
                                 paths.append(str(images.reference_to_path(config.images_path, reference)))
-                        await channel.feed_input(text, paths)
+                        await channel.feed_input(text, paths, thinking=thinking)
                         continue
                     control = _parse_control(raw)
                     if control is None:

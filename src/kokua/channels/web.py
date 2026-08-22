@@ -440,12 +440,14 @@ class WebChannel(BaseWebChannel):
         streamed content, so it is sent regardless of what ``streaming_conversation`` names."""
         await self.send_frame({"type": "working", "active": active})
 
-    async def feed_input(self, text: str, image_paths: list[str]) -> None:
-        """Enqueue a user turn carrying attached image file paths (the web pump's ``input`` frame).
+    async def feed_input(self, text: str, image_paths: list[str], thinking: Optional[str] = None) -> None:
+        """Enqueue a user turn carrying attached image file paths, a per-turn reasoning effort, or both
+        (the web pump's ``input`` frame).
 
         Plain chat / ``/stop`` / approval replies still arrive through the base string ``feed``; only a
-        turn with images uses this richer path, so ``receive`` can populate ``ChannelMessage.images``."""
-        await self._inbound.put({"text": text, "images": image_paths})
+        turn carrying something besides its text uses this richer path, so ``receive`` can populate
+        ``ChannelMessage.images`` and ``ChannelMessage.metadata``."""
+        await self._inbound.put({"text": text, "images": image_paths, "thinking": thinking})
 
     async def receive(self) -> AsyncIterator[ChannelMessage]:
         """Yield inbound turns; a dict item carries attached image paths, a string is a plain text turn.
@@ -457,8 +459,16 @@ class WebChannel(BaseWebChannel):
             if item is None:
                 return
             if isinstance(item, dict):
+                # An absent effort leaves `metadata` empty rather than carrying a None: the core reads a
+                # missing key as "use the configured effort", and a present-but-None key would be a
+                # second spelling of the same thing for every reader to remember.
+                metadata = {} if item.get("thinking") is None else {"thinking": item["thinking"]}
                 yield ChannelMessage(
-                    text=item.get("text", ""), images=item.get("images") or None, sender="web", channel=self.name
+                    text=item.get("text", ""),
+                    images=item.get("images") or None,
+                    sender="web",
+                    channel=self.name,
+                    metadata=metadata,
                 )
             else:
                 yield ChannelMessage(text=item, sender="web", channel=self.name)

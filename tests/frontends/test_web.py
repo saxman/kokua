@@ -1707,3 +1707,74 @@ def test_ws_conversations_carry_whether_a_turn_is_running(tmp_path):
     with TestClient(app).websocket_connect("/ws") as ws:
         frame = _drain_until(ws, "conversations")
     assert frame["items"] and frame["items"][0]["running"] is False
+
+
+# --- the input frame: images, a per-turn effort, or both -----------------------------------------
+
+
+def test_parse_input_reads_an_effort_off_a_frame_with_no_images():
+    """The frame is no longer image-only. A text message with a chosen effort has exactly this shape,
+    and rejecting it here would drop its text back to the plain-string path, feeding the model the raw
+    JSON as if the user had typed it."""
+    from kokua.frontends.web import _parse_input
+
+    parsed = _parse_input('{"type": "input", "text": "hello", "thinking": "high"}')
+
+    assert parsed == ("hello", [], "high")
+
+
+def test_parse_input_reads_images_and_an_effort_together():
+    from kokua.frontends.web import _parse_input
+
+    parsed = _parse_input('{"type": "input", "text": "what is this?", "images": ["data:x"], "thinking": "off"}')
+
+    assert parsed == ("what is this?", ["data:x"], "off")
+
+
+def test_parse_input_returns_no_effort_when_the_frame_carries_none():
+    from kokua.frontends.web import _parse_input
+
+    assert _parse_input('{"type": "input", "text": "hi", "images": ["data:x"]}') == ("hi", ["data:x"], None)
+
+
+def test_parse_input_ignores_a_non_string_effort():
+    """The page cannot send this, but the socket is not the page. The core would drop it anyway; dropping
+    it here keeps a malformed frame from reaching the core at all."""
+    from kokua.frontends.web import _parse_input
+
+    assert _parse_input('{"type": "input", "text": "hi", "thinking": 3}') == ("hi", [], None)
+
+
+def test_parse_input_declines_anything_that_is_not_an_input_frame():
+    from kokua.frontends.web import _parse_input
+
+    assert _parse_input("just a message") is None
+    assert _parse_input('{"type": "select", "id": "abc"}') is None
+
+
+def test_web_channel_feed_input_puts_the_effort_on_the_message_metadata():
+    async def run():
+        channel = WebChannel(_FakeWS())
+        await channel.feed_input("think hard", [], thinking="high")
+        await channel.feed(None)
+        return [m async for m in channel.receive()]
+
+    received = asyncio.run(run())
+    assert len(received) == 1
+    assert received[0].text == "think hard"
+    assert received[0].images is None
+    assert received[0].metadata["thinking"] == "high"
+
+
+def test_web_channel_feed_input_leaves_metadata_empty_without_an_effort():
+    """Absence has to stay absent: the core reads a missing key as "use the configured effort"."""
+
+    async def run():
+        channel = WebChannel(_FakeWS())
+        await channel.feed_input("what is this?", ["/tmp/a.png"])
+        await channel.feed(None)
+        return [m async for m in channel.receive()]
+
+    received = asyncio.run(run())
+    assert received[0].images == ["/tmp/a.png"]
+    assert "thinking" not in received[0].metadata
