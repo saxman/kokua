@@ -1138,10 +1138,17 @@ function thinkingChoice() {
   if (thinkingLevel.disabled || thinkingLevel.value === "default") return null;
   return thinkingLevel.value;
 }
-thinkingLevel.addEventListener("change", () => {
+function syncThinkingAccent() {
   thinkingLevel.classList.toggle("active", thinkingLevel.value !== "default");
+}
+thinkingLevel.addEventListener("change", () => {
+  syncThinkingAccent();
   input.focus();
 });
+// A browser restores a <select>'s value across an ordinary reload without firing "change", so a
+// reload with a non-default choice would otherwise leave the accent off while thinkingChoice() still
+// returns the restored value. Called once at startup so the two can never disagree.
+syncThinkingAccent();
 
 // Images staged for the next message, each {name, dataUrl}. Read client-side, sent inline in an
 // "input" frame; the server saves them to disk and hands the model the files.

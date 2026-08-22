@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import io
 
-from kokua.channels.cli import CLIChannel
+from kokua.channels.cli import _THINK_CHOICES, CLIChannel
+from kokua.config.file import thinking_request
 
 
 def _messages(stdin: str, monkeypatch) -> list:
@@ -66,3 +67,14 @@ def test_think_and_attach_both_apply_to_the_same_message(tmp_path, monkeypatch):
     assert len(messages) == 1
     assert messages[0].images == [str(image)]
     assert messages[0].metadata["thinking"] == "low"
+
+
+def test_every_offered_level_but_default_is_a_word_the_core_accepts():
+    """`_THINK_CHOICES` is its own list on purpose (`/think` offers "default", a word `thinking_request`
+    has no case for), but that means nothing here catches the two drifting apart otherwise: a level
+    added to one vocabulary and not the other would offer a `/think` choice that silently falls back to
+    the configured effort instead of the one just picked."""
+    for level in _THINK_CHOICES:
+        if level == "default":
+            continue
+        assert thinking_request(level) is not None

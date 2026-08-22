@@ -1509,6 +1509,33 @@ def test_ws_round_trip(tmp_path):
     assert frames[-1] == {"type": "done"}
 
 
+def test_ws_input_frame_thinking_reaches_the_stored_turn(tmp_path):
+    """The one seam no unit test reaches on its own: `_parse_input` and `feed_input` are each tested in
+    isolation, and the core seam is tested against a hand-built `ChannelMessage`, but nothing joins
+    them end to end. A mis-wire in `frontends/web.py`'s `pump` (the line that calls
+    `feed_input(text, paths, thinking=thinking)`) would pass every one of those tests and still lose
+    the effort on the wire, so this drives a real `{"type": "input", ...}` frame over the socket and
+    checks what actually landed in the conversation's stored provenance."""
+    import json
+
+    from aimu.sessions import TinyDBSessionStore
+    from starlette.testclient import TestClient
+
+    cfg = _config(tmp_path)
+    app = build_app(cfg, client=MockAsyncModelClient(["Hello there."]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "input", "text": "hi", "thinking": "high"}))
+        while True:
+            frame = ws.receive_json()
+            if frame["type"] == "done":
+                break
+
+    store = TinyDBSessionStore(str(cfg.sessions_path))
+    (key,) = store.list_keys()
+    session = store.get(key)
+    assert "high" in session.metadata["thinking"].values()
+
+
 def test_index_route_serves_html(tmp_path):
     from starlette.testclient import TestClient
 

@@ -177,6 +177,12 @@ non-thinking-mode sampling defaults are usually different.
 An agent's declaration is resolved on "is it unset", not on truthiness, so `thinking = false` on an agent
 genuinely overrides a `"high"` default rather than being swallowed by it.
 
+This key is not the last word: a single turn can ask for its own effort from the web composer's picker
+or the CLI's `/think`, beating whatever this key and an agent's own declaration resolve to for that turn
+alone. Nothing about the request is stored in `config.toml`; see
+[Architecture](../explanation/architecture.md#which-model-an-agent-runs-on-and-how-hard-it-thinks) for
+the full resolution order.
+
 ### `system_message`
 
 Fallback opener for any agent that sets no `system_message` of its own. The `--system` flag overrides the

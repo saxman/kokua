@@ -958,3 +958,45 @@ def test_a_non_default_effort_is_visible_without_reading_the_words(page, live_se
 
     page.select_option("#thinking-level", "default")
     expect(page.locator("#thinking-level")).not_to_have_class(re.compile(r"\bactive\b"))
+
+
+def test_a_reload_returns_the_picker_to_default(page, live_server):
+    """Nothing about the choice persists (README, CHANGELOG, and the picker's own comment all promise
+    this), and a freshly loaded page has to actually show that: the value the markup ships is
+    "default", with no accent."""
+    _open(page, live_server(delay=0.0))
+
+    expect(page.locator("#thinking-level")).to_have_value("default")
+    expect(page.locator("#thinking-level")).not_to_have_class(re.compile(r"\bactive\b"))
+
+
+def test_a_value_restored_without_a_change_event_still_shows_the_accent(page, live_server):
+    """A browser restores a <select>'s value across an ordinary reload without ever firing "change" --
+    the control ends up on a non-default choice the same silent way a script assigning `.value` does.
+    (Verified directly: even with the markup exactly as the previous commit left it, `page.reload()`
+    under headless Chromium never reproduces that native restore -- automation suppresses it -- so a
+    test built on `page.reload()` would pass whether or not the fix is present and prove nothing.) This
+    drives the actual case the fix has to cover instead: an init script patches `getElementById` to set
+    the select's value the moment app.js's own top-level code first looks it up, which lands the value
+    exactly where a restore would and exercises the same "no change event fired" path, without
+    touching the network (a mocked navigation response trips Chromium's private-network-access check
+    against the page's own WebSocket, which is a Playwright artifact and not this bug)."""
+    page.add_init_script(
+        """
+        (() => {
+          const original = document.getElementById.bind(document);
+          document.getElementById = function (id) {
+            const el = original(id);
+            if (id === "thinking-level" && el) {
+              el.value = "high";
+              document.getElementById = original;  // one-shot: only the restored value is simulated
+            }
+            return el;
+          };
+        })();
+        """
+    )
+    _open(page, live_server(delay=0.0))
+
+    expect(page.locator("#thinking-level")).to_have_value("high")
+    expect(page.locator("#thinking-level")).to_have_class(re.compile(r"\bactive\b"))

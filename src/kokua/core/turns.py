@@ -202,7 +202,10 @@ class TurnRunner:
         # the efforts their tables declare, so a request arriving on a workflow turn applies to nothing,
         # and recording it would make the transcript claim an effort the turn never ran at.
         declared = self._config.thinking_for(self._config.entry_agent)
-        requested = thinking_request(msg.metadata.get("thinking")) if workflow is None else None
+        # `.metadata or {}`, not `.metadata`: `ChannelMessage.metadata` defaults to `{}` and no channel in
+        # this repo or in AIMU ever sets it to `None`, but this is the one seam a message from an unknown
+        # channel arrives on, so it is where that belief gets guarded rather than assumed.
+        requested = thinking_request((msg.metadata or {}).get("thinking")) if workflow is None else None
         thinking = declared if requested is None else requested
         self._book.pin(conversation_id)  # invariant 2
         token = streaming_conversation.set(conversation_id)  # invariant 3

@@ -450,7 +450,8 @@ class WebChannel(BaseWebChannel):
         await self._inbound.put({"text": text, "images": image_paths, "thinking": thinking})
 
     async def receive(self) -> AsyncIterator[ChannelMessage]:
-        """Yield inbound turns; a dict item carries attached image paths, a string is a plain text turn.
+        """Yield inbound turns; a dict item carries attached image paths, a per-turn reasoning effort, or
+        both, a string is a plain text turn.
 
         Overrides the base (string-only) receive so uploaded images reach the agent. ``None`` remains the
         socket-closed sentinel."""
