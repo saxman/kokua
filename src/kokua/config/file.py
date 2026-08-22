@@ -19,7 +19,7 @@ import importlib.resources
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence, Union
 
 from kokua.config import paths as paths
 from kokua.config import table as runtime_settings
@@ -70,6 +70,31 @@ def _thinking(section: str, key: str, value: Any) -> Any:
         if lowered in _THINKING_LEVELS:
             return lowered
     raise ConfigError(f"[{section}].{key} must be true, false, or one of {', '.join(_THINKING_LEVELS)}, got {value!r}")
+
+
+# The wire word for "do not reason". A message frame carries strings, and `False` is not one; the levels
+# are `_THINKING_LEVELS` above. There is deliberately no word for "use the configured effort", because
+# asking for that is the absence of a request.
+_THINKING_OFF = "off"
+
+
+def thinking_request(value: Any) -> Optional[Union[bool, str]]:
+    """One per-turn reasoning-effort request off a channel message, or None to leave the config in force.
+
+    The channel counterpart of ``_thinking`` above, and deliberately the softer of the two. A value in
+    ``config.toml`` is a declaration the user wrote, so a typo there stops startup and names the table it
+    came from; a value on a message is transport input that arrived while someone is waiting for an
+    answer, so anything unrecognized degrades to the configured effort rather than failing the turn.
+
+    Both read ``_THINKING_LEVELS``, which is why this lives here rather than beside either channel: the
+    two entry points cannot drift apart about what a level is.
+    """
+    if not isinstance(value, str):
+        return None
+    choice = value.strip().lower()
+    if choice == _THINKING_OFF:
+        return False
+    return choice if choice in _THINKING_LEVELS else None
 
 
 # Every generation parameter Kokua sets, with the range each accepts: (accepted TOML types, the label

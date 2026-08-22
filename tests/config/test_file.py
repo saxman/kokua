@@ -687,3 +687,35 @@ def test_scheduling_is_not_a_reserved_core_section():
     # Routing the task tables on the dotted "scheduling.task" keeps the scheduling toolset's own
     # max_task_conversations declaration legal; adding "scheduling" to _STRUCTURED_SECTIONS would not.
     assert "scheduling" not in settings.core_sections()
+
+
+# --- per-turn effort requests off a channel message -------------------------------------------
+
+
+def test_thinking_request_reads_each_wire_word():
+    assert settings.thinking_request("off") is False
+    assert settings.thinking_request("low") == "low"
+    assert settings.thinking_request("medium") == "medium"
+    assert settings.thinking_request("high") == "high"
+
+
+def test_thinking_request_is_case_and_whitespace_insensitive():
+    assert settings.thinking_request("  HIGH ") == "high"
+
+
+def test_thinking_request_falls_back_to_the_config_for_anything_else():
+    """A value off a message is transport input, not a declaration, so an unrecognized one degrades to
+    the configured effort instead of failing a turn someone is waiting on. `_thinking` raises for the
+    same input, which is the difference between the two entry points."""
+    assert settings.thinking_request("xhigh") is None  # Qwen's own ceiling, the plausible typo
+    assert settings.thinking_request("default") is None
+    assert settings.thinking_request("") is None
+    assert settings.thinking_request(None) is None
+    assert settings.thinking_request(True) is None
+    assert settings.thinking_request(3) is None
+
+
+def test_thinking_request_and_the_file_validator_agree_on_the_levels():
+    """One vocabulary, two entry points. A level the file accepts must be a level a message can ask for."""
+    for level in settings._THINKING_LEVELS:
+        assert settings.thinking_request(level) == settings._thinking("assistant", "thinking", level)
