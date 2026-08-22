@@ -182,6 +182,34 @@ def test_skills_on_a_worker_is_rejected_during_validation():
     assert "skills" in str(excinfo.value)
 
 
+def test_a_worker_model_may_carry_an_endpoint_override():
+    """A worker's model accepts the same extended string ``[assistant].model`` does.
+
+    The two are validated by different code (this one parses, ``[assistant].model`` builds a
+    throwaway client), so they can drift apart, and a validator that understood only
+    ``provider:model_id`` would refuse an endpoint the entry agent runs on happily: pinning a
+    worker to the same host the assistant uses would fail at startup.
+    """
+    agents = {
+        "assistant": AgentConfig(tools=["time"], delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"], model="ollama:qwen3.5:9b@http://example.local:11434"),
+    }
+    config = _config(agents)
+    validate_agents(config, build_registry(config))
+
+
+def test_an_unresolvable_worker_model_is_still_rejected():
+    """The endpoint grammar widens what parses, not what passes: a bad id fails as before."""
+    agents = {
+        "assistant": AgentConfig(tools=["time"], delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"], model="ollama:no-such-model@http://example.local:11434"),
+    }
+    config = _config(agents)
+    with pytest.raises(ConfigError) as excinfo:
+        validate_agents(config, build_registry(config))
+    assert "researcher" in str(excinfo.value)
+
+
 def test_unreferenced_toolsets_ignores_unnamed_builtin_and_core_groups():
     """A built-in AIMU group or a core subsystem toolset ships whether or not any agent names it, so an
     unnamed one is not a startup warning -- only a name the user provisioned earns one."""

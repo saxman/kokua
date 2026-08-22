@@ -314,6 +314,11 @@ All three are resolved per agent and **never inherited down the delegation graph
 a big model, reasons hard, or runs cold does not drag its workers along. A worker declaring nothing runs
 on the `[assistant]` defaults like every other undeclared agent.
 
+An agent's `model` is the same string [`[assistant].model`](#model) is, suffixes included: a worker can
+be pinned to its own endpoint, or to the same remote server the assistant uses. Worth stating because the
+two are checked by different code (a worker's is parsed at startup, `[assistant].model` by building a
+throwaway client), so a reader has no way to tell from the code alone that they accept the same thing.
+
 `generation` merges per key rather than table for table, so an agent that wants only a colder temperature
 keeps the default's context length.
 

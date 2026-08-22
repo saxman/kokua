@@ -468,13 +468,19 @@ def _check_model(agent_name: str, model: Optional[str]) -> None:
     load. Doing it here rather than at first use is what keeps a typo from surfacing mid-turn, since a
     worker's model is only reached once something delegates to it. A provider whose optional dependency
     is not installed fails the same way, which is the same wall the client build would hit later.
+
+    ``resolve_model``, not ``resolve_model_string``: only the former reads the full
+    ``provider:model_id[@base_url][;flags]`` grammar that ``[assistant].model`` already accepts (that
+    key is validated by building a throwaway client, which parses everything). The narrower resolver
+    would refuse an endpoint the entry agent runs on happily, so pinning a worker to the host the
+    assistant itself uses would fail at startup.
     """
     if not model:
         return
-    from aimu.models.model_client import resolve_model_string
+    from aimu.models.model_client import resolve_model
 
     try:
-        resolve_model_string(model)
+        resolve_model(model)
     except (ValueError, TypeError) as e:
         raise ConfigError(f"[agents.{agent_name}].model is {model!r}, which cannot be resolved: {e}") from e
 

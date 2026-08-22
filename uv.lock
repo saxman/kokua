@@ -18,7 +18,7 @@ resolution-markers = [
 
 [[package]]
 name = "aimu"
-version = "0.19.0"
+version = "0.20.0.dev0"
 source = { editable = "../aimu" }
 dependencies = [
     { name = "fastmcp" },

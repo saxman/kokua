@@ -44,7 +44,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.18.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.20.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -53,7 +53,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.18.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.20.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -74,15 +74,28 @@ Consequences for working in this repo:
   AIMU 0.18.0 then moved it again without moving the symbol: the capability is `generate_kwargs`, a member
   of that same `SUBAGENT_SPEC_KEYS`, which shipped one release earlier for the `thinking` key, so the set's
   mere presence proves nothing and only its contents do -- the same gap a name lookup left for a dict key,
-  one level down, inside a set instead of at module scope. The probe therefore covers exactly one surface
-  at a time, in whatever shape that surface has, and it has taken three: a name lookup for a symbol, a
-  *signature* check for a keyword argument no `getattr` would notice (as `SkillManager(include=...)` was),
-  and now a membership check for an entry in a published set. What the current surface says nothing about,
-  only the floor covers. If you add a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the
-  `pyproject.toml` floor in the same commit, and move the probe to whatever the new surface is. When a
-  release genuinely offers no handle a probe can grip, leave the probe where it is and say so in
-  `aimu_compat`'s docstring rather than moving it to something it can only pretend to check --
-  but look for a handle first, because 0.17.0 appeared to be that case and was not.
+  one level down, inside a set instead of at module scope. AIMU 0.20.0 is the case where the search for a
+  handle genuinely comes up short, and the probe records that instead of pretending otherwise. What Kokua
+  depends on is that a *sub-agent* spawned with a `provider:model@base_url` string reaches that endpoint:
+  before it, the async spawn path resolved the string through a resolver reading only `provider:model_id`,
+  so an endpoint [docs/reference/configuration.md](docs/reference/configuration.md#model) documents killed
+  every delegation while the entry agent ran on it happily. That fix is two lines inside a private
+  function: no symbol, no parameter, no set member, and the one thing that would detect it directly (which
+  resolver the function reaches for) is the kind of internal a later honest refactor would change, turning
+  the preflight into a wall in front of a *newer, working* AIMU. So the probe grips
+  `aimu.models.model_client.endpoint_kwargs`, the mapping that fix routes through, and `aimu_compat`'s
+  docstring states the limit out loud: the plumbing landed earlier *within* 0.20.0 than the spawn fix
+  riding on it, so a sibling parked between those two commits passes the probe and still drops a
+  sub-agent's endpoint. The probe therefore covers exactly one surface at a time, in whatever shape that
+  surface has, and it has taken three: a name lookup for a symbol, a *signature* check for a keyword
+  argument no `getattr` would notice (as `SkillManager(include=...)` was), and a membership check for an
+  entry in a published set. What the current surface says nothing about, only the floor covers. If you add
+  a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the `pyproject.toml` floor in the same
+  commit, and move the probe to whatever the new surface is. When a release genuinely offers no handle a
+  probe can grip, leave the probe where it is and say so in `aimu_compat`'s docstring rather than moving it
+  to something it can only pretend to check -- but look for a handle first, because 0.17.0 appeared to be
+  that case and was not, and 0.20.0 shows the other outcome: no handle for the capability itself, so the
+  probe takes the nearest one on its path and names what that leaves uncovered.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

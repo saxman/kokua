@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.20.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -637,7 +637,16 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
 - **Remote and custom model endpoints.** `[assistant] model` accepts AIMU's extended
   `provider:model_id[@base_url][;flags]` form, so Kokua can target a remote OpenAI-compatible server or
   a model id not in AIMU's catalog, e.g.
-  `model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"`.
+  `model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"`. A worker's `[agents.<name>].model` takes
+  the same suffixes, which is worth stating because the two are checked by different code and had drifted:
+  a worker's model was parsed with a resolver reading only `provider:model_id`, so pinning a worker to the
+  endpoint the assistant itself runs on failed at startup.
+  Needs `aimu>=0.20.0`, which is what moves the floor there: earlier AIMU resolved a *spawned* agent's
+  model string with that same narrow resolver, so a documented endpoint on `[assistant] model` killed
+  every delegation (`Provider 'ollama' has no model id 'qwen3.8:27b@http://gpu-box:11434'`) while the
+  entry agent ran on it happily, and a fix would still have dropped the endpoint had it only widened the
+  parse: no resolved model enum can carry one, so the sub-agent would have gone on talking to the provider
+  default.
 - **All state under one directory you own**: `$KOKUA_HOME`, default `~/.kokua`, replacing the example's
   reliance on `aimu.paths.output`. `data/` holds content only -- conversations, memory, documents,
   `images/`, `downloads/`, `logs/`. Images and downloads live in their own folders so the binary files

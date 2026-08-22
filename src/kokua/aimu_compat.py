@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.18.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.20.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -29,6 +29,21 @@ release probe-able anyway is the other half of it -- closing a spec's keys to a 
 ``SUBAGENT_SPEC_KEYS``, which is a symbol *and* is the set the key Kokua depends on belongs to. Where a
 release offers no such handle, leave the probe where it is and say so here rather than moving it to
 something it could only pretend to check.
+
+AIMU 0.20.0 is the sharpest case of a capability with no handle of its own, and the probe's stated limit
+is part of what it moved to. What Kokua depends on there is that a sub-agent spawned with a
+``provider:model@base_url`` string reaches that endpoint: before it, the async spawn path resolved the
+string through a resolver reading only ``provider:model_id``, so an endpoint Kokua's own configuration
+reference documents killed every delegation while the entry agent ran on it happily. That fix is two
+lines inside a private function. It adds no symbol, no parameter, and no set member, and the one thing
+that would detect it directly (which resolver the function reaches for) is exactly the sort of internal
+that a later honest refactor would change, which would make this preflight refuse a *newer, working*
+AIMU. So the probe checks ``endpoint_kwargs`` instead: new in that release, on the very path the fix
+routes through, and stable enough that its absence means the checkout predates the release rather than
+merely differs from it. Its limit is worth naming, because it is narrower than usual: the endpoint
+plumbing landed earlier *within* 0.20.0 than the spawn fix riding on it, so a sibling parked between the
+two commits passes this probe and still drops a sub-agent's endpoint. Only the floor covers that, which
+is the ordinary division of labour here, just with less margin than a probe usually leaves.
 """
 
 from __future__ import annotations
@@ -38,17 +53,17 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 18, 0)
+MINIMUM_AIMU = (0, 20, 0)
 
-# The newest AIMU surface Kokua depends on: the `generate_kwargs` member of the closed `agent_types`
-# spec key set, which `build_agent_specs` writes for a per-agent generation table. The set is the
-# symbol and the key is checked *in* it, because 0.17.0 published the set itself -- so its existence
-# no longer proves anything, where its contents do. `None` for the parameter: a member check answers
-# this capability, and a signature check would be probing the wrong shape.
-_PROBE_MODULE = "aimu.tools.builtin"
-_PROBE_SYMBOL = "SUBAGENT_SPEC_KEYS"
+# The newest AIMU surface Kokua depends on is a sub-agent honouring a `provider:model@base_url` model
+# string, and `endpoint_kwargs` is the function that turns that endpoint into the provider's own
+# constructor kwarg. A plain name lookup: the function is new in the release, so its absence dates the
+# checkout, and there is nothing finer to check -- both a member and a parameter check would be probing
+# a shape this capability does not have. See the module docstring for what this deliberately misses.
+_PROBE_MODULE = "aimu.models.model_client"
+_PROBE_SYMBOL = "endpoint_kwargs"
 _PROBE_PARAMETER: Optional[str] = None
-_PROBE_MEMBER: Optional[str] = "generate_kwargs"
+_PROBE_MEMBER: Optional[str] = None
 
 
 class AimuVersionError(RuntimeError):

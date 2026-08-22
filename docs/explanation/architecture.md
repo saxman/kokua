@@ -403,7 +403,8 @@ The per-agent half needs `aimu>=0.17.0`, which added the `"thinking"` key to the
 An AIMU that predates it ignores an unknown spec key in silence, so a per-worker effort would simply not
 apply with nothing raised -- and a dict key is invisible to both a name lookup and a signature check. The
 same release closes a spec's keys to a published set (`SUBAGENT_SPEC_KEYS`), which is what the startup
-probe checks instead: a symbol, and the set the depended-on key belongs to. See `kokua.aimu_compat`.
+probe moved to at the time: a symbol, and the set the depended-on key belongs to. The probe has moved on
+twice since (see below); the floor is what still covers this release. See `kokua.aimu_compat`.
 
 ### Generation parameters
 
@@ -436,11 +437,15 @@ Three places apply the result, all of them startup-only reads:
    tier a reviewer can have.
 
 The per-agent half needs `aimu>=0.18.0`, which added the `generate_kwargs` key to the `agent_types` spec.
-That key is the one surface the startup probe covers now: 0.17.0 published `SUBAGENT_SPEC_KEYS` itself, so
-the set's existence no longer proves this capability, and `kokua.aimu_compat` checks `generate_kwargs`'s
-membership in it instead -- a membership check, the third shape the probe has taken after a name lookup
-and a signature check. The probe covers one surface at a time; the version floor is what covers every
-earlier release's.
+That key was the probe's surface for a release: 0.17.0 published `SUBAGENT_SPEC_KEYS` itself, so the set's
+existence no longer proved this capability, and the probe checked `generate_kwargs`'s membership in it
+instead -- a membership check, the third shape it has taken after a name lookup and a signature check.
+The repository floor is now `aimu>=0.20.0`, for a sub-agent honouring a `provider:model@base_url` string
+(see [`model`](../reference/configuration.md#model)), and that capability is a behavioural fix inside a
+private function with no symbol, parameter, or set member to grip. So `kokua.aimu_compat` probes
+`endpoint_kwargs`, the mapping the fix routes through, and says in its own docstring what that leaves
+uncovered. The probe covers one surface at a time; the version floor is what covers every earlier
+release's.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
