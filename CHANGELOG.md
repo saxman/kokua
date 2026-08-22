@@ -45,7 +45,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
 ### Front ends
 
 - **`cli`**: the terminal, via AIMU's `CLIChannel`. `/attach <path>` stages a local image onto the next
-  message.
+  message; `/think <level>` sets the reasoning effort for the messages that follow (`off`, `low`,
+  `medium`, `high`, or `default`), and a bare `/think` reports the current one.
 - **`web`** (behind the `web` extra): a Starlette + uvicorn WebSocket server with a streaming browser
   UI, bound to `127.0.0.1:8000` by default. The page is three files: `index.html` for the markup,
   `app.css`, and `app.js`, served from the same static-asset allowlist as the vendored libraries.
@@ -67,6 +68,10 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.18.0 or newer
     Shift+Enter inserts a newline (an IME's Enter does neither). Send is replaced by Stop for the
     duration of a turn rather than sitting beside a permanently disabled button, and switching
     conversations mid-turn updates it to match the conversation being viewed.
+  - **A Think picker beside the Plan toggle** sets the reasoning effort for the messages you send after
+    it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
+    `input` frame field, writes nothing to `config.toml`, and resets to the configured default on reload.
+    It goes inert while Plan is on, because a planned turn runs its own agents at their declared efforts.
   - **Replies render as GitHub-flavored markdown** on turn completion, via vendored `marked` +
     `DOMPurify` (bundled, served locally, no CDN). The rendered HTML is sanitized, so model and tool
     output cannot inject scripts or markup, and links open with `rel="noopener"`. LaTeX math is typeset
@@ -575,6 +580,11 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   predates it ignores an unknown spec key silently, so a per-worker effort would simply not apply with
   nothing raised; that release also closes a spec's keys to a published `SUBAGENT_SPEC_KEYS`, which is
   what the startup preflight now probes, since the key itself is a dict entry no probe can see.
+  A turn may also ask for its own effort, which beats both tiers for that one turn: the web composer's
+  Think picker and the CLI's `/think`. The request rides `ChannelMessage.metadata`, so it is a property of
+  the message rather than a setting anything stores, and it reaches the entry agent's own run alone: a
+  spawned worker keeps its table's effort, and a workflow turn ignores the request rather than applying it
+  to agents the user did not choose for. What the turn actually ran at is what `metadata.thinking` records.
 - **A default tier of generation parameters, with per-key overrides.** `[assistant.generation]` sets
   `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`, `repetition_penalty`, `max_tokens`, and
   `context_length` for every agent; an agent's own `[agents.<name>.generation]` overrides it **per key**,

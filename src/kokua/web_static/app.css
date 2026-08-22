@@ -305,6 +305,15 @@ button:disabled { opacity: 0.5; cursor: default; }
 #attach-btn, #plan-toggle { background: none; border-color: var(--border); color: var(--fg-dim); }
 #attach-btn:hover, #plan-toggle:hover { color: var(--fg); }
 #plan-toggle.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+/* The composer's effort picker, styled to sit with the outlined buttons beside it rather than as a
+   browser-default select. `.active` (set by app.js for any non-default choice) is the same accent the
+   Plan toggle uses, so a request in force is visible without reading the words. */
+#thinking-level { padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: none; color: var(--fg-dim); font-family: inherit; font-size: 0.95em; line-height: 1.15;
+  cursor: pointer; }
+#thinking-level:hover:not(:disabled) { color: var(--fg); }
+#thinking-level.active { border-color: var(--accent); color: var(--fg); font-weight: 600; }
+#thinking-level:disabled { opacity: 0.5; cursor: default; }
 #stop { background: none; border-color: var(--border); color: var(--fg-dim); }
 #stop:hover { color: var(--fg); border-color: var(--fg-dim); }
 button.secondary, .notification-banner button { background: none; border-color: var(--border);

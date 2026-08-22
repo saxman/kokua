@@ -381,6 +381,16 @@ level. What differs:
 3. **It reaches the reviewers.** `critics.reviewer_agent` takes a `thinking`, and the four planning
    wrappers thread `config.thinking` to it. A reviewer is not an `[agents.*]` agent, so the `[assistant]`
    tier is the only one it has -- exactly as it is for the model it already ran on.
+4. **A turn can ask for its own.** The web composer's Think picker and the CLI's `/think` put a level on
+   `ChannelMessage.metadata["thinking"]`; `config.file.thinking_request` normalizes it (the softer sibling
+   of the `_thinking` validator: unrecognized degrades to the configured effort rather than raising), and
+   `TurnRunner.reactive` passes it to `agent.run(..., thinking=...)` as a per-run override. A per-run
+   argument rather than a write to `agent.thinking`, because the planning workflow drives the same agent
+   object, so the field would leak the request into a planned turn's planner and executor phases. The same
+   resolved value goes to `_record_provenance`, which is why that method takes the effort as a required
+   argument now instead of reading the config: with a per-turn request the two can disagree, and the
+   record has to say what the turn did, not what it would have done. A workflow turn resolves to the
+   config regardless, so a request that reaches one is neither applied nor recorded.
 
 One consequence worth knowing: `false` also selects a model card's instruct-mode sampling profile where
 the card declares one (`select_profile` in AIMU). Only the Qwen 3.5/3.6/3.8 cards do today; every other
@@ -542,6 +552,11 @@ self-contained `web_static/index.html` served as package data, plus vendored `ma
 (GitHub-flavored markdown, sanitized, rendered client-side on turn completion) and vendored KaTeX,
 typeset after sanitization with `trust:false`. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under `/fonts/`.
+
+The page sends an `input` frame (`{"type": "input", "text", "images"?, "thinking"?}`) for any message
+carrying more than its own text, and the bare string for everything else, including `/stop` and approval
+replies. `frontends/web.py`'s `_parse_input` decodes it and `WebChannel.feed_input` queues it; both shapes
+converge on one `ChannelMessage` in `receive`, so nothing downstream knows which path a message took.
 
 ### The tasks section, and the settings frames behind it
 

@@ -4,6 +4,7 @@ const input = document.getElementById("msg");
 const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
 const planToggle = document.getElementById("plan-toggle");
+const thinkingLevel = document.getElementById("thinking-level");
 const attachBtn = document.getElementById("attach-btn");
 const imageInput = document.getElementById("image-input");
 const attachPreviews = document.getElementById("attach-previews");
@@ -1118,6 +1119,27 @@ planToggle.addEventListener("click", () => {
   planNext = !planNext;
   planToggle.classList.toggle("active", planNext);
   planToggle.setAttribute("aria-pressed", planNext ? "true" : "false");
+  // A planned turn runs its own agents at the efforts their config tables declare, so the picker would
+  // be a silent no-op while Plan is on. Disabled rather than hidden, so its value is still there when
+  // Plan goes back off.
+  thinkingLevel.disabled = planNext;
+  thinkingLevel.title = planNext
+    ? "Planning runs at the configured effort"
+    : "Reasoning effort for the messages you send";
+  input.focus();
+});
+
+// Reasoning effort for the messages that follow: sticky, like the Plan toggle beside it. "default" is
+// the absence of a request, which is what leaves the configured effort in force, so it sends no field
+// and no frame of its own.
+function thinkingChoice() {
+  // A disabled select keeps whatever it was showing, so the disabled state has to be read here too and
+  // not only when it is set: Plan turning on must silence a choice made before it.
+  if (thinkingLevel.disabled || thinkingLevel.value === "default") return null;
+  return thinkingLevel.value;
+}
+thinkingLevel.addEventListener("change", () => {
+  thinkingLevel.classList.toggle("active", thinkingLevel.value !== "default");
   input.focus();
 });
 
@@ -1171,11 +1193,19 @@ form.addEventListener("submit", (e) => {
   const now = new Date();
   if (text) addBubble("user", text, now);  // show the user's own words, not the /plan wrapper
   for (const item of attached) addImageBubble(item.dataUrl, "user", now);  // echo attachments locally
-  if (attached.length) {
-    // An image turn carries its own frame shape (text + data URLs); /plan wrapping doesn't apply.
-    ws.send(JSON.stringify({ type: "input", text, images: attached.map(a => a.dataUrl) }));
-    attached = [];
-    renderPreviews();
+  const thinking = thinkingChoice();
+  if (attached.length || thinking) {
+    // A message carrying anything besides its text goes as an input frame. /plan wrapping does not apply
+    // to one: an image turn has never been plannable, and the picker is disabled whenever Plan is on, so
+    // a frame and a wrapper can never both be wanted.
+    const frame = { type: "input", text };
+    if (attached.length) frame.images = attached.map(a => a.dataUrl);
+    if (thinking) frame.thinking = thinking;
+    ws.send(JSON.stringify(frame));
+    if (attached.length) {
+      attached = [];
+      renderPreviews();
+    }
   } else {
     const outgoing = planNext && !/^\/plan(\s|$)/i.test(text) ? "/plan " + text : text;
     ws.send(outgoing);

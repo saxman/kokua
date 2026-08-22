@@ -15,6 +15,7 @@ those aren't installed, so the default mock-only suite stays green without them.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import socket
 import threading
@@ -907,3 +908,53 @@ def test_a_running_task_offers_stop_in_place_of_run_now(page, live_server):
     # The task is still scheduled: stopping a run is not disabling it.
     expect(page.locator(".task-row")).to_have_class(re.compile(r"(^|\s)enabled(\s|$)"))
     expect(page.locator(".task-row .task-when")).to_contain_text("in ")
+
+
+def test_a_chosen_effort_rides_the_message_it_was_set_for(page, live_server):
+    """The picker's whole job, at the only layer that can see it: the frame the page puts on the wire.
+    The default has to keep sending the bare string, or every ordinary message would change shape for a
+    feature almost no message uses."""
+    frames = []
+    # Subscribed before the navigation, since the socket opens during it.
+    page.on("websocket", lambda ws: ws.on("framesent", lambda payload: frames.append(payload)))
+    _open(page, live_server(delay=0.0))
+
+    page.fill("#msg", "ordinary question")
+    page.click("#send")
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+
+    page.select_option("#thinking-level", "high")
+    page.fill("#msg", "think hard about this")
+    page.click("#send")
+    expect(page.locator(".bubble.user", has_text="think hard about this")).to_be_visible()
+    expect(page.locator(".bubble", has_text=REPLY).nth(1)).to_be_visible(timeout=10_000)
+
+    assert "ordinary question" in frames, "the default choice must still send the plain string"
+    inputs = [json.loads(f) for f in frames if isinstance(f, str) and f.startswith('{"type":"input"')]
+    assert inputs == [{"type": "input", "text": "think hard about this", "thinking": "high"}]
+
+
+def test_the_effort_picker_goes_inert_while_plan_is_on(page, live_server):
+    """A planned turn runs its own agents at their declared efforts, so a live-looking picker would be a
+    silent no-op. Disabled rather than reset, so the choice is still there when Plan goes back off."""
+    _open(page, live_server(delay=0.0))
+
+    page.select_option("#thinking-level", "high")
+    page.click("#plan-toggle")
+    expect(page.locator("#thinking-level")).to_be_disabled()
+
+    page.click("#plan-toggle")
+    expect(page.locator("#thinking-level")).to_be_enabled()
+    assert page.input_value("#thinking-level") == "high"
+
+
+def test_a_non_default_effort_is_visible_without_reading_the_words(page, live_server):
+    """The accent border is the only signal that a request is in force, and a picker that looks inert
+    while changing every message is the failure this guards."""
+    _open(page, live_server(delay=0.0))
+
+    page.select_option("#thinking-level", "medium")
+    expect(page.locator("#thinking-level")).to_have_class(re.compile(r"\bactive\b"))
+
+    page.select_option("#thinking-level", "default")
+    expect(page.locator("#thinking-level")).not_to_have_class(re.compile(r"\bactive\b"))
