@@ -181,12 +181,17 @@ plain AIMU `Agent` rather than a `SkillAgent`, so skill injection would have not
 Four steps, all in `toolsets/`. The first two run once at startup, before Kokua opens or connects to
 anything; the last two run once per agent, whenever one is built:
 
-1. **Build the namespace.** `agents.build_registry(config)` collects toolsets from four labeled
-   providers -- AIMU capability (`builtin.py`), core subsystem (`core.py`), MCP server (one per
-   `[[mcp.server]]`, named by its required `name`), and plugin (the `kokua.toolsets` entry-point group,
-   skipped entirely when `load_plugins` is off) -- and `registry.register` rejects a name two providers
-   claim. A `Toolset` is a frozen dataclass: `name`, `description`, `build`, `guidance`, `cross_cutting`,
-   `entry_point_only`, `workflow`.
+1. **Build the namespace.** `agents.build_registry(config)` collects toolsets from six labeled
+   providers: AIMU capability (`builtin.py`), core subsystem (`core.py`), MCP server (one per
+   `[[mcp.server]]`, named by its required `name`), skill (one per skill on disk, so a skill name sits in
+   the same namespace as everything else), built-in toolset, and plugin. The last two are both the
+   `kokua.toolsets` entry-point group, skipped entirely when `load_plugins` is off, split by which
+   distribution registered them: Kokua's own three (`aimu_agents`, `github_backup`, `image`) take the
+   built-in label so `unreferenced_toolsets` stays quiet about ships-in-the-box toolsets the shipped
+   config simply never named. That label is the only difference between the two; both are built with the
+   same failure tolerance. `registry.register` then rejects a name two providers claim. A `Toolset` is a
+   frozen dataclass: `name`, `description`, `build`, `guidance`, `cross_cutting`, `entry_point_only`,
+   `workflow`, `settings`.
 2. **Validate.** `agents.validate_agents` runs before the session store is opened or any server
    connected, so an unknown toolset name, a missing entry agent, an unknown delegation target, a cycle,
    or `skills` on a worker fails with nothing written and nothing connected.
