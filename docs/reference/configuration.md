@@ -23,8 +23,8 @@ Two rules run through the whole file and explain most of what follows:
 - [Who may change which key](#who-may-change-which-key)
 - [Which keys apply live](#which-keys-apply-live)
 - Sections: [`[assistant]`](#assistant) · [`[assistant.generation]`](#assistantgeneration) ·
-  [`[display]`](#display) · [`[agents.<name>]`](#agentsname) · [`[[mcp.server]]`](#mcpserver) ·
-  [`[security]`](#security) · [`[paths]`](#paths) · [`[frontend]`](#frontend) · [`[web]`](#web) ·
+  [`[security]`](#security) · [`[display]`](#display) · [`[agents.<name>]`](#agentsname) ·
+  [`[[mcp.server]]`](#mcpserver) · [`[paths]`](#paths) · [`[frontend]`](#frontend) · [`[web]`](#web) ·
   [`[logging]`](#logging) · [`[email]`](#email) · [`[scheduling]`](#scheduling) ·
   [`[scheduling.task.<name>]`](#schedulingtaskname) · [`[planning]`](#planning) ·
   [`[capabilities]`](#capabilities) · [`[github_backup]`](#github_backup) ·
@@ -284,6 +284,57 @@ Because this is a TOML sub-table, it must come **last** in `[assistant]`: any pl
 written after the `[assistant.generation]` header would belong to the sub-table instead. The same is true
 of an agent's own generation table.
 
+## `[security]`
+
+### `confirm_tools`
+
+Tools that require interactive confirmation before each call: a terminal `y/N`, or Allow/Deny in the web
+UI. These are the tools that run with full machine access.
+
+```toml
+confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
+```
+
+Set to `[]` to disable approval entirely. Proactive turns (scheduled tasks, anything the assistant starts
+unprompted) **auto-deny** these regardless of the setting, since there is no one at the keyboard to ask.
+
+`update_config` is in the default list because it lets the assistant rewrite this file, except for the
+locked keys it can never change. This key is itself locked by default too, for the obvious reason.
+
+Gating is **by tool name**, so it applies to a worker's call as much as the entry agent's: a worker's
+gated call is routed to you. Note the flip side, which is easy to misread: there is no privilege tier
+among agents. An agent whose table declares `config` really does get `update_config`, and one declaring
+`compute` really does get `execute_python`. Your hand-edit is the consent, and this list is the gate at
+call time.
+
+Two names worth considering adding, both ungated by default: `read_conversation` and
+`search_conversations`. A saved transcript is untrusted text, since a worker may have pasted web content
+into it, so an injection landing in one conversation can influence another. They are ungated by default
+because gating a read would make an unattended scheduled run that reads history fail silently.
+
+### `locked_config_keys`
+
+A list of patterns naming which keys `update_config` refuses. Default:
+`["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]`. Startup-only, and
+always locked against `update_config` regardless of its own value. See
+[Who may change which key](#who-may-change-which-key) for the pattern forms and what each shipped
+pattern is holding back. A pattern that could never match anything is a hard startup error rather than a
+line that silently locks nothing, and two checks decide that.
+
+The first is the pattern's shape: a bare `display` with no dot, whitespace at either end of the pattern,
+an empty segment (`agents.`), a `*` sharing a segment with other characters (`agent*.tools`), or a `*`
+anywhere but the last segment (`*.*`, `agents.*.*`) all fail. The second is its vocabulary, read off the
+schema this install actually has, so it knows the sections your installed toolsets contribute as well as
+Kokua's own. The first segment must be a real section, which is what refuses `agnets.*` and, since TOML
+keys are case-sensitive, `Agents.*`. An exact `<section>.<key>` in a section whose keys are known must
+name one of them, which is what refuses `security.confirm_tool` while accepting
+`security.confirm_tools`.
+
+Neither check can see a name that does not exist yet, and neither tries to. The `[agents.<name>]` and
+`[scheduling.task.<name>]` sections are yours to create, so `agents.resercher.*` is accepted and locks
+nothing until an agent by that name exists. Locking a section you are about to add is a legitimate thing
+to write; a misspelling of one is indistinguishable from it.
+
 ## `[display]`
 
 Both keys are hot: change one with `update_config` and it applies from the next turn and is written
@@ -425,57 +476,6 @@ Kokua's own name if your provider accepts a non-loopback redirect URI. Pinning t
 re-authorization in a later session, since the client registration is cached across restarts while a
 random port is not. [Add an MCP service](../how-to/add-mcp-services.md#authorizing-when-kokua-runs-on-another-machine)
 covers both setups.
-
-## `[security]`
-
-### `confirm_tools`
-
-Tools that require interactive confirmation before each call: a terminal `y/N`, or Allow/Deny in the web
-UI. These are the tools that run with full machine access.
-
-```toml
-confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
-```
-
-Set to `[]` to disable approval entirely. Proactive turns (scheduled tasks, anything the assistant starts
-unprompted) **auto-deny** these regardless of the setting, since there is no one at the keyboard to ask.
-
-`update_config` is in the default list because it lets the assistant rewrite this file, except for the
-locked keys it can never change. This key is itself locked by default too, for the obvious reason.
-
-Gating is **by tool name**, so it applies to a worker's call as much as the entry agent's: a worker's
-gated call is routed to you. Note the flip side, which is easy to misread: there is no privilege tier
-among agents. An agent whose table declares `config` really does get `update_config`, and one declaring
-`compute` really does get `execute_python`. Your hand-edit is the consent, and this list is the gate at
-call time.
-
-Two names worth considering adding, both ungated by default: `read_conversation` and
-`search_conversations`. A saved transcript is untrusted text, since a worker may have pasted web content
-into it, so an injection landing in one conversation can influence another. They are ungated by default
-because gating a read would make an unattended scheduled run that reads history fail silently.
-
-### `locked_config_keys`
-
-A list of patterns naming which keys `update_config` refuses. Default:
-`["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]`. Startup-only, and
-always locked against `update_config` regardless of its own value. See
-[Who may change which key](#who-may-change-which-key) for the pattern forms and what each shipped
-pattern is holding back. A pattern that could never match anything is a hard startup error rather than a
-line that silently locks nothing, and two checks decide that.
-
-The first is the pattern's shape: a bare `display` with no dot, whitespace at either end of the pattern,
-an empty segment (`agents.`), a `*` sharing a segment with other characters (`agent*.tools`), or a `*`
-anywhere but the last segment (`*.*`, `agents.*.*`) all fail. The second is its vocabulary, read off the
-schema this install actually has, so it knows the sections your installed toolsets contribute as well as
-Kokua's own. The first segment must be a real section, which is what refuses `agnets.*` and, since TOML
-keys are case-sensitive, `Agents.*`. An exact `<section>.<key>` in a section whose keys are known must
-name one of them, which is what refuses `security.confirm_tool` while accepting
-`security.confirm_tools`.
-
-Neither check can see a name that does not exist yet, and neither tries to. The `[agents.<name>]` and
-`[scheduling.task.<name>]` sections are yours to create, so `agents.resercher.*` is accepted and locks
-nothing until an agent by that name exists. Locking a section you are about to add is a legitimate thing
-to write; a misspelling of one is indistinguishable from it.
 
 ## `[paths]`
 

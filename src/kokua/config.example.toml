@@ -54,6 +54,23 @@ agent_cache_cap = 8
 # max_tokens = 4096          # at least 1
 # context_length = 32768     # at least 1
 
+[security]
+# Tools requiring confirmation before each call (terminal y/N, or Allow/Deny in the web UI). These run
+# with full machine access. [] disables approval; proactive turns auto-deny these regardless. Gating is
+# by tool name, so a worker's call is routed to you too. Locked by default.
+confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
+
+# Which config keys update_config refuses, so only a hand-edit here changes them. A pattern is
+# "section.key" for one key, "section.*" for a section and every table under it, or "*" for all of
+# them. Anything else fails startup (a stray space, an empty segment, a "*" outside the last one)
+# rather than sitting here locking nothing. So does a pattern that is shaped right and names a
+# section or key that does not exist ("agnets.*", "Agents.*", "security.confirm_tool"). An agent or
+# task name inside a pattern is not checked, since you may be locking one you are about to add. This
+# key is always locked, whatever the list says, so the assistant cannot unlock itself in one call;
+# everything else below is yours to remove. Removing "agents.*" really does let the assistant
+# rewrite any agent's tools list, and so widen its own reach, on the next restart. Restart to apply.
+locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
+
 [display]
 # Stream the model's reasoning / tool calls into the channel. Both apply live (no restart).
 show_thinking = true
@@ -143,23 +160,6 @@ shell, or calculations). Report exactly what you did and the concrete result."""
 # or set the host to Kokua's own name if the provider accepts a non-loopback redirect. Restart to apply.
 # oauth_callback_host = "localhost"
 # oauth_callback_port = 8765
-
-[security]
-# Tools requiring confirmation before each call (terminal y/N, or Allow/Deny in the web UI). These run
-# with full machine access. [] disables approval; proactive turns auto-deny these regardless. Gating is
-# by tool name, so a worker's call is routed to you too. Locked by default.
-confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
-
-# Which config keys update_config refuses, so only a hand-edit here changes them. A pattern is
-# "section.key" for one key, "section.*" for a section and every table under it, or "*" for all of
-# them. Anything else fails startup (a stray space, an empty segment, a "*" outside the last one)
-# rather than sitting here locking nothing. So does a pattern that is shaped right and names a
-# section or key that does not exist ("agnets.*", "Agents.*", "security.confirm_tool"). An agent or
-# task name inside a pattern is not checked, since you may be locking one you are about to add. This
-# key is always locked, whatever the list says, so the assistant cannot unlock itself in one call;
-# everything else below is yours to remove. Removing "agents.*" really does let the assistant
-# rewrite any agent's tools list, and so widen its own reach, on the next restart. Restart to apply.
-locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
 
 [paths]
 # Absolute override for where all transient + user content lives. Default: $KOKUA_HOME/data.
