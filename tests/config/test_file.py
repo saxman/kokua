@@ -534,10 +534,58 @@ def test_a_non_numeric_generation_string_is_refused():
         settings.coerce_config_string("assistant.generation", "temperature", "warm", table=core_table())
 
 
-def test_an_agents_generation_table_is_not_editable_with_update_config():
-    """[agents.*] is hand-edit only, and a dotted section must not slip past the exact-match check."""
-    with pytest.raises(settings.ConfigError, match="hand-edit"):
-        settings.coerce_config_string("agents.researcher.generation", "temperature", "0.2", table=core_table())
+def test_an_agents_generation_table_coerces_through_the_agent_schema():
+    """An agent's [<name>.generation] sub-table now resolves through AGENT_SCHEMA like any other agent
+    key; whether the write is *allowed* is the lock list's decision (default: locked), not this
+    function's, so a dotted agent section coerces a valid value instead of refusing outright."""
+    value = settings.coerce_config_string("agents.researcher.generation", "temperature", "0.2", table=core_table())
+    assert value == 0.2
+
+
+@pytest.mark.parametrize(
+    "section,expected",
+    [
+        ("agents.researcher", "agents.*"),
+        ("agents.researcher.generation", "agents.*.generation"),
+        ("agents", "agents"),
+        ("display", "display"),
+        ("scheduling.task.brief", "scheduling.task.brief"),
+    ],
+)
+def test_schema_section_wildcards_only_the_agent_name(section, expected):
+    assert settings._schema_section(section) == expected
+
+
+def test_coerce_reads_an_agent_tools_list():
+    value = settings.coerce_config_string("agents.researcher", "tools", "time, memory", table=core_table())
+    assert value == ["time", "memory"]
+
+
+def test_coerce_reads_an_agent_thinking_level():
+    assert settings.coerce_config_string("agents.researcher", "thinking", "high", table=core_table()) == "high"
+
+
+def test_coerce_range_checks_an_agent_generation_parameter():
+    with pytest.raises(settings.ConfigError) as error:
+        settings.coerce_config_string("agents.researcher.generation", "temperature", "3.0", table=core_table())
+    assert "temperature" in str(error.value)
+
+
+def test_coerce_points_an_agent_generation_write_at_its_own_section():
+    with pytest.raises(settings.ConfigError) as error:
+        settings.coerce_config_string("agents.researcher", "generation", "{}", table=core_table())
+    assert "agents.researcher.generation" in str(error.value)
+
+
+def test_coerce_asks_a_bare_agents_write_to_name_an_agent():
+    with pytest.raises(settings.ConfigError) as error:
+        settings.coerce_config_string("agents", "researcher", "x", table=core_table())
+    assert "name an agent" in str(error.value).lower()
+
+
+def test_coerce_still_rejects_an_unknown_agent_key():
+    with pytest.raises(settings.ConfigError):
+        settings.coerce_config_string("agents.researcher", "nosuch", "x", table=core_table())
 
 
 @pytest.mark.parametrize(

@@ -380,6 +380,39 @@ _STARTUP_SCHEMA.update(
 )
 
 
+def _schema_section(section: str) -> str:
+    """The schema's name for a section whose second segment is a user-chosen agent name.
+
+    An agent's table is ``[agents.<name>]``, so its keys cannot be enumerated in a flat schema the way
+    every other section's can. Folding the name to ``*`` before the lookup is what lets one set of
+    entries serve every agent, and it is the same shape ``store.locked_by`` matches a pattern with.
+    A bare ``agents`` is left alone so ``coerce_config_string`` can give it its own error.
+    """
+    if not section.startswith("agents."):
+        return section
+    return ".".join(["agents", "*", *section.split(".")[2:]])
+
+
+#: What ``update_config`` may write inside an agent's table, keyed by the wildcard section
+#: ``_schema_section`` produces. Deliberately not merged into ``_STARTUP_SCHEMA``: no real file has a
+#: section literally named ``agents.*``, and keeping these out of the load path means ``load`` cannot
+#: route a table through them instead of through ``_parse_agent``. ``generation`` has no entry because it
+#: is a sub-table rather than a scalar; ``coerce_config_string`` points that write at
+#: ``[agents.<name>.generation]`` instead.
+AGENT_SCHEMA: dict[tuple[str, str], tuple] = {
+    ("agents.*", "description"): ("description", (str,), "a string", None),
+    ("agents.*", "system_message"): ("system_message", (str,), "a string", None),
+    ("agents.*", "model"): ("model", (str,), "a string", None),
+    ("agents.*", "thinking"): ("thinking", (bool, str), "true, false, or low/medium/high", _thinking),
+    ("agents.*", "tools"): ("tools", (list,), "a list of strings", _str_list),
+    ("agents.*", "delegates_to"): ("delegates_to", (list,), "a list of strings", _str_list),
+    **{
+        ("agents.*.generation", key): ("generation", types, label, _generation_value)
+        for key, (types, label, _) in _GENERATION_KEYS.items()
+    },
+}
+
+
 # The tables ``load`` parses itself, key by key, rather than through the flat schema above: each has its
 # own branch in ``load`` because it maps to one dict/list field or a nested table, not to one field per key.
 _STRUCTURED_SECTIONS = frozenset({"subagents", "agents", "mcp"})
@@ -495,20 +528,32 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
     holds only hot settings, so without it a key a toolset declared as cold is not in any schema this can
     see and the tool answers "unknown config key" for a key sitting in the user's file. It is passed in,
     never imported, because ``config`` is the bottom layer and cannot reach the installed toolsets.
+
+    An ``[agents.<name>]`` section is resolved through :data:`AGENT_SCHEMA` after ``_schema_section``
+    folds the agent's name to ``*``. Whether such a write is *allowed* is not decided here: that is
+    ``store.locked_by`` against the user's ``[security].locked_config_keys``, which locks ``agents.*`` by
+    default.
     """
-    # By prefix, not exact match: an agent's own sub-table ([agents.<name>.generation]) is a dotted
-    # section, and it is hand-edit only for the reason the whole table is -- update_config is a tool
-    # the assistant holds, and a writable agent table would let it widen its own reach.
-    if section == "agents" or section.startswith("agents."):
-        raise ConfigError("[agents.*] is hand-edit only; update_config cannot change an agent's table")
+    # A bare [agents] write names no agent: the section is [agents.<name>], and writing a key directly
+    # under [agents] would produce a table `_parse_agent` reads as an agent named after the key.
+    if section == "agents":
+        raise ConfigError(
+            f'[agents].{key} is not a setting. Name an agent: section="agents.{key}" with the key you '
+            'want to set, for instance "tools".'
+        )
+    if section.startswith("agents.") and key == "generation":
+        raise ConfigError(
+            f"[{section}].generation is a table, not a scalar. Set one parameter at a time with "
+            f'section="{section}.generation", for instance key="temperature".'
+        )
     if section == "subagents":
         raise ConfigError("[subagents] has no scalar keys editable with update_config")
     # [mcp] does have scalar keys, but its [[mcp.server]] array is not one of them: a server is added
     # and removed through the mcp-admin tools, which connect it as well as write it.
     if section == "mcp" and key == "server":
         raise ConfigError("[[mcp.server]] is not editable with update_config; use the MCP tools")
-    schema = build_schema(table, extra_schema)
-    spec = schema.get((section, key))
+    schema = build_schema(table, {**AGENT_SCHEMA, **(extra_schema or {})})
+    spec = schema.get((_schema_section(section), key))
     if spec is None:
         raise _unknown_key_error(schema, section, key)
     _, types, _, convert = spec

@@ -141,12 +141,17 @@ async def test_update_config_rejects_invalid_value_without_writing(tmp_path):
 
 async def test_update_config_points_a_misplaced_key_at_its_real_section(tmp_path):
     """`thinking` is an [assistant] key and [assistant.generation] is the sub-table directly beneath it,
-    so this is the miss to expect. The error has to carry the fix: the assistant retries from it alone."""
+    so this is the miss to expect. The error has to carry the fix: the assistant retries from it alone.
+
+    `thinking` is also an agent key (``AGENT_SCHEMA``'s wildcarded ``agents.*``), so the hint now names
+    both places the key lives; this only checks the one this test is about.
+    """
     path, _, update_config = _tools(tmp_path)
 
     result = await update_config("assistant.generation", "thinking", "medium")
 
-    assert "did you mean [assistant].thinking?" in result
+    assert "did you mean" in result
+    assert "[assistant].thinking" in result
     assert not path.exists()
 
 
