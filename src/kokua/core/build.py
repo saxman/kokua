@@ -142,6 +142,12 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
     deduplicated by name) and the same catalogue entries a second time in the prompt (not harmless). A
     spawned worker is a plain agent with no such machinery, so for it the registry is the only route and
     ``build_agent_specs`` resolves skill names like any other name.
+
+    ``script_env`` is handed over for the same reason, in the opposite direction: a ``SkillAgent`` builds
+    its own skills server, so the ``env`` ``LiveState.skill_tools`` passes when it builds one for a
+    spawned worker never reaches this agent's scripts. Omitting it raises nothing, it just leaves the
+    entry agent's scripts unable to see the ``[email]`` settings or the downloads folder, which each
+    script reports as being unconfigured.
     """
     # Imported here, not at module level: see the comment in resolve_system_message -- the same cycle
     # runs through kokua.toolsets.agents.
@@ -157,6 +163,7 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
         resolved_client,
         tools=[],
         skill_manager=state.skill_manager,
+        script_env=state.script_env(),
         name=agent_name,
         concurrent_tool_calls=config.concurrent_tools,
         thinking=config.thinking_for(agent_name),

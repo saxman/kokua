@@ -791,3 +791,21 @@ def test_validate_model_string_accepts_one_the_client_factory_accepts(monkeypatc
     monkeypatch.setattr(aio, "client", lambda model, system=None: seen.append(model))
     validate_model_string("ollama:qwen3.8:27b")
     assert seen == ["ollama:qwen3.8:27b"]
+
+
+def test_the_entry_agent_runs_skill_scripts_with_the_host_environment(tmp_path):
+    """A ``SkillAgent`` builds its own skills server, so the ``env`` ``LiveState.skill_tools`` passes
+    when it builds one for a spawned worker never reaches this agent's scripts. Wiring that forgets
+    raises nothing: the `email-report` script simply reports itself unconfigured while `[email]` is
+    filled in, and `markdown-to-pdf` writes outside the served downloads folder.
+    """
+    from kokua.core.build import wire_agent
+
+    config = _config(tmp_path, email_host="smtp.example.com", email_to="user@example.com")
+    state = _live_state(config)
+
+    agent = wire_agent(config, state, "assistant", client=MockAsyncModelClient([]))
+
+    assert agent.script_env == state.script_env()
+    assert agent.script_env["KOKUA_EMAIL_HOST"] == "smtp.example.com"
+    assert agent.script_env["KOKUA_DOWNLOADS_DIR"] == str(config.downloads_path)

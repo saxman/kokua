@@ -15,12 +15,12 @@ declared version already reads new enough while the code behind it predates the 
 string of an editable install says what the branch claims, not what it contains.
 
 The probe covers exactly one surface at a time: the newest one Kokua depends on, whose shape decides the
-check's shape. A name lookup answers for a symbol; a signature check answers for a keyword argument no
-``getattr`` would notice (as ``SkillManager(include=...)`` was); a membership check answers for an entry
-in a published set, which is the shape in force today. What Kokua depends on is the ``"generate_kwargs"``
-it writes into an ``agent_types`` spec, and although the set holding it (``SUBAGENT_SPEC_KEYS``) is a
-symbol, that symbol shipped a release earlier, so its existence proves nothing here and only its contents
-do. Checking one surface is no claim about the others; covering those is the version floor's job.
+check's shape. A name lookup answers for a symbol; a membership check answers for an entry in a published
+set whose mere existence proves nothing (``SUBAGENT_SPEC_KEYS`` shipped a release before the
+``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a checkout); a signature
+check answers for a keyword argument no ``getattr`` would notice, which is the shape in force today and
+was once before, when it was ``SkillManager(include=...)``. Checking one surface is no claim about the
+others; covering those is the version floor's job.
 
 A capability can also be shaped so that *nothing* can probe it, and AIMU 0.17.0's headline surface is:
 the ``"thinking"`` key Kokua writes into an ``agent_types`` spec is a dict key, neither a symbol nor a
@@ -30,20 +30,25 @@ release probe-able anyway is the other half of it -- closing a spec's keys to a 
 release offers no such handle, leave the probe where it is and say so here rather than moving it to
 something it could only pretend to check.
 
-AIMU 0.20.0 is the sharpest case of a capability with no handle of its own, and the probe's stated limit
-is part of what it moved to. What Kokua depends on there is that a sub-agent spawned with a
-``provider:model@base_url`` string reaches that endpoint: before it, the async spawn path resolved the
-string through a resolver reading only ``provider:model_id``, so an endpoint Kokua's own configuration
-reference documents killed every delegation while the entry agent ran on it happily. That fix is two
-lines inside a private function. It adds no symbol, no parameter, and no set member, and the one thing
-that would detect it directly (which resolver the function reaches for) is exactly the sort of internal
-that a later honest refactor would change, which would make this preflight refuse a *newer, working*
-AIMU. So the probe checks ``endpoint_kwargs`` instead: new in that release, on the very path the fix
-routes through, and stable enough that its absence means the checkout predates the release rather than
-merely differs from it. Its limit is worth naming, because it is narrower than usual: the endpoint
-plumbing landed earlier *within* 0.20.0 than the spawn fix riding on it, so a sibling parked between the
-two commits passes this probe and still drops a sub-agent's endpoint. Only the floor covers that, which
-is the ordinary division of labour here, just with less margin than a probe usually leaves.
+AIMU 0.20.0 carries two capabilities Kokua depends on, and only the later one is worth probing. The
+first is that a sub-agent spawned with a ``provider:model@base_url`` string reaches that endpoint: a
+two-line fix inside a private function, adding no symbol, no parameter, and no set member, whose one
+direct tell (which resolver that function reaches for) is exactly the sort of internal a later honest
+refactor would change, turning this preflight into a wall in front of a *newer, working* AIMU. The
+nearest handle on its path, ``endpoint_kwargs``, is what the probe gripped while that was the newest
+surface, and its limit had to be stated out loud: the plumbing landed earlier *within* 0.20.0 than the
+spawn fix riding on it, so a sibling parked between those two commits passed and still dropped a
+sub-agent's endpoint.
+
+The second capability closes that gap by arriving later in the same release with a handle of its own.
+``SkillAgent`` builds its own skills server, so the ``env`` a host passes to ``build_skills_server``
+cannot reach the entry agent's skill scripts; ``script_env`` is the constructor parameter that carries
+the ``[email]`` settings and the downloads folder to them, and a checkout without it runs every one of
+those scripts with the settings missing and no error anywhere. Probing it subsumes the older check
+rather than trading one narrow window for another: it landed after both of the commits the endpoint
+window sat between, so a sibling that passes this one has the spawn fix too. That is luck, not a rule.
+The next surface may sit earlier than something else Kokua needs, and then its limit gets stated here
+again.
 """
 
 from __future__ import annotations
@@ -55,14 +60,13 @@ from typing import Optional
 
 MINIMUM_AIMU = (0, 20, 0)
 
-# The newest AIMU surface Kokua depends on is a sub-agent honouring a `provider:model@base_url` model
-# string, and `endpoint_kwargs` is the function that turns that endpoint into the provider's own
-# constructor kwarg. A plain name lookup: the function is new in the release, so its absence dates the
-# checkout, and there is nothing finer to check -- both a member and a parameter check would be probing
-# a shape this capability does not have. See the module docstring for what this deliberately misses.
-_PROBE_MODULE = "aimu.models.model_client"
-_PROBE_SYMBOL = "endpoint_kwargs"
-_PROBE_PARAMETER: Optional[str] = None
+# The newest AIMU surface Kokua depends on is `SkillAgent(script_env=...)`, which is what carries the
+# `[email]` settings and the downloads folder into a skill script the entry agent runs. A signature
+# check, because the capability is a constructor parameter: the class predates the release, so only its
+# parameters date the checkout. See the module docstring for what this deliberately misses.
+_PROBE_MODULE = "aimu.aio"
+_PROBE_SYMBOL = "SkillAgent"
+_PROBE_PARAMETER: Optional[str] = "script_env"
 _PROBE_MEMBER: Optional[str] = None
 
 

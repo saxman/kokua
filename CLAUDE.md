@@ -74,22 +74,28 @@ Consequences for working in this repo:
   AIMU 0.18.0 then moved it again without moving the symbol: the capability is `generate_kwargs`, a member
   of that same `SUBAGENT_SPEC_KEYS`, which shipped one release earlier for the `thinking` key, so the set's
   mere presence proves nothing and only its contents do -- the same gap a name lookup left for a dict key,
-  one level down, inside a set instead of at module scope. AIMU 0.20.0 is the case where the search for a
-  handle genuinely comes up short, and the probe records that instead of pretending otherwise. What Kokua
-  depends on is that a *sub-agent* spawned with a `provider:model@base_url` string reaches that endpoint:
-  before it, the async spawn path resolved the string through a resolver reading only `provider:model_id`,
-  so an endpoint [docs/reference/configuration.md](docs/reference/configuration.md#model) documents killed
-  every delegation while the entry agent ran on it happily. That fix is two lines inside a private
-  function: no symbol, no parameter, no set member, and the one thing that would detect it directly (which
-  resolver the function reaches for) is the kind of internal a later honest refactor would change, turning
-  the preflight into a wall in front of a *newer, working* AIMU. So the probe grips
-  `aimu.models.model_client.endpoint_kwargs`, the mapping that fix routes through, and `aimu_compat`'s
-  docstring states the limit out loud: the plumbing landed earlier *within* 0.20.0 than the spawn fix
-  riding on it, so a sibling parked between those two commits passes the probe and still drops a
-  sub-agent's endpoint. The probe therefore covers exactly one surface at a time, in whatever shape that
-  surface has, and it has taken three: a name lookup for a symbol, a *signature* check for a keyword
-  argument no `getattr` would notice (as `SkillManager(include=...)` was), and a membership check for an
-  entry in a published set. What the current surface says nothing about, only the floor covers. If you add
+  one level down, inside a set instead of at module scope. AIMU 0.20.0 carries two capabilities Kokua depends on, and
+  between them they show both outcomes of the search for a handle. The first is that a *sub-agent* spawned
+  with a `provider:model@base_url` string reaches that endpoint: before it, the async spawn path resolved
+  the string through a resolver reading only `provider:model_id`, so an endpoint
+  [docs/reference/configuration.md](docs/reference/configuration.md#model) documents killed every
+  delegation while the entry agent ran on it happily. That fix is two lines inside a private function: no
+  symbol, no parameter, no set member, and the one thing that would detect it directly (which resolver the
+  function reaches for) is the kind of internal a later honest refactor would change, turning the preflight
+  into a wall in front of a *newer, working* AIMU. While it was the newest surface the probe gripped
+  `aimu.models.model_client.endpoint_kwargs`, the mapping that fix routes through, and stated the limit out
+  loud: the plumbing landed earlier *within* 0.20.0 than the spawn fix riding on it, so a sibling parked
+  between those two commits passed and still dropped a sub-agent's endpoint. The second capability closes
+  that window by arriving later in the same release with a handle of its own, and the probe has moved to
+  it: `aio.SkillAgent(script_env=...)`, the parameter carrying the `[email]` settings and the downloads
+  folder into a skill script the entry agent runs, without which those scripts run with the settings simply
+  missing and report themselves unconfigured. It landed after both of the commits the endpoint window sat
+  between, so passing it now implies the spawn fix too, which is luck rather than a rule: the next surface
+  may sit earlier than something else Kokua needs. The probe therefore covers exactly one surface at a
+  time, in whatever shape that surface has, and it has taken three: a name lookup for a symbol, a
+  *signature* check for a keyword argument no `getattr` would notice (`SkillManager(include=...)` first,
+  `script_env` today), and a membership check for an entry in a published set. What the current surface
+  says nothing about, only the floor covers. If you add
   a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the `pyproject.toml` floor in the same
   commit, and move the probe to whatever the new surface is. When a release genuinely offers no handle a
   probe can grip, leave the probe where it is and say so in `aimu_compat`'s docstring rather than moving it

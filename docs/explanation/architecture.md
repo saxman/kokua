@@ -222,6 +222,24 @@ instructions that make the model use it, and removing one takes them away, with 
 keep in step by hand. `wire_agent` selects once and passes the same list to both the message and the
 tools, so the two cannot resolve different toolsets for the same names.
 
+#### What a skill script sees
+
+A skill's scripts run as subprocesses, and a script cannot discover where Kokua serves downloads from or
+which address it is allowed to mail. `LiveState.script_env()` is the one place those facts are turned
+into environment variables (`KOKUA_DOWNLOADS_DIR`, `KOKUA_IMAGES_DIR`, and the `[email]` settings);
+deriving them inside a script would mean re-implementing `config/paths.py` and drifting from it.
+`KOKUA_EMAIL_PASSWORD` is deliberately not among them, since a subprocess already inherits it from this
+process and copying it would duplicate a secret for nothing.
+
+That map has to travel by two separate routes, which is the part worth knowing before changing either.
+A spawned worker is a plain `Agent`, so its skill tools come from the registry, and `LiveState.skill_tools`
+passes the env to `build_skills_server` when it builds that server. The entry agent is a `SkillAgent`,
+which builds its *own* skills server (on first run, and again on `reload_skills`), so nothing outside it
+can reach that call; `wire_agent` hands the same map to `SkillAgent(script_env=...)` instead. A route that
+forgets raises nothing anywhere: the script simply runs with the settings missing and reports itself
+unconfigured, which is what `email-report` did on the entry agent until the second route was wired.
+`tests/core/test_build.py` pins it, because nothing else would notice.
+
 #### The shipped entry agent's inventory
 
 All 30 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
@@ -440,12 +458,17 @@ The per-agent half needs `aimu>=0.18.0`, which added the `generate_kwargs` key t
 That key was the probe's surface for a release: 0.17.0 published `SUBAGENT_SPEC_KEYS` itself, so the set's
 existence no longer proved this capability, and the probe checked `generate_kwargs`'s membership in it
 instead -- a membership check, the third shape it has taken after a name lookup and a signature check.
-The repository floor is now `aimu>=0.20.0`, for a sub-agent honouring a `provider:model@base_url` string
-(see [`model`](../reference/configuration.md#model)), and that capability is a behavioural fix inside a
-private function with no symbol, parameter, or set member to grip. So `kokua.aimu_compat` probes
-`endpoint_kwargs`, the mapping the fix routes through, and says in its own docstring what that leaves
-uncovered. The probe covers one surface at a time; the version floor is what covers every earlier
-release's.
+The repository floor is now `aimu>=0.20.0`, and that release carries two capabilities Kokua depends on.
+The first is a sub-agent honouring a `provider:model@base_url` string (see
+[`model`](../reference/configuration.md#model)), a behavioural fix inside a private function with no
+symbol, parameter, or set member to grip; while it was the newest surface the probe gripped
+`endpoint_kwargs`, the mapping the fix routes through, and said in its own docstring what that left
+uncovered. The second arrives later in the same release with a handle of its own, so the probe now grips
+that instead: `SkillAgent(script_env=...)`, the parameter that carries the `[email]` settings and the
+downloads folder into a skill script the *entry* agent runs (see
+[What a skill script sees](#what-a-skill-script-sees) above). That is a
+signature check, the shape this probe has taken once before. The probe covers one surface at a time; the
+version floor is what covers every earlier release's.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes

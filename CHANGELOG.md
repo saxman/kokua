@@ -283,10 +283,17 @@ command says where to get one.
   around.
 
 A script cannot discover where Kokua serves downloads from or which address it may mail, so
-`LiveState._script_env` passes the downloads and images folders and the `[email]` settings into each
+`LiveState.script_env()` passes the downloads and images folders and the `[email]` settings into each
 script's environment (AIMU 0.14.1 threads them to the subprocess). Deriving them in a script would mean
 re-implementing `config/paths.py` and drifting from it. `KOKUA_EMAIL_PASSWORD` is deliberately not
 passed: a subprocess already inherits it, so copying it would duplicate a secret for nothing.
+That map travels by two routes, because a skill script reaches an agent by two. A spawned worker takes
+its skill tools from the registry, where `LiveState.skill_tools` passes the env to
+`build_skills_server`. The entry agent is a `SkillAgent`, which builds its own skills server and so
+cannot be reached that way; `wire_agent` hands it the same map as `SkillAgent(script_env=...)`, which
+needs `aimu>=0.20.0`. A route that misses it raises nothing: the script runs with the settings simply
+absent and reports itself unconfigured, which is why `tests/core/test_build.py` pins the entry agent's
+copy directly.
 
 A skill carrying scripts belongs on an agent that also declares `fs` and `compute`, since running the
 script is how the skill does its work.
@@ -737,15 +744,15 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.16.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.20.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
   claims, not what its code contains -- and names both fixes: update the sibling, or
-  `uv sync --no-sources` to take AIMU from PyPI instead. The probe is `aimu.aio.ContextOverflowError`,
-  the newest surface Kokua leans on: without it an over-long Ollama request returns a raw 500 whose
-  wording names a missing user turn rather than the overflow that trimmed it away, and a delegating agent
-  reads that as transient and re-runs the same over-long task.
+  `uv sync --no-sources` to take AIMU from PyPI instead. The probe tracks the newest surface Kokua leans
+  on and takes that surface's shape, which is why it has moved several times and has been a name lookup,
+  a set-membership check, and (today, for `SkillAgent(script_env=...)`) a signature check. It covers one
+  surface at a time by design; every earlier release's capabilities are the floor's job.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.

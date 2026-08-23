@@ -156,7 +156,7 @@ class LiveState:
         # Held until close(): the callables close over this client, and it owns a blocking portal that
         # must be released explicitly. Left to garbage collection it is released during interpreter
         # finalization, where stopping the portal cannot complete and blocks the process from exiting.
-        self._skills_mcp_client = MCPClient(server=build_skills_server(manager, env=self._script_env()))
+        self._skills_mcp_client = MCPClient(server=build_skills_server(manager, env=self.script_env()))
         by_name = {fn.__name__: fn for fn in self._skills_mcp_client.as_tools()}
         activate = [by_name["activate_skill"]] if "activate_skill" in by_name else []
         return {
@@ -164,8 +164,14 @@ class LiveState:
             for skill in manager.skills.values()
         }
 
-    def _script_env(self) -> dict[str, str]:
+    def script_env(self) -> dict[str, str]:
         """The host context every skill script gets, from this config.
+
+        Public because both routes to a skill script need it and they are built in different modules:
+        ``skill_tools`` above, for a spawned worker, and ``core.build.wire_agent``, which hands it to the
+        entry agent's ``SkillAgent`` (that class builds its own skills server, so nothing else can reach
+        the env it passes). A route that misses this is not a failure anyone sees: the script simply runs
+        without the settings and reports itself unconfigured.
 
         A script cannot discover where Kokua serves downloads from or which address it may mail, and
         deriving it would mean re-implementing the config and path resolution in ``config/paths.py``
