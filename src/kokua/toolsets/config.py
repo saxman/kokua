@@ -17,13 +17,16 @@ model string resolves (see :func:`_resolvable_model`).
 
 from __future__ import annotations
 
+import copy
+from dataclasses import replace
 from pathlib import Path
-from typing import Awaitable, Callable, Sequence
+from typing import Any, Awaitable, Callable, Sequence
 
 from aimu.tools import tool
 
 from kokua.config import file as settings
 from kokua.config import store as config_store
+from kokua.config.schema import AgentConfig
 from kokua.config.settings_sources import startup_schema
 from kokua.toolsets.registry import Toolset
 
@@ -72,6 +75,38 @@ def _resolvable_model(section: str, key: str, value: str) -> str:
     return value
 
 
+def _validated_agent_write(config, registry) -> Callable[[str, str, Any], Any]:
+    """A converter refusing an agent-table write that would produce a config the next startup rejects.
+
+    A dry run of the real ``validate_agents`` rather than a set of per-key checks, so the tool cannot
+    drift from what startup enforces: one call covers an unknown toolset, an unresolvable model, an
+    unknown delegate, a delegation cycle, and a broken entry agent. That matters more here than for an
+    ordinary key, because an agent write is startup-only and outlives the conversation that made it, so
+    a bad value surfaces as a Kokua that will not start with the assistant that wrote it gone.
+
+    Supplied by the caller rather than living in ``config/file.py`` because that layer may reach neither
+    the toolset registry nor AIMU, which is the same seam :func:`_resolvable_model` uses.
+
+    ``copy.copy`` rather than ``dataclasses.replace`` on the whole config: only ``agents`` is rebound,
+    ``validate_agents`` reads nothing else but ``entry_agent``, and a shallow copy re-runs no
+    ``__post_init__``.
+    """
+    from kokua.toolsets.agents import validate_agents
+
+    def convert(section: str, key: str, value: Any) -> Any:
+        name = section.split(".")[1]
+        candidate = copy.copy(config)
+        agent = config.agents.get(name, AgentConfig())
+        candidate.agents = {**config.agents, name: replace(agent, **{key: value})}
+        try:
+            validate_agents(candidate, registry)
+        except settings.ConfigError as error:
+            raise settings.ConfigError(f"[{section}].{key}: {error}") from error
+        return value
+
+    return convert
+
+
 def make_config_tools(
     config_path: Path,
     apply_hot: Callable[[str, str, object], Awaitable[None]],
@@ -97,10 +132,23 @@ def make_config_tools(
 
     ``config`` is the live ``AssistantConfig``, read for its ``locked_config_keys`` at call time rather
     than bound to a snapshot, since a settings applier can mutate it between calls. ``registry`` is the
-    live toolset registry, accepted here so a future capability check has it without a second signature
-    change; nothing in this module reads it yet.
+    live toolset registry, read here to dry-run an agent-table write against it.
+
+    The agent entries are the third thing this module supplies rather than wraps: ``AGENT_SCHEMA`` in
+    ``config/file.py`` types an agent key, and the converter layered over it here is what checks the
+    resulting config would still start. ``build_schema`` merges ``extra_schema`` last, which is what lets
+    that override land.
     """
-    cold_schema = {**startup_schema(), ("assistant", "model"): ("model", (str,), "a string", _resolvable_model)}
+    agent_write = _validated_agent_write(config, registry)
+    cold_schema = {
+        **startup_schema(),
+        ("assistant", "model"): ("model", (str,), "a string", _resolvable_model),
+        **{
+            location: (target, types, label, agent_write)
+            for location, (target, types, label, _) in settings.AGENT_SCHEMA.items()
+            if location[0] == "agents.*"
+        },
+    }
 
     @tool
     async def read_config() -> str:

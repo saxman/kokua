@@ -11,7 +11,7 @@ import pytest
 
 from kokua.config import file as settings
 from kokua.config import schema
-from kokua.config.schema import AssistantConfig
+from kokua.config.schema import AgentConfig, AssistantConfig
 from kokua.toolsets import config as config_tools
 from tests.helpers import core_table
 
@@ -248,3 +248,67 @@ def test_the_example_config_ships_the_default_lock_list():
     """The scaffolded file is what a user reads the policy off, so it must be the policy."""
     example = tomllib.loads(settings.example_text())
     assert example["security"]["locked_config_keys"] == list(schema.DEFAULT_LOCKED_CONFIG_KEYS)
+
+
+def _stub_toolset(name):
+    from kokua.toolsets.registry import Toolset
+
+    return Toolset(name=name, description=f"{name} for a test", build=lambda ctx: [])
+
+
+def _unlocked(**kwargs):
+    """A config whose agents.* lock is off, which is the only state these writes are reachable in."""
+    return AssistantConfig(locked_config_keys=[], **kwargs)
+
+
+async def test_update_config_writes_an_agent_tools_list_when_unlocked(tmp_path):
+    config = _unlocked(agents={"researcher": AgentConfig(tools=["time"])}, entry_agent="researcher")
+    path, _, update_config = _tools(
+        tmp_path, config=config, registry={"time": _stub_toolset("time"), "memory": _stub_toolset("memory")}
+    )
+    result = await update_config("agents.researcher", "tools", "time,memory")
+    assert _read(path)["agents"]["researcher"]["tools"] == ["time", "memory"]
+    assert "restart" in result.lower()
+
+
+async def test_update_config_refuses_an_agent_tools_list_naming_an_unknown_toolset(tmp_path):
+    config = _unlocked(agents={"researcher": AgentConfig(tools=["time"])}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
+    result = await update_config("agents.researcher", "tools", "time,nosuch")
+    assert "nosuch" in result
+    assert not path.exists()
+
+
+async def test_update_config_refuses_a_delegation_cycle(tmp_path):
+    config = _unlocked(
+        agents={"a": AgentConfig(delegates_to=["b"]), "b": AgentConfig()},
+        entry_agent="a",
+    )
+    path, _, update_config = _tools(tmp_path, config=config)
+    result = await update_config("agents.b", "delegates_to", "a")
+    assert "delegation cycle" in result
+    assert not path.exists()
+
+
+async def test_update_config_refuses_an_agent_model_this_process_cannot_build(tmp_path):
+    config = _unlocked(agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config)
+    result = await update_config("agents.researcher", "model", "nosuchprovider:nosuchmodel")
+    assert "nosuchmodel" in result
+    assert not path.exists()
+
+
+async def test_update_config_creates_an_agent_table_that_does_not_exist_yet(tmp_path):
+    config = _unlocked(agents={"assistant": AgentConfig()}, entry_agent="assistant")
+    path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
+    await update_config("agents.newbie", "tools", "time")
+    assert _read(path)["agents"]["newbie"]["tools"] == ["time"]
+
+
+async def test_update_config_still_refuses_an_agent_write_by_default(tmp_path):
+    """The shipped policy locks agents.*, so none of the above is reachable without a hand-edit."""
+    config = AssistantConfig(agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config)
+    result = await update_config("agents.researcher", "tools", "time")
+    assert "agents.*" in result
+    assert not path.exists()
