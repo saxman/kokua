@@ -147,7 +147,7 @@ shell, or calculations). Report exactly what you did and the concrete result."""
 [security]
 # Tools requiring confirmation before each call (terminal y/N, or Allow/Deny in the web UI). These run
 # with full machine access. [] disables approval; proactive turns auto-deny these regardless. Gating is
-# by tool name, so a worker's call is routed to you too. Hand-edit only.
+# by tool name, so a worker's call is routed to you too. Locked by default.
 confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
 
 # Which config keys update_config refuses, so only a hand-edit here changes them. A pattern is
@@ -159,7 +159,7 @@ locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "s
 
 [paths]
 # Absolute override for where all transient + user content lives. Default: $KOKUA_HOME/data.
-# Hand-edit only. Set $KOKUA_HOME instead to move config.toml along with it.
+# Locked by default. Set $KOKUA_HOME instead to move config.toml along with it.
 # data_dir = "/path/to/kokua-data"
 
 [frontend]
