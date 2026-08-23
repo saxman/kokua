@@ -99,8 +99,11 @@ A pattern takes one of three forms:
 Keys never contain dots and sections do, so the last segment of the third form is always the key. To
 lock one task's contents, write `"scheduling.task.morning-brief.*"`, not
 `"scheduling.task.morning-brief"`. Anything that is none of the three forms fails startup naming the
-pattern, so a slip cannot leave you reading a lock that is not in force; see
-[`locked_config_keys`](#locked_config_keys) for the list of what is refused.
+pattern, and so does a pattern whose shape is right but whose section or key does not exist: `agnets.*`,
+`Agents.*`, and `security.confirm_tool` are all refused. What no check can catch is a name only you
+bring into being. `agents.resercher.*` and `scheduling.task.mornin-brief.*` name an agent and a task
+that could be created tomorrow, so there is no closed set to test them against, and each one loads while
+locking nothing. See [`locked_config_keys`](#locked_config_keys) for the full list of what is refused.
 
 **One key is always locked:** `[security].locked_config_keys` itself, whatever the list says, including
 when it is empty. Otherwise an assistant holding `update_config` would need a single call to disable
@@ -458,11 +461,21 @@ A list of patterns naming which keys `update_config` refuses. Default:
 always locked against `update_config` regardless of its own value. See
 [Who may change which key](#who-may-change-which-key) for the pattern forms and what each shipped
 pattern is holding back. A pattern that could never match anything is a hard startup error rather than a
-line that silently locks nothing: a bare `display` with no dot, whitespace at either end of the pattern,
-an empty segment (`agents.`), or a `*` anywhere but the last segment (`*.*`, `agents.*.*`,
-`agent*.tools`). One mistake it cannot catch is case. TOML keys are case-sensitive, so `Agents.*` really
-does lock nothing, but section names include your own agent and toolset names, so nothing at startup can
-tell a wrong-cased section from a real one.
+line that silently locks nothing, and two checks decide that.
+
+The first is the pattern's shape: a bare `display` with no dot, whitespace at either end of the pattern,
+an empty segment (`agents.`), a `*` sharing a segment with other characters (`agent*.tools`), or a `*`
+anywhere but the last segment (`*.*`, `agents.*.*`) all fail. The second is its vocabulary, read off the
+schema this install actually has, so it knows the sections your installed toolsets contribute as well as
+Kokua's own. The first segment must be a real section, which is what refuses `agnets.*` and, since TOML
+keys are case-sensitive, `Agents.*`. An exact `<section>.<key>` in a section whose keys are known must
+name one of them, which is what refuses `security.confirm_tool` while accepting
+`security.confirm_tools`.
+
+Neither check can see a name that does not exist yet, and neither tries to. The `[agents.<name>]` and
+`[scheduling.task.<name>]` sections are yours to create, so `agents.resercher.*` is accepted and locks
+nothing until an agent by that name exists. Locking a section you are about to add is a legitimate thing
+to write; a misspelling of one is indistinguishable from it.
 
 ## `[paths]`
 

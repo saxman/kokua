@@ -10,6 +10,7 @@ from kokua.config import paths
 from kokua.config import file as settings
 from kokua.config import schema
 from kokua.config.schema import AssistantConfig
+from kokua.config.settings_sources import build_settings_table, startup_schema
 from kokua.cli import _init_config, build_arg_parser, resolve_config
 from tests.helpers import core_table
 
@@ -151,14 +152,69 @@ def test_every_unmatchable_lock_pattern_fails_startup(tmp_path, pattern, fault):
 
 @pytest.mark.parametrize(
     "pattern",
-    ["*", "agents.*", "email.to", "scheduling.task.*", "agents.researcher.generation.temperature"],
+    [
+        "*",
+        "agents.*",
+        "security.*",
+        "display.*",
+        "email.to",
+        "paths.data_dir",
+        "scheduling.task.*",
+        "agents.researcher.generation.temperature",
+    ],
 )
 def test_every_accepted_lock_pattern_form_still_loads(tmp_path, pattern):
     """The three documented forms, including the dotted sections a per-agent or per-task pattern needs:
-    tightening the validator must not cost the forms it exists to protect."""
+    tightening either validator must not cost the forms they exist to protect. The deep dotted one is the
+    case the vocabulary check has to leave alone, since `agents.researcher.generation` is a section only
+    an agent named `researcher` brings into being."""
     path = tmp_path / "config.toml"
     path.write_text(f'[security]\nlocked_config_keys = ["{pattern}"]\n', encoding="utf-8")
     assert settings.load(str(path), table=core_table())["locked_config_keys"] == [pattern]
+
+
+@pytest.mark.parametrize(
+    "pattern,fault",
+    [
+        ("Agents.*", "no config section is named 'Agents'"),
+        ("agnets.*", "no config section is named 'agnets'"),
+        ("emial.to", "no config section is named 'emial'"),
+        ("security.confirm_tool", "[security] has no key 'confirm_tool'"),
+    ],
+)
+def test_a_lock_pattern_naming_no_real_section_or_key_fails_startup(tmp_path, pattern, fault):
+    """Each of these is well-shaped and still matches nothing, which is the silent unlock the structural
+    check cannot see: a mistyped section header ([secrity]) and a mistyped key already hard-error, so a
+    mistyped *pattern* naming the same thing has to as well."""
+    path = tmp_path / "config.toml"
+    path.write_text(f'[security]\nlocked_config_keys = ["{pattern}"]\n', encoding="utf-8")
+    with pytest.raises(settings.ConfigError) as error:
+        settings.load(str(path), table=core_table())
+    assert repr(pattern) in str(error.value)
+    assert fault in str(error.value)
+
+
+@pytest.mark.parametrize("pattern", schema.DEFAULT_LOCKED_CONFIG_KEYS)
+def test_every_shipped_lock_default_validates_under_a_narrow_and_a_full_table(tmp_path, pattern):
+    """The vocabulary the check reads comes from the schema, and the schema depends on which toolsets are
+    installed, so rejecting a default under some table would be a hard startup failure on a config that
+    used to work. `scheduling.task.*` is the pattern that makes the point: `core_table()` omits the
+    scheduling toolset's own section, so only `_TASK_SECTION` keeps that default loadable there."""
+    path = tmp_path / "config.toml"
+    path.write_text(f'[security]\nlocked_config_keys = ["{pattern}"]\n', encoding="utf-8")
+    assert settings.load(str(path), table=core_table())["locked_config_keys"] == [pattern]
+    full = settings.load(str(path), table=build_settings_table(), extra_schema=startup_schema())
+    assert full["locked_config_keys"] == [pattern]
+
+
+def test_the_shipped_example_lock_list_loads_under_a_narrow_and_a_full_table(tmp_path):
+    """The example is what `kokua config init` writes, so a check it cannot satisfy would refuse the file
+    Kokua itself hands the user."""
+    path = tmp_path / "config.toml"
+    path.write_text(settings.example_text(), encoding="utf-8")
+    for table, extra in ((core_table(), None), (build_settings_table(), startup_schema())):
+        overrides = settings.load(str(path), table=table, extra_schema=extra)
+        assert overrides["locked_config_keys"] == list(schema.DEFAULT_LOCKED_CONFIG_KEYS)
 
 
 def test_lock_patterns_load_as_a_field_override(tmp_path):

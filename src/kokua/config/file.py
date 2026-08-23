@@ -46,6 +46,12 @@ def _str_list(section: str, key: str, value: list) -> list[str]:
     return list(value)
 
 
+# Where the write policy is declared, and the name of the `AssistantConfig` field it loads into, which is
+# the same word. Named rather than spelled three times, because `load` has to find the parsed patterns
+# again by their field name to run the semantic check on them, and to say where they came from.
+_LOCK_LIST_SECTION = "security"
+_LOCK_LIST_KEY = "locked_config_keys"
+
 # The three accepted pattern forms, spelled out. Every rejection below ends with this, because a pattern
 # the user has to retype is only useful next to what a good one looks like.
 _LOCK_PATTERN_FORMS = (
@@ -66,10 +72,10 @@ def _lock_pattern_fault(pattern: str) -> Optional[str]:
     so quietly stripping a stray space would hide the slip that produced it instead of showing the user
     a lock they believe they wrote and do not have.
 
-    Case is deliberately not checked. TOML keys are case-sensitive, so ``"Agents.*"`` really does match
-    nothing, but telling the two apart would need a list of the section names that exist, and sections
-    include every agent name and every installed toolset's own. A wrong-case pattern is a user error
-    this cannot see.
+    Only the *shape* is decided here. Whether the section and key a well-shaped pattern names could ever
+    exist is the second check, :func:`_lock_target_fault`, which needs the schema this one cannot see.
+    ``"Agents.*"`` is the pattern that shows the split: its shape is perfect, TOML keys are
+    case-sensitive, so it matches nothing, and only a list of the sections that exist can say so.
     """
     if not pattern:
         return "it is empty"
@@ -98,7 +104,8 @@ def _locked_config_keys(section: str, key: str, value: list) -> list[str]:
     Failing at startup is what keeps a typo in a security setting from reading as a policy that is in
     force: an unmatchable pattern locks nothing, and both the file and the policy preamble
     ``read_config`` prints still show the line the user wrote. See :func:`_lock_pattern_fault` for the
-    forms that are wrong and why each one is silent.
+    forms that are wrong and why each one is silent, and :func:`_lock_target_fault` for the vocabulary
+    check ``load`` runs afterwards, which is where a well-shaped pattern naming nothing real is caught.
     """
     patterns = _str_list(section, key, value)
     for pattern in patterns:
@@ -398,8 +405,8 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("email", "to"): ("email_to", (str,), "a string", None),
     ("email", "use_ssl"): ("email_use_ssl", (bool,), "a boolean", None),
     ("security", "confirm_tools"): ("confirm_tools", (list,), "a list of strings", _str_list),
-    ("security", "locked_config_keys"): (
-        "locked_config_keys",
+    (_LOCK_LIST_SECTION, _LOCK_LIST_KEY): (
+        _LOCK_LIST_KEY,
         (list,),
         "a list of strings",
         _locked_config_keys,
@@ -499,6 +506,57 @@ def build_schema(table, extra: Optional[dict] = None) -> dict:
     a section the core still parses (see :func:`core_sections`).
     """
     return {**_STARTUP_SCHEMA, **table.toml_schema(), **(extra or {})}
+
+
+def _lock_pattern_sections(schema: dict) -> frozenset[str]:
+    """Every top-level section name a lock pattern's first segment may name.
+
+    Derived from what the code already knows rather than listed, for the reason :func:`core_sections`
+    gives: a hand-written set would answer for a config file it had stopped describing. Three sources,
+    because a section reaches ``load`` three ways. The schema holds the flat sections, Kokua's own and
+    each installed toolset's, and a dotted one contributes its head, since ``[assistant.generation]`` is
+    reached by locking ``assistant.*``. :data:`_STRUCTURED_SECTIONS` holds the tables ``load`` parses
+    itself, which have no schema entries to be found in. :data:`_TASK_SECTION` holds ``scheduling``,
+    which must be a known section whether or not the scheduling toolset is installed: the shipped
+    ``scheduling.task.*`` default has to survive every table this is called with, including the
+    core-only one a config test parses through.
+    """
+    return frozenset(
+        {section.split(".")[0] for section, _ in schema} | _STRUCTURED_SECTIONS | {_TASK_SECTION.split(".")[0]}
+    )
+
+
+def _lock_target_fault(schema: dict, pattern: str) -> Optional[str]:
+    """Why ``pattern`` names a section or key no config could hold, or None when it could match.
+
+    The second half of the lock-list check, and it cannot be folded into :func:`_lock_pattern_fault`:
+    that one runs as a schema converter, whose ``(section, key, value)`` signature is fixed by every
+    other converter and carries no view of the schema, and the schema does not exist yet when the
+    converter runs, being built in ``load`` from the settings table the caller passes in. So the shape
+    is checked on the way in and the vocabulary once the file is parsed.
+
+    Deliberately not a check that the pattern matches something *present*. A ``.*`` pattern is how the
+    per-agent and per-task sections get covered, and those names are the user's; ``agents.new_helper.*``
+    has to keep loading for an agent added tomorrow. What is caught is a first segment that is not a
+    section at all, and, for an exact ``<section>.<key>`` in a flat section, a key that section does not
+    have. A misspelled *agent* or *task* name inside a pattern is not caught by either, since there is no
+    closed set to check it against.
+    """
+    if pattern == "*":
+        return None
+    known = _lock_pattern_sections(schema)
+    first = pattern.split(".")[0]
+    if first not in known:
+        return f"no config section is named {first!r}. Sections: {', '.join(sorted(known))}"
+    if pattern.endswith(".*"):
+        return None
+    section, _, key = pattern.rpartition(".")
+    # Only a section the schema enumerates can answer this. A dotted section holding user-named
+    # sub-tables ([agents.<name>], [scheduling.task.<name>]) has no entries here and is left alone.
+    keys = {entry_key for entry_section, entry_key in schema if entry_section == section}
+    if keys and key not in keys:
+        return f"[{section}] has no key {key!r}. Keys in [{section}]: {', '.join(sorted(keys))}"
+    return None
 
 
 def _unknown_key_error(schema: dict, section: str, key: str) -> ConfigError:
@@ -740,6 +798,12 @@ def load(
                 overrides.setdefault("toolset_settings", {}).setdefault(toolset, {})[setting_key] = coerced
             else:
                 overrides[target] = coerced
+    # Run once the whole file is parsed, because it is the only point where both halves exist: the
+    # patterns the user wrote, and the schema naming every section this install really has.
+    for pattern in overrides.get(_LOCK_LIST_KEY, ()):
+        fault = _lock_target_fault(schema, pattern)
+        if fault is not None:
+            raise ConfigError(f"[{_LOCK_LIST_SECTION}].{_LOCK_LIST_KEY}: {pattern!r} matches nothing, because {fault}")
     if declaring_names:
         overrides["configured_sections"] = tuple(sorted(set(data) & set(declaring_names)))
     return overrides

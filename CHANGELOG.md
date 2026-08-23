@@ -561,8 +561,13 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
 - The `update_config` write policy is now yours to set. `[security].locked_config_keys` holds the
   patterns the assistant may not write, defaulting to what was previously hardcoded. The key is itself
   always locked, so the assistant cannot unlock itself in one call. A pattern that could never match
-  anything fails startup rather than reading as a lock you do not have: no dot, whitespace at either
-  end, an empty segment, or a `*` anywhere but the last one. Removing `agents.*` genuinely
+  anything fails startup rather than reading as a lock you do not have. Two checks decide that: the
+  shape (no dot, whitespace at either end, an empty segment, a `*` sharing a segment with other
+  characters, or a `*` anywhere but the last one), and then the vocabulary, read off the sections and
+  keys this install really has, which is what refuses `agnets.*`, `Agents.*`, and
+  `security.confirm_tool`. A name only you can invent is deliberately not checked: `agents.<name>` and
+  `scheduling.task.<name>` are sections you create, so locking one before it exists stays legal.
+  Removing `agents.*` genuinely
   unlocks agent tables: `update_config` can now resolve an agent's keys, and dry-runs `validate_agents`
   before saving so a write that would break the next startup is refused. That dry run reads the file
   rather than the running session, both the agent tables and the `[assistant].agent` naming the entry

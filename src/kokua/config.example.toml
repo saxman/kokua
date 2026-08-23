@@ -151,12 +151,14 @@ shell, or calculations). Report exactly what you did and the concrete result."""
 confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
 
 # Which config keys update_config refuses, so only a hand-edit here changes them. A pattern is
-# "section.key" for one key, "section.*" for a section and every table under it, or "*" for all of them.
-# Anything else fails startup (a stray space, an empty segment, a "*" outside the last one) rather than
-# sitting here locking nothing. This key is always locked, whatever the list says, so the assistant
-# cannot unlock itself in one call; everything else below is yours to remove. Removing "agents.*" really
-# does let the assistant rewrite any agent's tools list, and so widen its own reach, on the next
-# restart. Restart to apply.
+# "section.key" for one key, "section.*" for a section and every table under it, or "*" for all of
+# them. Anything else fails startup (a stray space, an empty segment, a "*" outside the last one)
+# rather than sitting here locking nothing. So does a pattern that is shaped right and names a
+# section or key that does not exist ("agnets.*", "Agents.*", "security.confirm_tool"). An agent or
+# task name inside a pattern is not checked, since you may be locking one you are about to add. This
+# key is always locked, whatever the list says, so the assistant cannot unlock itself in one call;
+# everything else below is yours to remove. Removing "agents.*" really does let the assistant
+# rewrite any agent's tools list, and so widen its own reach, on the next restart. Restart to apply.
 locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
 
 [paths]
