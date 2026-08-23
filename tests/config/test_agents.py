@@ -108,7 +108,8 @@ async def test_update_config_refuses_an_agent_table_and_still_writes_a_runtime_s
     async def apply_hot(section, key, value):
         return None
 
-    update = next(t for t in make_config_tools(path, apply_hot, core_table()) if t.__name__ == "update_config")
+    tools = make_config_tools(path, apply_hot, core_table(), config=AssistantConfig(), registry={})
+    update = next(t for t in tools if t.__name__ == "update_config")
 
     refusal = await update(section="agents.assistant", key="tools", value="fs, compute")
     assert "hand-editing" in refusal

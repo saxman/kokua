@@ -31,7 +31,11 @@ from tomlkit.container import Container
 from tomlkit.items import Comment, InlineTable, Key, Null, Table, Whitespace
 
 from kokua.config import file as settings
-from kokua.config.schema import DEFAULT_LOCKED_CONFIG_KEYS
+
+# Re-exported (the redundant `as` tells ruff this is deliberate) so a test or caller that wants the
+# shipped policy can reach it as `store.DEFAULT_LOCKED_CONFIG_KEYS`, next to `locked_by`/`is_locked`,
+# the functions that apply it, rather than having to know it actually lives in `schema`.
+from kokua.config.schema import DEFAULT_LOCKED_CONFIG_KEYS as DEFAULT_LOCKED_CONFIG_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -496,12 +500,17 @@ LOCK_AXIOM: tuple[str, str] = ("security", "locked_config_keys")
 
 
 class SettingLocked(Exception):
-    """This key may only be changed by hand-editing config.toml. Carries the section and key."""
+    """This key may only be changed by hand-editing config.toml. Carries the section, key, and pattern.
 
-    def __init__(self, section: str, key: str):
+    ``pattern`` is the ``[security].locked_config_keys`` entry that matched, or None when the key is
+    :data:`LOCK_AXIOM`, which no list entry is responsible for.
+    """
+
+    def __init__(self, section: str, key: str, pattern: Optional[str] = None):
         super().__init__(f"[{section}].{key}")
         self.section = section
         self.key = key
+        self.pattern = pattern
 
 
 class HotApplyFailed(Exception):
@@ -584,6 +593,7 @@ async def apply_setting(
     apply_hot: Callable[[str, str, object], Awaitable[None]],
     *,
     table,
+    locked: Sequence[str],
     extra_schema: Optional[dict] = None,
 ) -> AppliedSetting:
     """Coerce, apply, and persist one setting. Raises rather than reporting.
@@ -605,10 +615,17 @@ async def apply_setting(
     alone is not the whole schema, though: it holds only hot settings, so ``extra_schema`` carries the
     *cold* keys the installed toolsets declared, without which this refuses one as an unknown key.
 
+    ``locked`` is the user's ``[security].locked_config_keys``, passed in rather than read because this
+    module is the bottom layer and holds no config object. See :func:`locked_by` for the pattern forms
+    and :data:`LOCK_AXIOM` for the one key the list cannot reach.
+
     Raises :class:`SettingLocked`, ``ConfigError`` (from coercion), or :class:`HotApplyFailed`.
     """
-    if is_locked(section, key, DEFAULT_LOCKED_CONFIG_KEYS):
+    if (section, key) == LOCK_AXIOM:
         raise SettingLocked(section, key)
+    pattern = locked_by(section, key, locked)
+    if pattern is not None:
+        raise SettingLocked(section, key, pattern)
     coerced = settings.coerce_config_string(section, key, raw, table=table, extra_schema=extra_schema)
 
     if table.is_hot(section, key):

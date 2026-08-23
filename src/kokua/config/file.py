@@ -46,6 +46,23 @@ def _str_list(section: str, key: str, value: list) -> list[str]:
     return list(value)
 
 
+def _locked_config_keys(section: str, key: str, value: list) -> list[str]:
+    """Validate the write-policy patterns, rejecting one that could never match.
+
+    A bare word names no key: the matcher reads the last dotted segment as the key, so a dotless pattern
+    silently locks nothing. Failing at startup is what keeps a typo in a security setting from reading as
+    a policy that is in force.
+    """
+    patterns = _str_list(section, key, value)
+    for pattern in patterns:
+        if pattern != "*" and "." not in pattern:
+            raise ConfigError(
+                f'[{section}].{key}: {pattern!r} matches nothing. Write "section.key" for one key, '
+                '"section.*" for a section and everything under it, or "*" for every key.'
+            )
+    return patterns
+
+
 # The reasoning-effort levels AIMU accepts as strings; `true` / `false` are the other two forms.
 _THINKING_LEVELS = ("low", "medium", "high")
 
@@ -336,6 +353,12 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("email", "to"): ("email_to", (str,), "a string", None),
     ("email", "use_ssl"): ("email_use_ssl", (bool,), "a boolean", None),
     ("security", "confirm_tools"): ("confirm_tools", (list,), "a list of strings", _str_list),
+    ("security", "locked_config_keys"): (
+        "locked_config_keys",
+        (list,),
+        "a list of strings",
+        _locked_config_keys,
+    ),
     ("paths", "data_dir"): ("data_dir", (str,), "a string path", lambda s, k, v: Path(v).expanduser()),
     ("frontend", "name"): ("frontend", (str,), "a string", None),
     ("mcp", "oauth_callback_host"): ("mcp_oauth_callback_host", (str,), "a string", None),

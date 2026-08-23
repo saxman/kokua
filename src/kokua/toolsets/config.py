@@ -50,7 +50,12 @@ def _resolvable_model(section: str, key: str, value: str) -> str:
 
 
 def make_config_tools(
-    config_path: Path, apply_hot: Callable[[str, str, object], Awaitable[None]], table
+    config_path: Path,
+    apply_hot: Callable[[str, str, object], Awaitable[None]],
+    table,
+    *,
+    config,
+    registry,
 ) -> list[Callable]:
     """Build ``read_config`` / ``update_config`` bound to the config file, the live-apply callback, and
     the live settings table, so ``update_config`` resolves a key against the same declarations the
@@ -66,6 +71,11 @@ def make_config_tools(
     The one entry added on top is a stricter ``[assistant].model``: the file's own schema type-checks it
     as a string and leaves resolving it to startup, which is too late for a tool whose write outlives the
     conversation that made it (see :func:`_resolvable_model`).
+
+    ``config`` is the live ``AssistantConfig``, read for its ``locked_config_keys`` at call time rather
+    than bound to a snapshot, since a settings applier can mutate it between calls. ``registry`` is the
+    live toolset registry, accepted here so a future capability check has it without a second signature
+    change; nothing in this module reads it yet.
     """
     cold_schema = {**startup_schema(), ("assistant", "model"): ("model", (str,), "a string", _resolvable_model)}
 
@@ -97,7 +107,14 @@ def make_config_tools(
         """
         try:
             applied = await config_store.apply_setting(
-                config_path, section, key, value, apply_hot, table=table, extra_schema=cold_schema
+                config_path,
+                section,
+                key,
+                value,
+                apply_hot,
+                table=table,
+                locked=config.locked_config_keys,
+                extra_schema=cold_schema,
             )
         except config_store.SettingLocked as locked:
             if locked.section.startswith("scheduling.task"):
@@ -125,6 +142,12 @@ def make_config_tools(
 TOOLSET = Toolset(
     name="config",
     description="Read config.toml and change a runtime setting, persisted back to the file.",
-    build=lambda ctx: make_config_tools(ctx.config.config_path, ctx.state.reapply_config, ctx.state.settings_table),
+    build=lambda ctx: make_config_tools(
+        ctx.config.config_path,
+        ctx.state.reapply_config,
+        ctx.state.settings_table,
+        config=ctx.config,
+        registry=ctx.state.registry,
+    ),
     cross_cutting=True,
 )

@@ -244,12 +244,49 @@ def test_read_text_reports_an_absent_file_as_none(tmp_path):
     assert "[assistant]" in config_store.read_text(path)
 
 
+async def test_apply_setting_refuses_a_key_the_users_list_locks(tmp_path):
+    path = tmp_path / "config.toml"
+    with pytest.raises(config_store.SettingLocked) as error:
+        await config_store.apply_setting(
+            path,
+            "display",
+            "show_tools",
+            "false",
+            _noop_apply,
+            table=core_table(),
+            locked=["display.*"],
+        )
+    assert error.value.pattern == "display.*"
+    assert not path.exists()
+
+
+async def test_apply_setting_writes_a_key_the_users_list_does_not_lock(tmp_path):
+    path = tmp_path / "config.toml"
+    result = await config_store.apply_setting(
+        path,
+        "email",
+        "to",
+        "someone@example.com",
+        _noop_apply,
+        table=core_table(),
+        locked=[],
+    )
+    assert result.value == "someone@example.com"
+    assert _read(path)["email"]["to"] == "someone@example.com"
+
+
 async def test_apply_setting_persists_a_cold_setting_without_touching_the_session(tmp_path):
     applied = []
     path = tmp_path / "config.toml"
 
     result = await config_store.apply_setting(
-        path, "web", "port", "9100", lambda *a: applied.append(a), table=core_table()
+        path,
+        "web",
+        "port",
+        "9100",
+        lambda *a: applied.append(a),
+        table=core_table(),
+        locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
     )
 
     assert result.hot is False and result.value == 9100
@@ -265,14 +302,29 @@ async def test_apply_setting_resolves_a_cold_toolset_key_from_the_extra_schema(t
     path = tmp_path / "config.toml"
 
     result = await config_store.apply_setting(
-        path, "widgets", "endpoint", "https://set/by-tool", _noop_apply, table=core_table(), extra_schema=cold
+        path,
+        "widgets",
+        "endpoint",
+        "https://set/by-tool",
+        _noop_apply,
+        table=core_table(),
+        locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
+        extra_schema=cold,
     )
 
     assert result.hot is False and result.value == "https://set/by-tool"
     assert _read(path)["widgets"]["endpoint"] == "https://set/by-tool"
 
     with pytest.raises(settings.ConfigError, match=r"unknown config key \[widgets\].endpoint"):
-        await config_store.apply_setting(path, "widgets", "endpoint", "https://x", _noop_apply, table=core_table())
+        await config_store.apply_setting(
+            path,
+            "widgets",
+            "endpoint",
+            "https://x",
+            _noop_apply,
+            table=core_table(),
+            locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
+        )
 
 
 async def test_apply_setting_type_checks_a_cold_toolset_key(tmp_path):
@@ -281,7 +333,14 @@ async def test_apply_setting_type_checks_a_cold_toolset_key(tmp_path):
 
     with pytest.raises(settings.ConfigError, match=r"\[widgets\].rounds must be an integer"):
         await config_store.apply_setting(
-            path, "widgets", "rounds", "many", _noop_apply, table=core_table(), extra_schema=cold
+            path,
+            "widgets",
+            "rounds",
+            "many",
+            _noop_apply,
+            table=core_table(),
+            locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
+            extra_schema=cold,
         )
 
     assert not path.exists()
@@ -294,7 +353,15 @@ async def test_apply_setting_applies_a_hot_setting_before_persisting_it(tmp_path
         applied.append((section, key, value))
 
     path = tmp_path / "config.toml"
-    result = await config_store.apply_setting(path, "display", "show_tools", "false", apply_hot, table=core_table())
+    result = await config_store.apply_setting(
+        path,
+        "display",
+        "show_tools",
+        "false",
+        apply_hot,
+        table=core_table(),
+        locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
+    )
 
     assert result.hot is True and applied == [("display", "show_tools", False)]
     assert _read(path)["display"]["show_tools"] is False
@@ -309,7 +376,15 @@ async def test_apply_setting_does_not_persist_a_hot_setting_that_failed_to_apply
 
     path = tmp_path / "config.toml"
     with pytest.raises(config_store.HotApplyFailed) as failure:
-        await config_store.apply_setting(path, "display", "show_tools", "false", apply_hot, table=core_table())
+        await config_store.apply_setting(
+            path,
+            "display",
+            "show_tools",
+            "false",
+            apply_hot,
+            table=core_table(),
+            locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
+        )
 
     assert "bad flag" in str(failure.value)
     assert not path.exists()
@@ -319,9 +394,25 @@ async def test_apply_setting_refuses_a_locked_key_and_rejects_a_bad_value(tmp_pa
     path = tmp_path / "config.toml"
 
     with pytest.raises(config_store.SettingLocked):
-        await config_store.apply_setting(path, "email", "to", "attacker@x.com", _noop_apply, table=core_table())
+        await config_store.apply_setting(
+            path,
+            "email",
+            "to",
+            "attacker@x.com",
+            _noop_apply,
+            table=core_table(),
+            locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
+        )
     with pytest.raises(settings.ConfigError):
-        await config_store.apply_setting(path, "web", "port", "not-a-number", _noop_apply, table=core_table())
+        await config_store.apply_setting(
+            path,
+            "web",
+            "port",
+            "not-a-number",
+            _noop_apply,
+            table=core_table(),
+            locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
+        )
 
     assert not path.exists()
 

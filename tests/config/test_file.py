@@ -8,6 +8,8 @@ import pytest
 
 from kokua.config import paths
 from kokua.config import file as settings
+from kokua.config import schema
+from kokua.config.schema import AssistantConfig
 from kokua.cli import _init_config, build_arg_parser, resolve_config
 from tests.helpers import core_table
 
@@ -117,6 +119,28 @@ def test_core_sections_includes_the_removed_key_sections():
 def test_security_confirm_tools_from_file():
     _write_config('[security]\nconfirm_tools = ["add_skill_script"]\n')
     assert _resolve().confirm_tools == ["add_skill_script"]
+
+
+def test_a_lock_pattern_that_could_never_match_fails_startup(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[security]\nlocked_config_keys = ["display"]\n', encoding="utf-8")
+    with pytest.raises(settings.ConfigError) as error:
+        settings.load(str(path), table=core_table())
+    assert "display" in str(error.value)
+
+
+def test_lock_patterns_load_as_a_field_override(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[security]\nlocked_config_keys = ["email.to", "agents.*"]\n', encoding="utf-8")
+    overrides = settings.load(str(path), table=core_table())
+    assert overrides["locked_config_keys"] == ["email.to", "agents.*"]
+
+
+def test_an_unset_lock_list_leaves_the_shipped_default_in_force(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[assistant]\n", encoding="utf-8")
+    assert "locked_config_keys" not in settings.load(str(path), table=core_table())
+    assert AssistantConfig().locked_config_keys == list(schema.DEFAULT_LOCKED_CONFIG_KEYS)
 
 
 def test_planning_flags_from_file():

@@ -3,9 +3,9 @@
 # (the [agents.*] tables exist nowhere else), every individual key is optional, and a command-line flag
 # beats a value here. An unknown key or a wrong-typed value fails startup, naming the key.
 #
-# The assistant's update_config tool and add_mcp_server write here too, preserving comments.
-# Hand-edit only, refused to the assistant: [security].confirm_tools, [email].to, [paths].data_dir,
-# and all of [agents.*]. [scheduling.task.*] changes through the scheduling tools instead.
+# The assistant's update_config tool and add_mcp_server write here too, preserving comments. What
+# update_config may NOT write is [security].locked_config_keys, which you own; see that key below.
+# [scheduling.task.*] changes through the scheduling tools rather than update_config.
 #
 # Full reference: https://github.com/saxman/kokua/blob/main/docs/reference/configuration.md
 
@@ -149,6 +149,13 @@ shell, or calculations). Report exactly what you did and the concrete result."""
 # by tool name, so a worker's call is routed to you too. Hand-edit only.
 confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
 
+# Which config keys update_config refuses, so only a hand-edit here changes them. A pattern is
+# "section.key" for one key, "section.*" for a section and every table under it, or "*" for all of them.
+# This key is always locked, whatever the list says, so the assistant cannot unlock itself in one call;
+# everything else below is yours to remove. Removing "agents.*" really does let the assistant rewrite
+# any agent's tools list, and so widen its own reach, on the next restart. Restart to apply.
+locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
+
 [paths]
 # Absolute override for where all transient + user content lives. Default: $KOKUA_HOME/data.
 # Hand-edit only. Set $KOKUA_HOME instead to move config.toml along with it.
@@ -179,7 +186,7 @@ level = "INFO"
 # port = 587                    # 587 with STARTTLS (default), or 465 with use_ssl = true
 # username = "you@example.com"  # SMTP login user; defaults to `from`, then `to`
 # from = "you@example.com"      # From: header; defaults to `to`
-# to = "you@example.com"        # the ONLY address the assistant can send to; hand-edit only
+# to = "you@example.com"        # the ONLY address the assistant can send to; locked by [security].locked_config_keys by default
 # use_ssl = false               # false -> STARTTLS on connect; true -> implicit TLS (SMTP_SSL)
 
 [scheduling]

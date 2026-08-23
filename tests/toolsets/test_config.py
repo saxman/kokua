@@ -9,6 +9,9 @@ import tomllib
 
 import pytest
 
+from kokua.config import file as settings
+from kokua.config import schema
+from kokua.config.schema import AssistantConfig
 from kokua.toolsets import config as config_tools
 from tests.helpers import core_table
 
@@ -18,12 +21,18 @@ def _read(path):
         return tomllib.load(file)
 
 
-def _tools(tmp_path, apply_hot=None):
+def _tools(tmp_path, apply_hot=None, config=None, registry=None):
     async def _noop(section, key, value):
         return None
 
     path = tmp_path / "config.toml"
-    read_config, update_config = config_tools.make_config_tools(path, apply_hot or _noop, core_table())
+    read_config, update_config = config_tools.make_config_tools(
+        path,
+        apply_hot or _noop,
+        core_table(),
+        config=config or AssistantConfig(),
+        registry=registry if registry is not None else {},
+    )
     return path, read_config, update_config
 
 
@@ -199,3 +208,9 @@ async def test_update_config_points_a_task_edit_at_the_scheduling_tools(tmp_path
     assert not path.exists()  # nothing written
     assert "update_scheduled_task" in result
     assert "security-critical" not in result
+
+
+def test_the_example_config_ships_the_default_lock_list():
+    """The scaffolded file is what a user reads the policy off, so it must be the policy."""
+    example = tomllib.loads(settings.example_text())
+    assert example["security"]["locked_config_keys"] == list(schema.DEFAULT_LOCKED_CONFIG_KEYS)
