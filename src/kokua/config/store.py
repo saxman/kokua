@@ -22,7 +22,7 @@ import logging
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, Sequence
 from urllib.parse import urlparse
 
 import tomlkit
@@ -31,6 +31,7 @@ from tomlkit.container import Container
 from tomlkit.items import Comment, InlineTable, Key, Null, Table, Whitespace
 
 from kokua.config import file as settings
+from kokua.config.schema import DEFAULT_LOCKED_CONFIG_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -486,12 +487,12 @@ def rename_task(path: Path, old: str, new: str) -> None:
 
 # --- The programmatic-write policy and the apply path ------------------------------------------------
 
-# Keys no programmatic write may change, even behind the approval prompt: the tool-approval gate
-# itself, the locked email recipient, and where all state lives. Only a hand-edit of config.toml
-# changes these.
-LOCKED_KEYS: frozenset[tuple[str, str]] = frozenset(
-    {("security", "confirm_tools"), ("email", "to"), ("paths", "data_dir")}
-)
+#: The one key no lock list can unlock. Without it, an assistant holding ``update_config`` needs a single
+#: call to disable every other lock, and a policy the app can rewrite for itself is not a policy. Note the
+#: narrowness: only this key is axiomatic, not the ``[security]`` section around it. A list of
+#: ``["email.to"]`` leaves ``confirm_tools`` writable, because the shipped ``security.*`` pattern was the
+#: only thing locking it.
+LOCK_AXIOM: tuple[str, str] = ("security", "locked_config_keys")
 
 
 class SettingLocked(Exception):
@@ -526,24 +527,46 @@ class AppliedSetting:
     hot: bool
 
 
-def is_locked(section: str, key: str) -> bool:
+def locked_by(section: str, key: str, patterns: Sequence[str]) -> Optional[str]:
+    """The pattern in ``patterns`` that refuses a programmatic write to ``[section].key``, or None.
+
+    Returned rather than a bool so a refusal can tell the caller which rule caught it, which is the
+    difference between "security-critical" and a sentence naming the line to edit.
+
+    Three pattern forms. ``"*"`` matches everything. ``"<section>.*"`` matches that section and every
+    descendant section, any key, which is what covers the per-agent (``agents.<name>``) and per-task
+    (``scheduling.task.<name>``) sections that cannot be enumerated ahead of time. Anything else is an
+    exact ``"<section>.<key>"``: keys never contain dots and sections do, so reading the last segment as
+    the key is unambiguous.
+
+    ``patterns`` is required and has no default. Defaulting it to ``DEFAULT_LOCKED_CONFIG_KEYS`` would let
+    a caller that forgot to thread the user's list through silently enforce the shipped policy instead,
+    which is the one failure this function must not have.
+    """
+    for pattern in patterns:
+        if pattern == "*":
+            return pattern
+        if pattern.endswith(".*"):
+            prefix = pattern[:-2]
+            if section == prefix or section.startswith(prefix + "."):
+                return pattern
+        else:
+            head, _, last = pattern.rpartition(".")
+            if head == section and last == key:
+                return pattern
+    return None
+
+
+def is_locked(section: str, key: str, patterns: Sequence[str]) -> bool:
     """Whether only a hand-edit or a dedicated tool may change this key.
 
-    ``[agents.*]`` is locked wholesale, and by prefix rather than by an entry in :data:`LOCKED_KEYS`,
-    because a section name is per-agent (``agents.<name>``) and so cannot be enumerated ahead of time.
-    It declares what every agent can do, and ``update_config`` is a tool the assistant holds, so a
-    writable agent table would let the assistant widen its own reach. Granting a capability stays a
-    human decision.
-
-    ``[scheduling.task.*]`` is locked by prefix for a different reason: routing, not capability. The
-    assistant may change any task, but only through the scheduling tools, because every task write has
-    to be paired with the scheduler (un)arming that accompanies it. A bare ``update_config`` write
-    would edit the file and leave the running scheduler firing the old schedule. The parent
-    ``[scheduling]`` section stays writable: its ``max_task_conversations`` is an ordinary hot setting.
+    :data:`LOCK_AXIOM` is locked whatever ``patterns`` says, including when it is empty. Everything else
+    is the user's to remove, ``agents.*`` included; see the configuration reference for what removing it
+    actually permits.
     """
-    if (section, key) in LOCKED_KEYS:
+    if (section, key) == LOCK_AXIOM:
         return True
-    return section in ("agents", "scheduling.task") or section.startswith(("agents.", "scheduling.task."))
+    return locked_by(section, key, patterns) is not None
 
 
 def read_text(path: Path) -> str | None:
@@ -584,7 +607,7 @@ async def apply_setting(
 
     Raises :class:`SettingLocked`, ``ConfigError`` (from coercion), or :class:`HotApplyFailed`.
     """
-    if is_locked(section, key):
+    if is_locked(section, key, DEFAULT_LOCKED_CONFIG_KEYS):
         raise SettingLocked(section, key)
     coerced = settings.coerce_config_string(section, key, raw, table=table, extra_schema=extra_schema)
 

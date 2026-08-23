@@ -190,13 +190,51 @@ async def _noop_apply(section, key, value):
 
 
 def test_is_locked_covers_the_named_keys_and_every_agent_table():
-    assert config_store.is_locked("security", "confirm_tools")
-    assert config_store.is_locked("email", "to")
-    assert config_store.is_locked("paths", "data_dir")
+    defaults = config_store.DEFAULT_LOCKED_CONFIG_KEYS
+    assert config_store.is_locked("security", "confirm_tools", defaults)
+    assert config_store.is_locked("email", "to", defaults)
+    assert config_store.is_locked("paths", "data_dir", defaults)
     # By prefix, because a section name is per-agent and cannot be enumerated ahead of time.
-    assert config_store.is_locked("agents", "assistant")
-    assert config_store.is_locked("agents.researcher", "tools")
-    assert not config_store.is_locked("display", "show_tools")
+    assert config_store.is_locked("agents", "assistant", defaults)
+    assert config_store.is_locked("agents.researcher", "tools", defaults)
+    assert not config_store.is_locked("display", "show_tools", defaults)
+
+
+DEFAULTS = config_store.DEFAULT_LOCKED_CONFIG_KEYS
+
+
+def test_locked_by_returns_the_pattern_that_matched():
+    assert config_store.locked_by("agents.researcher", "tools", DEFAULTS) == "agents.*"
+    assert config_store.locked_by("email", "to", DEFAULTS) == "email.to"
+    assert config_store.locked_by("display", "show_tools", DEFAULTS) is None
+
+
+def test_locked_by_section_wildcard_covers_the_section_and_its_descendants():
+    patterns = ["scheduling.task.*"]
+    assert config_store.locked_by("scheduling.task", "anything", patterns) == "scheduling.task.*"
+    assert config_store.locked_by("scheduling.task.brief", "prompt", patterns) == "scheduling.task.*"
+    # The parent section is not a descendant of the pattern, so an ordinary setting beside the tasks
+    # stays writable.
+    assert config_store.locked_by("scheduling", "max_task_conversations", patterns) is None
+
+
+def test_locked_by_exact_pattern_needs_the_key_to_match_too():
+    assert config_store.locked_by("email", "to", ["email.to"]) == "email.to"
+    assert config_store.locked_by("email", "host", ["email.to"]) is None
+
+
+def test_locked_by_bare_star_matches_everything():
+    assert config_store.locked_by("display", "show_tools", ["*"]) == "*"
+
+
+def test_the_lock_list_key_is_locked_whatever_the_list_says():
+    assert config_store.is_locked("security", "locked_config_keys", [])
+    assert config_store.is_locked("security", "locked_config_keys", ["display.*"])
+
+
+def test_an_empty_list_locks_nothing_else():
+    assert not config_store.is_locked("agents.researcher", "tools", [])
+    assert not config_store.is_locked("email", "to", [])
 
 
 def test_read_text_reports_an_absent_file_as_none(tmp_path):
@@ -522,10 +560,10 @@ def test_a_task_name_needing_a_quoted_key_survives_the_round_trip(tmp_path, name
 
 
 def test_task_tables_are_locked_against_programmatic_writes():
-    assert config_store.is_locked("scheduling.task.morning-brief", "prompt") is True
-    assert config_store.is_locked("scheduling.task", "anything") is True
+    assert config_store.is_locked("scheduling.task.morning-brief", "prompt", DEFAULTS) is True
+    assert config_store.is_locked("scheduling.task", "anything", DEFAULTS) is True
     # The toolset's own setting in the parent section stays writable.
-    assert config_store.is_locked("scheduling", "max_task_conversations") is False
+    assert config_store.is_locked("scheduling", "max_task_conversations", DEFAULTS) is False
 
 
 # --- Hand-edited task shapes -------------------------------------------------------------------------

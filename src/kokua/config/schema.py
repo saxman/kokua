@@ -15,6 +15,18 @@ from kokua.config import paths as paths
 
 DEFAULT_SYSTEM_MESSAGE = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 
+#: The write policy Kokua ships with, and the default of ``[security].locked_config_keys``. A pattern is
+#: ``"*"``, ``"<section>.*"`` (that section and every descendant, any key), or ``"<section>.<key>"``.
+#: Declared here rather than beside the matcher in ``config/store.py`` because the dataclass field below
+#: needs it and ``store`` sits above this module; see ``store.locked_by`` for what the forms mean.
+DEFAULT_LOCKED_CONFIG_KEYS: tuple[str, ...] = (
+    "security.*",
+    "email.to",
+    "paths.data_dir",
+    "agents.*",
+    "scheduling.task.*",
+)
+
 
 @dataclass
 class AgentConfig:
@@ -129,6 +141,9 @@ class AssistantConfig:
     confirm_tools: list[str] = field(
         default_factory=lambda: ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
     )
+    # Which config keys update_config refuses. The user's to set: see store.locked_by for the pattern
+    # forms, and store.LOCK_AXIOM for the one key no list can unlock.
+    locked_config_keys: list[str] = field(default_factory=lambda: list(DEFAULT_LOCKED_CONFIG_KEYS))
     # Front end to run and, for the web front end, its bind address.
     frontend: str = "cli"
     host: str = "127.0.0.1"

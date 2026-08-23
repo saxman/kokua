@@ -88,12 +88,13 @@ def test_removed_memory_key_names_the_toolsets_that_replace_it(tmp_path):
 
 
 def test_the_agents_section_cannot_be_written_by_the_assistant():
-    from kokua.config.store import is_locked
+    from kokua.config import store as config_store
 
-    assert is_locked("agents.assistant", "tools")
-    assert is_locked("agents", "assistant")
-    assert is_locked("security", "confirm_tools")
-    assert not is_locked("display", "show_tools")
+    defaults = config_store.DEFAULT_LOCKED_CONFIG_KEYS
+    assert config_store.is_locked("agents.assistant", "tools", defaults)
+    assert config_store.is_locked("agents", "assistant", defaults)
+    assert config_store.is_locked("security", "confirm_tools", defaults)
+    assert not config_store.is_locked("display", "show_tools", defaults)
 
 
 async def test_update_config_refuses_an_agent_table_and_still_writes_a_runtime_setting(tmp_path):
