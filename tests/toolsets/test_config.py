@@ -327,7 +327,7 @@ async def test_update_config_dry_run_sees_a_prior_write_from_the_same_session(tm
     path, _, update_config = _tools(tmp_path, config=config)
     # Pre-seed the file with exactly these two agents. Left to create itself on the first write below,
     # `config_store.set_value` scaffolds a brand-new file from the shipped example config (see
-    # `config/store.py`'s `_document`), which carries its own default agents -- a distraction this test
+    # `config/store.py`'s `_document`), which carries its own default agents, a distraction this test
     # does not want in the graph the second write's dry run sees.
     path.write_text("[agents.a]\n\n[agents.b]\n", encoding="utf-8")
 
@@ -352,3 +352,32 @@ async def test_update_config_refusal_names_which_agent_the_fault_is_actually_in(
     assert "'q'" in result
     assert "different agent" in result
     assert not path.exists()
+
+
+async def test_update_config_validates_against_the_live_config_when_no_file_exists_yet(tmp_path):
+    """Nothing is on disk yet, so the dry run has no file to be checked against; it must fall back to the
+    live snapshot rather than treating an absent file as a parse failure."""
+    config = _unlocked(agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
+    assert not path.exists()
+
+    result = await update_config("agents.researcher", "tools", "time")
+
+    assert _read(path)["agents"]["researcher"]["tools"] == ["time"]
+    assert "restart" in result.lower()
+
+
+async def test_update_config_refuses_an_agent_write_when_the_file_does_not_currently_parse(tmp_path):
+    """A file that fails to parse for a reason having nothing to do with [agents.*] (a concurrent
+    hand-edit adding a bad key while Kokua runs, say) must refuse the write rather than silently falling
+    back to the live config: the next startup will fail on that same broken file regardless of what this
+    dry run decides, so validating against something else would be answering the wrong question."""
+    config = _unlocked(agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config)
+    path.write_text('[email]\nnosuchkey = "x"\n', encoding="utf-8")
+
+    result = await update_config("agents.researcher", "description", "the researcher")
+
+    assert "does not currently parse" in result
+    assert "nosuchkey" in result
+    assert _read(path) == {"email": {"nosuchkey": "x"}}

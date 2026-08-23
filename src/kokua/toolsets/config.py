@@ -95,14 +95,17 @@ def _agents_on_disk(config_path: Path, table) -> Optional[dict]:
     so today this would not recurse, but nothing enforces that staying true, and there is no reason to
     depend on it.
 
-    Returns ``None`` rather than an empty dict when the file does not exist yet, so the caller can fall
-    back to the live config's own ``agents`` instead of dry-running against nothing: a file only fails to
-    exist before this tool's first successful write, at which point the live snapshot is still accurate.
+    Returns ``None`` only for "the file does not exist yet", checked directly with
+    :func:`kokua.config.store.read_text` rather than by catching ``load``'s ``ConfigError``: that
+    exception also covers a malformed ``[[mcp.server]]`` entry, an unknown scheduling key, a removed key,
+    and more, none of which mean "nothing to read yet". A file that exists but fails to parse is left to
+    raise out of this function uncaught, so the caller must refuse the write rather than quietly falling
+    back to the live snapshot, since a file that cannot parse will fail the next startup regardless of what
+    this dry run decides, and validating against something else would be answering the wrong question.
     """
-    try:
-        return settings.load(str(config_path), table=table, extra_schema=startup_schema()).get("agents")
-    except settings.ConfigError:
+    if config_store.read_text(config_path) is None:
         return None
+    return settings.load(str(config_path), table=table, extra_schema=startup_schema()).get("agents", {})
 
 
 def _validated_agent_write(config, registry, config_path: Path, table) -> Callable[[str, str, Any], Any]:
@@ -125,7 +128,7 @@ def _validated_agent_write(config, registry, config_path: Path, table) -> Callab
 
     The check runs against every configured agent, not only the one being written, so an agent already
     broken by some other change (an MCP server removed mid-session, say) blocks a write to any other
-    agent's table too -- exact parity with startup, which would refuse the whole file. The error is
+    agent's table too, exact parity with startup, which would refuse the whole file. The error is
     reworded rather than simply prefixed with the section being written, so that when the fault named
     inside it belongs to a different agent's table, a model reading the refusal is not misled into
     repairing the one it just tried to write.
@@ -134,7 +137,12 @@ def _validated_agent_write(config, registry, config_path: Path, table) -> Callab
 
     def convert(section: str, key: str, value: Any) -> Any:
         name = section.split(".")[1]
-        baseline = _agents_on_disk(config_path, table)
+        try:
+            baseline = _agents_on_disk(config_path, table)
+        except settings.ConfigError as error:
+            raise settings.ConfigError(
+                f"config.toml does not currently parse, so [{section}].{key} cannot be checked against it: {error}"
+            ) from error
         if baseline is None:
             baseline = config.agents
         candidate = copy.copy(config)
