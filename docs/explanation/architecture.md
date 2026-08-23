@@ -489,13 +489,15 @@ re-enters it as `assistant.generation`, which is what lets one schema entry per 
 what makes an unknown key inside it report `[assistant.generation].<key>` rather than a generic
 `[assistant]` type complaint. Read only at startup, like the model and the reasoning effort: `update_config` can write the default
 tier (a cold key, applying on the next start) but not an agent's own `[agents.<name>.generation]`, which
-stays hand-edit only like the rest of `[agents.*]`.
+is locked the same way the rest of `[agents.*]` is by default.
 
 `config.toml` is the single source of settings **and the app writes it**. `config/store.py` does
 comment-preserving writes via `tomlkit` (stdlib `tomllib` cannot write). Two writers: the
-`add_mcp_server`/`remove_mcp_server` tools, and the assistant's own `update_config`. `update_config` refuses the keys `config/store.py`'s `is_locked` guards (`confirm_tools`, `email.to`,
-`data_dir`) plus the whole `[agents.*]` section, matched by section prefix since agent names cannot be
-enumerated in advance, and applies hot-appliable keys live.
+`add_mcp_server`/`remove_mcp_server` tools, and the assistant's own `update_config`. `update_config`
+refuses whatever `[security].locked_config_keys` matches, via `config/store.py`'s `locked_by`, with
+`("security", "locked_config_keys")` itself locked by axiom regardless of what the list says. See
+[the configuration reference](../reference/configuration.md#who-may-change-which-key) for the shipped
+patterns and what removing each one permits. `update_config` applies hot-appliable keys live.
 
 Which settings are hot is not a list maintained by hand in several places: it is
 `config/table.py`'s `SettingsTable`, built once at startup from `CORE_RUNTIME_SETTINGS` plus every
@@ -528,8 +530,8 @@ reaches it. The runtime `add_mcp_server` tool appends reconnectable servers ther
 `config/store.py` (no secret on disk), so config.toml stays the one source; it writes a name derived
 from the server's host and disambiguated against the names already on file, so a successful add can
 never leave behind a config the registry's collision check would reject at the next boot. That derived
-name reaches no agent until a human adds it to an `[agents.*]` table, since that section is hand-edit
-only: the tool can connect a server but cannot grant itself the capability. `mcp/auth.py` handles OAuth
+name reaches no agent until a human adds it to an `[agents.*]` table, since that section is locked by
+default: the tool can connect a server but cannot grant itself the capability. `mcp/auth.py` handles OAuth
 by posting the authorization link into the chat and persisting tokens to disk. It also carries the one
 piece of that flow a single-machine library gets to assume away: `OAuthSettings` holds where the
 provider's redirect lands, because FastMCP's default (loopback, a random port per process) sends the

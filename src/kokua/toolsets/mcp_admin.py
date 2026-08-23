@@ -85,7 +85,7 @@ def make_mcp_tools(
 
         When a server is recorded, its name is derived from the URL, but that name reaches no agent
         until a human adds it to that agent's tools list in config.toml's [agents.*] section AND
-        restarts Kokua: that section is hand-edit only and is read only at startup, so this tool
+        restarts Kokua: that section is locked by default and is read only at startup, so this tool
         cannot grant itself (or any agent) the capability it just connected.
         """
         try:

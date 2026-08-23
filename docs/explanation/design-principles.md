@@ -110,18 +110,19 @@ conclusion. It decides exactly one sentence of prompt guidance (whether an agent
 supervisor that must delegate) and nothing else. A worker whose table declares `tools = ["config"]`
 really does get `update_config`; a worker declaring `compute` really does get `execute_python`. That is
 intentional: filtering a declaration in code is precisely the behavior this design removes. The security
-boundary is elsewhere, and it is two things: `[agents.*]` can only be changed by hand-editing
-`config.toml`, so a human writing the table *is* the consent, and `[security] confirm_tools` gates the
-dangerous calls at call time no matter which agent makes them (a worker's gated call is routed to the
-user for approval, and an unattended turn auto-denies).
+boundary is elsewhere, and it is two things: `[agents.*]` is locked by default in
+`[security].locked_config_keys`, so a human writing the table *is* the consent under the shipped policy,
+and `[security] confirm_tools` gates the dangerous calls at call time no matter which agent makes them
+(a worker's gated call is routed to the user for approval, and an unattended turn auto-denies).
 
-`update_config` refusing to touch `[agents.*]` is not the only thing standing between it and being
-rewritten by the assistant itself: the entry agent's `add_skill_script` and a `compute` worker's
+`update_config` refusing to touch `[agents.*]` by default is not the only thing standing between it and
+being rewritten by the assistant itself: the entry agent's `add_skill_script` and a `compute` worker's
 `execute_python` both have the machine access to overwrite `config.toml` directly, bypassing
-`update_config`'s refusal entirely. `confirm_tools` gating both by default is what makes "hand-edit only"
-hold in practice rather than only in `update_config`'s own code, and it is why `[security] confirm_tools`
-is itself one of the hand-edit-only keys. `config.example.toml` documents `confirm_tools = []` as the way
-to turn approval off, so this backstop is a default a user can remove, not a wall.
+`update_config`'s refusal entirely. `confirm_tools` gating both by default is what makes "locked by
+default" hold in practice rather than only in `update_config`'s own code, and it is why
+`[security] confirm_tools` is itself one of the locked-by-default keys. `config.example.toml` documents
+`confirm_tools = []` as the way to turn approval off, so this backstop is a default a user can remove,
+not a wall.
 
 ## 3. `config.toml` is the single source of settings, and the app writes it
 
@@ -133,12 +134,14 @@ else. One file is also what makes a running system's whole configuration legible
 *How this cashes out:* [`config/store.py`](../../src/kokua/config/store.py) does comment-preserving
 `tomlkit` writes; two writers (`add_mcp_server` and the assistant's own `update_config` tool) land in
 that one file. A `runtime-settings.json` store used to exist and was
-retired in favour of the file itself. Four things in the file are hand-edit only, refused by
-`update_config` even behind the approval prompt: `[security] confirm_tools` (the gate itself),
-`[email] to` (the locked recipient), `[paths] data_dir` (where all state lives), and the whole
-`[agents.*]` section. That last one is locked by section prefix rather than by a key entry, since agent
-names cannot be enumerated ahead of time, and it is locked for the obvious reason: `update_config` is a
-tool the assistant holds, so a writable agent table would let the assistant widen its own reach.
+retired in favour of the file itself. `[security].locked_config_keys` is a user-set list of patterns
+naming what `update_config` refuses even behind the approval prompt, and it ships locking four things:
+`[security] confirm_tools` (the gate itself), `[email] to` (the locked recipient), `[paths] data_dir`
+(where all state lives), and the whole `[agents.*]` section. That last one is matched by section prefix
+rather than by a key entry, since agent names cannot be enumerated ahead of time, and it is locked by
+default for the obvious reason: `update_config` is a tool the assistant holds, so a writable agent table
+would let the assistant widen its own reach. `locked_config_keys` itself is the one entry the list can
+never remove; everything else, `agents.*` included, is a hand-edit away from being unlocked.
 
 `config.toml` also holds Kokua's declared scheduled tasks, one `[scheduling.task.<name>]` table per
 task, and `[scheduling.task.*]` is app-written the same way `[[mcp.server]]` is: the assistant's own

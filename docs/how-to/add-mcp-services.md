@@ -158,8 +158,8 @@ Two consequences of the runtime path being real:
   derives one from the server's host (`broker.example.com` becomes `broker-example-com`, with a numeric
   suffix if that name is already taken), so the config it leaves behind always loads. Then:
   1. add that name (or rename it to something friendlier) to an agent's `tools` by hand. `[agents.*]` is
-     hand-edit only: `update_config` refuses the whole section, precisely so the assistant cannot grant
-     itself the capability it just connected;
+     locked by default: `update_config` refuses the whole section, precisely so the assistant cannot
+     grant itself the capability it just connected;
   2. **restart Kokua**, because the namespace and the agent tables are both read only at startup.
 
   Until you do, the server connects, reconnects on each start, and startup warns that nothing names it.

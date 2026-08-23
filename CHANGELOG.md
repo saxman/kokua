@@ -199,7 +199,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.20.0 or newer
   you MUST delegate" clause only when every toolset it declared is marked `cross_cutting` -- something an
   agent holds to manage itself rather than to do domain work. `cross_cutting` decides that one sentence
   and nothing else: it is **not** an authorization boundary, and an agent declaring `config` really does
-  get `update_config`. The boundaries are that `[agents.*]` is hand-edit only and that `confirm_tools`
+  get `update_config`. The boundaries are that `[agents.*]` is locked by default and that `confirm_tools`
   gates by tool name whoever calls it.
 - **`--system` overrides the entry agent's opener for that run**, winning outright over its declared
   `system_message` (and over the `[assistant].system_message` fallback), since the message a person is
@@ -552,11 +552,18 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   applies it live and a name that does not resolve would be saved and surface as a Kokua that will not
   start. It is refused at write time by building a throwaway client -- the same call startup makes, so
   it also catches a provider whose extra is not installed. A
-  blocklist -- `[security] confirm_tools`, `[email] to`, `[paths] data_dir`, and the
-  whole `[agents.*]` section (matched by section prefix, since agent names cannot be enumerated ahead of
-  time) -- can never be changed by the tool, only by hand: `update_config` is a tool the assistant holds,
-  so a writable agent table would let it widen its own reach. `update_config` is also in the default
-  `confirm_tools` list, so each write it *is* allowed goes through the approval prompt.
+  list of locked patterns, `[security].locked_config_keys`, ships covering `[security] confirm_tools`,
+  `[email] to`, `[paths] data_dir`, and the whole `[agents.*]` section, matched by section prefix since
+  agent names cannot be enumerated ahead of time. Each is refused by the tool by default, and changeable
+  only by hand-editing the list itself: `update_config` is a tool the assistant holds, so a writable
+  agent table would let it widen its own reach. `update_config` is also in the default `confirm_tools`
+  list, so each write it *is* allowed goes through the approval prompt.
+- The `update_config` write policy is now yours to set. `[security].locked_config_keys` holds the
+  patterns the assistant may not write, defaulting to what was previously hardcoded. The key is itself
+  always locked, so the assistant cannot unlock itself in one call. Removing `agents.*` genuinely
+  unlocks agent tables: `update_config` can now resolve an agent's keys, and dry-runs `validate_agents`
+  before saving so a write that would break the next startup is refused. `read_config` opens with the
+  policy in force, and a refusal names the pattern that matched.
 - **A default model, with per-agent overrides.** `[assistant].model` is the model every agent runs on;
   an agent that names its own `[agents.<name>].model` runs on that instead. Resolution is per agent and
   never inherited down the delegation graph, so a delegator that pins a model does not drag its workers
@@ -674,8 +681,8 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   and disambiguate it (shared logic) against every other name already claimed -- on file for
   `add_mcp_server`, across the flag's own URLs for `--mcp` -- so neither can produce a config, or a set of
   servers in one run, the registry's collision check would reject. That derived name still reaches no
-  agent until a human puts it in an `[agents.*]` table, since that section is hand-edit only: neither can
-  grant itself the capability.
+  agent until a human puts it in an `[agents.*]` table, since that section is locked by default: neither
+  can grant itself the capability.
 - **Per-server bearer tokens via environment variables.** Each `[[mcp.server]]` takes a required `url`, a
   required `name`, and an optional `token_env` naming the variable holding that server's token, read
   at startup so the secret stays out of `config.toml`. A `token_env` whose variable is unset logs a

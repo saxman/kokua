@@ -148,11 +148,13 @@ Note what `cross_cutting` is **not**: it is not a permission boundary. An agent 
 [design principles](../explanation/design-principles.md#corollary-a-capability-is-declared-never-defaulted)
 for why that is the intended shape, and what the actual security boundary is.
 
-### `[agents.*]` is hand-edit only
+### `[agents.*]` is locked by default
 
 The assistant holds `update_config`, so a writable agent table would let it widen its own reach.
-`update_config` refuses the whole section by prefix. Which capability an agent gets stays a human
-decision, made in the file.
+`[security].locked_config_keys` ships locking the whole section by prefix; removing `agents.*` from
+that list is the hand-edit that hands the assistant its own capability table. Which capability an agent
+gets stays a human decision by default, made in the file. See [the configuration
+reference](../reference/configuration.md#who-may-change-which-key) for the full policy.
 
 ## Where mistakes surface
 

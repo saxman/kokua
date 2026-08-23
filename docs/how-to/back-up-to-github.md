@@ -137,9 +137,9 @@ tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "
          "planning", "capabilities", "time", "github_backup"]
 ```
 
-`[agents.*]` is **hand-edit only** by design: `update_config` refuses the whole section by prefix,
-because the assistant holds that tool and a writable agent table would let it widen its own reach. So
-this edit is yours to make in the file, and it needs the same restart step 4 does.
+`[agents.*]` is **locked by default**: `[security].locked_config_keys` refuses the whole section by
+prefix, because the assistant holds `update_config` and a writable agent table would let it widen its
+own reach. So this edit is yours to make in the file, and it needs the same restart step 4 does.
 
 Confirm the name reached your install's namespace:
 

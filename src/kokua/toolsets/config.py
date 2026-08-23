@@ -2,8 +2,8 @@
 
 These let the assistant inspect and repair its configuration during a conversation (e.g. "you keep
 failing to send email, check your config"). Reads are unrestricted; writes go through the same
-validation as the config file and are refused for the small security-critical set only a hand-edit may
-change (``config.store.is_locked``).
+validation as the config file and are refused for whatever the user's own
+``[security].locked_config_keys`` list matches (``config.store.is_locked``).
 
 The policy, the coercion, and the apply-then-persist ordering are all in ``config/store.py``. What is
 here is the two tool schemas and the four sentences that report what happened -- including the one that

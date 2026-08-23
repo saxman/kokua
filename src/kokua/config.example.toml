@@ -59,8 +59,9 @@ agent_cache_cap = 8
 show_thinking = true
 show_tools = true
 
-# Every agent, declared whole, and hand-edit only. An agent's `tools` list IS its capability: nothing is
-# added in code, and nothing is implicit, including the clock (declare "time" to get it).
+# Every agent, declared whole, and locked by default (see [security].locked_config_keys below). An
+# agent's `tools` list IS its capability: nothing is added in code, and nothing is implicit, including
+# the clock (declare "time" to get it).
 #
 # One namespace covers everything, so a `tools` entry may be an AIMU built-in group ("web", "fs",
 # "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own ("memory",

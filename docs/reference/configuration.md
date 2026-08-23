@@ -12,8 +12,8 @@ Two rules run through the whole file and explain most of what follows:
   with the declaration. See [set up a toolset](../how-to/set-up-toolsets.md).
 - **`config.toml` is the single source of settings, and the app writes it too.** There is no second
   store, no dotfile, no database. The assistant's own `update_config` tool and the runtime
-  `add_mcp_server` tool write back to this file, preserving your comments, which is why a small set of
-  keys is locked against them.
+  `add_mcp_server` tool write back to this file, preserving your comments, which is why
+  `[security].locked_config_keys` exists, and why it is the one key that list cannot unlock.
 
 ## Contents
 
@@ -81,25 +81,48 @@ by a tool outlives the conversation that wrote it.
 
 ## Who may change which key
 
-| Key | Hand-edit | `update_config` | Other |
-| --- | --- | --- | --- |
-| Most keys | yes | yes | web UI for the display flags |
-| `[security].confirm_tools` | yes | **refused** | |
-| `[email].to` | yes | **refused** | |
-| `[paths].data_dir` | yes | **refused** | |
-| `[agents.*]` (whole section) | yes | **refused** | |
-| `[scheduling.task.*]` | yes | **refused** | the scheduling tools |
-| `[[mcp.server]]` | yes | n/a | appended by `add_mcp_server` |
+`[security].locked_config_keys` decides this, and it is yours to set. Kokua ships with:
 
-The first four are locked because `update_config` is a tool the *assistant* holds. A writable
-`[agents.*]` would let it widen its own reach; a writable `confirm_tools` would let it remove its own
-approval gate; a writable `[email].to` would let it mail someone other than you; a writable `data_dir`
-would let it move its own state out from under you. Granting a capability stays your decision.
+```toml
+[security]
+locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
+```
 
-`[scheduling.task.*]` is refused for a different reason: routing, not capability. The assistant may
-change any task, but only through its scheduling tools, because a task write has to be paired with the
-scheduler arming or disarming to match. A bare `update_config` write would edit the file and leave the
-running scheduler firing the old schedule. The parent `[scheduling]` section stays writable.
+A pattern takes one of three forms:
+
+| Form | Matches |
+| --- | --- |
+| `*` | every section and key |
+| `<section>.*` | that section, every section under it, any key |
+| `<section>.<key>` | exactly that key in exactly that section |
+
+Keys never contain dots and sections do, so the last segment of the third form is always the key. To
+lock one task's contents, write `"scheduling.task.morning-brief.*"`, not
+`"scheduling.task.morning-brief"`.
+
+**One key is always locked:** `[security].locked_config_keys` itself, whatever the list says, including
+when it is empty. Otherwise an assistant holding `update_config` would need a single call to disable
+every other lock. Note how narrow that is: only this key, not the `[security]` section around it. Set
+`locked_config_keys = ["email.to"]` and `[security].confirm_tools` becomes writable by the assistant,
+because the shipped `security.*` pattern was the only thing that was locking it.
+
+Everything else is yours to remove, and here is what removing each shipped pattern actually permits:
+
+| Pattern | Removing it |
+| --- | --- |
+| `security.*` | lets the assistant change `confirm_tools`, and so remove its own approval gate |
+| `email.to` | lets the assistant mail someone other than you |
+| `paths.data_dir` | lets the assistant move its own state out from under you |
+| `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `system_message`, `description`, and `delegates_to`, and create new agents. It can widen its own reach, effective on the next restart. |
+| `scheduling.task.*` | changes the error message only. `update_config` still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule. |
+
+An agent-table write is checked before it is saved by the same `validate_agents` that runs at startup,
+so an unknown toolset name, an unresolvable model, an unknown delegate, or a delegation cycle is refused
+at the tool rather than breaking your next launch. That guarantees the result *starts*. It does not
+guarantee the result is one you wanted.
+
+`[[mcp.server]]` is not in the list and is not writable by `update_config` either way; it is appended by
+`add_mcp_server`, which connects the server as well as recording it.
 
 ## Which keys apply live
 
@@ -265,7 +288,8 @@ straight back to the file.
 Every agent, declared whole. The table name is the agent's name: it is what `[assistant].agent` selects,
 what another agent's `delegates_to` names, and what `spawn_subagent` takes as its `agent_type`.
 
-**This whole section is hand-edit only.** See [who may change which key](#who-may-change-which-key).
+**This whole section is locked by default.** See [who may change which key](#who-may-change-which-key)
+for what removing `agents.*` from `[security].locked_config_keys` actually permits.
 
 | Key | Type | Meaning |
 | --- | --- | --- |
@@ -418,6 +442,15 @@ Two names worth considering adding, both ungated by default: `read_conversation`
 `search_conversations`. A saved transcript is untrusted text, since a worker may have pasted web content
 into it, so an injection landing in one conversation can influence another. They are ungated by default
 because gating a read would make an unattended scheduled run that reads history fail silently.
+
+### `locked_config_keys`
+
+A list of patterns naming which keys `update_config` refuses. Default:
+`["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]`. Startup-only, and
+always locked against `update_config` regardless of its own value. See
+[Who may change which key](#who-may-change-which-key) for the pattern forms and what each shipped
+pattern is holding back. A pattern with no dot in it (a bare `display`) can match nothing and is a hard
+startup error rather than a line that silently locks nothing.
 
 ## `[paths]`
 

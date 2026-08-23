@@ -155,7 +155,7 @@ def add_mcp_server(path: Path, url: str, token_env: str | None = None) -> None:
     A runtime-added server (OAuth or unauthenticated) is recorded with just its URL and a name derived
     from it, so it reconnects on the next restart; ``token_env`` is written only for a bearer-token
     server declared explicitly. The derived name reaches no agent until a human names it in
-    ``[agents.*]``, since that section is hand-edit only and this write cannot grant capability.
+    ``[agents.*]``, which is locked by default and so this write cannot grant capability on its own.
 
     Replacing an existing entry for the same URL keeps that entry's ``name`` rather than re-deriving
     one, since a human may have hand-edited it to match an ``[agents.*]`` reference that this write
