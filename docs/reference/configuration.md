@@ -113,13 +113,16 @@ Everything else is yours to remove, and here is what removing each shipped patte
 | `security.*` | lets the assistant change `confirm_tools`, and so remove its own approval gate |
 | `email.to` | lets the assistant mail someone other than you |
 | `paths.data_dir` | lets the assistant move its own state out from under you |
-| `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `system_message`, `description`, and `delegates_to`, and create new agents. It can widen its own reach, effective on the next restart. |
+| `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `system_message`, `description`, and `delegates_to`, set its `[agents.<name>.generation]` parameters, and create new agents. It can widen its own reach, effective on the next restart. |
 | `scheduling.task.*` | changes the error message only. `update_config` still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule. |
 
-An agent-table write is checked before it is saved by the same `validate_agents` that runs at startup,
-so an unknown toolset name, an unresolvable model, an unknown delegate, or a delegation cycle is refused
-at the tool rather than breaking your next launch. That guarantees the result *starts*. It does not
-guarantee the result is one you wanted.
+A flat agent key (`tools`, `model`, `thinking`, `system_message`, `description`, `delegates_to`) is
+checked before it is saved by the same `validate_agents` that runs at startup, so an unknown toolset
+name, an unresolvable model, an unknown delegate, or a delegation cycle is refused at the tool rather
+than breaking your next launch. A `[agents.<name>.generation]` parameter gets a different check instead:
+the same type-and-range check `[assistant.generation]` gets, not a `validate_agents` dry run, since a bad
+`temperature` cannot break startup the way a bad delegate can. Either way, the write is checked before
+it is saved; neither check tells you the result is one you wanted, only that it starts.
 
 `[[mcp.server]]` is not in the list and is not writable by `update_config` either way; it is appended by
 `add_mcp_server`, which connects the server as well as recording it.
@@ -430,7 +433,7 @@ Set to `[]` to disable approval entirely. Proactive turns (scheduled tasks, anyt
 unprompted) **auto-deny** these regardless of the setting, since there is no one at the keyboard to ask.
 
 `update_config` is in the default list because it lets the assistant rewrite this file, except for the
-locked keys it can never change. This key is itself hand-edit only, for the obvious reason.
+locked keys it can never change. This key is itself locked by default too, for the obvious reason.
 
 Gating is **by tool name**, so it applies to a worker's call as much as the entry agent's: a worker's
 gated call is routed to you. Note the flip side, which is easy to misread: there is no privilege tier
@@ -457,7 +460,7 @@ startup error rather than a line that silently locks nothing.
 ### `data_dir`
 
 Absolute override for where all transient and user content lives. Default: `$KOKUA_HOME/data`.
-Hand-edit only.
+Locked by default.
 
 ```toml
 data_dir = "/path/to/kokua-data"
@@ -526,7 +529,7 @@ Lets the assistant email information to you (digests, summaries, reports) over S
 | `port` | integer | `587` | 587 with STARTTLS, or 465 with `use_ssl = true` |
 | `username` | string | falls back to `from`, then `to` | SMTP login user |
 | `from` | string | falls back to `to` | `From:` header |
-| `to` | string | unset | **the only address the assistant can send to**; hand-edit only |
+| `to` | string | unset | **the only address the assistant can send to**; locked by default |
 | `use_ssl` | bool | `false` | `false` is STARTTLS on connect, `true` is implicit TLS (SMTP_SSL) |
 
 Leave everything unset to disable email.
@@ -534,8 +537,8 @@ Leave everything unset to disable email.
 Three properties worth understanding before enabling it:
 
 - **The recipient is locked.** Kokua passes these settings to the script's environment and the script has
-  no recipient flag, so it can only ever mail `to`. That is also why `to` is hand-edit only: it is the
-  whole guarantee.
+  no recipient flag, so it can only ever mail `to`. That is also why `to` is locked by default: it is
+  the whole guarantee.
 - **Sending is ungated.** There is no per-send confirmation, because a scheduled or proactive turn has no
   one to ask and auto-denies gated tools. The recipient lock is what makes that safe.
 - **The password is never in this file.** It is read from `$KOKUA_EMAIL_PASSWORD`, and a `password` key
