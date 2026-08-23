@@ -750,6 +750,11 @@ is the point of a personal assistant, but it means a prompt-injected or mistaken
 code on your machine. Run it only with a model, inputs, and MCP servers you trust. The CLI prints a
 notice on startup.
 
+- **Security policy.** `SECURITY.md` states the reporting channel (GitHub private vulnerability
+  reporting), which barriers a report is about (the approval gate, `[security] locked_config_keys`,
+  agent capability boundaries, the web front end's download and image routes, the `[email].to`
+  recipient lock, and secret disclosure), and which behavior is the product working as documented (a
+  model you configured running code you approved).
 - **Tool approval.** Configured risky tools require confirmation before each call -- terminal `y/N`, web
   Allow/Deny -- built on AIMU's `ToolApproval` gate. The default set is `add_skill_script`,
   `add_mcp_server`, `execute_python`, and `update_config`; adjust with `[security] confirm_tools` or

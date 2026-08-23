@@ -1,7 +1,8 @@
 # TODO / Backlog
 
 Captured 2026-07-14; pruned and renumbered 2026-08-13 (three resolved items removed, three
-release-hygiene items added). Backlog only, not yet scheduled. File references point at current code.
+release-hygiene items added). Item 12, a security policy, was resolved 2026-08-23 by `SECURITY.md`.
+Backlog only, not yet scheduled. File references point at current code.
 
 ## 1. Make session-level config overrides visible
 When the web settings panel (`config/table.py`'s `RUNTIME_SETTINGS`) or a mid-session `/model` switch
@@ -121,9 +122,3 @@ Decide as one change: adopt with an explicit `[tool.ruff.lint] select`, apply th
 commit that does nothing else, and either fix or `noqa`-with-a-reason the judgment calls. Raising the
 pin without that is how a linter upgrade turns into an unreviewed diff across the tree.
 
-## 12. Add a SECURITY.md
-The README's Security section is thorough about the threat model -- unsandboxed subprocesses with the
-user's privileges, prompt injection crossing conversations -- but there is no `SECURITY.md`, so a
-reporter has no stated channel or expectation. Add one covering how to report, what is in scope (the
-approval gate, the config blocklist, path traversal in the email/download paths) and what is explicitly
-out of scope (a trusted model running code you approved).
