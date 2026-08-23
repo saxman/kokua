@@ -112,7 +112,7 @@ async def test_update_config_refuses_an_agent_table_and_still_writes_a_runtime_s
     update = next(t for t in tools if t.__name__ == "update_config")
 
     refusal = await update(section="agents.assistant", key="tools", value="fs, compute")
-    assert "hand-editing" in refusal
+    assert "locked_config_keys" in refusal
     assert 'tools = ["time"]' in path.read_text(encoding="utf-8")
 
     assert "9100" in await update(section="web", key="port", value="9100")

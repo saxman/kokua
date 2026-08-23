@@ -210,6 +210,35 @@ async def test_update_config_points_a_task_edit_at_the_scheduling_tools(tmp_path
     assert "security-critical" not in result
 
 
+async def test_read_config_states_the_write_policy_in_force(tmp_path):
+    config = AssistantConfig(locked_config_keys=["email.to"])
+    path, read_config, _ = _tools(tmp_path, config=config)
+    path.write_text('[assistant]\nmodel = "m"\n', encoding="utf-8")
+    text = await read_config()
+    assert "email.to" in text
+    # The user's list, not the shipped one.
+    assert "paths.data_dir" not in text.split("config.toml follows")[0]
+    assert 'model = "m"' in text
+
+
+async def test_read_config_states_the_policy_even_with_no_file(tmp_path):
+    _, read_config, _ = _tools(tmp_path, config=AssistantConfig(locked_config_keys=["email.to"]))
+    assert "email.to" in await read_config()
+
+
+async def test_update_config_refusal_names_the_pattern_that_matched(tmp_path):
+    _, _, update_config = _tools(tmp_path, config=AssistantConfig(locked_config_keys=["email.*"]))
+    result = await update_config("email", "to", "someone@example.com")
+    assert "email.*" in result
+    assert "locked_config_keys" in result
+
+
+async def test_update_config_refuses_the_lock_list_itself(tmp_path):
+    _, _, update_config = _tools(tmp_path, config=AssistantConfig(locked_config_keys=[]))
+    result = await update_config("security", "locked_config_keys", "email.to")
+    assert "locked_config_keys" in result
+
+
 def test_the_example_config_ships_the_default_lock_list():
     """The scaffolded file is what a user reads the policy off, so it must be the policy."""
     example = tomllib.loads(settings.example_text())

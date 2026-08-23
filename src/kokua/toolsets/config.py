@@ -18,7 +18,7 @@ model string resolves (see :func:`_resolvable_model`).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Sequence
 
 from aimu.tools import tool
 
@@ -26,6 +26,29 @@ from kokua.config import file as settings
 from kokua.config import store as config_store
 from kokua.config.settings_sources import startup_schema
 from kokua.toolsets.registry import Toolset
+
+
+def _policy_preamble(locked: Sequence[str]) -> str:
+    """The write policy in force, as comment lines above the file text ``read_config`` returns.
+
+    Generated from the same list the refusal checks rather than read out of the file, for two reasons: a
+    hand-written config that never mentions ``[security].locked_config_keys`` is running on the shipped
+    default with nothing in its text to say so, and a generated line cannot drift from the policy the way
+    the three prose restatements this replaced could.
+
+    Kept out of ``update_config``'s tool description on purpose. That text sits in the model's context
+    every turn, and Kokua is run against locally served models with small context windows; this is what
+    the assistant reads when it actually cares.
+    """
+    patterns = ", ".join(locked) if locked else "(none)"
+    return (
+        "# --- Write policy in force (generated, not part of the file) ---\n"
+        "# update_config refuses any key matching these patterns:\n"
+        f"#   {patterns}\n"
+        "# [security].locked_config_keys sets that list, and is itself always locked.\n"
+        "# [scheduling.task.*] is refused here but changes through the scheduling tools.\n"
+        "# --- config.toml follows ---\n"
+    )
 
 
 def _resolvable_model(section: str, key: str, value: str) -> str:
@@ -83,13 +106,15 @@ def make_config_tools(
     async def read_config() -> str:
         """Return the current contents of config.toml so you can diagnose a configuration problem.
 
-        Use this before update_config to see what is set, and to check keys and section names. If no
-        config file exists yet, all settings are at their built-in defaults.
+        Use this before update_config to see what is set, and to check keys and section names. The
+        reply opens with the write policy in force: which keys update_config will refuse. If no config
+        file exists yet, all settings are at their built-in defaults.
         """
+        preamble = _policy_preamble(config.locked_config_keys)
         text = config_store.read_text(config_path)
         if text is None:
-            return "No config file exists yet; all settings are at their built-in defaults."
-        return text
+            return preamble + "No config file exists yet; all settings are at their built-in defaults."
+        return preamble + text
 
     @tool
     async def update_config(section: str, key: str, value: str) -> str:
@@ -102,8 +127,8 @@ def make_config_tools(
         time Kokua restarts. The result says which of the two happened; pass that on, because a saved
         setting is not yet in force and only the user can restart. A model string is checked against the
         providers actually installed before it is saved, so a name that does not resolve is refused here
-        rather than breaking the next startup. A few security-critical keys cannot be changed here and
-        must be hand-edited in the file.
+        rather than breaking the next startup. Which keys are refused is the user's own
+        [security].locked_config_keys list, not a fixed set; read_config opens with the list in force.
         """
         try:
             applied = await config_store.apply_setting(
@@ -122,9 +147,14 @@ def make_config_tools(
                     f"[{locked.section}] is a scheduled task, not a setting. Use update_scheduled_task "
                     "to change it, so its schedule is re-armed to match."
                 )
+            if locked.pattern is None:
+                return (
+                    "[security].locked_config_keys is the list of keys I may not write, so I may not "
+                    "write it either. Hand-edit config.toml to change it."
+                )
             return (
-                f"[{section}].{key} is security-critical and can only be changed by hand-editing "
-                "config.toml, not with this tool."
+                f"[{section}].{key} is refused by [security].locked_config_keys, which matches it as "
+                f"{locked.pattern!r}. Hand-edit config.toml to change either."
             )
         except settings.ConfigError as error:
             return f"Rejected: {error}"
