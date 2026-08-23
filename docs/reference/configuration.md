@@ -98,7 +98,9 @@ A pattern takes one of three forms:
 
 Keys never contain dots and sections do, so the last segment of the third form is always the key. To
 lock one task's contents, write `"scheduling.task.morning-brief.*"`, not
-`"scheduling.task.morning-brief"`.
+`"scheduling.task.morning-brief"`. Anything that is none of the three forms fails startup naming the
+pattern, so a slip cannot leave you reading a lock that is not in force; see
+[`locked_config_keys`](#locked_config_keys) for the list of what is refused.
 
 **One key is always locked:** `[security].locked_config_keys` itself, whatever the list says, including
 when it is empty. Otherwise an assistant holding `update_config` would need a single call to disable
@@ -119,7 +121,10 @@ Everything else is yours to remove, and here is what removing each shipped patte
 A flat agent key (`tools`, `model`, `thinking`, `system_message`, `description`, `delegates_to`) is
 checked before it is saved by the same `validate_agents` that runs at startup, so an unknown toolset
 name, an unresolvable model, an unknown delegate, or a delegation cycle is refused at the tool rather
-than breaking your next launch. A `[agents.<name>.generation]` parameter gets a different check instead:
+than breaking your next launch. That check reads `config.toml` itself, not the copy this session started
+from, and reads both halves of it that startup reads: the agent tables and the `[assistant].agent`
+naming the entry agent. So two writes that each looked fine alone cannot add up to a file your next
+launch refuses. A `[agents.<name>.generation]` parameter gets a different check instead:
 the same type-and-range check `[assistant.generation]` gets, not a `validate_agents` dry run, since a bad
 `temperature` cannot break startup the way a bad delegate can. Either way, the write is checked before
 it is saved; neither check tells you the result is one you wanted, only that it starts.
@@ -452,8 +457,12 @@ A list of patterns naming which keys `update_config` refuses. Default:
 `["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]`. Startup-only, and
 always locked against `update_config` regardless of its own value. See
 [Who may change which key](#who-may-change-which-key) for the pattern forms and what each shipped
-pattern is holding back. A pattern with no dot in it (a bare `display`) can match nothing and is a hard
-startup error rather than a line that silently locks nothing.
+pattern is holding back. A pattern that could never match anything is a hard startup error rather than a
+line that silently locks nothing: a bare `display` with no dot, whitespace at either end of the pattern,
+an empty segment (`agents.`), or a `*` anywhere but the last segment (`*.*`, `agents.*.*`,
+`agent*.tools`). One mistake it cannot catch is case. TOML keys are case-sensitive, so `Agents.*` really
+does lock nothing, but section names include your own agent and toolset names, so nothing at startup can
+tell a wrong-cased section from a real one.
 
 ## `[paths]`
 
@@ -663,8 +672,9 @@ gone. The next backup then clones the new repository from scratch, carrying none
 repository's history with it.
 
 The push token is **not** a config key. It is read from the `GITHUB_BACKUP_TOKEN` environment variable,
-fixed rather than named in `config.toml`, so that repointing `repo` (which `update_config` can do, since
-this section is not hand-edit-only) can never widen the capability past whatever repository that one
+fixed rather than named in `config.toml`, so that repointing `repo` (which `update_config` can do unless
+you lock the key yourself with `"github_backup.repo"` in [`locked_config_keys`](#locked_config_keys), as
+no toolset section is locked by default) can never widen the capability past whatever repository that one
 token already writes. Scope the token, a fine-grained GitHub PAT with `contents: write`, to the backup
 repository alone.
 

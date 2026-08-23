@@ -3,7 +3,7 @@
 These let the assistant inspect and repair its configuration during a conversation (e.g. "you keep
 failing to send email, check your config"). Reads are unrestricted; writes go through the same
 validation as the config file and are refused for whatever the user's own
-``[security].locked_config_keys`` list matches (``config.store.is_locked``).
+``[security].locked_config_keys`` list matches (``config.store.locked_by``).
 
 The policy, the coercion, and the apply-then-persist ordering are all in ``config/store.py``. What is
 here is the two tool schemas and the four sentences that report what happened -- including the one that
@@ -75,18 +75,20 @@ def _resolvable_model(section: str, key: str, value: str) -> str:
     return value
 
 
-def _agents_on_disk(config_path: Path, table) -> Optional[dict]:
-    """The persisted ``[agents.*]`` tables, read fresh, or ``None`` when there is nothing to read yet.
+def _persisted_config(config_path: Path, table) -> Optional[dict]:
+    """The config file re-read into overrides, or ``None`` when there is nothing to read yet.
 
-    Agent keys are cold: ``apply_setting`` persists a successful write to the file but never calls
-    ``apply_hot`` for one, so the live ``AssistantConfig.agents`` a running session holds stays exactly
+    ``validate_agents`` reads exactly two things off a config, the ``[agents.*]`` tables and
+    ``[assistant].agent``, and both are cold: ``apply_setting`` persists a successful write to the file
+    but never calls ``apply_hot`` for either, so what a running session holds for them stays exactly
     what it was at process start until the next restart. A dry run against that frozen snapshot would
     validate each write against a config nothing has actually been checked against twice in a row: two
     sequential writes, each individually fine against what was on disk when it landed, could together
-    reintroduce the exact fault (an unresolvable delegate, a cycle) this converter exists to catch,
-    because the second dry run never saw the first write. Reading the file each time instead is what lets
-    the second call see the first call's already-persisted change, which is what the next real startup
-    will also see.
+    reintroduce the exact fault (an unresolvable delegate, a cycle, an entry agent naming no table) this
+    converter exists to catch, because the second dry run never saw the first write. Reading the file
+    each time instead is what lets the second call see the first call's already-persisted change, which
+    is what the next real startup will also see. Both fields come from this one read for that reason:
+    taking either from the session snapshot leaves the whole bug class alive in that half.
 
     ``startup_schema()``, not the module's own ``cold_schema``: the latter routes every ``agents.*`` key
     through this very converter, and handing it to ``load`` as ``extra_schema`` would consult it while
@@ -105,7 +107,7 @@ def _agents_on_disk(config_path: Path, table) -> Optional[dict]:
     """
     if config_store.read_text(config_path) is None:
         return None
-    return settings.load(str(config_path), table=table, extra_schema=startup_schema()).get("agents", {})
+    return settings.load(str(config_path), table=table, extra_schema=startup_schema())
 
 
 def _validated_agent_write(config, registry, config_path: Path, table) -> Callable[[str, str, Any], Any]:
@@ -120,11 +122,22 @@ def _validated_agent_write(config, registry, config_path: Path, table) -> Callab
     Supplied by the caller rather than living in ``config/file.py`` because that layer may reach neither
     the toolset registry nor AIMU, which is the same seam :func:`_resolvable_model` uses.
 
-    Dry-runs against :func:`_agents_on_disk`, not ``config.agents`` directly, since "would the next
-    startup accept this" is a question about the file, not about a snapshot frozen at process start (see
-    that function's docstring for why the two can disagree). ``copy.copy`` rather than
-    ``dataclasses.replace`` on the whole config: only ``agents`` is rebound, ``validate_agents`` reads
-    nothing else but ``entry_agent``, and a shallow copy re-runs no ``__post_init__``.
+    Dry-runs against :func:`_persisted_config`, not against the live ``config`` directly, since "would
+    the next startup accept this" is a question about the file, not about a snapshot frozen at process
+    start (see that function's docstring for why the two can disagree). Both of the fields
+    ``validate_agents`` reads come from that one read, the agent tables and the entry agent
+    ``[assistant].agent`` names, because taking either from the snapshot instead leaves the whole
+    staleness problem alive in that half: ``[assistant].agent`` is unlocked by default, so the assistant
+    can point it at an agent that does not exist and then be told a later agent write is fine.
+    ``copy.copy`` rather than ``dataclasses.replace`` on the whole config: only those two fields are
+    rebound, and a shallow copy re-runs no ``__post_init__``.
+
+    A key the file simply does not carry falls back to the live value, but only for the entry agent, and
+    the asymmetry is deliberate. A file with no ``[assistant].agent`` line resolves at the next startup
+    to whatever this session resolved it to, the built-in default or a command-line flag. A file with no
+    ``[agents]`` table is not a gap but a declaration of none, which the next startup refuses outright,
+    so backfilling the session's own agents there would hide the very failure being asked about. Only a
+    file that does not exist yet falls back for both, having declared nothing either way.
 
     The check runs against every configured agent, not only the one being written, so an agent already
     broken by some other change (an MCP server removed mid-session, say) blocks a write to any other
@@ -138,16 +151,20 @@ def _validated_agent_write(config, registry, config_path: Path, table) -> Callab
     def convert(section: str, key: str, value: Any) -> Any:
         name = section.split(".")[1]
         try:
-            baseline = _agents_on_disk(config_path, table)
+            persisted = _persisted_config(config_path, table)
         except settings.ConfigError as error:
             raise settings.ConfigError(
                 f"config.toml does not currently parse, so [{section}].{key} cannot be checked against it: {error}"
             ) from error
-        if baseline is None:
-            baseline = config.agents
+        if persisted is None:
+            baseline, entry_agent = config.agents, config.entry_agent
+        else:
+            baseline = persisted.get("agents", {})
+            entry_agent = persisted.get("entry_agent", config.entry_agent)
         candidate = copy.copy(config)
         agent = baseline.get(name, AgentConfig())
         candidate.agents = {**baseline, name: replace(agent, **{key: value})}
+        candidate.entry_agent = entry_agent
         try:
             validate_agents(candidate, registry)
         except settings.ConfigError as error:
@@ -196,6 +213,10 @@ def make_config_tools(
     cold_schema = {
         **startup_schema(),
         ("assistant", "model"): ("model", (str,), "a string", _resolvable_model),
+        # The flat agent keys only. An ``[agents.<name>.generation]`` key is deliberately left on its
+        # own converter, undried-run, because `agent_write` rebuilds the candidate agent with
+        # `replace(agent, **{key: value})` and `generation` is a sub-table rather than a field: a write
+        # to `temperature` would raise TypeError out of the tool call instead of being validated.
         **{
             location: (target, types, label, agent_write)
             for location, (target, types, label, _) in settings.AGENT_SCHEMA.items()

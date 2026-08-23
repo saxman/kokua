@@ -20,10 +20,12 @@ turn a scheduled task fires, where gated tools auto-deny. A version of this tool
 ``path`` argument would have to be gated, and a gated backup tool cannot be scheduled.
 
 The token's environment variable name is fixed here rather than configurable. ``[github_backup].repo``
-is this capability's blast radius and ``update_config`` is a tool the assistant holds, but a toolset
-``Setting`` has no way to declare itself hand-edit-only. Fixing the variable name means a repointed
-``repo`` can still only reach a repository that one token already writes, and the documentation says to
-scope that token to the backup repository alone.
+is this capability's blast radius and ``update_config`` is a tool the assistant holds. A toolset
+``Setting`` still has no way to declare itself hand-edit-only, but the user can lock this one from the
+other side, by adding ``"github_backup.repo"`` to ``[security].locked_config_keys``. Fixing the variable
+name is what bounds the capability whether or not they do: a repointed ``repo`` can still only reach a
+repository that one token already writes, and the documentation says to scope that token to the backup
+repository alone.
 """
 
 from __future__ import annotations

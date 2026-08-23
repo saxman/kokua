@@ -560,10 +560,14 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   list, so each write it *is* allowed goes through the approval prompt.
 - The `update_config` write policy is now yours to set. `[security].locked_config_keys` holds the
   patterns the assistant may not write, defaulting to what was previously hardcoded. The key is itself
-  always locked, so the assistant cannot unlock itself in one call. Removing `agents.*` genuinely
+  always locked, so the assistant cannot unlock itself in one call. A pattern that could never match
+  anything fails startup rather than reading as a lock you do not have: no dot, whitespace at either
+  end, an empty segment, or a `*` anywhere but the last one. Removing `agents.*` genuinely
   unlocks agent tables: `update_config` can now resolve an agent's keys, and dry-runs `validate_agents`
-  before saving so a write that would break the next startup is refused. `read_config` opens with the
-  policy in force, and a refusal names the pattern that matched.
+  before saving so a write that would break the next startup is refused. That dry run reads the file
+  rather than the running session, both the agent tables and the `[assistant].agent` naming the entry
+  agent, so two writes that are each fine alone cannot combine into a config the next startup rejects.
+  `read_config` opens with the policy in force, and a refusal names the pattern that matched.
 - **A default model, with per-agent overrides.** `[assistant].model` is the model every agent runs on;
   an agent that names its own `[agents.<name>].model` runs on that instead. Resolution is per agent and
   never inherited down the delegation graph, so a delegator that pins a model does not drag its workers

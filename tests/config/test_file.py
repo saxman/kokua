@@ -121,12 +121,44 @@ def test_security_confirm_tools_from_file():
     assert _resolve().confirm_tools == ["add_skill_script"]
 
 
-def test_a_lock_pattern_that_could_never_match_fails_startup(tmp_path):
+@pytest.mark.parametrize(
+    "pattern,fault",
+    [
+        ("agents.* ", "whitespace"),
+        (" agents.*", "whitespace"),
+        ("agents .*", "whitespace"),
+        ("display", "no dot"),
+        ("*.*", "last segment"),
+        ("agents.*.*", "last segment"),
+        ("agents.", "empty segment"),
+        (".display", "empty segment"),
+        ("a..b", "empty segment"),
+        ("agent*.tools", "whole segment"),
+    ],
+)
+def test_every_unmatchable_lock_pattern_fails_startup(tmp_path, pattern, fault):
+    """Each of these is a pattern `store.locked_by` can never match, so accepting one would leave the
+    user reading a lock they do not have: the file still says `agents.*` and the policy preamble still
+    prints it. Whitespace is rejected rather than stripped, since the list is hand-authored and a silent
+    repair hides the slip."""
     path = tmp_path / "config.toml"
-    path.write_text('[security]\nlocked_config_keys = ["display"]\n', encoding="utf-8")
+    path.write_text(f'[security]\nlocked_config_keys = ["{pattern}"]\n', encoding="utf-8")
     with pytest.raises(settings.ConfigError) as error:
         settings.load(str(path), table=core_table())
-    assert "display" in str(error.value)
+    assert repr(pattern) in str(error.value)
+    assert fault in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    ["*", "agents.*", "email.to", "scheduling.task.*", "agents.researcher.generation.temperature"],
+)
+def test_every_accepted_lock_pattern_form_still_loads(tmp_path, pattern):
+    """The three documented forms, including the dotted sections a per-agent or per-task pattern needs:
+    tightening the validator must not cost the forms it exists to protect."""
+    path = tmp_path / "config.toml"
+    path.write_text(f'[security]\nlocked_config_keys = ["{pattern}"]\n', encoding="utf-8")
+    assert settings.load(str(path), table=core_table())["locked_config_keys"] == [pattern]
 
 
 def test_lock_patterns_load_as_a_field_override(tmp_path):
@@ -540,6 +572,16 @@ def test_an_agents_generation_table_coerces_through_the_agent_schema():
     function's, so a dotted agent section coerces a valid value instead of refusing outright."""
     value = settings.coerce_config_string("agents.researcher.generation", "temperature", "0.2", table=core_table())
     assert value == 0.2
+
+
+def test_the_agent_write_schema_covers_exactly_the_agent_keys_load_accepts():
+    """Two hand-kept lists, one for what `update_config` may write into an agent table and one for what
+    `load` parses back out of it, and drift between them is silent in the worst direction: a key only
+    `AGENT_SCHEMA` knows is written to the file and then rejected on the next read, which leaves every
+    later agent write refused with "does not currently parse". `generation` is the one deliberate
+    difference, being a sub-table `AGENT_SCHEMA` spells out one parameter at a time."""
+    flat_agent_keys = {key for section, key in settings.AGENT_SCHEMA if section == "agents.*"}
+    assert flat_agent_keys == set(settings._AGENT_KEYS) - {"generation"}
 
 
 @pytest.mark.parametrize(

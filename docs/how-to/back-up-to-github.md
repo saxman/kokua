@@ -82,11 +82,12 @@ with:
 - **Permissions:** `Contents: Read and write`. Nothing else is needed.
 
 **The scope of this token is the blast radius of the whole capability.** `[github_backup].repo` is an
-ordinary config key, which means the assistant can change it with `update_config` (unlike `[agents.*]`,
-a toolset's settings section cannot declare itself hand-edit-only). What makes that acceptable is that
-the token's name is fixed in code rather than configurable: a repointed `repo` can still only reach a
-repository the one token already writes. Scope the token narrowly and you have bounded where a backup
-can ever go.
+ordinary config key, which means the assistant can change it with `update_config` until you say
+otherwise: a toolset's settings section cannot declare itself hand-edit-only the way `[agents.*]` is by
+default, but adding `"github_backup.repo"` to `[security].locked_config_keys` locks it just as firmly.
+What makes it acceptable even unlocked is that the token's name is fixed in code rather than
+configurable: a repointed `repo` can still only reach a repository the one token already writes. Scope
+the token narrowly and you have bounded where a backup can ever go.
 
 Copy the token now; GitHub will not show it again.
 

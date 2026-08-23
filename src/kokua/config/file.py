@@ -46,20 +46,65 @@ def _str_list(section: str, key: str, value: list) -> list[str]:
     return list(value)
 
 
+# The three accepted pattern forms, spelled out. Every rejection below ends with this, because a pattern
+# the user has to retype is only useful next to what a good one looks like.
+_LOCK_PATTERN_FORMS = (
+    'Write "section.key" for one key, "section.*" for a section and everything under it, or "*" for every key.'
+)
+
+
+def _lock_pattern_fault(pattern: str) -> Optional[str]:
+    """Why ``pattern`` could never match a key, or None when it is one of the three accepted forms.
+
+    ``store.locked_by`` compares a pattern to a section and a key literally, segment for segment, so
+    every fault named here describes a pattern that would be *accepted in silence and lock nothing*:
+    a security setting whose file still reads as though the policy were in force. That is the failure
+    this validator exists to prevent, which is why the check is the whole shape of a pattern rather
+    than only the dotless case a reader hits first.
+
+    A faulty pattern is rejected rather than repaired, whitespace included. The list is hand-authored,
+    so quietly stripping a stray space would hide the slip that produced it instead of showing the user
+    a lock they believe they wrote and do not have.
+
+    Case is deliberately not checked. TOML keys are case-sensitive, so ``"Agents.*"`` really does match
+    nothing, but telling the two apart would need a list of the section names that exist, and sections
+    include every agent name and every installed toolset's own. A wrong-case pattern is a user error
+    this cannot see.
+    """
+    if not pattern:
+        return "it is empty"
+    if pattern != pattern.strip():
+        return "it has leading or trailing whitespace, and a pattern is matched exactly as written"
+    if pattern == "*":
+        return None
+    segments = pattern.split(".")
+    if len(segments) == 1:
+        return "it has no dot, so it names no key"
+    for position, segment in enumerate(segments):
+        if not segment:
+            return "it has an empty segment"
+        if segment != segment.strip():
+            return f"the segment {segment!r} has whitespace around it"
+        if "*" in segment and segment != "*":
+            return f"the segment {segment!r} mixes '*' with other characters, and '*' stands for a whole segment"
+        if segment == "*" and position != len(segments) - 1:
+            return "'*' stands for the rest of the pattern, so it means nothing except in the last segment"
+    return None
+
+
 def _locked_config_keys(section: str, key: str, value: list) -> list[str]:
     """Validate the write-policy patterns, rejecting one that could never match.
 
-    A bare word names no key: the matcher reads the last dotted segment as the key, so a dotless pattern
-    silently locks nothing. Failing at startup is what keeps a typo in a security setting from reading as
-    a policy that is in force.
+    Failing at startup is what keeps a typo in a security setting from reading as a policy that is in
+    force: an unmatchable pattern locks nothing, and both the file and the policy preamble
+    ``read_config`` prints still show the line the user wrote. See :func:`_lock_pattern_fault` for the
+    forms that are wrong and why each one is silent.
     """
     patterns = _str_list(section, key, value)
     for pattern in patterns:
-        if pattern != "*" and "." not in pattern:
-            raise ConfigError(
-                f'[{section}].{key}: {pattern!r} matches nothing. Write "section.key" for one key, '
-                '"section.*" for a section and everything under it, or "*" for every key.'
-            )
+        fault = _lock_pattern_fault(pattern)
+        if fault is not None:
+            raise ConfigError(f"[{section}].{key}: {pattern!r} matches nothing, because {fault}. {_LOCK_PATTERN_FORMS}")
     return patterns
 
 

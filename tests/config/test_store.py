@@ -137,7 +137,7 @@ def test_add_mcp_server_two_urls_on_one_host_get_distinct_names(tmp_path):
 
 def test_add_mcp_server_replacing_an_existing_url_keeps_its_hand_edited_name(tmp_path):
     """Re-adding an already-recorded URL must not silently rename an entry a human named by hand: that
-    name may be the one an [agents.*] table (hand-edit only) already references."""
+    name may be the one an [agents.*] table (locked by default) already references."""
     path = tmp_path / "config.toml"
     path.write_text('[[mcp.server]]\nurl = "https://x/mcp"\nname = "custom-name"\n', encoding="utf-8")
     config_store.add_mcp_server(path, "https://x/mcp", token_env="TOK")

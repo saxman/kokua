@@ -327,7 +327,7 @@ async def test_update_config_dry_run_sees_a_prior_write_from_the_same_session(tm
     path, _, update_config = _tools(tmp_path, config=config)
     # Pre-seed the file with exactly these two agents. Left to create itself on the first write below,
     # `config_store.set_value` scaffolds a brand-new file from the shipped example config (see
-    # `config/store.py`'s `_document`), which carries its own default agents, a distraction this test
+    # `config/store.py`'s `_load`), which carries its own default agents, a distraction this test
     # does not want in the graph the second write's dry run sees.
     path.write_text("[agents.a]\n\n[agents.b]\n", encoding="utf-8")
 
@@ -338,6 +338,26 @@ async def test_update_config_dry_run_sees_a_prior_write_from_the_same_session(tm
     second = await update_config("agents.b", "delegates_to", "a")
     assert "delegation cycle" in second
     assert _read(path)["agents"].get("b", {}).get("delegates_to") is None
+
+
+async def test_update_config_dry_run_sees_a_prior_entry_agent_write(tmp_path):
+    """The other half of the same staleness, and the one the file-backed baseline first missed:
+    `[assistant].agent` is unlocked by default, so the assistant can point the entry agent at a table
+    that does not exist. That write is cold, so the session snapshot still names the old entry agent,
+    and an agent write checked against the snapshot is reported as safe while the next startup refuses
+    the file for naming an agent it has no table for."""
+    config = _unlocked(agents={"a": AgentConfig()}, entry_agent="a")
+    path, _, update_config = _tools(tmp_path, config=config)
+    path.write_text("[agents.a]\n", encoding="utf-8")
+
+    first = await update_config("assistant", "agent", "ghost")
+    assert "restart" in first.lower()
+    assert _read(path)["assistant"]["agent"] == "ghost"
+
+    second = await update_config("agents.a", "description", "hi")
+
+    assert "ghost" in second
+    assert _read(path)["agents"]["a"].get("description") is None
 
 
 async def test_update_config_refusal_names_which_agent_the_fault_is_actually_in(tmp_path):

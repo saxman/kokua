@@ -152,9 +152,11 @@ confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update
 
 # Which config keys update_config refuses, so only a hand-edit here changes them. A pattern is
 # "section.key" for one key, "section.*" for a section and every table under it, or "*" for all of them.
-# This key is always locked, whatever the list says, so the assistant cannot unlock itself in one call;
-# everything else below is yours to remove. Removing "agents.*" really does let the assistant rewrite
-# any agent's tools list, and so widen its own reach, on the next restart. Restart to apply.
+# Anything else fails startup (a stray space, an empty segment, a "*" outside the last one) rather than
+# sitting here locking nothing. This key is always locked, whatever the list says, so the assistant
+# cannot unlock itself in one call; everything else below is yours to remove. Removing "agents.*" really
+# does let the assistant rewrite any agent's tools list, and so widen its own reach, on the next
+# restart. Restart to apply.
 locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
 
 [paths]

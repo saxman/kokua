@@ -146,13 +146,12 @@ change. Full rationale, with the code that backs each claim, is in
    toolset's are one `Setting` on the toolset itself, in its own `[<name>]` section. `SettingsTable`,
    built at startup from both, is what still drives the schema, the sanitizer, the hot-apply set, the
    live-apply loop, and the persist path from one place. `[agents.*]` is locked by default (matched by
-   `config/store.py`'s `is_locked`, which takes the pattern list and delegates to `locked_by(section,
-   key, patterns)`), because `update_config` is a tool the assistant holds and a writable agent table
-   would let it widen its own reach; granting it that table takes a hand-edit removing the pattern from
-   `[security].locked_config_keys`. `[scheduling.task.*]` is locked by
-   prefix too, but for routing rather than capability: the assistant may change any task, only through
-   the scheduling tools, since a bare `update_config` write would skip the scheduler (un)arming a task
-   write has to be paired with.
+   `config/store.py`'s `locked_by(section, key, patterns)`, which answers with the pattern that refused
+   the write), because `update_config` is a tool the assistant holds and a writable agent table would
+   let it widen its own reach; granting it that table takes a hand-edit removing the pattern from
+   `[security].locked_config_keys`. `[scheduling.task.*]` is locked by prefix too, but for routing
+   rather than capability: the assistant may change any task, only through the scheduling tools, since a
+   bare `update_config` write would skip the scheduler (un)arming a task write has to be paired with.
 4. **All state under one directory the user owns.** `$KOKUA_HOME`, default `~/.kokua`. Every leaf
    below `data/` is a derived `AssistantConfig` property, never a new function in `config/paths.py`.
    Declared scheduled tasks are the one stated exception, living in `config.toml` rather than under
