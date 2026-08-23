@@ -20,7 +20,7 @@ from __future__ import annotations
 import copy
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Sequence
+from typing import Any, Awaitable, Callable, Optional, Sequence
 
 from aimu.tools import tool
 
@@ -75,7 +75,37 @@ def _resolvable_model(section: str, key: str, value: str) -> str:
     return value
 
 
-def _validated_agent_write(config, registry) -> Callable[[str, str, Any], Any]:
+def _agents_on_disk(config_path: Path, table) -> Optional[dict]:
+    """The persisted ``[agents.*]`` tables, read fresh, or ``None`` when there is nothing to read yet.
+
+    Agent keys are cold: ``apply_setting`` persists a successful write to the file but never calls
+    ``apply_hot`` for one, so the live ``AssistantConfig.agents`` a running session holds stays exactly
+    what it was at process start until the next restart. A dry run against that frozen snapshot would
+    validate each write against a config nothing has actually been checked against twice in a row: two
+    sequential writes, each individually fine against what was on disk when it landed, could together
+    reintroduce the exact fault (an unresolvable delegate, a cycle) this converter exists to catch,
+    because the second dry run never saw the first write. Reading the file each time instead is what lets
+    the second call see the first call's already-persisted change, which is what the next real startup
+    will also see.
+
+    ``startup_schema()``, not the module's own ``cold_schema``: the latter routes every ``agents.*`` key
+    through this very converter, and handing it to ``load`` as ``extra_schema`` would consult it while
+    resolving the write this call is in the middle of deciding. ``[agents]`` itself never actually reaches
+    that schema (``load`` parses it via its own ``_parse_agent``, not through ``coerce_config_string``),
+    so today this would not recurse, but nothing enforces that staying true, and there is no reason to
+    depend on it.
+
+    Returns ``None`` rather than an empty dict when the file does not exist yet, so the caller can fall
+    back to the live config's own ``agents`` instead of dry-running against nothing: a file only fails to
+    exist before this tool's first successful write, at which point the live snapshot is still accurate.
+    """
+    try:
+        return settings.load(str(config_path), table=table, extra_schema=startup_schema()).get("agents")
+    except settings.ConfigError:
+        return None
+
+
+def _validated_agent_write(config, registry, config_path: Path, table) -> Callable[[str, str, Any], Any]:
     """A converter refusing an agent-table write that would produce a config the next startup rejects.
 
     A dry run of the real ``validate_agents`` rather than a set of per-key checks, so the tool cannot
@@ -87,21 +117,36 @@ def _validated_agent_write(config, registry) -> Callable[[str, str, Any], Any]:
     Supplied by the caller rather than living in ``config/file.py`` because that layer may reach neither
     the toolset registry nor AIMU, which is the same seam :func:`_resolvable_model` uses.
 
-    ``copy.copy`` rather than ``dataclasses.replace`` on the whole config: only ``agents`` is rebound,
-    ``validate_agents`` reads nothing else but ``entry_agent``, and a shallow copy re-runs no
-    ``__post_init__``.
+    Dry-runs against :func:`_agents_on_disk`, not ``config.agents`` directly, since "would the next
+    startup accept this" is a question about the file, not about a snapshot frozen at process start (see
+    that function's docstring for why the two can disagree). ``copy.copy`` rather than
+    ``dataclasses.replace`` on the whole config: only ``agents`` is rebound, ``validate_agents`` reads
+    nothing else but ``entry_agent``, and a shallow copy re-runs no ``__post_init__``.
+
+    The check runs against every configured agent, not only the one being written, so an agent already
+    broken by some other change (an MCP server removed mid-session, say) blocks a write to any other
+    agent's table too -- exact parity with startup, which would refuse the whole file. The error is
+    reworded rather than simply prefixed with the section being written, so that when the fault named
+    inside it belongs to a different agent's table, a model reading the refusal is not misled into
+    repairing the one it just tried to write.
     """
     from kokua.toolsets.agents import validate_agents
 
     def convert(section: str, key: str, value: Any) -> Any:
         name = section.split(".")[1]
+        baseline = _agents_on_disk(config_path, table)
+        if baseline is None:
+            baseline = config.agents
         candidate = copy.copy(config)
-        agent = config.agents.get(name, AgentConfig())
-        candidate.agents = {**config.agents, name: replace(agent, **{key: value})}
+        agent = baseline.get(name, AgentConfig())
+        candidate.agents = {**baseline, name: replace(agent, **{key: value})}
         try:
             validate_agents(candidate, registry)
         except settings.ConfigError as error:
-            raise settings.ConfigError(f"[{section}].{key}: {error}") from error
+            raise settings.ConfigError(
+                f"{error} (found while validating every agent for the write to [{section}].{key}; the "
+                "fault may be in a different agent's table than this one)"
+            ) from error
         return value
 
     return convert
@@ -139,7 +184,7 @@ def make_config_tools(
     resulting config would still start. ``build_schema`` merges ``extra_schema`` last, which is what lets
     that override land.
     """
-    agent_write = _validated_agent_write(config, registry)
+    agent_write = _validated_agent_write(config, registry, config_path, table)
     cold_schema = {
         **startup_schema(),
         ("assistant", "model"): ("model", (str,), "a string", _resolvable_model),

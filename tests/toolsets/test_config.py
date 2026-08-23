@@ -312,3 +312,43 @@ async def test_update_config_still_refuses_an_agent_write_by_default(tmp_path):
     result = await update_config("agents.researcher", "tools", "time")
     assert "agents.*" in result
     assert not path.exists()
+
+
+async def test_update_config_dry_run_sees_a_prior_write_from_the_same_session(tmp_path):
+    """Reproduces the cycle the dry run exists to prevent, across two writes rather than one.
+
+    Each write, taken alone, validates fine against what was on disk when it landed: `a -> b` is
+    acyclic, and so is `b -> a` if checked against the agents this *session* started with, which never
+    learned about the first write, since an agent table is a cold key nothing re-applies live. Checked
+    against the file instead (what the next startup actually reads), the second write closes `a -> b -> a`
+    and must be refused.
+    """
+    config = _unlocked(agents={"a": AgentConfig(), "b": AgentConfig()}, entry_agent="a")
+    path, _, update_config = _tools(tmp_path, config=config)
+    # Pre-seed the file with exactly these two agents. Left to create itself on the first write below,
+    # `config_store.set_value` scaffolds a brand-new file from the shipped example config (see
+    # `config/store.py`'s `_document`), which carries its own default agents -- a distraction this test
+    # does not want in the graph the second write's dry run sees.
+    path.write_text("[agents.a]\n\n[agents.b]\n", encoding="utf-8")
+
+    first = await update_config("agents.a", "delegates_to", "b")
+    assert "restart" in first.lower()
+    assert _read(path)["agents"]["a"]["delegates_to"] == ["b"]
+
+    second = await update_config("agents.b", "delegates_to", "a")
+    assert "delegation cycle" in second
+    assert _read(path)["agents"].get("b", {}).get("delegates_to") is None
+
+
+async def test_update_config_refusal_names_which_agent_the_fault_is_actually_in(tmp_path):
+    """A graph already broken elsewhere must not make the refusal read as though the agent just written
+    is the broken one: the write to `r` is fine on its own, the fault is in `q`'s tools."""
+    config = _unlocked(agents={"q": AgentConfig(tools=["nosuch"]), "r": AgentConfig()}, entry_agent="r")
+    path, _, update_config = _tools(tmp_path, config=config, registry={})
+
+    result = await update_config("agents.r", "description", "the researcher")
+
+    assert "agents.r" in result
+    assert "'q'" in result
+    assert "different agent" in result
+    assert not path.exists()
