@@ -530,7 +530,11 @@ from the server's host and disambiguated against the names already on file, so a
 never leave behind a config the registry's collision check would reject at the next boot. That derived
 name reaches no agent until a human adds it to an `[agents.*]` table, since that section is hand-edit
 only: the tool can connect a server but cannot grant itself the capability. `mcp/auth.py` handles OAuth
-by posting the authorization link into the chat and persisting tokens to disk.
+by posting the authorization link into the chat and persisting tokens to disk. It also carries the one
+piece of that flow a single-machine library gets to assume away: `OAuthSettings` holds where the
+provider's redirect lands, because FastMCP's default (loopback, a random port per process) sends the
+approved browser to *its own* machine, which is the wrong one whenever Kokua is not where you browse.
+The two settings behind it are `[mcp].oauth_callback_host` / `oauth_callback_port`.
 
 ## Workflows
 

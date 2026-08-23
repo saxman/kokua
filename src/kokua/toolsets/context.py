@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import cached_property
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from aimu.aio import Scheduler
@@ -22,6 +21,7 @@ from aimu.memory import DocumentStore, SemanticMemoryStore
 from aimu.skills import SkillManager
 
 from kokua.config.schema import AssistantConfig
+from kokua.mcp.auth import OAuthSettings
 from kokua.config.table import SettingsTable
 
 # The toolset that grants author_skill / add_skill_script. Declaring it opts an agent out of catalogue
@@ -51,7 +51,7 @@ class LiveState:
 
     config: AssistantConfig
     notify: Optional[Callable] = None
-    oauth_storage_dir: Optional[Path] = None
+    oauth: Optional[OAuthSettings] = None
     connections: list = field(default_factory=list)
     for_each_agent: Optional[Callable[[Callable], None]] = None
     reapply_config: Optional[Callable] = None

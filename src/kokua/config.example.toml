@@ -135,6 +135,14 @@ shell, or calculations). Report exactly what you did and the concrete result."""
 # url = "https://broker.example.com/mcp"
 # name = "stocks"
 
+# [mcp]
+# Where an OAuth server sends your browser after you approve, and where Kokua listens for the code.
+# Defaults to localhost on a free port picked per process, which assumes you browse from the machine
+# Kokua runs on. If you do not, pin the port and forward it (ssh -L 8765:localhost:8765 kokua-host),
+# or set the host to Kokua's own name if the provider accepts a non-loopback redirect. Restart to apply.
+# oauth_callback_host = "localhost"
+# oauth_callback_port = 8765
+
 [security]
 # Tools requiring confirmation before each call (terminal y/N, or Allow/Deny in the web UI). These run
 # with full machine access. [] disables approval; proactive turns auto-deny these regardless. Gating is

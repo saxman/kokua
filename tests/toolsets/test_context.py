@@ -3,13 +3,14 @@ pinning directly: shared across agents when declared, never constructed when not
 
 from kokua.config.schema import AssistantConfig
 from kokua.toolsets.context import LiveState, ToolsetContext
+from kokua.mcp.auth import OAuthSettings
 
 
 def _state(tmp_path) -> LiveState:
     return LiveState(
         config=AssistantConfig(data_dir=tmp_path),
         notify=None,
-        oauth_storage_dir=tmp_path / "mcp-oauth",
+        oauth=OAuthSettings(storage_dir=tmp_path / "mcp-oauth"),
         connections=[],
         for_each_agent=lambda apply: None,
         reapply_config=None,

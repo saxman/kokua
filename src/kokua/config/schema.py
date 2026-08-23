@@ -98,6 +98,12 @@ class AssistantConfig:
     configured_sections: tuple[str, ...] = ()
     # Remote MCP servers to connect at startup; each may name an env var holding its bearer token.
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
+    # Where an MCP server's OAuth approval is sent back to. The defaults are FastMCP's own (loopback,
+    # a fresh port per process) and assume the browser runs on the same machine as Kokua; set both
+    # when it does not, and see kokua.mcp.auth.OAuthSettings for why the port is worth pinning either
+    # way. Applied when a connection is made, so a change takes effect on the next start.
+    mcp_oauth_callback_host: str = "localhost"
+    mcp_oauth_callback_port: Optional[int] = None
     # Email (SMTP send). Recipients are LOCKED to email_to: the send_email tool takes no recipient, so
     # the assistant can only ever email the user. The password is read from KOKUA_EMAIL_PASSWORD (env),
     # never TOML. The email toolset self-gates: it offers no tool unless host + email_to are set and

@@ -241,6 +241,22 @@ def test_mcp_server_unknown_key_raises(tmp_path):
         settings.load(str(path), table=core_table())
 
 
+def test_mcp_oauth_callback_keys_parse(tmp_path):
+    """A Kokua the browser reaches over the network needs the OAuth redirect pointed at it."""
+    path = tmp_path / "config.toml"
+    path.write_text('[mcp]\noauth_callback_host = "kokua.lan"\noauth_callback_port = 8765\n', encoding="utf-8")
+    overrides = settings.load(str(path), table=core_table())
+    assert overrides["mcp_oauth_callback_host"] == "kokua.lan"
+    assert overrides["mcp_oauth_callback_port"] == 8765
+
+
+def test_mcp_oauth_callback_port_rejects_a_non_integer(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[mcp]\noauth_callback_port = "8765"\n', encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match="oauth_callback_port"):
+        settings.load(str(path), table=core_table())
+
+
 def test_mcp_unknown_top_level_key_raises(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[mcp]\nservers = ["https://x/mcp"]\n', encoding="utf-8")

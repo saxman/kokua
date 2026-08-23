@@ -58,13 +58,58 @@ Three modes, chosen automatically:
 - **None.** An unprotected server connects directly.
 - **OAuth.** On an auth challenge, the flow starts by itself: the assistant posts an authorization link
   into the chat and opens a browser window. Once you approve, the connection completes and the token is
-  saved under `$KOKUA_HOME/data/mcp-oauth/` for later sessions.
+  saved under `$KOKUA_HOME/data/mcp-oauth/` for later sessions. The posted message names the address
+  your approval will be sent back to, which matters if you are not browsing from Kokua's own machine
+  (see below).
 - **Bearer token.** Set `token_env` to the name of an environment variable, exported however you already
   manage secrets. It is read at connect time, so the token never enters `config.toml`.
 
 Some servers require authentication but cannot use the automatic OAuth flow, because they do not support
 dynamic client registration. `add_mcp_server` detects this and returns a message asking for a token
 rather than failing opaquely; the assistant relays that request to you.
+
+### Authorizing when Kokua runs on another machine
+
+The OAuth handshake ends with the provider redirecting *your browser* to a callback address that Kokua
+is listening on, and by default that address is `http://localhost:<random port>/callback`. When the
+browser and Kokua are on the same machine this is invisible and correct. When they are not, `localhost`
+is your own computer, the approved code is delivered there, nothing is listening, and Kokua's own
+listener waits five minutes before failing. Nothing about the failure points at the cause, which is why
+the authorization message names the callback address.
+
+Fix it by pinning the callback to a port you can reach, in `[mcp]`:
+
+```toml
+[mcp]
+oauth_callback_port = 8765
+```
+
+Then forward that port from the machine you browse on, before you ask for the connection:
+
+```bash
+ssh -L 8765:localhost:8765 kokua-host
+```
+
+The redirect URI stays `http://localhost:8765/callback`, which is what you want: OAuth providers
+routinely accept a loopback redirect and reject any other plain-HTTP one (RFC 8252's loopback
+exception), so tunnelling works where pointing the callback at a hostname may not.
+
+If your provider does accept a non-loopback redirect, you can skip the tunnel by naming the Kokua host
+instead:
+
+```toml
+[mcp]
+oauth_callback_host = "kokua.lan"
+oauth_callback_port = 8765
+```
+
+That value is both the interface the callback server binds and the host in the registered redirect URI,
+so it has to resolve to Kokua from your browser as well as from Kokua itself. The authorization code
+then crosses your network in cleartext, which is the trade for not tunnelling.
+
+Pinning the port is worth doing even on a single machine. Kokua caches the OAuth client registration
+across restarts, but a random port is chosen fresh in each process, so a re-authorization in a later
+session can present a redirect URI the provider has on file under the old port and be rejected.
 
 ## Add one mid-conversation
 

@@ -41,6 +41,7 @@ from kokua.core.conversations import ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
 from kokua.core.subagents import SubagentReporter
+from kokua.mcp.auth import OAuthSettings
 from kokua.mcp.servers import ServerConnection, reconnect_mcp_servers
 from kokua.core.settings_runtime import SettingsApplier
 from kokua.core.turn_gate import TurnGate
@@ -170,7 +171,11 @@ class Assistant:
         undeclared_commands = undeclared_workflow_commands(config, registry)
 
         connections: list[ServerConnection] = []
-        oauth_storage_dir = config.data_dir / "mcp-oauth"
+        oauth = OAuthSettings(
+            storage_dir=config.data_dir / "mcp-oauth",
+            callback_host=config.mcp_oauth_callback_host,
+            callback_port=config.mcp_oauth_callback_port,
+        )
 
         # Multiple conversations live in a session store. The active conversation is the most
         # recently updated (a fresh empty one if there are none).
@@ -225,7 +230,7 @@ class Assistant:
         state = LiveState(
             config=config,
             notify=channel.send,
-            oauth_storage_dir=oauth_storage_dir,
+            oauth=oauth,
             connections=connections,
             scheduler=scheduler,
             proactive=assistant._proactive,
@@ -261,9 +266,7 @@ class Assistant:
         # agent is built: the entry agent's spawn_subagent snapshots `connections` at build time to give
         # MCP-backed workers their tools. The fan-out is a no-op here (no agents are live yet); it just
         # fills `connections`.
-        await reconnect_mcp_servers(
-            for_each_agent, connections, config, notify=channel.send, oauth_storage_dir=oauth_storage_dir
-        )
+        await reconnect_mcp_servers(for_each_agent, connections, config, notify=channel.send, oauth=oauth)
         for name in unreferenced_toolsets(config, state.registry):
             logger.warning(
                 "Toolset %r is provisioned but no [agents.*] table names it in `tools`, so it reaches no "

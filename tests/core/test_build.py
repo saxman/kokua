@@ -10,6 +10,7 @@ from kokua.config import MCPServerConfig
 from kokua.config.schema import AgentConfig
 from kokua.core.assistant import Assistant
 from kokua.toolsets.context import LiveState
+from kokua.mcp.auth import OAuthSettings
 from tests.channels import FakeChannel, _config, example_agents
 from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
 from tests.helpers import MockAsyncModelClient
@@ -558,7 +559,7 @@ def test_make_agent_builder_wires_and_restores(tmp_path):
     state = LiveState(
         config=config,
         registry=build_registry(config),
-        oauth_storage_dir=config.data_dir / "mcp-oauth",
+        oauth=OAuthSettings(storage_dir=config.data_dir / "mcp-oauth"),
         tool_approval=lambda name, args: True,
         reapply_config=noop,
         for_each_agent=lambda apply: None,

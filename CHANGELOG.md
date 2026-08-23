@@ -685,6 +685,16 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   cannot complete because the server lacks dynamic client registration, it returns an actionable "provide
   a bearer token and add the server again" message instead of a raw `OAuthRegistrationError`, and its
   docstring tells the assistant to relay that, ask for a token, and retry with `bearer_token`.
+- **The OAuth callback is placeable** through `[mcp].oauth_callback_host` / `oauth_callback_port`.
+  FastMCP's defaults (loopback, a fresh random port per process) assume the browser runs on the machine
+  the client does. When it does not, the provider redirects the approved browser to *its own* loopback,
+  Kokua's listener never hears it, and the connection fails only when the flow times out minutes later,
+  with nothing anywhere naming the cause. Pinning the port makes an SSH forward possible while keeping
+  the loopback redirect URI that OAuth providers accept; setting the host suits a provider that takes a
+  non-loopback one. Pinning also fixes a single-machine case, since the client registration is cached
+  across restarts while a random port is not, so a re-authorization in a later process could present a
+  redirect URI the provider had on file under the old port. The authorization message now names the
+  callback address it will use, because a redirect landing on the wrong machine is otherwise invisible.
 - **Boot logs the tools each server contributed, by name.** This is the only record of a remote server's
   tool list: `config.toml` does not know it, `--list-toolsets` runs before any connection so it can only
   name the server, and `add_mcp_server` reports tool names on a runtime add but a boot reconnect reported

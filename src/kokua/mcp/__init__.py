@@ -3,7 +3,7 @@
 The agent tools that drive this live in ``kokua.toolsets.mcp_admin``; nothing here formats a sentence.
 """
 
-from .auth import build_chat_oauth
+from .auth import OAuthSettings, build_chat_oauth
 from .servers import (
     AlreadyConnected,
     BearerTokenRequired,
@@ -32,5 +32,6 @@ __all__ = [
     "add_server",
     "remove_server",
     "reconnect_mcp_servers",
+    "OAuthSettings",
     "build_chat_oauth",
 ]

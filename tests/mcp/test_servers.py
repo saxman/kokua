@@ -5,6 +5,7 @@ from aimu import aio
 
 from kokua.mcp import servers as mcp
 from kokua.config import MCPServerConfig
+from kokua.mcp.auth import OAuthSettings
 from kokua.mcp.servers import (
     _looks_like_auth_required,
     _looks_like_registration_unsupported,
@@ -55,7 +56,7 @@ async def test_connect_mcp_bearer_token_skips_oauth(monkeypatch, tmp_path):
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
     client, mode = await mcp.connect_mcp(
-        "https://svc/mcp", bearer_token="tok", notify=_noop_notify, oauth_storage_dir=tmp_path
+        "https://svc/mcp", bearer_token="tok", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path)
     )
     assert (client, mode) == ("client", "bearer")
 
@@ -69,7 +70,9 @@ async def test_connect_mcp_asks_for_bearer_when_registration_unsupported(monkeyp
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
     with pytest.raises(mcp.BearerTokenRequired) as excinfo:
-        await mcp.connect_mcp("https://git.example/mcp", notify=_noop_notify, oauth_storage_dir=tmp_path / "oauth")
+        await mcp.connect_mcp(
+            "https://git.example/mcp", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+        )
     assert "git.example" in str(excinfo.value)
     assert "bearer token" in str(excinfo.value).lower()
 
@@ -83,7 +86,9 @@ async def test_connect_mcp_other_oauth_failure_reraises_unchanged(monkeypatch, t
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
     with pytest.raises(RuntimeError, match="token exchange failed"):
-        await mcp.connect_mcp("https://svc/mcp", notify=_noop_notify, oauth_storage_dir=tmp_path / "oauth")
+        await mcp.connect_mcp(
+            "https://svc/mcp", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+        )
 
 
 def test_resolve_server_token_reads_env(monkeypatch):
@@ -138,7 +143,7 @@ async def _noop_notify(message: str) -> None:
 def _kwargs(tmp_path, **overrides):
     base = {
         "notify": _noop_notify,
-        "oauth_storage_dir": tmp_path / "oauth",
+        "oauth": OAuthSettings(storage_dir=tmp_path / "oauth"),
         "config_path": tmp_path / "config.toml",
         "for_each_agent": lambda fn: None,
     }
@@ -279,7 +284,7 @@ async def test_boot_reconnect_logs_the_tool_names_each_server_contributed(monkey
 
     with caplog.at_level("INFO", logger="kokua.mcp.servers"):
         await mcp.reconnect_mcp_servers(
-            lambda fn: None, [], config, notify=_noop_notify, oauth_storage_dir=tmp_path / "oauth"
+            lambda fn: None, [], config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
         )
 
     logged = " ".join(record.getMessage() for record in caplog.records)
@@ -297,7 +302,7 @@ async def test_boot_reconnect_says_so_when_a_server_contributes_no_tools(monkeyp
 
     with caplog.at_level("INFO", logger="kokua.mcp.servers"):
         await mcp.reconnect_mcp_servers(
-            lambda fn: None, [], config, notify=_noop_notify, oauth_storage_dir=tmp_path / "oauth"
+            lambda fn: None, [], config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
         )
 
     assert any("no tools" in record.getMessage() for record in caplog.records)
@@ -326,7 +331,11 @@ async def test_boot_reconnect_through_an_auth_challenge_posts_nothing_to_the_cha
     connections = []
 
     await mcp.reconnect_mcp_servers(
-        lambda fn: None, connections, config, notify=recording_notify, oauth_storage_dir=tmp_path / "oauth"
+        lambda fn: None,
+        connections,
+        config,
+        notify=recording_notify,
+        oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
     )
 
     assert posted == []

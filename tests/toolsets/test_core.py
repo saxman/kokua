@@ -6,6 +6,7 @@ import sys
 from kokua.config.schema import AssistantConfig
 from kokua.toolsets.context import LiveState, ToolsetContext
 from kokua.toolsets.core import CORE_TOOLSETS
+from kokua.mcp.auth import OAuthSettings
 
 BY_NAME = {t.name: t for t in CORE_TOOLSETS}
 
@@ -59,7 +60,7 @@ def test_mcp_admin_builds_the_add_and_remove_tools(tmp_path):
     ctx = _ctx(
         tmp_path,
         for_each_agent=lambda apply: None,
-        oauth_storage_dir=tmp_path,
+        oauth=OAuthSettings(storage_dir=tmp_path),
         refresh_workers=lambda agent: None,
     )
     assert {fn.__name__ for fn in BY_NAME["mcp-admin"].build(ctx)} == {"add_mcp_server", "remove_mcp_server"}

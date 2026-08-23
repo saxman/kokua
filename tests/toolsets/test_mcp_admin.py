@@ -3,6 +3,7 @@
 from aimu import aio
 
 from kokua.toolsets.mcp_admin import make_mcp_tools
+from kokua.mcp.auth import OAuthSettings
 
 
 async def _noop_notify(message: str) -> None:
@@ -14,7 +15,7 @@ def _tools(tmp_path, connections=None):
         lambda fn: None,
         connections if connections is not None else [],
         notify=_noop_notify,
-        oauth_storage_dir=tmp_path / "oauth",
+        oauth=OAuthSettings(storage_dir=tmp_path / "oauth"),
         config_path=tmp_path / "config.toml",
     )
 

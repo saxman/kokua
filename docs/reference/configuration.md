@@ -110,7 +110,7 @@ immediately. Everything else is **startup-only**: change it, then restart.
 | --- | --- |
 | `[display].show_thinking`, `[display].show_tools` | everything in `[assistant]`, including `[assistant.generation]` |
 | `[planning].plan_review`, `plan_review_agent`, `result_review`, `show_reasoning` | `[planning].review_rounds` |
-| `[capabilities].max_depth` | all of `[agents.*]`, `[[mcp.server]]`, `[security]`, `[paths]`, `[frontend]`, `[web]`, `[logging]`, `[email]` |
+| `[capabilities].max_depth` | all of `[agents.*]`, `[mcp]` (including `[[mcp.server]]`), `[security]`, `[paths]`, `[frontend]`, `[web]`, `[logging]`, `[email]` |
 | `[scheduling].max_task_conversations` | |
 
 The model and the reasoning effort read like runtime settings and are not. Nothing rebinds a live model
@@ -367,6 +367,29 @@ derived from the host and a numeric suffix if that name is taken, so the file al
 reaches no agent until you add it to a `tools` list **and restart**, since the toolset namespace and the
 agent tables are both read only at startup. See [add an MCP
 service](../how-to/add-mcp-services.md).
+
+### The OAuth callback
+
+Two scalar keys sit in `[mcp]` itself, alongside the server array. They decide where an OAuth provider
+sends your browser once you approve, which is also where Kokua listens for the code.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `oauth_callback_host` | `"localhost"` | host in the registered redirect URI, and the interface the callback server binds |
+| `oauth_callback_port` | unset (a free port, chosen per process) | port for both |
+
+```toml
+[mcp]
+oauth_callback_port = 8765
+```
+
+The defaults assume the browser runs on the same machine as Kokua. If it does not, the provider sends
+your approval to *your* loopback, Kokua never receives it, and the connection fails only when the flow
+times out. Pin the port and forward it (`ssh -L 8765:localhost:8765 kokua-host`), or set the host to
+Kokua's own name if your provider accepts a non-loopback redirect URI. Pinning the port also protects a
+re-authorization in a later session, since the client registration is cached across restarts while a
+random port is not. [Add an MCP service](../how-to/add-mcp-services.md#authorizing-when-kokua-runs-on-another-machine)
+covers both setups.
 
 ## `[security]`
 

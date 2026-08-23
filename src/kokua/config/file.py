@@ -338,6 +338,8 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("security", "confirm_tools"): ("confirm_tools", (list,), "a list of strings", _str_list),
     ("paths", "data_dir"): ("data_dir", (str,), "a string path", lambda s, k, v: Path(v).expanduser()),
     ("frontend", "name"): ("frontend", (str,), "a string", None),
+    ("mcp", "oauth_callback_host"): ("mcp_oauth_callback_host", (str,), "a string", None),
+    ("mcp", "oauth_callback_port"): ("mcp_oauth_callback_port", (int,), "an integer", None),
     ("web", "host"): ("host", (str,), "a string", None),
     ("web", "port"): ("port", (int,), "an integer", None),
     ("logging", "level"): ("log_level", (str,), "a string", None),
@@ -476,8 +478,12 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
     # the assistant holds, and a writable agent table would let it widen its own reach.
     if section == "agents" or section.startswith("agents."):
         raise ConfigError("[agents.*] is hand-edit only; update_config cannot change an agent's table")
-    if section in ("subagents", "mcp"):
-        raise ConfigError(f"[{section}] has no scalar keys editable with update_config")
+    if section == "subagents":
+        raise ConfigError("[subagents] has no scalar keys editable with update_config")
+    # [mcp] does have scalar keys, but its [[mcp.server]] array is not one of them: a server is added
+    # and removed through the mcp-admin tools, which connect it as well as write it.
+    if section == "mcp" and key == "server":
+        raise ConfigError("[[mcp.server]] is not editable with update_config; use the MCP tools")
     schema = build_schema(table, extra_schema)
     spec = schema.get((section, key))
     if spec is None:
@@ -592,14 +598,13 @@ def load(
         if section == "agents":
             overrides["agents"] = {name: _parse_agent(name, spec) for name, spec in entries.items()}
             continue
-        # The [mcp] table holds a [[mcp.server]] array of tables (each url + optional token_env),
-        # not flat scalar keys, so it is handled specially like [subagents]/[agents].
+        # [mcp] is the one section holding both shapes: a [[mcp.server]] array of tables, which needs
+        # its own parser, and ordinary scalar keys (the OAuth callback), which the schema handles. Only
+        # the array is special-cased; everything else falls through to the flat path below.
         if section == "mcp":
-            for key, value in entries.items():
-                if key != "server":
-                    raise ConfigError(f"unknown config key [mcp].{key}")
-                overrides["mcp_servers"] = _parse_mcp_servers(value)
-            continue
+            if "server" in entries:
+                overrides["mcp_servers"] = _parse_mcp_servers(entries["server"])
+            entries = {key: value for key, value in entries.items() if key != "server"}
         # Routed by section rather than by the dotted-target convention a toolset's keys use, because
         # `generation` is also a legal toolset name and would claim the same bucket.
         if section == _GENERATION_SECTION:

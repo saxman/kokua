@@ -55,7 +55,7 @@ def make_mcp_tools(
     connections: list,
     *,
     notify,
-    oauth_storage_dir,
+    oauth,
     config_path,
     refresh_workers: Optional[Callable] = None,
 ) -> list[Callable]:
@@ -94,7 +94,7 @@ def make_mcp_tools(
                 url,
                 bearer_token=bearer_token,
                 notify=notify,
-                oauth_storage_dir=oauth_storage_dir,
+                oauth=oauth,
                 config_path=config_path,
                 for_each_agent=for_each_agent,
                 refresh_workers=refresh_workers,
@@ -151,7 +151,7 @@ def _build(ctx) -> list:
         ctx.state.for_each_agent,
         ctx.state.connections,
         notify=ctx.state.notify,
-        oauth_storage_dir=ctx.state.oauth_storage_dir,
+        oauth=ctx.state.oauth,
         config_path=ctx.config.config_path,
         refresh_workers=ctx.state.refresh_workers,
     )
