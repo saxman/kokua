@@ -313,6 +313,33 @@ async def test_update_config_creates_an_agent_table_that_does_not_exist_yet(tmp_
     assert _read(path)["agents"]["newbie"]["tools"] == ["time"]
 
 
+async def test_update_config_writes_no_table_for_a_section_naming_no_real_agent(tmp_path):
+    """The wildcard is a schema key, not a section: `_schema_section` folds an agent's name to `*` and so
+    folds `agents.*` to itself, which used to resolve and put an agent literally named `*` on disk. It
+    reads as though it were the lock pattern the user wrote and matches nothing, so it is refused."""
+    config = _unlocked(tmp_path, agents={"a": AgentConfig()}, entry_agent="a")
+    path, _, update_config = _tools(tmp_path, config=config)
+    path.write_text("[agents.a]\n", encoding="utf-8")
+
+    result = await update_config("agents.*", "tools", "time")
+
+    assert "does not name an agent" in result
+    assert list(_read(path)["agents"]) == ["a"]
+
+
+async def test_update_config_writes_a_hyphenated_agent_name(tmp_path):
+    """The refusal above is TOML's bare-key character set, and the shipped example's own `report-writer`
+    is what that rule has to keep letting through."""
+    config = _unlocked(tmp_path, agents={"a": AgentConfig()}, entry_agent="a")
+    path, _, update_config = _tools(tmp_path, config=config)
+    path.write_text("[agents.a]\n", encoding="utf-8")
+
+    result = await update_config("agents.report-writer", "description", "writes the report")
+
+    assert "restart" in result.lower()
+    assert _read(path)["agents"]["report-writer"]["description"] == "writes the report"
+
+
 async def test_update_config_still_refuses_an_agent_write_by_default(tmp_path):
     """The shipped policy locks agents.*, so none of the above is reachable without a hand-edit."""
     config = _config(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")

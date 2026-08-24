@@ -551,7 +551,11 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   `[agents.<name>]` table gets both hints as well, read off the one set of entries that serves every
   agent, and a hint pointing *into* an agent's table says `[agents.<name>]` rather than the wildcard the
   schema is keyed by, because a model follows a hint literally and the wildcard written back would
-  create an agent named `*`. A `config.toml` that is not valid TOML is answered the same way, as a
+  create an agent named `*`. The tool refuses that section outright as well, along with every other
+  agent name a section header could not carry as written (an empty one, a spaced one): those are quoted
+  on the way into the file, so the table written would not be the section the tool just reported. The
+  rule is TOML's bare-key character set, so `report-writer` and `stock_trader` still write. A
+  `config.toml` that is not valid TOML is answered the same way, as a
   refusal naming the file and the syntax fault: both parsers the tool sits over (tomlkit for the write
   itself, `tomllib` for the re-read an agent write is checked against) raise a `ConfigError` on a syntax
   error, so a stray bracket from a hand-edit made while Kokua runs is something the assistant can report

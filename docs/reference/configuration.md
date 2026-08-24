@@ -118,7 +118,7 @@ Everything else is yours to remove, and here is what removing each shipped patte
 | `security.*` | lets the assistant change `confirm_tools`, and so remove its own approval gate |
 | `email.to` | lets the assistant mail someone other than you |
 | `paths.data_dir` | lets the assistant move its own state out from under you |
-| `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `system_message`, `description`, and `delegates_to`, set its `[agents.<name>.generation]` parameters, and create new agents. It can widen its own reach, effective on the next restart. |
+| `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `system_message`, `description`, and `delegates_to`, set its `[agents.<name>.generation]` parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart. |
 | `scheduling.task.*` | changes the error message only. `update_config` still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule. |
 
 A flat agent key (`tools`, `model`, `thinking`, `system_message`, `description`, `delegates_to`) is
@@ -366,6 +366,12 @@ straight back to the file.
 
 Every agent, declared whole. The table name is the agent's name: it is what `[assistant].agent` selects,
 what another agent's `delegates_to` names, and what `spawn_subagent` takes as its `agent_type`.
+
+A name you write by hand is any TOML key, quoted where it has to be. A name `update_config` writes is
+narrower, letters, digits, hyphens, and underscores, so the section the tool reports is the section that
+reaches the file: anything else would be quoted on the way in and land under a name you could not name
+again. `agents.*` is refused for that reason and one more, being the wildcard a lock pattern covers the
+whole section with rather than an agent.
 
 **This whole section is locked by default.** See [who may change which key](#who-may-change-which-key)
 for what removing `agents.*` from `[security].locked_config_keys` actually permits.

@@ -761,6 +761,37 @@ def test_agent_hint_names_a_placeholder_rather_than_the_wildcard():
         settings.coerce_config_string("display", "tools", "x", table=core_table())
 
 
+@pytest.mark.parametrize(
+    "section, key",
+    [
+        ("agents.*", "tools"),
+        ("agents.*", "generation"),
+        ("agents.*.generation", "temperature"),
+        ("agents.", "tools"),
+        ("agents..generation", "temperature"),
+        ("agents. spaced", "tools"),
+    ],
+)
+def test_a_section_whose_agent_name_could_not_be_written_as_given_is_refused(section, key):
+    """`_schema_section` folds an agent's name to `*` for the lookup, and the folded forms fold to
+    themselves, so every one of these resolved against the schema and wrote a quoted table: `[agents."*"]`,
+    `[agents.""]`, `[agents." spaced"]`. Each is an agent under a name the caller did not ask for and
+    cannot name again the same way, and `*` reads besides as the wildcard a lock pattern is written with.
+
+    `generation` is in the list twice on purpose: the name is checked before the sub-table refusal, so
+    `section="agents.*"` is answered about the name rather than pointed at `agents.*.generation`.
+    """
+    with pytest.raises(settings.ConfigError, match="does not name an agent"):
+        settings.coerce_config_string(section, key, "0.7", table=core_table())
+
+
+@pytest.mark.parametrize("name", ["report-writer", "stock-trader", "my_agent", "agent2"])
+def test_an_agent_name_a_section_header_can_carry_is_still_accepted(name):
+    """The rule is TOML's bare-key character set, not a blocklist of one character, and the shipped
+    example's own `report-writer` is the case that has to keep working."""
+    assert settings.coerce_config_string(f"agents.{name}", "tools", "time", table=core_table()) == ["time"]
+
+
 def _write_task_config(tmp_path, body: str):
     path = tmp_path / "config.toml"
     path.write_text(body, encoding="utf-8")

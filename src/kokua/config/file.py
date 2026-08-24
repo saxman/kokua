@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.resources
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, Union
@@ -449,6 +450,35 @@ def _schema_section(section: str) -> str:
 _FOLDED_PREFIX = "agents.*"
 _NAMED_PREFIX = "agents.<name>"
 
+# TOML's own bare-key character set, which is what an agent name has to be for the section a write names
+# to be the section that lands in the file. See `_agent_name_fault`.
+_BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _agent_name_fault(name: str) -> Optional[str]:
+    """Why ``name`` cannot be the agent segment of a section ``update_config`` writes, or None.
+
+    The write path spells a section into the file segment by segment, and tomlkit quotes any segment that
+    is not a bare TOML key. So ``section="agents.*"`` produces ``[agents."*"]``: an agent really does
+    appear on disk, under a name the caller did not ask for and cannot name again by the same route, while
+    the tool reports the section it was handed. The literal ``*`` is the form that motivated this, because
+    the schema is keyed by the folded ``agents.*`` and so accepts it as though it were a section, and
+    because an agent called ``*`` reads as though it were the wildcard a lock pattern is written with and
+    is no such thing. It is not the only one: an empty name (``section="agents."``) and a name with a
+    space are quoted exactly the same way, so the rule is the character set rather than the one character.
+
+    Only the tool surface is narrowed. A hand-authored ``[agents."my agent"]`` is legal TOML that
+    ``_parse_agent`` loads without complaint, and stays loadable; it simply is not a table this tool
+    edits, which is the same trade the bare-``[agents]`` and ``generation`` refusals below already make.
+    """
+    if not name:
+        return "the segment where the agent's name goes is empty"
+    if name == "*":
+        return "'*' is the wildcard a lock pattern covers a whole section with, not an agent"
+    if not _BARE_KEY.fullmatch(name):
+        return f"{name!r} would have to be quoted in a section header, so the table written would not be this section"
+    return None
+
 
 def _named_section(section: str) -> str:
     """A schema section written the way a config file writes it, for error text only.
@@ -660,9 +690,11 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
     never imported, because ``config`` is the bottom layer and cannot reach the installed toolsets.
 
     An ``[agents.<name>]`` section is resolved through :data:`AGENT_SCHEMA` after ``_schema_section``
-    folds the agent's name to ``*``. Whether such a write is *allowed* is not decided here: that is
-    ``store.locked_by`` against the user's ``[security].locked_config_keys``, which locks ``agents.*`` by
-    default.
+    folds the agent's name to ``*``. The fold is a schema lookup, not a licence to write the folded form:
+    a section whose agent segment could not be written into the file as given is refused first, by
+    :func:`_agent_name_fault`. Whether an otherwise well-named write is *allowed* is not decided here:
+    that is ``store.locked_by`` against the user's ``[security].locked_config_keys``, which locks
+    ``agents.*`` by default.
     """
     # A bare [agents] write names no agent: the section is [agents.<name>], and writing a key directly
     # under [agents] would produce a table `_parse_agent` reads as an agent named after the key.
@@ -671,6 +703,13 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
             f'[agents].{key} is not a setting. Name an agent: section="agents.{key}" with the key you '
             'want to set, for instance "tools".'
         )
+    if section.startswith("agents."):
+        fault = _agent_name_fault(section.split(".")[1])
+        if fault is not None:
+            raise ConfigError(
+                f"[{section}] does not name an agent: {fault}. Name a real agent, for instance "
+                'section="agents.researcher"; a name holds letters, digits, hyphens, or underscores.'
+            )
     if section.startswith("agents.") and key == "generation":
         raise ConfigError(
             f"[{section}].generation is a table, not a scalar. Set one parameter at a time with "
