@@ -67,7 +67,7 @@ The practical consequence: the assistant core is a few hundred lines that knows 
 
 ## Install
 
-Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.20.0 or newer.
+Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer.
 
 ```bash
 uv sync --all-extras --no-sources        # AIMU from PyPI; what you want to just run Kokua
@@ -82,7 +82,7 @@ The `web` extra (included in `--all-extras`, or `pip install '.[web]'`) adds the
 > uv sync --all-extras                        # installs ../aimu editable; picks up your edits live
 > ```
 >
-> The `aimu>=0.20.0` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
+> The `aimu>=0.21.0` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
 
 ## Quick start
 

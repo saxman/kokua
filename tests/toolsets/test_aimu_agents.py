@@ -115,6 +115,21 @@ def test_the_model_is_read_at_call_time(tmp_path, stub_prebuilts):
     assert stub_prebuilts["models"] == ["anthropic:claude-opus-4-1"]
 
 
+def test_a_prebuilt_runs_on_the_resolved_default_when_none_is_declared(tmp_path, stub_prebuilts):
+    """With no [assistant].model this handed ``aimu.client`` None and let it resolve its own default.
+
+    It reached the right endpoint by luck rather than by design, and it was a second resolution: the
+    prebuilt could land on a different model than every Kokua agent, since nothing tied the two
+    answers together. It now runs on the one string the config resolved.
+    """
+    from tests.conftest import TEST_DEFAULT_MODEL
+
+    config = _config(tmp_path)
+    config.model = None
+    _tool(aimu_agents.build(config), "code_review")("x")
+    assert stub_prebuilts["models"] == [TEST_DEFAULT_MODEL]
+
+
 def test_research_workers_always_get_web_tools(tmp_path, stub_prebuilts):
     """There is no global tool policy left to gate this on: naming ``aimu_agents`` in an agent's
     ``tools`` is itself the consent, so building the toolset must not raise and the research worker

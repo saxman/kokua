@@ -164,17 +164,56 @@ class AssistantConfig:
     # it re-reads the file on every operation, because a cancel between arming and firing must win over
     # any snapshot.
     scheduled_tasks: dict = field(default_factory=dict)
+    # `default_model`'s answer, resolved on first use. Not an init argument: it is not a setting,
+    # it is the one resolution of `model` this process performs.
+    _resolved_default_model: Optional[str] = field(default=None, init=False, repr=False, compare=False)
 
-    def model_for(self, agent_name: str) -> Optional[str]:
-        """The model ``agent_name`` runs on: its own declaration, else the ``[assistant].model`` default.
+    @property
+    def default_model(self) -> str:
+        """The model every agent runs on unless its own ``[agents.<name>].model`` names one.
+
+        ``[assistant].model`` when the file sets it, and otherwise AIMU's own default, which is
+        ``AIMU_LANGUAGE_MODEL`` if that is exported and a locally available model if it is not.
+        Resolving it here rather than leaving it None is what keeps one answer in the process: the
+        alternative is to hand None to AIMU at client construction and then ask the built client what
+        it became, and the client cannot say. ``client.model`` is a resolved ``Model`` enum, which
+        names a catalogued id and carries nothing else, so the ``@base_url`` in a default like
+        ``ollama:qwen3.8:27b@http://gpu-box:11434`` is gone by the time anything reads it back. Every
+        sub-agent Kokua rebuilt from that answer therefore ran against the provider default while the
+        entry agent talked to the override, silently whenever a local server happened to be up.
+
+        ``include_hf_cache=False`` matches what ``aio.client`` asks for, and is required rather than
+        cosmetic: the aio surface cannot construct an in-process ``hf:`` model from a string, so a
+        default resolved with the HuggingFace cache included could name a model no agent here can be
+        built on.
+
+        Raises ``ValueError`` (AIMU's, naming the remedies) when nothing is configured and nothing is
+        locally available. That is the same failure the first client build already produced, arriving
+        at the same moment, since this is what that build now asks for.
+
+        Imported inside the property for the reason ``toolsets/capabilities.py`` gives for its own
+        deferred AIMU import: config is resolved before ``aimu_compat.require_aimu`` runs, so a
+        module-scope import here would turn a stale AIMU into a bare ImportError on invocations that
+        precede the preflight, instead of the fix the preflight prints.
+        """
+        if self.model:
+            return self.model
+        if self._resolved_default_model is None:
+            from aimu.models import resolve_default_text_model
+
+            self._resolved_default_model = resolve_default_text_model(include_hf_cache=False)
+        return self._resolved_default_model
+
+    def model_for(self, agent_name: str) -> str:
+        """The model ``agent_name`` runs on: its own declaration, else ``default_model`` above.
 
         Resolution is per agent and never inherited down the delegation graph, so a delegator that pins
         a model does not drag its workers onto it: a worker declaring nothing runs on the same default
-        every other undeclared agent does. ``None`` here means "no model configured anywhere", which
-        AIMU resolves at client construction.
+        every other undeclared agent does. Total, never None: "nothing declared anywhere" is a question
+        ``default_model`` answers rather than one every caller answers again for itself.
         """
         agent = self.agents.get(agent_name)
-        return (agent.model if agent else None) or self.model
+        return (agent.model if agent else None) or self.default_model
 
     def thinking_for(self, agent_name: str) -> Optional[Union[bool, str]]:
         """The reasoning effort ``agent_name`` runs at: its own declaration, else the ``[assistant]`` default.

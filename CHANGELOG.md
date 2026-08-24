@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.20.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -605,6 +605,13 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   later as a failed spawn. Both are read once, at startup: no live client is ever rebound to another
   model, which is why the model is not a runtime setting. `[assistant].thinking` follows the same
   shape for reasoning effort (below).
+  `[assistant].model` is optional, and leaving it out is supported rather than merely tolerated: AIMU
+  resolves a default from `$AIMU_LANGUAGE_MODEL`, or a probe of the local servers when that is unset,
+  which is what lets one `config.toml` be shared across machines serving different models.
+  `AssistantConfig.default_model` performs that resolution once per process and `model_for` falls back
+  to it, so `model_for` is **total**: it answers with a string whatever the file says, and nothing
+  downstream has to reconstruct the default from somewhere lossier. See the endpoint entry below for
+  what "somewhere lossier" cost.
 - **A default reasoning effort, with per-agent overrides.** `[assistant].thinking` is the effort every
   agent runs at; an agent that names its own `[agents.<name>].thinking` runs at that instead. The values
   are AIMU's own four: unset sends nothing (each model keeps its own behavior), `false` asks the model
@@ -688,12 +695,33 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   the same suffixes, which is worth stating because the two are checked by different code and had drifted:
   a worker's model was parsed with a resolver reading only `provider:model_id`, so pinning a worker to the
   endpoint the assistant itself runs on failed at startup.
-  Needs `aimu>=0.20.0`, which is what moves the floor there: earlier AIMU resolved a *spawned* agent's
+  Needs `aimu>=0.20.0`, which is what moved the floor there: earlier AIMU resolved a *spawned* agent's
   model string with that same narrow resolver, so a documented endpoint on `[assistant] model` killed
   every delegation (`Provider 'ollama' has no model id 'qwen3.8:27b@http://gpu-box:11434'`) while the
   entry agent ran on it happily, and a fix would still have dropped the endpoint had it only widened the
   parse: no resolved model enum can carry one, so the sub-agent would have gone on talking to the provider
   default.
+- **The endpoint reaches every sub-agent, including when the default comes from the environment.** The
+  paragraph above ends on the reason a widened parse would not have been enough, and Kokua had the other
+  half of exactly that bug. With `[assistant].model` unset and the default arriving through
+  `$AIMU_LANGUAGE_MODEL` (`ollama:qwen3.8:27b@http://gpu-box:11434`), five places recovered the default by
+  reading it back off an already-built client, as `config.model or agent.model_client.model`. A client
+  reports a resolved `Model` enum, which names a catalogued id and carries nothing else, so the `@base_url`
+  was gone before any of them saw it: `spawn_subagent`'s delegate, a nested delegate one level down,
+  `compose_subagent`, the `aimu_agents` prebuilt orchestrators, and both `/plan` reviewers were each built
+  against the *provider default* while the entry agent talked to the override. Where a local server happened
+  to be running it produced answers from the wrong model with nothing reported anywhere; where none was, it
+  surfaced as `All connection attempts failed` from a tool call inside a turn that was otherwise working.
+  All five now ask `config.default_model`, and none of them may consult a live client. Needs `aimu>=0.21.0`,
+  which exports `resolve_default_text_model`: AIMU's public default resolver was the enum-returning twin,
+  which by its own docstring cannot represent an endpoint, and the string resolver its documentation told
+  callers to use was importable only from `aimu.models._internal`.
+  Two things fell out of the fix. `build.model_label` no longer takes a client, so `/diag` and the stored
+  per-turn record show `ollama:qwen3.8:27b@http://gpu-box:11434` rather than `OllamaModel.QWEN_3_8_27B` --
+  the string you wrote, not the enum it became. And the test suite pins a default of its own
+  (`tests/conftest.py`'s `pin_default_model`), because resolving through AIMU reads a `.env` found by
+  walking up from the working directory and otherwise probes a local server over HTTP; a developer's real
+  `~/devel/.env` did leak into a run before that fixture existed.
 - **All state under one directory you own**: `$KOKUA_HOME`, default `~/.kokua`, replacing the example's
   reliance on `aimu.paths.output`. `data/` holds content only -- conversations, memory, documents,
   `images/`, `downloads/`, `logs/`. Images and downloads live in their own folders so the binary files
@@ -806,15 +834,19 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.20.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.21.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
   claims, not what its code contains -- and names both fixes: update the sibling, or
   `uv sync --no-sources` to take AIMU from PyPI instead. The probe tracks the newest surface Kokua leans
-  on and takes that surface's shape, which is why it has moved several times and has been a name lookup,
-  a set-membership check, and (today, for `SkillAgent(script_env=...)`) a signature check. It covers one
-  surface at a time by design; every earlier release's capabilities are the floor's job.
+  on and takes that surface's shape, which is why it has moved several times and has been a
+  set-membership check, a signature check (`SkillManager(include=...)`, later
+  `SkillAgent(script_env=...)`), and today a plain name lookup for the `resolve_default_text_model`
+  export. That last is the shape to hope for: the capability *is* the exported name, so the check asks
+  exactly the question that matters, where each earlier shape had to settle for the nearest handle on the
+  capability's path. It covers one surface at a time by design; every earlier release's capabilities are
+  the floor's job.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.

@@ -379,13 +379,39 @@ reads a missing key as "the model the spawn tool was built with". `validate_agen
 declared model string at startup (offline, no client and no key), so a typo names its table instead of
 surfacing later as a failed spawn.
 
+#### The model every agent runs on
+
+`[assistant].model` is optional, and leaving it out is a supported way to run: AIMU resolves a default
+from `AIMU_LANGUAGE_MODEL`, or from a probe of the local servers when that is unset, which is what lets
+one `config.toml` be shared across machines that serve different models. `AssistantConfig.default_model`
+is where that resolution happens, once per process, and `model_for` falls back to it, so **`model_for` is
+total: it answers with a string whatever the file says.**
+
+That totality is the point, not a convenience. The alternative is to hand `None` to AIMU at client
+construction and ask the built client afterwards what it became, and a client cannot answer: `client.model`
+is a resolved `Model` enum, which names a catalogued id and carries nothing else. A default may be an
+extended string -- `ollama:qwen3.8:27b@http://gpu-box:11434` (see
+[`model`](../reference/configuration.md#model)) -- and the `@base_url` is gone by the time anything reads
+it back off a client. Kokua did read it back, in five places, and the result was that every spawned
+sub-agent, every composed worker, and both planning reviewers were rebuilt against the *provider default*
+while the entry agent talked to the override. On a machine with a local server running it produced
+answers, from the wrong model, with nothing reported anywhere; with no local server it surfaced as
+`All connection attempts failed` from a tool call whose parent turn was working fine.
+
+So the rule is: **anything needing the default asks the config, never a live client.** `default_model`
+resolves with `include_hf_cache=False`, matching what `aio.client` asks for, because the aio surface
+cannot construct an in-process `hf:` model from a string. The answer is cached on the config, since the
+no-env-var path probes over HTTP and `compose_subagent` asks on every call. `build.model_label` renders
+that same string for `/diag` and the stored record, which is why a session with nothing declared now
+reports `ollama:qwen3.8:27b@http://gpu-box:11434` rather than `OllamaModel.QWEN_3_8_27B`.
+
 Both are read once, at startup. No live client is rebound to another model, which is why the model is
 not a `RuntimeSetting`: a hot setting is one the change reaches in the same session, and this one cannot.
 It is an ordinary cold key, so `update_config` writes it and reports that a restart is needed.
 
 `/diag` reports the entry agent's model plus every override, since a running session otherwise has no
-surface that names one. `build.model_label` is the single renderer: the declared string when there is
-one, else what AIMU resolved onto the live client, which is also what the stored record uses.
+surface that names one. `build.model_label` is the single renderer, and it renders `model_for`'s string,
+which is also what the stored record uses.
 
 A stored conversation records what produced it, in `session.metadata` rather than on any message dict:
 `metadata.model.<user_index>` is the model that answered that turn, and each sub-agent card carries its
@@ -470,17 +496,22 @@ The per-agent half needs `aimu>=0.18.0`, which added the `generate_kwargs` key t
 That key was the probe's surface for a release: 0.17.0 published `SUBAGENT_SPEC_KEYS` itself, so the set's
 existence no longer proved this capability, and the probe checked `generate_kwargs`'s membership in it
 instead -- a membership check, the third shape it has taken after a name lookup and a signature check.
-The repository floor is now `aimu>=0.20.0`, and that release carries two capabilities Kokua depends on.
-The first is a sub-agent honouring a `provider:model@base_url` string (see
-[`model`](../reference/configuration.md#model)), a behavioural fix inside a private function with no
-symbol, parameter, or set member to grip; while it was the newest surface the probe gripped
-`endpoint_kwargs`, the mapping the fix routes through, and said in its own docstring what that left
-uncovered. The second arrives later in the same release with a handle of its own, so the probe now grips
-that instead: `SkillAgent(script_env=...)`, the parameter that carries the `[email]` settings and the
-downloads folder into a skill script the *entry* agent runs (see
-[What a skill script sees](#what-a-skill-script-sees) above). That is a
-signature check, the shape this probe has taken once before. The probe covers one surface at a time; the
-version floor is what covers every earlier release's.
+AIMU 0.20.0 then carried two capabilities Kokua depends on. The first is a sub-agent honouring a
+`provider:model@base_url` string (see [`model`](../reference/configuration.md#model)), a behavioural fix
+inside a private function with no symbol, parameter, or set member to grip; while it was the newest
+surface the probe gripped `endpoint_kwargs`, the mapping the fix routes through, and said in its own
+docstring what that left uncovered. The second arrived later in the same release with a handle of its
+own: `SkillAgent(script_env=...)`, the parameter that carries the `[email]` settings and the downloads
+folder into a skill script the *entry* agent runs (see
+[What a skill script sees](#what-a-skill-script-sees) above). That was a signature check, the shape this
+probe has taken twice.
+
+The repository floor is now `aimu>=0.21.0`, for the `resolve_default_text_model` export that
+[`default_model`](#the-model-every-agent-runs-on) calls, and the probe grips that name. It is the
+cleanest case this preflight has had: the capability *is* the exported symbol, so a plain name lookup
+asks exactly the question that matters, where the three shapes before it each had to settle for the
+nearest available handle. The probe covers one surface at a time; the version floor is what covers every
+earlier release's.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes

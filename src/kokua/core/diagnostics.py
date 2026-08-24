@@ -103,9 +103,11 @@ def diag_report(
     """The `/diag` text: the models, reasoning effort, and generation parameters in play, in-flight
     turns, gate depth, pending human decisions, and stuck-turn stacks.
 
-    ``entry_model`` is passed in rather than read off ``config`` because with nothing declared the only
-    place the answer exists is the live client (see ``build.model_label``), which this module has no
-    route to.
+    ``entry_model`` is passed in rather than derived here because the caller already holds it: it is
+    what ``build.model_label`` renders, and this module reports what the assistant is running rather
+    than working it out a second time. It was once passed for a stronger reason, that with nothing
+    declared the answer existed only on the live client; ``AssistantConfig.default_model`` answers it
+    now, so this is plumbing rather than the only route.
     """
     turns = tracker.all()
     lines = ["Diagnostics:", _model_line(config, entry_model)]

@@ -190,6 +190,24 @@ model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"
 model = "openai-compat:my-model@http://gpu-box:9000/v1;tools,thinking"
 ```
 
+Both suffixes survive the `$AIMU_LANGUAGE_MODEL` route as well, which is worth stating because it is the
+natural way to share one `config.toml` across machines that serve different models:
+
+```bash
+export AIMU_LANGUAGE_MODEL="ollama:qwen3.8:27b@http://gpu-box:11434"
+```
+
+Whichever route the default arrives by, it is resolved once and every agent gets the same string:
+sub-agents spawned through `spawn_subagent`, sub-agents built by `compose_subagent`, the prebuilt
+orchestrators in the `aimu_agents` toolset, and both `/plan` reviewers. An endpoint set here reaches all
+of them. (Before Kokua 0.1.0 it did not: with `model` unset, the endpoint was dropped for everything
+except the entry agent, so a remote default sent every sub-agent to the *local* server instead. It failed
+loudly only when nothing was listening there.)
+
+Note this pins the client, not discovery. The probe that picks a default when nothing is set at all
+looks at default endpoints only, so export `OLLAMA_HOST` as well when a remote server's models should be
+considered there too.
+
 ### `thinking`
 
 The default reasoning effort every agent runs at. An agent that declares its own `thinking` runs at that

@@ -58,15 +58,18 @@ def build(config: AssistantConfig) -> list:
     per call also keeps each run isolated: a cached orchestrator's ``ModelClient.messages`` is shared
     mutable state, so two concurrent calls would interleave into one history.
 
-    A prebuilt runs on ``config.model``, the default every agent falls back to, rather than on the
-    declaring agent's own ``[agents.*].model``: an orchestrator AIMU builds is not one of Kokua's agents,
-    and the context a toolset builds from does not name the agent that declared it.
+    A prebuilt runs on ``config.default_model``, the default every agent falls back to, rather than on
+    the declaring agent's own ``[agents.*].model``: an orchestrator AIMU builds is not one of Kokua's
+    agents, and the context a toolset builds from does not name the agent that declared it. That is the
+    same string Kokua's own agents are built from, resolved once, even though this client is the sync
+    one: a prebuilt running on a different model than everything else because it resolved its own
+    default separately is the surprise this avoids.
     """
 
     def run_prebuilt(agent_class, task: str, **kwargs) -> str:
         # A tool that raises breaks the agent's tool loop, so an unresolvable model comes back as text.
         try:
-            client = aimu.client(config.model)
+            client = aimu.client(config.default_model)
         except (ValueError, TypeError) as e:
             return f"Could not start the {agent_class.__name__}: {e}"
         return agent_class(client, **kwargs).run(task)

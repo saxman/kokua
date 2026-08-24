@@ -385,9 +385,14 @@ async def test_compose_subagent_asks_for_a_capability_when_given_none(tmp_path, 
     assert spawn.calls == []
 
 
-async def test_compose_subagent_falls_back_to_the_agents_own_model_when_no_default_is_set(tmp_path, monkeypatch):
-    """Reusing the string the delegator's client already resolved keeps every composition on that model
-    instead of re-resolving per call, the same fallback `make_delegation_tool` takes."""
+async def test_compose_subagent_uses_the_resolved_default_not_the_holders_client(tmp_path, monkeypatch):
+    """With no [assistant].model, a composition runs on the string AIMU's default resolved to.
+
+    It used to read the holder's already-built client instead. A client reports a resolved ``Model``
+    enum, so an ``@base_url`` in the default never survived the trip, and the composed sub-agent was
+    built against the provider default while the agent that composed it talked to the override.
+    """
+    from tests.conftest import TEST_DEFAULT_MODEL
 
     class _Agent:
         model_client = type("_Client", (), {"model": "ollama:resolved"})()
@@ -396,7 +401,7 @@ async def test_compose_subagent_falls_back_to_the_agents_own_model_when_no_defau
     state = _state(tmp_path)
     tools = {fn.__name__: fn for fn in make_capability_tools(ToolsetContext(state=state, agent=_Agent()))}
     await tools["compose_subagent"]("w", "Do it.", ["web"], "Instructions.")
-    assert spawn.calls[0]["model"] == "ollama:resolved"
+    assert spawn.calls[0]["model"] == TEST_DEFAULT_MODEL
 
 
 def test_the_guidance_ranks_the_declared_roles_above_composing_one(tmp_path):

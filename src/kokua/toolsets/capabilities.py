@@ -238,10 +238,11 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
 
 def make_capability_tools(ctx: "ToolsetContext") -> list:
     state = ctx.state
-    # The [assistant] default, falling back to whatever the holder's own client already resolved. That
-    # is the fallback `make_delegation_tool` takes, for the same reason: with no default set, resolving
-    # per composition would pick a model afresh each time instead of staying on the one in use.
-    model = state.config.model or getattr(getattr(ctx.agent, "model_client", None), "model", None)
+    # The one default the process resolved, which is also what `make_delegation_tool` builds its spawn
+    # tool with: a composed worker and a declared one run on the same model. Read from the config and
+    # not from `ctx.agent`'s client, which answers with a resolved enum and so cannot report the
+    # endpoint a default may carry. See `AssistantConfig.default_model`.
+    model = state.config.default_model
     return [_make_list_tool(state), _make_compose_tool(state, remaining_depth=None, model=model)]
 
 

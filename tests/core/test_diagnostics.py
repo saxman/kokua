@@ -91,13 +91,18 @@ async def test_diag_reports_the_model_each_agent_runs_on(tmp_path):
 
 
 async def test_diag_names_the_model_aimu_resolved_when_the_config_declares_none(tmp_path):
+    """With nothing declared, the label is the string AIMU's default resolved to, endpoint included.
+
+    It used to be read off the live client, which reports a ``Model`` enum: that rendered as
+    ``OllamaModel.QWEN_3_8_27B``, a form you cannot type back into config.toml and which cannot show
+    the endpoint at all. The client argument is gone with the fallback it served.
+    """
     from kokua.core.build import model_label
 
-    class _Client:
-        model = "ollama:auto-resolved"
+    from tests.conftest import TEST_DEFAULT_MODEL
 
     config = _config(tmp_path, model=None)
-    assert model_label(config, config.entry_agent, _Client()) == "ollama:auto-resolved"
+    assert model_label(config, config.entry_agent) == TEST_DEFAULT_MODEL
 
 
 async def test_diag_reports_the_thinking_each_agent_runs_at(tmp_path):

@@ -502,7 +502,7 @@ def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Ca
     """The ``spawn_subagent`` delegate for one agent, over that agent's own targets."""
     observer: Optional[SubagentObserver] = state.observer
     return make_async_subagent_tool(
-        config.model,
+        config.default_model,
         agent_types=build_agent_specs(config, state, delegator),
         tool_approval=state.tool_approval,
         observer=observer,
@@ -512,18 +512,23 @@ def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Ca
 def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Optional[Callable]:
     """The delegate for a live agent, or None when it declares no targets.
 
-    The tool is built with the ``[assistant].model`` default, not the delegator's own model: a worker
-    declaring no model of its own runs on that default rather than inheriting a delegator's pin, and a
-    worker that declares one carries it in its spec. Falling back to the delegator's already-resolved
-    client model covers an unset default, where AIMU picked a model when that client was built: reusing
-    the string keeps every spawn on it instead of re-resolving per spawn.
+    The tool is built with ``config.default_model``, not the delegator's own model: a worker declaring
+    no model of its own runs on that default rather than inheriting a delegator's pin, and a worker
+    that declares one carries it in its spec.
+
+    Asking the config rather than the live agent is load-bearing, not a tidy-up. This read used to be
+    ``config.model or agent.model_client.model``, which reached for the delegator's already-built
+    client whenever ``[assistant].model`` was unset. A client answers that question with a resolved
+    ``Model`` enum, so a default carrying an ``@base_url`` arrived here stripped of it, and every
+    sub-agent was rebuilt against the provider default while the delegator kept talking to the
+    override. See ``AssistantConfig.default_model``.
     """
     name = getattr(agent, "name", config.entry_agent)
     if not config.agents[name].delegates_to:
         return None
     observer: Optional[SubagentObserver] = state.observer
     return make_async_subagent_tool(
-        config.model or agent.model_client.model,
+        config.default_model,
         agent_types=build_agent_specs(config, state, name),
         tool_approval=state.tool_approval,
         observer=observer,

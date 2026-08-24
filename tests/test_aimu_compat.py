@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from importlib.metadata import PackageNotFoundError
 from types import SimpleNamespace
 
@@ -10,7 +9,12 @@ import pytest
 
 from kokua import aimu_compat
 from kokua.aimu_compat import AimuVersionError, MINIMUM_AIMU, _release, require_aimu
-from tests.helpers import MockAsyncModelClient
+
+#: A version string that clears the floor, whatever the floor currently is. Derived rather than
+#: written out, because these tests exercise the probe rather than the floor: a literal here goes
+#: stale on the next bump and fails every one of them for a reason that has nothing to do with what
+#: they check. The floor itself is pinned with explicit old versions in the two tests above.
+AT_FLOOR = ".".join(str(n) for n in MINIMUM_AIMU)
 
 
 def test_release_reads_the_numeric_prefix():
@@ -53,11 +57,11 @@ def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
 def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
     """The probe follows whatever shape the newest surface has, and a set member is one of the three.
 
-    Not the shape in force today (0.20.0's surface is a keyword argument), but it was for 0.18.0, and
+    Not the shape in force today (0.21.0's surface is a plain exported name), but it was for 0.18.0, and
     the branch has to stay exercised: a published set proves nothing by existing once the set itself
     predates the capability, so only its contents can answer.
     """
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.20.0")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "SUBAGENT_SPEC_KEYS")
     monkeypatch.setattr(aimu_compat, "_PROBE_MEMBER", "generate_kwargs")
     monkeypatch.setattr(
@@ -75,7 +79,7 @@ def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
 def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch):
     """An editable checkout's version says what its branch claims, not what its code contains, so a
     sibling on an older branch can report the floor while missing the surface behind it."""
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.20.0")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(
         aimu_compat.importlib,
         "import_module",
@@ -85,38 +89,43 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
         require_aimu()
 
 
-def test_the_probe_targets_the_release_the_floor_names():
+def test_the_probe_targets_the_release_the_floor_names(monkeypatch):
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    Pinned because the probe has twice been left behind by a moving floor. The surface today is
-    ``SkillAgent(script_env=...)``, which is what carries the ``[email]`` settings and the downloads
-    folder into a skill script the entry agent runs: a ``SkillAgent`` builds its own skills server, so
-    the ``env`` a host passes to ``build_skills_server`` cannot reach those scripts. Asserting that the
-    agent keeps the value, and not just that the parameter is accepted, is what keeps this from
-    degrading into a bare existence check.
+    Pinned because the probe has twice been left behind by a moving floor. The surface today is the
+    ``resolve_default_text_model`` export, which is how ``AssistantConfig.default_model`` learns what an
+    unset ``[assistant].model`` resolves to without losing the ``@base_url`` a default may carry.
+
+    Exercising what the name does, and not merely that it resolves, is what keeps this from degrading
+    into the bare existence check the probe's own mechanics already perform. The thing worth asserting
+    is the property Kokua depends on: what comes back is the string, endpoint intact, and not the
+    ``Model`` enum its published twin returns.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
     probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_PARAMETER in inspect.signature(probe.__init__).parameters
-    assert probe(MockAsyncModelClient([]), script_env={"KOKUA_EMAIL_HOST": "smtp.example.com"}).script_env == {
-        "KOKUA_EMAIL_HOST": "smtp.example.com"
-    }
+    assert aimu_compat._PROBE_PARAMETER is None, "a plain export needs no signature check"
+
+    monkeypatch.setenv("AIMU_LANGUAGE_MODEL", "ollama:qwen3.5:9b@http://gpu-box:11434")
+    assert probe(include_hf_cache=False) == "ollama:qwen3.5:9b@http://gpu-box:11434"
 
 
 def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
-    """The probe follows whatever shape the newest surface has, and a keyword argument is the shape in
-    force today: a name lookup would pass over an older signature, so the signature is what gets
-    checked. Exercised here against ``SkillManager(include=...)``, the first surface of this shape, so
-    the branch stays covered by a case that does not move when the real probe does."""
+    """The probe follows whatever shape the newest surface has, and a keyword argument is one of three.
+
+    Not the shape in force today (0.21.0's surface is a plain exported name, and a name lookup answers
+    it exactly), but it was for 0.20.0 and for ``SkillManager(include=...)`` before that, and the branch
+    has to stay exercised: where a capability is a constructor parameter, a name lookup passes over an
+    older signature that has the class and not the argument.
+    """
 
     class SkillManagerWithoutInclude:
         def __init__(self, skill_dirs=None):
             pass
 
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.20.0")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "SkillManager")
     monkeypatch.setattr(aimu_compat, "_PROBE_MEMBER", None)
     monkeypatch.setattr(aimu_compat, "_PROBE_PARAMETER", "include")
@@ -135,7 +144,7 @@ def test_an_unimportable_aimu_carries_the_import_error(monkeypatch):
     def broken(name):
         raise ImportError("no module named aimu.agents")
 
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.20.0")
+    monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(aimu_compat.importlib, "import_module", broken)
     with pytest.raises(AimuVersionError, match="no module named aimu.agents"):
         require_aimu()

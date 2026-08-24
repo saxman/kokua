@@ -86,18 +86,17 @@ def validate_model_string(model: str) -> None:
         raise ModelClientError(str(e)) from e
 
 
-def model_label(config: AssistantConfig, agent_name: str, client=None) -> str:
+def model_label(config: AssistantConfig, agent_name: str) -> str:
     """The model ``agent_name`` runs on, as a string for a person to read or a record to store.
 
-    Prefers what the config declares, since that is the string the user wrote and recognizes. With
-    nothing declared anywhere, AIMU resolved one when the client was built, so the live client is the
-    only place the answer exists; it renders as the provider enum rather than a ``provider:id`` string,
-    which is unambiguous even though it is not the form you would type back into ``config.toml``.
+    Always the string the config resolved, which is the form the user recognizes and could type back
+    into ``config.toml``. This used to take the live client and fall back to it when nothing was
+    declared anywhere, because ``model_for`` answered None in that case and the built client was the
+    only place an answer existed. It is not a place an answer exists: a client reports a resolved
+    ``Model`` enum, which renders as ``OllamaModel.QWEN_3_8_27B`` and cannot show the endpoint a
+    default may carry. ``model_for`` is total now, so there is nothing left to fall back to.
     """
-    declared = config.model_for(agent_name)
-    if declared:
-        return str(declared)
-    return str(getattr(client, "model", "") or "") if client is not None else ""
+    return str(config.model_for(agent_name))
 
 
 def entry_agent_system_message(config: AssistantConfig, state: LiveState) -> str:

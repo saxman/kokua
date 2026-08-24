@@ -111,6 +111,22 @@ def test_a_spec_declaring_no_model_carries_none_so_the_spawn_default_applies(tmp
     assert "model" not in build_agent_specs(config, state, "assistant")["researcher"]
 
 
+class _EnumLikeModel:
+    """What a live client actually reports: a catalogued id and nothing else.
+
+    The fake client here used to hold a plain ``provider:model_id`` string, which is why the endpoint
+    bug survived a test suite that covered this path. A real ``AsyncModelClient.model`` is a ``Model``
+    enum member, and no ``@base_url`` reaches it. Shaped like one so a fallback that reads it cannot
+    look correct here while dropping the endpoint in production.
+    """
+
+    def __init__(self, model_id):
+        self.value = model_id
+
+    def __str__(self):
+        return f"OllamaModel.{self.value}"
+
+
 class _FakeClient:
     def __init__(self, model):
         self.model = model
@@ -155,16 +171,25 @@ def test_the_delegate_is_built_with_the_default_model_not_the_delegators_pin(tmp
     assert _captured_spawn_model(monkeypatch, config, state, agent) == "ollama:qwen3:8b"
 
 
-def test_an_unset_default_falls_back_to_the_model_the_delegator_already_resolved(tmp_path, monkeypatch):
-    """With no [assistant].model, AIMU resolved one when the entry agent's client was built. Reusing
-    that string keeps every spawn on the same model instead of re-resolving per spawn."""
+def test_an_unset_default_is_the_resolved_string_not_the_delegators_client(tmp_path, monkeypatch):
+    """With no [assistant].model, the delegate is built with the string AIMU's default resolved to.
+
+    The regression this pins: it used to be built with ``agent.model_client.model``, and a live
+    client answers with a resolved ``Model`` enum. An enum names a catalogued id and carries nothing
+    else, so a default like ``ollama:qwen3.8:27b@http://gpu-box:11434`` reached the spawn tool as
+    ``qwen3.8:27b`` and every sub-agent was rebuilt against the provider default. The fake here keeps
+    an enum-shaped model for that reason: nothing may read the endpoint back off a client, because on
+    a real one it is not there to read.
+    """
+    from tests.conftest import TEST_DEFAULT_MODEL
+
     agents = {
         "assistant": AgentConfig(delegates_to=["researcher"]),
         "researcher": AgentConfig(tools=["web"]),
     }
     config, state = _state(tmp_path, agents)
-    agent = _FakeAgent("assistant", "ollama:auto-resolved")
-    assert _captured_spawn_model(monkeypatch, config, state, agent) == "ollama:auto-resolved"
+    agent = _FakeAgent("assistant", _EnumLikeModel("qwen3.8:27b"))
+    assert _captured_spawn_model(monkeypatch, config, state, agent) == TEST_DEFAULT_MODEL
 
 
 def test_a_spec_carries_the_thinking_level_its_agent_declares(tmp_path):
@@ -250,3 +275,39 @@ def test_every_spec_key_kokua_writes_is_one_aimu_accepts():
     from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
 
     assert {"system_message", "tools", "model", "thinking", "generate_kwargs"} <= SUBAGENT_SPEC_KEYS
+
+
+def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypatch):
+    """A worker that itself delegates gets a spawn tool, and it needs a model like any other.
+
+    This path passed ``config.model`` straight through, so with no ``[assistant].model`` it handed
+    AIMU None. Nothing failed at build time: the spec's own model covers a worker that declares one,
+    and the tool is only constructed per spawn, so an undeclared worker two levels down raised
+    ``ValueError: No available async client for model type 'NoneType'`` at the moment it was asked to
+    do something, and only then.
+    """
+    from kokua.toolsets import agents as agents_mod
+
+    from tests.conftest import TEST_DEFAULT_MODEL
+
+    captured = []
+
+    def fake_make(model, **kwargs):
+        captured.append(model)
+
+        async def spawn_subagent(agent_type: str, task: str) -> str:
+            """menu"""
+            return "ok"
+
+        spawn_subagent.__name__ = "spawn_subagent"
+        return spawn_subagent
+
+    agents = {
+        "assistant": AgentConfig(delegates_to=["lead"]),
+        "lead": AgentConfig(tools=["web"], delegates_to=["helper"]),
+        "helper": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make)
+    agents_mod.build_agent_specs(config, state, "assistant")
+    assert captured == [TEST_DEFAULT_MODEL]

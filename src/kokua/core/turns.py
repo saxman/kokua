@@ -368,11 +368,11 @@ class TurnRunner:
     def _answering_model(self, conversation_id: str) -> str:
         """The model behind this conversation's agent, as a string for the stored record.
 
-        The live client is passed for the case where nothing is declared: it is a cache hit here, since
-        this only runs inside a turn on that conversation, whose agent is pinned.
+        Takes ``conversation_id`` for the caller's benefit rather than its own: every conversation's
+        agent IS the entry agent (only a spawned worker differs), so the answer is the same for all of
+        them, and keeping the argument means a caller does not have to know that to ask the question.
         """
-        agent = self._book.agent_for(conversation_id)
-        return model_label(self._config, self._config.entry_agent, agent.model_client)
+        return model_label(self._config, self._config.entry_agent)
 
     async def _notify_if_backgrounded(self, conversation_id: str, *, succeeded: bool, failure_reason: str) -> None:
         """The user switched away before this turn finished: tell them rather than silently updating

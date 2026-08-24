@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.20.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.21.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -40,15 +40,26 @@ surface, and its limit had to be stated out loud: the plumbing landed earlier *w
 spawn fix riding on it, so a sibling parked between those two commits passed and still dropped a
 sub-agent's endpoint.
 
-The second capability closes that gap by arriving later in the same release with a handle of its own.
-``SkillAgent`` builds its own skills server, so the ``env`` a host passes to ``build_skills_server``
-cannot reach the entry agent's skill scripts; ``script_env`` is the constructor parameter that carries
-the ``[email]`` settings and the downloads folder to them, and a checkout without it runs every one of
-those scripts with the settings missing and no error anywhere. Probing it subsumes the older check
-rather than trading one narrow window for another: it landed after both of the commits the endpoint
-window sat between, so a sibling that passes this one has the spawn fix too. That is luck, not a rule.
-The next surface may sit earlier than something else Kokua needs, and then its limit gets stated here
-again.
+AIMU 0.20.0's second capability closed that gap by arriving later in the same release with a handle of
+its own: ``SkillAgent(script_env=...)``, the constructor parameter carrying the ``[email]`` settings and
+the downloads folder into the entry agent's skill scripts, without which those scripts run with the
+settings missing and no error anywhere. It was the probe until 0.21.0, and it subsumed the endpoint
+check rather than trading one narrow window for another, since it landed after both of the commits that
+window sat between.
+
+AIMU 0.21.0 is the current surface, and for once the capability and its handle are the same object.
+``resolve_default_text_model`` is what ``AssistantConfig.default_model`` calls to learn the model an
+unset ``[assistant].model`` runs on, and it is a plain exported name, so a name lookup asks precisely
+the question that matters. The function is old; only its export is new, which is exactly why the floor
+and the probe are both needed and neither is redundant here. What Kokua needs is not the behavior but
+the *reachability*: AIMU's own docs already told a caller wanting an ``@base_url`` to use "the string
+resolver", while it lived in ``aimu.models._internal`` and could not be imported. A sibling predating
+the export raises ``AttributeError`` at the first config that declares no model, which is most of them.
+
+Worth recording, since it is the case this module keeps meeting: the capability behind that export has
+*no* handle at all. Nothing on a live client retains the string it was constructed from, so a host
+cannot ask a built client which endpoint it is talking to. The export is the route around that gap
+rather than a fix for it, which is why the probe grips the export and not something on the client.
 """
 
 from __future__ import annotations
@@ -58,15 +69,16 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 20, 0)
+MINIMUM_AIMU = (0, 21, 0)
 
-# The newest AIMU surface Kokua depends on is `SkillAgent(script_env=...)`, which is what carries the
-# `[email]` settings and the downloads folder into a skill script the entry agent runs. A signature
-# check, because the capability is a constructor parameter: the class predates the release, so only its
-# parameters date the checkout. See the module docstring for what this deliberately misses.
-_PROBE_MODULE = "aimu.aio"
-_PROBE_SYMBOL = "SkillAgent"
-_PROBE_PARAMETER: Optional[str] = "script_env"
+# The newest AIMU surface Kokua depends on is the `resolve_default_text_model` export, which is how
+# `AssistantConfig.default_model` learns what an unset `[assistant].model` resolves to without losing
+# the `@base_url` a default may carry. A plain name lookup, because the capability *is* the exported
+# name: the function itself is older than the release, so its presence in the public namespace is what
+# dates the checkout. See the module docstring for what this deliberately misses.
+_PROBE_MODULE = "aimu.models"
+_PROBE_SYMBOL = "resolve_default_text_model"
+_PROBE_PARAMETER: Optional[str] = None
 _PROBE_MEMBER: Optional[str] = None
 
 

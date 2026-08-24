@@ -565,7 +565,7 @@ class Assistant:
             self._tracker,
             self._gate,
             config=self._config,
-            entry_model=model_label(self._config, self._config.entry_agent, self._book.agent.model_client),
+            entry_model=model_label(self._config, self._config.entry_agent),
             pending_approval=self._human.approval.pending,
             pending_decision=self._human.decision.pending,
         )

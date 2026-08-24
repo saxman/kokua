@@ -4,6 +4,28 @@ from __future__ import annotations
 
 import pytest
 
+#: What an unset ``[assistant].model`` resolves to under test. See ``pin_default_model``.
+TEST_DEFAULT_MODEL = "lmstudio:kokua-test-default@http://test-host:1234"
+
+
+@pytest.fixture(autouse=True)
+def pin_default_model(monkeypatch):
+    """Pin the model a config with no ``[assistant].model`` resolves to.
+
+    ``AssistantConfig.default_model`` asks AIMU for its default, and AIMU's answer is
+    ``AIMU_LANGUAGE_MODEL`` if that is exported and a probe of the local servers if it is not. Both
+    reach outside the sandbox: the env-var read loads a ``.env`` found by walking up from the working
+    directory (a developer's ``~/devel/.env`` is two levels above this checkout, and did leak into a
+    run here), and the probe makes an HTTP call. Neither belongs in a mock-only suite, and either one
+    makes an assertion about the default depend on the machine it runs on.
+
+    Pinned rather than stubbed out, so the real resolver still runs and the extended grammar is what
+    the suite exercises. The value is deliberately an endpoint-carrying ad-hoc string: that is the
+    shape that was silently losing its endpoint, so it is the shape the default should have here.
+    A test wanting a different answer sets ``config.model`` or patches the resolver itself.
+    """
+    monkeypatch.setenv("AIMU_LANGUAGE_MODEL", TEST_DEFAULT_MODEL)
+
 
 @pytest.fixture(autouse=True)
 def isolate_state(monkeypatch, tmp_path):
