@@ -763,6 +763,13 @@ notice on startup.
   are currently viewing. The reply is routed through the single channel reader, so it is safe alongside
   `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
   cannot overwrite each other.
+- **A gate that names nothing fails startup.** `[security] confirm_tools` matches a tool by name, so an
+  entry no configured agent provides gates nothing, and the symptom is a prompt that never comes, which
+  nobody notices. Every unmatched entry is now named at startup with its near misses. The vocabulary is
+  every tool the config builds, not just the entry agent's: `execute_python` comes from `[agents.coder]`,
+  and `spawn_subagent` and a skill's script tools count too. A tool that arrives later (from a runtime
+  `add_mcp_server`, or built only by `compose_worker` out of a toolset no agent names) cannot be listed
+  ahead of time, and the error says so.
 - **The reviewer toolset needs no gate.** An autonomous critic cannot pause to ask you mid-review, so
   rather than exempting it from the gate the reviewer is given nothing the gate exists to cover: web
   lookup, `calculate`, and the clock. A test pins this against the shipped `confirm_tools` default, so

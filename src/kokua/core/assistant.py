@@ -157,6 +157,7 @@ class Assistant:
             configured_but_undeclared,
             undeclared_workflow_commands,
             unreferenced_toolsets,
+            validate_confirm_tools,
             validated_registry,
         )
 
@@ -285,7 +286,10 @@ class Assistant:
             )
 
         # Build the active conversation's agent.
-        assistant._registry.get(assistant._active_id)
+        entry_agent = assistant._registry.get(assistant._active_id)
+        # Last of the startup checks, because it is the first point where every tool this config builds
+        # exists: the entry agent's own, and each worker's, built when the delegation tool above was.
+        validate_confirm_tools(config, state, entry_agent)
 
         state.tasks.arm_all()
         return assistant

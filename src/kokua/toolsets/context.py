@@ -69,6 +69,12 @@ class LiveState:
     tool_approval: Optional[Callable] = None
     observer: Optional[SubagentObserver] = None
     registry: dict = field(default_factory=dict)
+    # Every tool name `registry.build_tools` has produced so far, accumulated as agents are wired. It is
+    # the vocabulary the `[security].confirm_tools` startup check matches against, and it lives here
+    # rather than being returned by a builder because the names arrive from several builds at different
+    # depths (the entry agent's, each declared worker's, each nested worker's) and the check needs their
+    # union.
+    built_tool_names: set[str] = field(default_factory=set)
     # Rebuilds one agent's delegate after a runtime MCP change. Assigned by the composition root rather
     # than imported by the toolsets that need it, since it lives in core.build and core.build imports
     # them.

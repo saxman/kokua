@@ -2,6 +2,8 @@
 
 import pytest
 
+from kokua.config.schema import AssistantConfig
+from kokua.toolsets.context import LiveState, ToolsetContext
 from kokua.toolsets.registry import Toolset, ToolsetError, build_tools, register, select
 
 
@@ -91,8 +93,30 @@ def test_build_tools_concatenates_and_keeps_the_first_tool_of_a_repeated_name():
         pass
 
     second.__name__ = "first"
-    tools = build_tools([_toolset("a", tools=[first]), _toolset("b", tools=[second])], ctx=None)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    tools = build_tools([_toolset("a", tools=[first]), _toolset("b", tools=[second])], ctx=ctx)
     assert tools == [first]
+
+
+def test_build_tools_records_every_name_it_built_on_the_shared_state():
+    """The vocabulary the [security].confirm_tools check matches against is collected here, so a name
+    dropped as a duplicate still counts: the tool it collided with answers to it."""
+
+    def first():
+        pass
+
+    def second():
+        pass
+
+    second.__name__ = "first"
+
+    def third():
+        pass
+
+    state = LiveState(config=AssistantConfig())
+    ctx = ToolsetContext(state=state, agent=None)
+    build_tools([_toolset("a", tools=[first, third]), _toolset("b", tools=[second])], ctx=ctx)
+    assert state.built_tool_names == {"first", "third"}
 
 
 def test_plugins_module_reexports_the_public_contract():

@@ -6,6 +6,7 @@ collision is an error, not a precedence rule, so nothing here depends on one pro
 
 from __future__ import annotations
 
+import difflib
 import logging
 from dataclasses import replace
 from typing import Callable, Mapping, Optional, Sequence
@@ -538,4 +539,68 @@ def unreferenced_toolsets(config: AssistantConfig, registry: ToolsetRegistry) ->
         name
         for name in registry
         if name not in declared and registry.providers.get(name) not in _UNPROVISIONED_PROVIDERS
+    )
+
+
+# Where the approval gate is declared, so the error below points at the words the user would edit rather
+# than at a paraphrase of them.
+_CONFIRM_TOOLS_SECTION = "security"
+_CONFIRM_TOOLS_KEY = "confirm_tools"
+
+
+def gateable_tool_names(state: LiveState, entry_agent) -> set[str]:
+    """Every tool name that exists once startup has finished, which is what a gate entry may name.
+
+    Three sources, because a tool reaches an agent three ways and only one of them is the registry.
+    ``state.built_tool_names`` holds what ``build_tools`` produced, for the entry agent and for every
+    worker at every delegation depth. The entry agent's own list adds ``spawn_subagent``, attached after
+    its toolsets are built. The skills an AIMU ``SkillAgent`` surfaces add the rest, and they are derived
+    from the manager rather than read off the agent because that class attaches them on its first run,
+    not at construction; they belong here because a skill script is an unsandboxed subprocess, which is
+    precisely the kind of call somebody gates. ``activate_skill`` comes with them and only with them,
+    since a ``SkillAgent`` with no skills builds no skills server at all.
+    """
+    names = set(state.built_tool_names)
+    for fn in entry_agent.tools:
+        name = getattr(fn, "__name__", None)
+        if name:
+            names.add(name)
+    skills = state.skill_manager.skills.values()
+    if skills:
+        names.add("activate_skill")
+        names.update(tool for skill in skills for tool in skill.script_tool_names())
+    return names
+
+
+def validate_confirm_tools(config: AssistantConfig, state: LiveState, entry_agent) -> None:
+    """Reject a ``[security].confirm_tools`` entry that names no tool this config can build.
+
+    The gate is a plain name match, so a misspelled entry gates nothing, and an entry that gates nothing
+    is the one config mistake whose symptom is the absence of a symptom: a tool with full machine access
+    runs without ever prompting, and no session says the line is dead. A user notices a prompt they did
+    not expect; nobody notices a prompt that never comes. That asymmetry is why this fails startup
+    instead of logging a warning.
+
+    Called once every agent has been wired, because the vocabulary does not exist before then and is
+    wider than the entry agent's own tools. ``execute_python`` is one of the four gates Kokua ships and
+    no toolset the entry agent declares provides it: it comes from ``[agents.coder]``, whose tools are
+    built when the delegation tool is.
+    """
+    known = gateable_tool_names(state, entry_agent)
+    unknown = [name for name in config.confirm_tools if name not in known]
+    if not unknown:
+        return
+    faults = []
+    for name in unknown:
+        close = difflib.get_close_matches(name, sorted(known), n=2)
+        hint = f" (did you mean {' or '.join(repr(match) for match in close)}?)" if close else ""
+        faults.append(f"{name!r}{hint}")
+    noun = "tool" if len(unknown) == 1 else "tools"
+    raise ConfigError(
+        f"[{_CONFIRM_TOOLS_SECTION}].{_CONFIRM_TOOLS_KEY} names {len(unknown)} {noun} nothing provides: "
+        f"{', '.join(faults)}. An entry matching no tool holds nothing back, so the call it was written "
+        "to stop runs with no prompt and nothing reports it. Correct the name, or remove it. Only tools "
+        "that exist at startup can be gated by name here, so a tool from a server the assistant connects "
+        "later with add_mcp_server cannot be listed ahead of time: give the server a [[mcp.server]] table "
+        "in config.toml and name it in an agent's tools, and its tools are gateable from the next start."
     )

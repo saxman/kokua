@@ -174,6 +174,13 @@ def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:
 
     First-wins matches the declared order, so an agent that wants one toolset's version of a shared
     tool name declares that toolset earlier.
+
+    Each name is also recorded on ``ctx.state``, which is what lets startup reject a
+    ``[security].confirm_tools`` entry that names no real tool. This is the only place that recording
+    can happen once: every agent's registry-provided tools are built through this function, the entry
+    agent's and a spawned worker's alike, and a nested worker's are built by a recursion that lands here
+    too. Collecting at any of the callers instead would need one collector per call site and would miss
+    whichever depth was forgotten.
     """
     tools: list = []
     seen: set[str] = set()
@@ -183,6 +190,7 @@ def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:
             if name and name not in seen:
                 seen.add(name)
                 tools.append(fn)
+    ctx.state.built_tool_names.update(seen)
     return tools
 
 

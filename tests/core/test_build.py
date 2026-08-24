@@ -309,13 +309,18 @@ async def test_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
 
 
 def _trading_via(name: str, *, url: str) -> dict:
-    """Config overrides for an entry agent delegating to one worker that declares the server ``name``."""
+    """Config overrides for an entry agent delegating to one worker that declares the server ``name``.
+
+    ``confirm_tools`` is emptied because these two agents provide none of the four tools the shipped
+    default gates, and a gate naming no tool is a startup error.
+    """
     return {
         "agents": {
             "assistant": AgentConfig(tools=["mcp-admin", "time"], delegates_to=["trader"]),
             "trader": AgentConfig(description="Trades.", tools=[name]),
         },
         "mcp_servers": [MCPServerConfig(url=url, name=name)],
+        "confirm_tools": [],
     }
 
 

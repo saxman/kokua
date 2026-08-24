@@ -57,7 +57,11 @@ agent_cache_cap = 8
 [security]
 # Tools requiring confirmation before each call (terminal y/N, or Allow/Deny in the web UI). These run
 # with full machine access. [] disables approval; proactive turns auto-deny these regardless. Gating is
-# by tool name, so a worker's call is routed to you too. Locked by default.
+# by tool name, so a worker's call is routed to you too. A name no configured agent provides fails
+# startup, naming it and suggesting the near misses: a gate matching nothing prompts for nothing, and a
+# prompt that never comes is not something you notice. Only what exists at startup can be listed, so a
+# tool the assistant brings in later with add_mcp_server, or one only compose_worker would build from a
+# toolset no agent names, has to be reachable from an [agents.*] table first. Locked by default.
 confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
 
 # Which config keys update_config refuses, so only a hand-edit here changes them. A pattern is

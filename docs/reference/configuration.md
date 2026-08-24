@@ -307,6 +307,23 @@ among agents. An agent whose table declares `config` really does get `update_con
 `compute` really does get `execute_python`. Your hand-edit is the consent, and this list is the gate at
 call time.
 
+**A name no configured agent provides fails startup**, naming every entry that matched nothing and
+suggesting the close names. A gate is a plain name match, so a misspelled entry holds nothing back, and
+the only sign of it is a prompt that never comes, which is not a thing anyone notices:
+`confirm_tools = ["execute_pythn"]` once loaded clean and then let `execute_python` run unattended for
+as long as the file stood. The vocabulary is every tool this config builds, which is wider than the
+entry agent's own: `execute_python` is there because `[agents.coder]` declares `compute`, and
+`spawn_subagent` and a skill's `{skill}__{script}` tools count as well. An empty list names nothing, so
+there is nothing for the check to refuse.
+
+The limit is anything that does not exist when startup ends. A tool from an MCP server the assistant
+connects later with `add_mcp_server` has no name to match yet, and neither does a tool only
+`compose_worker` would build, out of a toolset no `[agents.*]` table names. Listing either one is
+refused, which will look wrong if you were deliberately gating ahead of the connection. To gate an MCP
+tool, give its server a `[[mcp.server]]` table here and name that server in an agent's `tools`; to gate
+a tool from a toolset nothing declares, name that toolset in an agent's `tools`. Both are known from the
+next start.
+
 Two names worth considering adding, both ungated by default: `read_conversation` and
 `search_conversations`. A saved transcript is untrusted text, since a worker may have pasted web content
 into it, so an injection landing in one conversation can influence another. They are ungated by default
