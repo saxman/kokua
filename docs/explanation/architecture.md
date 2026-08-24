@@ -219,7 +219,19 @@ touched by the flag. Absent an override, it is the agent's own `system_message` 
 order, then `DELEGATION_GUIDANCE` if `delegates_to` is non-empty, then `LEAN_DELEGATION_GUIDANCE` if every
 selected toolset is `cross_cutting`. Guidance travelling with the capability is the point: installing a toolset brings the
 instructions that make the model use it, and removing one takes them away, with no prompt constant to
-keep in step by hand. `wire_agent` selects once and passes the same list to both the message and the
+keep in step by hand.
+
+Two of those sentences exist for one failure, a model answering a question it should have looked up, and
+they are split across the two halves because the two halves reach different agents. `DELEGATION_GUIDANCE`
+tells a delegating agent that a request counts as specialized whenever its answer could have moved since
+training or the user could check it against a source, and to delegate it "even when you think you know";
+the `web` toolset's own guidance tells whoever holds the tools to look it up rather than recall it. An
+agent that delegates but holds no web tools gets only the first, a worker holding `web` gets only the
+second, and the shipped `[agents.assistant]` and `[agents.researcher]` are exactly that pair. Both state
+the trigger as a property of the *question* (could it have changed, could the user check it) rather than
+as the model's own confidence, which is the signal a model is worst at reporting: `LEAN_DELEGATION_GUIDANCE`
+already named the *activity* ("web research"), and naming an activity only helps once the model has
+decided the question needs the web. `wire_agent` selects once and passes the same list to both the message and the
 tools, so the two cannot resolve different toolsets for the same names.
 
 #### What a skill script sees

@@ -7,6 +7,11 @@ The generative groups (audio, speech, transcription) each need their ``AIMU_*_MO
 at call time otherwise, so an agent declaring one is opting into that requirement. AIMU's fourth
 generative group, ``image``, is not registered here; see the comment at its omission in ``_GROUPS``.
 
+``web`` is the one AIMU group carrying ``guidance``. A tool schema says what `web_search` does but
+never when to prefer it over the model's own memory, and that is the failure worth a sentence: a
+model answering from recall does not reach for the tool at all. The other groups are reached for when
+the task plainly needs them (a file, a calculation), so a sentence would only cost prompt tokens.
+
 ``cross_cutting`` is set for the capabilities an agent holds to manage itself. ``time`` is one of them
 even though it is an AIMU group like ``fs``: an agent keeps a clock for its own scheduling and "when"
 questions, so holding it does not make an agent a domain worker.
@@ -20,23 +25,12 @@ from aimu.tools.builtin import make_document_tools, make_memory_tools
 
 from kokua.toolsets.registry import Toolset
 
-_GROUPS = {
-    "web": (builtin.web, "Web search and page retrieval."),
-    "fs": (builtin.fs, "Read files and list directories on this machine."),
-    "compute": (builtin.compute, "Run Python, shell commands, and calculations."),
-    "time": (builtin.time, "The current date and time, and timezone conversion."),
-    "misc": (builtin.misc, "Assorted utilities."),
-    # AIMU's own "image" group is deliberately not registered here. Kokua's `image` toolset
-    # (kokua.toolsets.image, a plugin) supersedes it: both contribute a tool named `generate_image`, but
-    # AIMU's saves into a folder inside the aimu package, which the web front end cannot serve, while
-    # Kokua's saves into the servable `images_path`. Registering both would let a name collision (which
-    # this registry otherwise treats as a startup error) instead decide, via first-wins deduplication,
-    # which implementation an agent silently gets -- the exact failure a single namespace exists to rule
-    # out. See tests/toolsets/test_builtin.py for the test pinning this.
-    "audio": (builtin.audio, "Audio generation. Needs AIMU_AUDIO_MODEL."),
-    "speech": (builtin.speech, "Text to speech. Needs AIMU_SPEECH_MODEL."),
-    "transcription": (builtin.transcription, "Speech to text. Needs AIMU_TRANSCRIPTION_MODEL."),
-}
+WEB_GUIDANCE = (
+    " Your own knowledge has a training cutoff. When an answer could have changed since then, or the "
+    "user could check it against a source (news, prices, releases, published figures, who holds a role, "
+    "what a page says today), look it up with the web tools rather than recalling it, and say where the "
+    "answer came from."
+)
 
 MEMORY_GUIDANCE = (
     " You have a persistent memory across conversations. When the user shares a durable fact about "
@@ -61,12 +55,32 @@ SKILLS_GUIDANCE = (
 )
 
 
+_GROUPS = {
+    "web": (builtin.web, "Web search and page retrieval.", WEB_GUIDANCE),
+    "fs": (builtin.fs, "Read files and list directories on this machine.", ""),
+    "compute": (builtin.compute, "Run Python, shell commands, and calculations.", ""),
+    "time": (builtin.time, "The current date and time, and timezone conversion.", ""),
+    "misc": (builtin.misc, "Assorted utilities.", ""),
+    # AIMU's own "image" group is deliberately not registered here. Kokua's `image` toolset
+    # (kokua.toolsets.image, a plugin) supersedes it: both contribute a tool named `generate_image`, but
+    # AIMU's saves into a folder inside the aimu package, which the web front end cannot serve, while
+    # Kokua's saves into the servable `images_path`. Registering both would let a name collision (which
+    # this registry otherwise treats as a startup error) instead decide, via first-wins deduplication,
+    # which implementation an agent silently gets -- the exact failure a single namespace exists to rule
+    # out. See tests/toolsets/test_builtin.py for the test pinning this.
+    "audio": (builtin.audio, "Audio generation. Needs AIMU_AUDIO_MODEL.", ""),
+    "speech": (builtin.speech, "Text to speech. Needs AIMU_SPEECH_MODEL.", ""),
+    "transcription": (builtin.transcription, "Speech to text. Needs AIMU_TRANSCRIPTION_MODEL.", ""),
+}
+
+
 def _group_toolset(name: str) -> Toolset:
-    group, description = _GROUPS[name]
+    group, description, guidance = _GROUPS[name]
     return Toolset(
         name=name,
         description=description,
         build=lambda ctx, _group=group: list(_group),
+        guidance=guidance,
         cross_cutting=name == "time",
     )
 

@@ -74,3 +74,13 @@ def test_skills_builds_the_authoring_and_script_tools(tmp_path):
 
     names = {fn.__name__ for fn in BY_NAME["skills"].build(_ctx(tmp_path, agent=FakeAgent()))}
     assert names == {"author_skill", "add_skill_script"}
+
+
+def test_web_carries_guidance_but_the_other_groups_do_not():
+    """A tool schema says what `web_search` does, never when to prefer it over the model's own memory,
+    which is the whole failure: a model that believes it knows the answer never reaches for the tool.
+    `web` is the one AIMU group whose trigger is epistemic rather than obvious from its name, so it is
+    the one that earns guidance; `fs` and `compute` are reached for when the task plainly needs them."""
+    assert "look it up" in BY_NAME["web"].guidance
+    assert BY_NAME["fs"].guidance == ""
+    assert BY_NAME["compute"].guidance == ""

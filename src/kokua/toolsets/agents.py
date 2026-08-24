@@ -363,11 +363,23 @@ def _reject_cycles(config: AssistantConfig) -> None:
 # redundant besides -- the model already sees its actual tools in the tool schema, and each toolset's own
 # guidance already says what it is for. The worker menu itself is AIMU's: it renders the agent_types into
 # the spawn tool's docstring.
+#
+# The closing sentences say what counts as specialized, and they are the counterweight to the trivia
+# clause rather than a repeat of the lean one below. That clause names activities ("web research"), which
+# only helps once the model has decided the question needs the web; a question it believes it already
+# knows the answer to never gets that far. So the trigger stated here is epistemic (could the answer have
+# moved, could the user check it) and the examples are categories of question, not tools the agent holds
+# -- an enumeration of questions cannot go stale when config.toml changes, which is what rules the tool
+# enumeration out. "Even when you think you know" is the operative half: a model's confidence is the
+# unreliable signal, so the instruction deliberately does not ask it to consult that confidence.
 DELEGATION_GUIDANCE = (
     " Answer trivial or conversational requests directly with your own tools. Delegate specialized work "
     "by calling `spawn_subagent(agent_type, task)`: pick the worker whose role fits, give it a complete, "
     "self-contained task (it shares no history with you), then relay or synthesize its answer for the "
-    "user. Emit several `spawn_subagent` calls when subtasks are independent."
+    "user. Emit several `spawn_subagent` calls when subtasks are independent. Treat a request as "
+    "specialized whenever its answer could have changed since you were trained, or the user could check "
+    "it against a source: current events, prices, releases, published figures, who holds a role, what a "
+    "page says today. Delegate those instead of answering from memory, even when you think you know."
 )
 
 # Added only when every toolset the agent declared is cross_cutting. Without the "almost no direct

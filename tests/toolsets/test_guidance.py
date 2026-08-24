@@ -189,3 +189,32 @@ def test_a_third_party_toolsets_guidance_reaches_the_prompt(monkeypatch):
     registry = build_registry(config)
     toolsets = select(["weather"], registry, agent="assistant", entry_point="assistant")
     assert "forecast" in assemble_system_message(config, "assistant", toolsets)
+
+
+def test_any_delegating_agent_is_told_what_it_cannot_answer_from_memory():
+    """The lean clause names activities ("web research"), which only helps once the model has already
+    decided the question needs the web. A question it believes it knows the answer to never gets that
+    far, so the trigger has to be epistemic (could the answer have changed, could the user check it)
+    rather than an activity. Unconditional for the same reason the trivia clause is: a tool-heavy
+    delegator answers a stale question from memory exactly as readily as a lean one."""
+    lean = {
+        "assistant": AgentConfig(system_message="Opener.", tools=["time", "memory"], delegates_to=["r"]),
+        "r": AgentConfig(tools=["web"]),
+    }
+    tool_heavy = {
+        "assistant": AgentConfig(system_message="Opener.", tools=["time", "fs"], delegates_to=["r"]),
+        "r": AgentConfig(tools=["web"]),
+    }
+    for message in (_assemble(lean), _assemble(tool_heavy)):
+        assert "could have changed since you were trained" in message
+        assert "even when you think you know" in message
+
+
+def test_an_agent_holding_web_itself_is_told_to_retrieve_rather_than_recall():
+    """The two halves partition: the delegation clause reaches an agent that must hand the work to a
+    worker, and the `web` toolset's own guidance reaches whoever holds the tools, worker or not. An
+    agent with web and no delegates is the case only the second half covers."""
+    agents = {"assistant": AgentConfig(system_message="Opener.", tools=["web"])}
+    message = _assemble(agents)
+    assert "look it up" in message
+    assert "spawn_subagent" not in message

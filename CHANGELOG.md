@@ -201,6 +201,15 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.20.0 or newer
   and nothing else: it is **not** an authorization boundary, and an agent declaring `config` really does
   get `update_config`. The boundaries are that `[agents.*]` is locked by default and that `confirm_tools`
   gates by tool name whoever calls it.
+- **The prompt names what cannot be answered from memory.** A model that believes it knows an answer
+  never reaches for a tool, so both halves of the prompt state the trigger as a property of the question
+  (could the answer have moved since training, could the user check it against a source: current events,
+  prices, releases, published figures, who holds a role, what a page says today) rather than as the
+  model's own confidence, which is the signal it is worst at reporting. A delegating agent is told to
+  delegate those "even when you think you know"; the `web` toolset, the one AIMU group carrying guidance
+  of its own, tells whoever holds the tools to look it up rather than recall it and to say where the
+  answer came from. The two reach different agents: the shipped `[agents.assistant]` holds no web tools
+  and gets the first, `[agents.researcher]` does not delegate and gets the second.
 - **`--system` overrides the entry agent's opener for that run**, winning outright over its declared
   `system_message` (and over the `[assistant].system_message` fallback), since the message a person is
   talking to is a prompt, not the capability `[agents.*]` is the single source of. A worker's own
