@@ -729,6 +729,14 @@ def test_unknown_key_lists_what_the_section_does_accept():
         settings.load(table=core_table())
 
 
+def test_load_raises_a_config_error_on_unparseable_toml():
+    """`load` is reached from `update_config`'s dry run as well as from startup, so a syntax slip has to
+    arrive in the same vocabulary every other fault in the file does."""
+    _write_config("[assistant\nmodel = 'm'\n")
+    with pytest.raises(settings.ConfigError, match="not valid TOML"):
+        settings.load(table=core_table())
+
+
 def test_unknown_key_in_an_unknown_section_stays_bare():
     """No section to enumerate and no other home for the key: the error says only what it knows."""
     with pytest.raises(settings.ConfigError, match=r"unknown config key \[widgets\].nonsense$"):
@@ -738,6 +746,19 @@ def test_unknown_key_in_an_unknown_section_stays_bare():
 def test_unknown_key_offers_every_section_that_has_it():
     with pytest.raises(settings.ConfigError, match=r"\[email\].host or \[web\].host"):
         settings.coerce_config_string("logging", "host", "x", table=core_table())
+
+
+def test_unknown_agent_key_lists_what_an_agent_table_accepts():
+    """An agent's keys are schema-keyed under the folded `agents.*`, so hints looked up under the section
+    the caller wrote would find nothing to enumerate for the one section whose keys are least guessable."""
+    with pytest.raises(settings.ConfigError, match=r"Accepted in \[agents.researcher\]: delegates_to, description"):
+        settings.coerce_config_string("agents.researcher", "nosuch", "x", table=core_table())
+
+
+def test_agent_hint_names_a_placeholder_rather_than_the_wildcard():
+    """A model acts on a hint verbatim, and `section="agents.*"` writes an agent literally named `*`."""
+    with pytest.raises(settings.ConfigError, match=r"did you mean \[agents.<name>\].tools\?"):
+        settings.coerce_config_string("display", "tools", "x", table=core_table())
 
 
 def _write_task_config(tmp_path, body: str):

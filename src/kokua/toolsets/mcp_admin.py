@@ -16,10 +16,11 @@ is reachable in-process:
   once; that waits for the agent to be rebuilt (a new conversation, an LRU eviction, a restart).
 * **A genuinely new server reaches nothing at all until a restart.** ``build_registry`` runs once, in
   ``Assistant.create``, over ``config.mcp_servers`` as loaded at startup, and nothing mutates the
-  registry afterwards, so a new server's name is not a key in it. No ``[agents.*]`` edit can reference
-  that name either, since ``config.toml`` is not reread mid-process. ``add_mcp_server`` therefore
-  persists the server for the *next* start and connects it for nothing else. This is the dominant flow,
-  and both tool results say so.
+  registry afterwards, so a new server's name is not a key in it. An ``[agents.*]`` edit *may* name the
+  server, because ``update_config``'s dry run rereads the file and so sees the ``[[mcp.server]]`` entry
+  written here, but that declaration resolves against no live registry either: it, too, is for the next
+  start. ``add_mcp_server`` therefore persists the server for the *next* start and connects it for
+  nothing else. This is the dominant flow, and both tool results say so.
 
 One consequence worth knowing for a config where a live agent declares a server directly: it holds
 callables from the connection it was built with, so a disconnect leaves that agent with stale ones until
@@ -41,8 +42,9 @@ logger = logging.getLogger(__name__)
 
 # The qualifier that is easy to lose and load-bearing: the toolset registry is built once in
 # Assistant.create from the config as loaded then, so a server that was not already a [[mcp.server]]
-# entry at startup has no name in it, and no [agents.*] edit can reference one (config.toml is not
-# reread mid-process either). Only a restart makes a new server referable.
+# entry at startup has no name in it. An [agents.*] edit may declare the new server, since
+# update_config's dry run rereads the file, but nothing in this process resolves that declaration.
+# Only a restart makes a new server referable.
 _REACH = (
     "You cannot call these yourself. A sub-agent you spawn can, but only if config.toml already "
     "declared this server at startup and names it in that agent's tools; otherwise the user must "

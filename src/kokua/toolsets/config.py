@@ -87,8 +87,10 @@ def _persisted_config(config_path: Path, table) -> Optional[dict]:
     reintroduce the exact fault (an unresolvable delegate, a cycle, an entry agent naming no table) this
     converter exists to catch, because the second dry run never saw the first write. Reading the file
     each time instead is what lets the second call see the first call's already-persisted change, which
-    is what the next real startup will also see. Both fields come from this one read for that reason:
-    taking either from the session snapshot leaves the whole bug class alive in that half.
+    is what the next real startup will also see. Both of those fields come from this one read for that
+    reason: taking either from the session snapshot leaves the whole bug class alive in that half. The
+    caller takes a third field off the same read, ``mcp_servers``, on the same argument, since the
+    registry it validates against is rebuilt from it.
 
     ``startup_schema()``, not the module's own ``cold_schema``: the latter routes every ``agents.*`` key
     through this very converter, and handing it to ``load`` as ``extra_schema`` would consult it while
@@ -110,7 +112,7 @@ def _persisted_config(config_path: Path, table) -> Optional[dict]:
     return settings.load(str(config_path), table=table, extra_schema=startup_schema())
 
 
-def _validated_agent_write(config, registry, config_path: Path, table) -> Callable[[str, str, Any], Any]:
+def _validated_agent_write(config, registry, table) -> Callable[[str, str, Any], Any]:
     """A converter refusing an agent-table write that would produce a config the next startup rejects.
 
     A dry run of the real ``validate_agents`` rather than a set of per-key checks, so the tool cannot
@@ -124,49 +126,68 @@ def _validated_agent_write(config, registry, config_path: Path, table) -> Callab
 
     Dry-runs against :func:`_persisted_config`, not against the live ``config`` directly, since "would
     the next startup accept this" is a question about the file, not about a snapshot frozen at process
-    start (see that function's docstring for why the two can disagree). Both of the fields
-    ``validate_agents`` reads come from that one read, the agent tables and the entry agent
-    ``[assistant].agent`` names, because taking either from the snapshot instead leaves the whole
-    staleness problem alive in that half: ``[assistant].agent`` is unlocked by default, so the assistant
-    can point it at an agent that does not exist and then be told a later agent write is fine.
-    ``copy.copy`` rather than ``dataclasses.replace`` on the whole config: only those two fields are
-    rebound, and a shallow copy re-runs no ``__post_init__``.
+    start (see that function's docstring for why the two can disagree). Three fields come from that one
+    read, because each of them decides part of the answer and each can be changed without the session
+    noticing. The agent tables and the entry agent ``[assistant].agent`` names are what
+    ``validate_agents`` reads, and taking either from the snapshot leaves the staleness alive in that
+    half: ``[assistant].agent`` is unlocked by default, so the assistant can point it at an agent that
+    does not exist and then be told a later agent write is fine. ``mcp_servers`` is the third, and it is
+    what the registry is rebuilt from rather than the live one being reused, because a server connected
+    this session with ``add_mcp_server`` is already a ``[[mcp.server]]`` entry on file and so is a name
+    the next startup registers, while the live registry was built once at ``Assistant.create`` and never
+    learned it. Reusing that registry made the dry run *stricter* than the startup it claims to predict,
+    refusing an agent write naming a server the file already declares. ``copy.copy`` rather than
+    ``dataclasses.replace`` on the whole config: only those three fields are rebound, and a shallow copy
+    re-runs no ``__post_init__``.
 
-    A key the file simply does not carry falls back to the live value, but only for the entry agent, and
-    the asymmetry is deliberate. A file with no ``[assistant].agent`` line resolves at the next startup
-    to whatever this session resolved it to, the built-in default or a command-line flag. A file with no
-    ``[agents]`` table is not a gap but a declaration of none, which the next startup refuses outright,
-    so backfilling the session's own agents there would hide the very failure being asked about. Only a
-    file that does not exist yet falls back for both, having declared nothing either way.
+    Rebuilding the registry costs an entry-point discovery pass and a scan of the skills directory, which
+    is not free. It is paid only on an agent write, which requires a user who has taken ``agents.*`` out
+    of ``[security].locked_config_keys`` by hand, so it is rare by construction, and a dry run that
+    answers about the wrong registry is worth less than the pass costs.
+
+    A key the file simply does not carry falls back to the live value, but only for the entry agent and
+    the servers, and the asymmetry is deliberate. A file with no ``[assistant].agent`` line resolves at
+    the next startup to whatever this session resolved it to, the built-in default or a command-line
+    flag, and a file with no ``[[mcp.server]]`` the same way, ``--mcp`` being the flag in that case. A
+    file with no ``[agents]`` table is not a gap but a declaration of none, which the next startup
+    refuses outright, so backfilling the session's own agents there would hide the very failure being
+    asked about. Only a file that does not exist yet falls back for all three, having declared nothing
+    either way, and that is also the only case still validated against the live registry.
 
     The check runs against every configured agent, not only the one being written, so an agent already
     broken by some other change (an MCP server removed mid-session, say) blocks a write to any other
     agent's table too, exact parity with startup, which would refuse the whole file. The error is
     reworded rather than simply prefixed with the section being written, so that when the fault named
     inside it belongs to a different agent's table, a model reading the refusal is not misled into
-    repairing the one it just tried to write.
+    repairing the one it just tried to write. ``validated_registry`` is what runs the file-backed half,
+    the same call a lazily built front end makes at startup, so a registry that will not even assemble
+    (two toolsets claiming one name, say) arrives as a refusal rather than escaping the tool call.
     """
-    from kokua.toolsets.agents import validate_agents
+    from kokua.toolsets.agents import validate_agents, validated_registry
 
     def convert(section: str, key: str, value: Any) -> Any:
         name = section.split(".")[1]
         try:
-            persisted = _persisted_config(config_path, table)
+            persisted = _persisted_config(config.config_path, table)
         except settings.ConfigError as error:
             raise settings.ConfigError(
                 f"config.toml does not currently parse, so [{section}].{key} cannot be checked against it: {error}"
             ) from error
+        candidate = copy.copy(config)
         if persisted is None:
             baseline, entry_agent = config.agents, config.entry_agent
         else:
             baseline = persisted.get("agents", {})
             entry_agent = persisted.get("entry_agent", config.entry_agent)
-        candidate = copy.copy(config)
+            candidate.mcp_servers = persisted.get("mcp_servers", config.mcp_servers)
         agent = baseline.get(name, AgentConfig())
         candidate.agents = {**baseline, name: replace(agent, **{key: value})}
         candidate.entry_agent = entry_agent
         try:
-            validate_agents(candidate, registry)
+            if persisted is None:
+                validate_agents(candidate, registry)
+            else:
+                validated_registry(candidate)
         except settings.ConfigError as error:
             raise settings.ConfigError(
                 f"{error} (found while validating every agent for the write to [{section}].{key}; the "
@@ -178,7 +199,6 @@ def _validated_agent_write(config, registry, config_path: Path, table) -> Callab
 
 
 def make_config_tools(
-    config_path: Path,
     apply_hot: Callable[[str, str, object], Awaitable[None]],
     table,
     *,
@@ -201,15 +221,18 @@ def make_config_tools(
     conversation that made it (see :func:`_resolvable_model`).
 
     ``config`` is the live ``AssistantConfig``, read for its ``locked_config_keys`` at call time rather
-    than bound to a snapshot, since a settings applier can mutate it between calls. ``registry`` is the
-    live toolset registry, read here to dry-run an agent-table write against it.
+    than bound to a snapshot, since a settings applier can mutate it between calls. It also carries the
+    file both tools read and write, ``config.config_path``, which is not a separate parameter: two ways
+    to name one file is two ways for a caller to name two, and a tool reporting one path while writing
+    another is a failure nothing here could detect. ``registry`` is the live toolset registry, the dry
+    run's fallback for an agent write made before the file exists.
 
     The agent entries are the third thing this module supplies rather than wraps: ``AGENT_SCHEMA`` in
     ``config/file.py`` types an agent key, and the converter layered over it here is what checks the
     resulting config would still start. ``build_schema`` merges ``extra_schema`` last, which is what lets
     that override land.
     """
-    agent_write = _validated_agent_write(config, registry, config_path, table)
+    agent_write = _validated_agent_write(config, registry, table)
     cold_schema = {
         **startup_schema(),
         ("assistant", "model"): ("model", (str,), "a string", _resolvable_model),
@@ -233,7 +256,7 @@ def make_config_tools(
         file exists yet, all settings are at their built-in defaults.
         """
         preamble = _policy_preamble(config.locked_config_keys)
-        text = config_store.read_text(config_path)
+        text = config_store.read_text(config.config_path)
         if text is None:
             return preamble + "No config file exists yet; all settings are at their built-in defaults."
         return preamble + text
@@ -254,7 +277,7 @@ def make_config_tools(
         """
         try:
             applied = await config_store.apply_setting(
-                config_path,
+                config.config_path,
                 section,
                 key,
                 value,
@@ -295,7 +318,6 @@ TOOLSET = Toolset(
     name="config",
     description="Read config.toml and change a runtime setting, persisted back to the file.",
     build=lambda ctx: make_config_tools(
-        ctx.config.config_path,
         ctx.state.reapply_config,
         ctx.state.settings_table,
         config=ctx.config,

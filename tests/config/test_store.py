@@ -49,6 +49,15 @@ def test_set_value_writes_a_float_into_a_missing_section(tmp_path):
     assert _read(path)["widgets"]["ratio"] == 0.3
 
 
+def test_set_value_raises_a_config_error_on_unparseable_toml(tmp_path):
+    """Every write walks through `_load`, `update_config`'s among them, and tomlkit's own ParseError is
+    in no caller's vocabulary: unconverted it escapes that tool call rather than becoming a refusal."""
+    path = tmp_path / "config.toml"
+    path.write_text("[assistant\nmodel = 'm'\n", encoding="utf-8")
+    with pytest.raises(settings.ConfigError, match="not valid TOML"):
+        config_store.set_value(path, "logging", "level", "DEBUG")
+
+
 def test_unset_value_removes_key(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[assistant]\nmodel = "m"\nmemory = true\n', encoding="utf-8")

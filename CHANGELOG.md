@@ -547,7 +547,15 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   a saved-but-not-yet-applied change reported as done is a change the user thinks they have. A rejected
   key says where to put it instead: an unknown `[section].key` names the section that *does* declare
   that key (`[assistant.generation].thinking` is answered with `[assistant].thinking`) and lists what
-  the section it was given accepts, so the assistant can correct itself from the error alone. A model
+  the section it was given accepts, so the assistant can correct itself from the error alone. An
+  `[agents.<name>]` table gets both hints as well, read off the one set of entries that serves every
+  agent, and a hint pointing *into* an agent's table says `[agents.<name>]` rather than the wildcard the
+  schema is keyed by, because a model follows a hint literally and the wildcard written back would
+  create an agent named `*`. A `config.toml` that is not valid TOML is answered the same way, as a
+  refusal naming the file and the syntax fault: both parsers the tool sits over (tomlkit for the write
+  itself, `tomllib` for the re-read an agent write is checked against) raise a `ConfigError` on a syntax
+  error, so a stray bracket from a hand-edit made while Kokua runs is something the assistant can report
+  rather than an exception out of the tool call. A model
   string gets a stronger check than the schema's `str`: `[assistant].model` is startup-only, so nothing
   applies it live and a name that does not resolve would be saved and surface as a Kokua that will not
   start. It is refused at write time by building a throwaway client -- the same call startup makes, so
@@ -570,8 +578,11 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   Removing `agents.*` genuinely
   unlocks agent tables: `update_config` can now resolve an agent's keys, and dry-runs `validate_agents`
   before saving so a write that would break the next startup is refused. That dry run reads the file
-  rather than the running session, both the agent tables and the `[assistant].agent` naming the entry
-  agent, so two writes that are each fine alone cannot combine into a config the next startup rejects.
+  rather than the running session, the agent tables, the `[assistant].agent` naming the entry agent, and
+  the `[[mcp.server]]` entries alike, so two writes that are each fine alone cannot combine into a config
+  the next startup rejects, and a write naming a server `add_mcp_server` connected this session is
+  accepted rather than refused as an unknown toolset: the entry is already on file, so the next startup
+  registers the name even though the running registry never learned it.
   `read_config` opens with the policy in force, and a refusal names the pattern that matched.
 - **A default model, with per-agent overrides.** `[assistant].model` is the model every agent runs on;
   an agent that names its own `[agents.<name>].model` runs on that instead. Resolution is per agent and

@@ -26,6 +26,7 @@ from typing import Awaitable, Callable, Optional, Sequence
 from urllib.parse import urlparse
 
 import tomlkit
+import tomlkit.exceptions
 from tomlkit import TOMLDocument
 from tomlkit.container import Container
 from tomlkit.items import Comment, InlineTable, Key, Null, Table, Whitespace
@@ -78,10 +79,20 @@ def _load(path: Path) -> TOMLDocument:
     all. The content is exactly what ``kokua config init`` would write, so this is not a way to grant a
     capability beyond what a hand-edit already could -- but it is a path by which ``[agents.*]`` reappears
     on disk without a human typing it.
+
+    A file that is not valid TOML raises ``ConfigError``, the same conversion ``load_tasks`` makes and for
+    the same reason: every write path runs through here, ``update_config`` among them, and tomlkit's own
+    ``ParseError`` is not in the vocabulary any caller handles, so a stray bracket in a hand-edit would
+    escape a tool call as an unhandled exception rather than becoming a refusal the assistant can report.
+    Only the file is guarded; the shipped example beneath it is this package's own content, and a parse
+    failure there is a broken install rather than a user's typo.
     """
-    if path.exists():
+    if not path.exists():
+        return tomlkit.parse(settings.example_text())
+    try:
         return tomlkit.parse(path.read_text(encoding="utf-8"))
-    return tomlkit.parse(settings.example_text())
+    except tomlkit.exceptions.ParseError as error:
+        raise settings.ConfigError(f"{path} is not valid TOML: {error}") from error
 
 
 def _write(path: Path, doc: TOMLDocument) -> None:

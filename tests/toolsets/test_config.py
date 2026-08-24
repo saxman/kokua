@@ -22,18 +22,29 @@ def _read(path):
 
 
 def _tools(tmp_path, apply_hot=None, config=None, registry=None):
+    """The two tools over a config file in `tmp_path`, and that file's path.
+
+    A caller passing its own `config` passes it through `_config` or `_unlocked` below, either of which
+    already points `config_path` at this file. The tools read the path off the config, so a config built
+    any other way sends every read and write to the real `$KOKUA_HOME/config.toml` the test never looks at.
+    """
+
     async def _noop(section, key, value):
         return None
 
     path = tmp_path / "config.toml"
     read_config, update_config = config_tools.make_config_tools(
-        path,
         apply_hot or _noop,
         core_table(),
-        config=config or AssistantConfig(),
+        config=config if config is not None else _config(tmp_path),
         registry=registry if registry is not None else {},
     )
     return path, read_config, update_config
+
+
+def _config(tmp_path, **kwargs):
+    """An `AssistantConfig` whose `config_path` is the file `_tools` hands back."""
+    return AssistantConfig(config_path=tmp_path / "config.toml", **kwargs)
 
 
 async def test_read_config_returns_file_text(tmp_path):
@@ -216,7 +227,7 @@ async def test_update_config_points_a_task_edit_at_the_scheduling_tools(tmp_path
 
 
 async def test_read_config_states_the_write_policy_in_force(tmp_path):
-    config = AssistantConfig(locked_config_keys=["email.to"])
+    config = _config(tmp_path, locked_config_keys=["email.to"])
     path, read_config, _ = _tools(tmp_path, config=config)
     path.write_text('[assistant]\nmodel = "m"\n', encoding="utf-8")
     text = await read_config()
@@ -227,19 +238,19 @@ async def test_read_config_states_the_write_policy_in_force(tmp_path):
 
 
 async def test_read_config_states_the_policy_even_with_no_file(tmp_path):
-    _, read_config, _ = _tools(tmp_path, config=AssistantConfig(locked_config_keys=["email.to"]))
+    _, read_config, _ = _tools(tmp_path, config=_config(tmp_path, locked_config_keys=["email.to"]))
     assert "email.to" in await read_config()
 
 
 async def test_update_config_refusal_names_the_pattern_that_matched(tmp_path):
-    _, _, update_config = _tools(tmp_path, config=AssistantConfig(locked_config_keys=["email.*"]))
+    _, _, update_config = _tools(tmp_path, config=_config(tmp_path, locked_config_keys=["email.*"]))
     result = await update_config("email", "to", "someone@example.com")
     assert "email.*" in result
     assert "locked_config_keys" in result
 
 
 async def test_update_config_refuses_the_lock_list_itself(tmp_path):
-    _, _, update_config = _tools(tmp_path, config=AssistantConfig(locked_config_keys=[]))
+    _, _, update_config = _tools(tmp_path, config=_config(tmp_path, locked_config_keys=[]))
     result = await update_config("security", "locked_config_keys", "email.to")
     assert "locked_config_keys" in result
 
@@ -256,13 +267,13 @@ def _stub_toolset(name):
     return Toolset(name=name, description=f"{name} for a test", build=lambda ctx: [])
 
 
-def _unlocked(**kwargs):
+def _unlocked(tmp_path, **kwargs):
     """A config whose agents.* lock is off, which is the only state these writes are reachable in."""
-    return AssistantConfig(locked_config_keys=[], **kwargs)
+    return _config(tmp_path, locked_config_keys=[], **kwargs)
 
 
 async def test_update_config_writes_an_agent_tools_list_when_unlocked(tmp_path):
-    config = _unlocked(agents={"researcher": AgentConfig(tools=["time"])}, entry_agent="researcher")
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig(tools=["time"])}, entry_agent="researcher")
     path, _, update_config = _tools(
         tmp_path, config=config, registry={"time": _stub_toolset("time"), "memory": _stub_toolset("memory")}
     )
@@ -272,7 +283,7 @@ async def test_update_config_writes_an_agent_tools_list_when_unlocked(tmp_path):
 
 
 async def test_update_config_refuses_an_agent_tools_list_naming_an_unknown_toolset(tmp_path):
-    config = _unlocked(agents={"researcher": AgentConfig(tools=["time"])}, entry_agent="researcher")
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig(tools=["time"])}, entry_agent="researcher")
     path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
     result = await update_config("agents.researcher", "tools", "time,nosuch")
     assert "nosuch" in result
@@ -280,10 +291,7 @@ async def test_update_config_refuses_an_agent_tools_list_naming_an_unknown_tools
 
 
 async def test_update_config_refuses_a_delegation_cycle(tmp_path):
-    config = _unlocked(
-        agents={"a": AgentConfig(delegates_to=["b"]), "b": AgentConfig()},
-        entry_agent="a",
-    )
+    config = _unlocked(tmp_path, agents={"a": AgentConfig(delegates_to=["b"]), "b": AgentConfig()}, entry_agent="a")
     path, _, update_config = _tools(tmp_path, config=config)
     result = await update_config("agents.b", "delegates_to", "a")
     assert "delegation cycle" in result
@@ -291,7 +299,7 @@ async def test_update_config_refuses_a_delegation_cycle(tmp_path):
 
 
 async def test_update_config_refuses_an_agent_model_this_process_cannot_build(tmp_path):
-    config = _unlocked(agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")
     path, _, update_config = _tools(tmp_path, config=config)
     result = await update_config("agents.researcher", "model", "nosuchprovider:nosuchmodel")
     assert "nosuchmodel" in result
@@ -299,7 +307,7 @@ async def test_update_config_refuses_an_agent_model_this_process_cannot_build(tm
 
 
 async def test_update_config_creates_an_agent_table_that_does_not_exist_yet(tmp_path):
-    config = _unlocked(agents={"assistant": AgentConfig()}, entry_agent="assistant")
+    config = _unlocked(tmp_path, agents={"assistant": AgentConfig()}, entry_agent="assistant")
     path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
     await update_config("agents.newbie", "tools", "time")
     assert _read(path)["agents"]["newbie"]["tools"] == ["time"]
@@ -307,7 +315,7 @@ async def test_update_config_creates_an_agent_table_that_does_not_exist_yet(tmp_
 
 async def test_update_config_still_refuses_an_agent_write_by_default(tmp_path):
     """The shipped policy locks agents.*, so none of the above is reachable without a hand-edit."""
-    config = AssistantConfig(agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    config = _config(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")
     path, _, update_config = _tools(tmp_path, config=config)
     result = await update_config("agents.researcher", "tools", "time")
     assert "agents.*" in result
@@ -323,7 +331,7 @@ async def test_update_config_dry_run_sees_a_prior_write_from_the_same_session(tm
     against the file instead (what the next startup actually reads), the second write closes `a -> b -> a`
     and must be refused.
     """
-    config = _unlocked(agents={"a": AgentConfig(), "b": AgentConfig()}, entry_agent="a")
+    config = _unlocked(tmp_path, agents={"a": AgentConfig(), "b": AgentConfig()}, entry_agent="a")
     path, _, update_config = _tools(tmp_path, config=config)
     # Pre-seed the file with exactly these two agents. Left to create itself on the first write below,
     # `config_store.set_value` scaffolds a brand-new file from the shipped example config (see
@@ -346,7 +354,7 @@ async def test_update_config_dry_run_sees_a_prior_entry_agent_write(tmp_path):
     that does not exist. That write is cold, so the session snapshot still names the old entry agent,
     and an agent write checked against the snapshot is reported as safe while the next startup refuses
     the file for naming an agent it has no table for."""
-    config = _unlocked(agents={"a": AgentConfig()}, entry_agent="a")
+    config = _unlocked(tmp_path, agents={"a": AgentConfig()}, entry_agent="a")
     path, _, update_config = _tools(tmp_path, config=config)
     path.write_text("[agents.a]\n", encoding="utf-8")
 
@@ -363,7 +371,7 @@ async def test_update_config_dry_run_sees_a_prior_entry_agent_write(tmp_path):
 async def test_update_config_refusal_names_which_agent_the_fault_is_actually_in(tmp_path):
     """A graph already broken elsewhere must not make the refusal read as though the agent just written
     is the broken one: the write to `r` is fine on its own, the fault is in `q`'s tools."""
-    config = _unlocked(agents={"q": AgentConfig(tools=["nosuch"]), "r": AgentConfig()}, entry_agent="r")
+    config = _unlocked(tmp_path, agents={"q": AgentConfig(tools=["nosuch"]), "r": AgentConfig()}, entry_agent="r")
     path, _, update_config = _tools(tmp_path, config=config, registry={})
 
     result = await update_config("agents.r", "description", "the researcher")
@@ -377,7 +385,7 @@ async def test_update_config_refusal_names_which_agent_the_fault_is_actually_in(
 async def test_update_config_validates_against_the_live_config_when_no_file_exists_yet(tmp_path):
     """Nothing is on disk yet, so the dry run has no file to be checked against; it must fall back to the
     live snapshot rather than treating an absent file as a parse failure."""
-    config = _unlocked(agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")
     path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})
     assert not path.exists()
 
@@ -392,7 +400,7 @@ async def test_update_config_refuses_an_agent_write_when_the_file_does_not_curre
     hand-edit adding a bad key while Kokua runs, say) must refuse the write rather than silently falling
     back to the live config: the next startup will fail on that same broken file regardless of what this
     dry run decides, so validating against something else would be answering the wrong question."""
-    config = _unlocked(agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")
     path, _, update_config = _tools(tmp_path, config=config)
     path.write_text('[email]\nnosuchkey = "x"\n', encoding="utf-8")
 
@@ -401,3 +409,47 @@ async def test_update_config_refuses_an_agent_write_when_the_file_does_not_curre
     assert "does not currently parse" in result
     assert "nosuchkey" in result
     assert _read(path) == {"email": {"nosuchkey": "x"}}
+
+
+async def test_update_config_accepts_an_agent_write_naming_a_server_only_the_file_knows(tmp_path):
+    """`add_mcp_server` persists a `[[mcp.server]]` entry the next startup registers, while the live
+    registry was built once at `Assistant.create` and never learned the name. Validated against that
+    registry, the dry run refused a write the very startup it claims to predict would accept, so the
+    candidate config carries the file's servers and the registry is rebuilt from it."""
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config, registry={})
+    path.write_text(
+        '[[mcp.server]]\nname = "notes"\nurl = "https://example.test/mcp"\n\n[agents.researcher]\n',
+        encoding="utf-8",
+    )
+
+    result = await update_config("agents.researcher", "tools", "notes")
+
+    assert "restart" in result.lower()
+    assert _read(path)["agents"]["researcher"]["tools"] == ["notes"]
+
+
+async def test_update_config_refuses_a_plain_write_when_the_file_is_not_valid_toml(tmp_path):
+    """A stray bracket left by a hand-edit reaches the write path rather than the dry run: tomlkit parses
+    the file to patch it, and without the conversion at the config layer its ParseError leaves the tool
+    call as an unhandled exception instead of a refusal the assistant can report and act on."""
+    path, _, update_config = _tools(tmp_path)
+    path.write_text("[assistant\nmodel = 'm'\n", encoding="utf-8")
+
+    result = await update_config("logging", "level", "DEBUG")
+
+    assert result.startswith("Rejected:")
+    assert "not valid TOML" in result
+
+
+async def test_update_config_refuses_an_agent_write_when_the_file_is_not_valid_toml(tmp_path):
+    """The same broken file reaches the agent path through a different parser, the dry run's `tomllib`
+    re-read, so both parses had to be converted for the tool to answer rather than raise."""
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config)
+    path.write_text("[assistant\nmodel = 'm'\n", encoding="utf-8")
+
+    result = await update_config("agents.researcher", "description", "the researcher")
+
+    assert result.startswith("Rejected:")
+    assert "not valid TOML" in result

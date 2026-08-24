@@ -132,9 +132,11 @@ startup, and the difference is the whole story of this section:**
   it was built, so if *it* declares the server, it picks them up only the next time it is built (a new
   conversation, or a restart).
 - **A server new to this session reaches nothing at all until you restart.** The toolset namespace is
-  built once, at startup, from the `[[mcp.server]]` tables as they were then, and `config.toml` is not
-  reread mid-process. So a newly connected server's name is not in the namespace, no `[agents.*]` table
-  can reference it yet, and editing that file while Kokua runs changes nothing until the next start.
+  built once, at startup, from the `[[mcp.server]]` tables as they were then. So a newly connected
+  server's name is not in that namespace, and nothing naming it resolves to anything before the next
+  start. You can write the `[agents.*]` table now, and so can the assistant if you have unlocked
+  `agents.*` (`update_config` rereads the file, so it sees the entry `add_mcp_server` just wrote and
+  accepts the name), but editing that file while Kokua runs changes nothing until it restarts.
   `add_mcp_server` has recorded the server for you; the remaining two steps are yours.
 
 This is why the tool's own reply tells the model it cannot use the new tools itself, and it is worth

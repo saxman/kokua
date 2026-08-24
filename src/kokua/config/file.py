@@ -445,6 +445,25 @@ def _schema_section(section: str) -> str:
     return ".".join(["agents", "*", *section.split(".")[2:]])
 
 
+# What a folded section is called in error text. `agents.*` is a schema key, not a section any file has.
+_FOLDED_PREFIX = "agents.*"
+_NAMED_PREFIX = "agents.<name>"
+
+
+def _named_section(section: str) -> str:
+    """A schema section written the way a config file writes it, for error text only.
+
+    The inverse of :func:`_schema_section`, and it exists because a hint is something a model acts on
+    literally: told "did you mean [agents.*].tools?", it calls ``update_config`` with that section
+    verbatim, and a write policy that has unlocked agent tables then creates an agent named ``*``. The
+    placeholder cannot be actioned that way, so a misread costs a second attempt rather than a junk
+    table on disk.
+    """
+    if not section.startswith(_FOLDED_PREFIX):
+        return section
+    return _NAMED_PREFIX + section[len(_FOLDED_PREFIX) :]
+
+
 #: What ``update_config`` may write inside an agent's table, keyed by the wildcard section
 #: ``_schema_section`` produces. Deliberately not merged into ``_STARTUP_SCHEMA``: no real file has a
 #: section literally named ``agents.*``, and keeping these out of the load path means ``load`` cannot
@@ -567,12 +586,20 @@ def _unknown_key_error(schema: dict, section: str, key: str) -> ConfigError:
     name something that is not really there. It matters most for ``update_config``, whose caller is a
     model retrying from the error text alone -- ``[assistant.generation].thinking`` is the case that
     prompted it, `thinking` being an ``[assistant]`` key whose sub-table sits directly beneath it.
+
+    The section serves two purposes here and an agent's table is why they cannot be the same string. The
+    header names the section the caller actually passed, ``[agents.researcher]``, because that is what the
+    writer was editing; the hints are looked up under the folded ``agents.*`` the schema is keyed by, or
+    every agent-table typo would arrive with no "Accepted in" list, losing the retry aid exactly where the
+    accepted keys are least guessable. :func:`_named_section` writes a folded section back out for the
+    reader.
     """
+    lookup = _schema_section(section)
     message = f"unknown config key [{section}].{key}"
-    elsewhere = sorted(other for other, other_key in schema if other_key == key and other != section)
+    elsewhere = sorted(other for other, other_key in schema if other_key == key and other != lookup)
     if elsewhere:
-        message += "; did you mean " + " or ".join(f"[{other}].{key}" for other in elsewhere) + "?"
-    accepted = sorted(k for s, k in schema if s == section)
+        message += "; did you mean " + " or ".join(f"[{_named_section(other)}].{key}" for other in elsewhere) + "?"
+    accepted = sorted(k for s, k in schema if s == lookup)
     if accepted:
         message += f" Accepted in [{section}]: {', '.join(accepted)}."
     return ConfigError(message)
@@ -746,8 +773,14 @@ def load(
     if not path.exists():
         raise ConfigError(f"config file not found: {path}\nRun `kokua config init` to write one.")
 
-    with path.open("rb") as file:
-        data = tomllib.load(file)
+    # A syntax error is reported as a ConfigError like every other fault in this file, the conversion
+    # `store.load_tasks` also makes: `load` is reached from `update_config`'s dry run as well as from
+    # startup, and a bare TOMLDecodeError there escapes the tool call instead of becoming a refusal.
+    try:
+        with path.open("rb") as file:
+            data = tomllib.load(file)
+    except tomllib.TOMLDecodeError as error:
+        raise ConfigError(f"{path} is not valid TOML: {error}") from error
 
     schema = build_schema(table, extra_schema)
     overrides: dict[str, Any] = {}
