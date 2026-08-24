@@ -179,7 +179,7 @@ ENTRY_AGENT_TOOLS = {
     "kokua toolsets/conversations.py": {"list_conversations", "read_conversation", "search_conversations"},
     "kokua toolsets/config.py": {"read_config", "update_config"},
     "kokua toolsets/mcp_admin.py": {"add_mcp_server", "remove_mcp_server"},
-    "kokua toolsets/capabilities.py": {"list_capabilities", "compose_worker"},
+    "kokua toolsets/capabilities.py": {"list_capabilities", "compose_subagent"},
     "kokua toolsets/scheduling.py": {
         "schedule_task",
         "list_scheduled_tasks",

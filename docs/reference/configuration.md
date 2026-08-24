@@ -318,7 +318,7 @@ there is nothing for the check to refuse.
 
 The limit is anything that does not exist when startup ends. A tool from an MCP server the assistant
 connects later with `add_mcp_server` has no name to match yet, and neither does a tool only
-`compose_worker` would build, out of a toolset no `[agents.*]` table names. Listing either one is
+`compose_subagent` would build, out of a toolset no `[agents.*]` table names. Listing either one is
 refused, which will look wrong if you were deliberately gating ahead of the connection. To gate an MCP
 tool, give its server a `[[mcp.server]]` table here and name that server in an agent's `tools`; to gate
 a tool from a toolset nothing declares, name that toolset in an agent's `tools`. Both are known from the
@@ -665,24 +665,24 @@ revision, including each intermediate version, which overrides `result_review`'s
 
 Capability discovery is a toolset: an agent's `tools` must list `capabilities` for the agent to see what
 is installed beyond its own tools. It gets two tools. `list_capabilities` reads the registry, every
-installed capability except this one, which the agent reading it already holds. `compose_worker` builds a
+installed capability except this one, which the agent reading it already holds. `compose_subagent` builds a
 sub-agent holding exactly the capabilities one task needs, and runs it.
 
-Unlike the workers in `[agents.*]`, a composed worker is not declared anywhere: its capabilities are
+Unlike the sub-agents in `[agents.*]`, a composed one is not declared anywhere: its capabilities are
 chosen per task from everything installed, except two names it can never be given. `skills` works only
-on the agent Kokua constructs directly, and `capabilities` itself would hand the worker a fresh
+on the agent Kokua constructs directly, and `capabilities` itself would hand it a fresh
 composition budget. It runs on `[assistant].model` with the `[assistant]` thinking
 and generation defaults, and its tools still go through `[security].confirm_tools`, so `execute_python`
 and `add_mcp_server` still ask you first. Composing itself is not in the shipped `confirm_tools`, so it
-does not ask; add `compose_worker` there to gate that too.
+does not ask; add `compose_subagent` there to gate that too.
 
 ### `max_depth`
 
 How far composition may nest. Default `3`. Hot.
 
-At `3` a chain reaches three workers, and the last of them holds neither `compose_worker` nor
-`list_capabilities`, since a `compose_worker` with no way to look up capability names is useless to
-whatever holds it. `0` switches composing off entirely. The cap is read when `compose_worker` is called,
+At `3` a chain reaches three sub-agents, and the last of them holds neither `compose_subagent` nor
+`list_capabilities`, since a `compose_subagent` with no way to look up capability names is useless to
+whatever holds it. `0` switches composing off entirely. The cap is read when `compose_subagent` is called,
 so an `update_config` change applies to the next composition with no restart, though a chain already
 running keeps the count it started with.
 

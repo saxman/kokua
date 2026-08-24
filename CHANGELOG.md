@@ -172,9 +172,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.20.0 or newer
   two agents declaring one toolset share one store rather than opening two, and the memory and document
   stores are opened because some agent declared them and not otherwise.
   An unknown name raises rather than being dropped, since a dropped name is a declaration silently
-  overruled. The one exception is a worker composed by `compose_worker` (below), and it is entered by
-  declaration too: only an agent whose own table names `capabilities` can compose one, and what it
-  composes is one task's worker rather than an agent the config describes.
+  overruled. The one exception is a sub-agent composed by `compose_subagent` (below), and it is entered
+  by declaration too: only an agent whose own table names `capabilities` can compose one, and what it
+  composes is one task's sub-agent rather than an agent the config describes.
 - **`spawn_subagent(agent_type, task)`** is typed, and a non-empty `delegates_to` is the whole switch
   for it: that agent gets a delegate offering exactly the agents it names, each running on its own
   declared model (or the default) with the tools its own table declares. Delegation nesting is Kokua's rather than AIMU's `max_depth`,
@@ -183,14 +183,14 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.20.0 or newer
   concurrently (`[assistant] concurrent_tools`, default on). A worker's gated-tool call is routed to the
   user for approval and is never run unattended.
 - **Capability discovery** (`capabilities` toolset). An agent can read the toolset registry at runtime
-  with `list_capabilities` and, when no declared sub-agent role fits a task, call `compose_worker` to
-  build a sub-agent holding exactly the capabilities that task needs. The composed worker is
+  with `list_capabilities` and, when no declared sub-agent role fits a task, call `compose_subagent` to
+  build a sub-agent holding exactly the capabilities that task needs. The composed sub-agent is
   constructed per call, runs one task, and is discarded; its tools still route through
   `[security].confirm_tools`. `[capabilities].max_depth` (default 3, `0` off) bounds how far composition
-  nests: at 3 a chain reaches three workers, and the last of them holds neither tool, since a
-  `compose_worker` with no way to look up capability names is useless to whatever holds it. A
+  nests: at 3 a chain reaches three sub-agents, and the last of them holds neither tool, since a
+  `compose_subagent` with no way to look up capability names is useless to whatever holds it. A
   declared role is ranked above composing one in the prompt guidance, since its instructions were
-  written for its job where a composed worker's are written in the moment.
+  written for its job where a composed one's are written in the moment.
 - **Guidance travels with the capability.** Each toolset carries the prompt text that makes the model use
   it, appended to any agent holding it, so installing a toolset brings its instructions and removing one
   takes them away. An agent's system message is its own opener (falling back to
@@ -792,7 +792,7 @@ notice on startup.
   nobody notices. Every unmatched entry is now named at startup with its near misses. The vocabulary is
   every tool the config builds, not just the entry agent's: `execute_python` comes from `[agents.coder]`,
   and `spawn_subagent` and a skill's script tools count too. A tool that arrives later (from a runtime
-  `add_mcp_server`, or built only by `compose_worker` out of a toolset no agent names) cannot be listed
+  `add_mcp_server`, or built only by `compose_subagent` out of a toolset no agent names) cannot be listed
   ahead of time, and the error says so.
 - **The reviewer toolset needs no gate.** An autonomous critic cannot pause to ask you mid-review, so
   rather than exempting it from the gate the reviewer is given nothing the gate exists to cover: web

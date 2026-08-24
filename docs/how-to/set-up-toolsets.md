@@ -28,8 +28,8 @@ declares it. Kokua refuses to start with no `[agents.*]` tables at all, because 
 route from a capability to the model.
 
 One capability reaches past the rule while staying inside it. An agent whose table names `capabilities`
-can call `compose_worker` to build a sub-agent from anything installed except `skills` (entry-agent
-only) and `capabilities` itself (which would hand the worker a fresh composition budget), chosen per
+can call `compose_subagent` to build a sub-agent from anything installed except `skills` (entry-agent
+only) and `capabilities` itself (which would hand it a fresh composition budget), chosen per
 task rather than declared: the exception is entered by declaration, and what it grants dies with the
 task rather than widening any agent your config describes.
 

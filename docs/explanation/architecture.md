@@ -144,12 +144,12 @@ conversation's agent cannot differ from a sibling's by accident, and there is no
   a *provisioned* name nothing references (`agents.unreferenced_toolsets`, which excludes the AIMU and
   core toolsets that ship regardless), since a plugin loaded or a server connected to be unreachable is
   invisible otherwise and cost something.
-- **A composed worker is the one exception, and it is entered by declaration.** `compose_worker`
+- **A composed sub-agent is the one exception, and it is entered by declaration.** `compose_subagent`
   ([toolsets/capabilities.py](../../src/kokua/toolsets/capabilities.py)) resolves a sub-agent's tools from
   names the model picked out of the registry rather than from a table, and runs one task on it through
   AIMU's subagent machinery instead of `wire_agent`. Only an agent whose own `tools` names `capabilities`
-  holds that tool; the worker may not be handed `capabilities` itself, since how far composition nests is
-  `[capabilities].max_depth`'s decision (default 3, `0` off) and not the model's; and the worker's tools
+  holds that tool; it may not be handed `capabilities` itself, since how far composition nests is
+  `[capabilities].max_depth`'s decision (default 3, `0` off) and not the model's; and its tools
   still route through `[security].confirm_tools`. It is built per call and discarded with the call, so
   what widens is one task's reach, never a persistent agent's.
 - **Delegation nesting is Kokua's, not AIMU's.** AIMU's `max_depth` gives every level the same worker
@@ -168,7 +168,7 @@ What the *shipped* config declares is a lean entry agent: `kokua config init` gi
 `[agents.assistant]` the cross-cutting toolsets (memory, documents, skills, config, `mcp-admin`,
 scheduling, conversations, `planning`, `capabilities`, the clock) and no domain toolset, delegating web
 work to `researcher` and filesystem and compute work to `coder`. There is deliberately no catch-all role
-alongside them: a task neither specialist covers is what `compose_worker` is for, and a `generalist`
+alongside them: a task neither specialist covers is what `compose_subagent` is for, and a `generalist`
 declared next to it would claim the same slot more cheaply and win. That keeps the always-on agent's
 tool context small, and the prompt tells it so: `assemble_system_message` adds the "you are a lean
 supervisor, you MUST delegate" clause only when every toolset the agent declared is `cross_cutting`. But
@@ -269,7 +269,7 @@ rather than a naming convention alone:
 | `read_config`, `update_config` | `toolsets/config.py` | `config` |
 | `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task`, `stop_scheduled_task` | `toolsets/scheduling.py` | `scheduling` |
 | `list_conversations`, `read_conversation`, `search_conversations` | `toolsets/conversations.py` | `conversations` |
-| `list_capabilities`, `compose_worker` | `toolsets/capabilities.py` | `capabilities` |
+| `list_capabilities`, `compose_subagent` | `toolsets/capabilities.py` | `capabilities` |
 | `spawn_subagent` | AIMU `make_async_subagent_tool` | implied by a non-empty `delegates_to` |
 
 Two conventions keep this honest. Every Kokua-side agent tool lives under `toolsets/` and nowhere else,

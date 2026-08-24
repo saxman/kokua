@@ -6,7 +6,7 @@ from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
 
 from kokua.config.schema import AgentConfig, AssistantConfig
 from kokua.toolsets.capabilities import (
-    DEFAULT_WORKER_NAME,
+    DEFAULT_SUBAGENT_NAME,
     TOOLSET,
     _catalogue,
     _compose_spec,
@@ -65,7 +65,7 @@ class _RecordingSpawn:
 
 
 def _recording(monkeypatch) -> _RecordingSpawn:
-    """Patches the factory where it is defined, since compose_worker imports it at call time.
+    """Patches the factory where it is defined, since compose_subagent imports it at call time.
 
     That import is deliberately function-level, to keep the AIMU surface the startup preflight probes
     off the module's import path, so there is no module attribute here to replace.
@@ -77,7 +77,7 @@ def _recording(monkeypatch) -> _RecordingSpawn:
 
 def _compose(state, monkeypatch):
     spawn = _recording(monkeypatch)
-    return _tools_by_name(state)["compose_worker"], spawn
+    return _tools_by_name(state)["compose_subagent"], spawn
 
 
 async def test_list_capabilities_reports_every_name_with_its_provider_and_description(tmp_path):
@@ -107,7 +107,7 @@ async def test_list_capabilities_says_so_when_nothing_matches(tmp_path):
 
 async def test_list_capabilities_omits_its_own_entry(tmp_path):
     """The agent reading the catalogue already holds this toolset; listing it back is noise, and it
-    would invite naming it to compose_worker, which only earns a rejection."""
+    would invite naming it to compose_subagent, which only earns a rejection."""
     sources = [("core", [_toolset("capabilities")]), ("AIMU capability", [_toolset("web")])]
     listing = await _tools_by_name(_state(tmp_path, sources=sources))["list_capabilities"]()
     assert "capabilities [" not in listing
@@ -192,7 +192,7 @@ def test_compose_spec_rejects_an_entry_point_only_capability_even_when_named_aft
 
 def test_compose_spec_rejects_naming_this_toolset_itself(tmp_path):
     """Naming `capabilities` among `tools` would let a worker rebuild a fresh, full-budget
-    `compose_worker` of its own, bypassing the depth count the caller already holds; the rejection is
+    `compose_subagent` of its own, bypassing the depth count the caller already holds; the rejection is
     checked ahead of `select`, so it fires whether or not `capabilities` is even installed here."""
     with pytest.raises(ToolsetError) as excinfo:
         _spec(_state(tmp_path), tools=["capabilities"])
@@ -251,22 +251,22 @@ def test_the_catalogue_labels_an_entry_whose_provider_is_unrecorded(tmp_path):
     assert _catalogue({"web": _toolset("web")}, "") == "web [unknown]: web description"
 
 
-async def test_compose_worker_runs_the_worker_under_its_given_name(tmp_path, monkeypatch):
+async def test_compose_subagent_runs_the_worker_under_its_given_name(tmp_path, monkeypatch):
     compose, spawn = _compose(_state(tmp_path), monkeypatch)
     result = await compose("quote-checker", "Check AAPL.", ["web"], "Check quotes.")
     assert result == "quote-checker ran: Check AAPL."
     assert list(spawn.calls[0]["agent_types"]) == ["quote-checker"]
 
 
-async def test_compose_worker_labels_an_unnamed_worker_rather_than_leaving_the_card_blank(tmp_path, monkeypatch):
+async def test_compose_subagent_labels_an_unnamed_worker_rather_than_leaving_the_card_blank(tmp_path, monkeypatch):
     """The agent_types key is both the observer's card label and AIMU's Agent name, so it reaches the
     web sub-agent card and the logs; a blank one makes two concurrent workers indistinguishable."""
     compose, spawn = _compose(_state(tmp_path), monkeypatch)
     await compose("  ", "Check AAPL.", ["web"], "Check quotes.")
-    assert list(spawn.calls[0]["agent_types"]) == [DEFAULT_WORKER_NAME]
+    assert list(spawn.calls[0]["agent_types"]) == [DEFAULT_SUBAGENT_NAME]
 
 
-async def test_compose_worker_forwards_the_approval_gate_and_the_observer(tmp_path, monkeypatch):
+async def test_compose_subagent_forwards_the_approval_gate_and_the_observer(tmp_path, monkeypatch):
     """Every tool a composed worker holds must still route to the human through confirm_tools, and the
     run must still reach the web sub-agent card."""
     state = _state(tmp_path)
@@ -278,7 +278,7 @@ async def test_compose_worker_forwards_the_approval_gate_and_the_observer(tmp_pa
     assert spawn.calls[0]["observer"] is state.observer
 
 
-async def test_compose_worker_calls_aimu_with_max_depth_one_at_every_level(tmp_path, monkeypatch):
+async def test_compose_subagent_calls_aimu_with_max_depth_one_at_every_level(tmp_path, monkeypatch):
     """Kokua owns the recursion, exactly as `build_agent_specs` does: AIMU's own max_depth would give
     every level the same menu, which cannot express a worker composed fresh per call."""
     compose, spawn = _compose(_state(tmp_path), monkeypatch)
@@ -291,12 +291,12 @@ async def test_a_composed_worker_can_compose_again_while_depth_remains(tmp_path,
     compose, spawn = _compose(state, monkeypatch)
     await compose("w", "Do it.", ["web"], "Instructions.")
     worker_tools = spawn.calls[0]["agent_types"]["w"]["tools"]
-    assert "compose_worker" in {fn.__name__ for fn in worker_tools}
+    assert "compose_subagent" in {fn.__name__ for fn in worker_tools}
 
 
 async def test_a_worker_that_can_compose_again_can_also_look_names_up(tmp_path, monkeypatch):
-    """A nested compose_worker is useless without list_capabilities to find names with, so the two are
-    handed to a worker as a pair rather than compose_worker alone."""
+    """A nested compose_subagent is useless without list_capabilities to find names with, so the two are
+    handed to a worker as a pair rather than compose_subagent alone."""
     state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 2}})
     compose, spawn = _compose(state, monkeypatch)
     await compose("w", "Do it.", ["web"], "Instructions.")
@@ -306,13 +306,13 @@ async def test_a_worker_that_can_compose_again_can_also_look_names_up(tmp_path, 
 
 async def test_the_last_worker_in_the_chain_gets_no_composition_tool(tmp_path, monkeypatch):
     """The decrementing counter is the entire termination argument: at zero the worker gets neither
-    list_capabilities nor compose_worker, since discovery with no way to act on what it finds is
+    list_capabilities nor compose_subagent, since discovery with no way to act on what it finds is
     useless to the worker holding it."""
     state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 1}})
     compose, spawn = _compose(state, monkeypatch)
     await compose("w", "Do it.", ["web"], "Instructions.")
     worker_tools = spawn.calls[0]["agent_types"]["w"]["tools"]
-    assert "compose_worker" not in {fn.__name__ for fn in worker_tools}
+    assert "compose_subagent" not in {fn.__name__ for fn in worker_tools}
 
 
 async def test_the_decrement_reaches_a_second_level_of_composition(tmp_path, monkeypatch):
@@ -323,17 +323,17 @@ async def test_the_decrement_reaches_a_second_level_of_composition(tmp_path, mon
     compose, spawn = _compose(state, monkeypatch)
     await compose("w", "Do it.", ["web"], "Instructions.")
     first_tools = {fn.__name__: fn for fn in spawn.calls[0]["agent_types"]["w"]["tools"]}
-    await first_tools["compose_worker"]("w2", "Do it.", ["web"], "Instructions.")
+    await first_tools["compose_subagent"]("w2", "Do it.", ["web"], "Instructions.")
     second_tools = spawn.calls[1]["agent_types"]["w2"]["tools"]
-    assert "compose_worker" in {fn.__name__ for fn in second_tools}
+    assert "compose_subagent" in {fn.__name__ for fn in second_tools}
 
     state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 2}})
     compose, spawn = _compose(state, monkeypatch)
     await compose("w", "Do it.", ["web"], "Instructions.")
     first_tools = {fn.__name__: fn for fn in spawn.calls[0]["agent_types"]["w"]["tools"]}
-    await first_tools["compose_worker"]("w2", "Do it.", ["web"], "Instructions.")
+    await first_tools["compose_subagent"]("w2", "Do it.", ["web"], "Instructions.")
     second_tools = spawn.calls[1]["agent_types"]["w2"]["tools"]
-    assert "compose_worker" not in {fn.__name__ for fn in second_tools}
+    assert "compose_subagent" not in {fn.__name__ for fn in second_tools}
 
 
 async def test_the_depth_cap_is_read_at_call_time_so_a_hot_change_reaches_a_built_agent(tmp_path, monkeypatch):
@@ -344,7 +344,7 @@ async def test_the_depth_cap_is_read_at_call_time_so_a_hot_change_reaches_a_buil
     state.config.toolset_settings["capabilities"]["max_depth"] = 1
     await compose("w", "Do it.", ["web"], "Instructions.")
     worker_tools = spawn.calls[0]["agent_types"]["w"]["tools"]
-    assert "compose_worker" not in {fn.__name__ for fn in worker_tools}
+    assert "compose_subagent" not in {fn.__name__ for fn in worker_tools}
 
 
 async def test_a_max_depth_of_zero_switches_composition_off(tmp_path, monkeypatch):
@@ -357,9 +357,9 @@ async def test_a_max_depth_of_zero_switches_composition_off(tmp_path, monkeypatc
     assert spawn.calls == []
 
 
-async def test_compose_worker_refuses_to_hand_a_worker_its_own_toolset_by_name(tmp_path, monkeypatch):
+async def test_compose_subagent_refuses_to_hand_a_worker_its_own_toolset_by_name(tmp_path, monkeypatch):
     """Naming `capabilities` in `tools` is the escape hatch that would defeat the depth cap: a worker
-    handed that name would resolve a fresh, full-budget compose_worker of its own rather than the
+    handed that name would resolve a fresh, full-budget compose_subagent of its own rather than the
     depth-limited one this call would otherwise build, regardless of what the cap says."""
     state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 1}})
     compose, spawn = _compose(state, monkeypatch)
@@ -368,7 +368,7 @@ async def test_compose_worker_refuses_to_hand_a_worker_its_own_toolset_by_name(t
     assert spawn.calls == []
 
 
-async def test_compose_worker_reports_an_unknown_capability_as_text(tmp_path, monkeypatch):
+async def test_compose_subagent_reports_an_unknown_capability_as_text(tmp_path, monkeypatch):
     """A tool that raises breaks the agent's tool loop, so an unresolvable name comes back as an answer
     the model can act on."""
     compose, spawn = _compose(_state(tmp_path), monkeypatch)
@@ -378,14 +378,14 @@ async def test_compose_worker_reports_an_unknown_capability_as_text(tmp_path, mo
     assert spawn.calls == []
 
 
-async def test_compose_worker_asks_for_a_capability_when_given_none(tmp_path, monkeypatch):
+async def test_compose_subagent_asks_for_a_capability_when_given_none(tmp_path, monkeypatch):
     compose, spawn = _compose(_state(tmp_path), monkeypatch)
     result = await compose("w", "Do it.", [], "Instructions.")
     assert "list_capabilities" in result
     assert spawn.calls == []
 
 
-async def test_compose_worker_falls_back_to_the_agents_own_model_when_no_default_is_set(tmp_path, monkeypatch):
+async def test_compose_subagent_falls_back_to_the_agents_own_model_when_no_default_is_set(tmp_path, monkeypatch):
     """Reusing the string the delegator's client already resolved keeps every composition on that model
     instead of re-resolving per call, the same fallback `make_delegation_tool` takes."""
 
@@ -395,7 +395,7 @@ async def test_compose_worker_falls_back_to_the_agents_own_model_when_no_default
     spawn = _recording(monkeypatch)
     state = _state(tmp_path)
     tools = {fn.__name__: fn for fn in make_capability_tools(ToolsetContext(state=state, agent=_Agent()))}
-    await tools["compose_worker"]("w", "Do it.", ["web"], "Instructions.")
+    await tools["compose_subagent"]("w", "Do it.", ["web"], "Instructions.")
     assert spawn.calls[0]["model"] == "ollama:resolved"
 
 
@@ -404,4 +404,4 @@ def test_the_guidance_ranks_the_declared_roles_above_composing_one(tmp_path):
     written for their job, and an agent that composes by default pays an extra step for a worse worker."""
     assert "spawn_subagent" in TOOLSET.guidance
     assert "list_capabilities" in TOOLSET.guidance
-    assert "compose_worker" in TOOLSET.guidance
+    assert "compose_subagent" in TOOLSET.guidance

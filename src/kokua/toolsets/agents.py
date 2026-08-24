@@ -374,7 +374,7 @@ def _reject_cycles(config: AssistantConfig) -> None:
 # unreliable signal, so the instruction deliberately does not ask it to consult that confidence.
 DELEGATION_GUIDANCE = (
     " Answer trivial or conversational requests directly with your own tools. Delegate specialized work "
-    "by calling `spawn_subagent(agent_type, task)`: pick the worker whose role fits, give it a complete, "
+    "by calling `spawn_subagent(agent_type, task)`: pick the role that fits, give it a complete, "
     "self-contained task (it shares no history with you), then relay or synthesize its answer for the "
     "user. Emit several `spawn_subagent` calls when subtasks are independent. Treat a request as "
     "specialized whenever its answer could have changed since you were trained, or the user could check "

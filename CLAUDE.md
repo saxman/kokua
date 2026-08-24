@@ -134,10 +134,10 @@ change. Full rationale, with the code that backs each claim, is in
    (`capabilities`, `config`, `conversations`, `mcp-admin`, `planning`, `scheduling`).
    Its corollary: **a capability is declared, never defaulted.** An agent holds exactly the toolsets its
    `[agents.<name>].tools` names, plus the delegate a non-empty `delegates_to` earns it; no code path
-   grants a capability the table did not declare, and no flag can disagree with one. `compose_worker` is
+   grants a capability the table did not declare, and no flag can disagree with one. `compose_subagent` is
    the one code path that draws from the whole registry instead of a table, and it is still entered by
    declaration: only an agent whose own table names `capabilities` holds it at all. What the rule protects
-   is a *persistent* agent's reach, and a worker composed for one task is not an agent the config
+   is a *persistent* agent's reach, and a sub-agent composed for one task is not an agent the config
    describes -- built per call, discarded with the call. (Another exception worth knowing: the entry
    agent is an `aio.SkillAgent`, so AIMU gives it the skill catalogue, `activate_skill`, and each
    `{skill}__{stem}` script tool whether or not it declares the `skills` toolset, which only adds

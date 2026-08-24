@@ -97,13 +97,14 @@ some agent declared the toolset that needs them, and not otherwise. An unknown n
 dropped ([`toolsets/registry.py`](../../src/kokua/toolsets/registry.py)'s `select`), since a dropped name
 is a declaration the code silently overruled.
 
-The one exception is a *composed* worker. `compose_worker`
+The one exception is a *composed* sub-agent. `compose_subagent`
 ([`toolsets/capabilities.py`](../../src/kokua/toolsets/capabilities.py)) draws from the whole registry
 rather than from a table, which is a code path granting a capability no `[agents.*]` table declared. It is
 an exception at one level and not at the next: only an agent whose own table names `capabilities` holds the
 tool at all, so the exception is still entered by declaration. What the rule protects is a *persistent*
-agent's reach, and a worker composed for one task is not an agent the config describes. Its reach is
-constructed per call and dies with the call. The call-time gate does not move either: a composed worker's
+agent's reach, and a sub-agent composed for one task is not an agent the config describes. Its reach is
+constructed per call and dies with the call. The call-time gate does not move either: a composed
+sub-agent's
 `execute_python` is routed to the user by `[security] confirm_tools` exactly as a declared worker's is.
 
 **`cross_cutting` is not an authorization boundary,** and reading it as one would be a false security

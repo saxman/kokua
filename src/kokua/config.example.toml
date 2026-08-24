@@ -57,10 +57,10 @@ agent_cache_cap = 8
 [security]
 # Tools requiring confirmation before each call (terminal y/N, or Allow/Deny in the web UI). These run
 # with full machine access. [] disables approval; proactive turns auto-deny these regardless. Gating is
-# by tool name, so a worker's call is routed to you too. A name no configured agent provides fails
+# by tool name, so a sub-agent's call is routed to you too. A name no configured agent provides fails
 # startup, naming it and suggesting the near misses: a gate matching nothing prompts for nothing, and a
 # prompt that never comes is not something you notice. Only what exists at startup can be listed, so a
-# tool the assistant brings in later with add_mcp_server, or one only compose_worker would build from a
+# tool the assistant brings in later with add_mcp_server, or one only compose_subagent would build from a
 # toolset no agent names, has to be reachable from an [agents.*] table first. Locked by default.
 confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
 
@@ -92,14 +92,14 @@ show_tools = true
 # startup.
 #
 # `model` / `thinking` / `generation` override the [assistant] defaults for one agent and are never
-# inherited by its workers. A non-empty `delegates_to` gives the agent spawn_subagent(agent_type, task)
-# over exactly the agents it names (acyclic; a worker's gated calls still come to you), and
+# inherited by its sub-agents. A non-empty `delegates_to` gives the agent spawn_subagent(agent_type,
+# task) over exactly the agents it names (acyclic; a sub-agent's gated calls still come to you), and
 # `description` is the label a delegator sees.
 
 [agents.assistant]
 # The agent you talk to (see [assistant].agent above): cross-cutting tools to manage itself, plus two
-# workers for specialized work. Anything neither specialist covers, it composes a worker for on the
-# spot with `capabilities`, so there is no catch-all role here to route to instead.
+# sub-agents for specialized work. Anything neither specialist covers, it composes a sub-agent for on
+# the spot with `capabilities`, so there is no catch-all role here to route to instead.
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "capabilities", "time"]
@@ -107,7 +107,7 @@ delegates_to = ["researcher", "coder"]
 
 [agents.researcher]
 description = "Research specialist: gather and verify information from the web."
-# model = "ollama:qwen3:32b"   # this worker alone runs on a bigger model
+# model = "ollama:qwen3:32b"   # this agent alone runs on a bigger model
 # thinking = "high"            # ...and reasons harder than the rest; `false` would turn it off
 tools = ["web", "misc", "time"]
 system_message = """\
@@ -240,10 +240,10 @@ level = "INFO"
 
 [capabilities]
 # Declared by the `capabilities` toolset: an agent's `tools` must list "capabilities" to get
-# list_capabilities (what else is installed) and compose_worker (build a sub-agent holding exactly what
-# one task needs, and run it). A composed worker runs on the [assistant] defaults and still obeys
-# [security].confirm_tools; composing itself is ungated unless you add compose_worker there.
-# max_depth bounds nesting: at 3 the last worker in a chain holds neither tool, 0 switches composing
+# list_capabilities (what else is installed) and compose_subagent (build a sub-agent holding exactly
+# what one task needs, and run it). A composed sub-agent runs on the [assistant] defaults and still
+# obeys [security].confirm_tools; composing itself is ungated unless you add compose_subagent there.
+# max_depth bounds nesting: at 3 the last sub-agent in a chain holds neither tool, 0 switches composing
 # off. Applies live, to the next composition.
 # max_depth = 3
 
