@@ -21,8 +21,9 @@ wholesale: plain Python, plain data, uniform interfaces, progressive disclosure,
 failures. What follows are the six that are Kokua's own, the ones that decide what belongs in this
 repository at all.
 
-Each of them serves the vision above, and they group in threes: **1 and 2 keep Kokua readable**,
-**3 and 4 keep it observable**, and **5 and 6 keep it runnable** by anyone who clones it. Every
+Each of them serves the vision above: **1 and 2 keep Kokua readable**, **3 and 4 keep it
+observable**, **5 keeps it runnable** by anyone who clones it, and **6 keeps its capability yours to
+bound**. Every
 principle carries a *how this cashes out* paragraph naming the files that back it, because a
 principle you cannot check against code is a slogan.
 
@@ -201,21 +202,42 @@ lock-guarded single slot ([`core/interaction.py`](../../src/kokua/core/interacti
 turns cannot clobber each other's prompt. The web front end refuses a second connection.
 `config/store.py` states last-writer-wins rather than adding file locking.
 
-## 6. Verifiable without a model
+## 6. Security is explicit and user controlled
 
-The default test suite is mock-only: no network, no API keys, no provider, and a temp `$KOKUA_HOME`.
-Anything needing a browser or a live model is opt-in and never gates the default run. This is a
-design constraint on the code, not just a habit in the tests -- it is *why* the model client is
-injectable and why the builders are free functions rather than methods on the assistant. It is also
-what keeps the project approachable: clone it, `uv sync`, `uv run pytest`, and the whole suite passes
-with no key, no network, and no model. Nothing stands between reading the code and running it.
+Kokua's capability is real and stays real. It runs code as ordinary subprocesses with your privileges,
+and it calls whatever tools the MCP servers you named expose. Taking that away would make the program
+safe and useless, and a toy cannot teach what real work costs. So safety here is never bought by
+removing capability. It is bought by putting a control beside every dangerous thing, and making that
+control yours: declared where you can see it, bounded by a value you wrote, and loud when it is doing
+nothing. That balance is the principle. Capability is not reduced; control is added next to it.
 
-*How this cashes out:* `Assistant.create(config, channel, client=..., client_factory=...)` exists so
-a test can inject. [`core/build.py`](../../src/kokua/core/build.py) is free functions taking a config
-and returning parts. `workflows/critics.py`'s review functions are kept module-level, in the module's
-own words, "so tests can monkeypatch them". `pytest`'s `addopts` deselect `-m e2e`; the Playwright
-suite skips rather than errors when the extra is absent. `tests/helpers.py` vendors
-`MockAsyncModelClient` so the suite does not reach into the sibling AIMU checkout.
+**A security control is a value in `config.toml`, never a constant in the source.** Which tools need
+your confirmation before each call is `[security] confirm_tools`. Which keys the assistant's own
+`update_config` may not write is `[security] locked_config_keys`, a list you author. What any agent may
+call at all is that agent's own `tools` list. Kokua ships a default for each, but a default in a file
+you can read and edit is not the same thing as a rule compiled in.
+
+**A control that would do nothing fails startup.** This is the failure mode a security setting has and
+an ordinary setting does not: silence. A gate naming a tool that does not exist prompts for nothing, and
+a lock pattern matching no real key locks nothing. You notice a prompt you did not expect; nobody
+notices a prompt that never comes. Both are hard startup errors naming the offending entry, because the
+alternative is a user who believes they are covered and is not.
+
+**You may loosen, not only tighten.** `locked_config_keys` is yours to empty. Strike `agents.*` from it
+and the assistant really can rewrite its own capability table on the next restart. The documentation
+states that consequence plainly rather than preventing it, because a control you cannot release is not
+yours. The one exception is the key holding that list, locked whatever the list says, since a policy the
+assistant can rewrite for itself is not a policy.
+
+*How this cashes out:* [`config/store.py`](../../src/kokua/config/store.py)'s `locked_by` matches a
+write against the user's own patterns, and `LOCK_AXIOM` beside it is the single unconditional lock.
+[`core/interaction.py`](../../src/kokua/core/interaction.py)'s `HumanGate.approve` is a bare name match
+against `confirm_tools`, which is what gates a worker's call identically to the entry agent's, and a
+proactive turn auto-denies rather than running a gated tool unattended.
+[`toolsets/agents.py`](../../src/kokua/toolsets/agents.py)'s `validate_confirm_tools` and
+[`config/file.py`](../../src/kokua/config/file.py)'s lock-pattern checks are the two startup errors
+above. [`SECURITY.md`](../../SECURITY.md) names which barrier a vulnerability report is about, and which
+behavior is the program working as documented.
 
 ## What follows from these principles
 
@@ -233,8 +255,9 @@ store and rules out environment variables as a settings mechanism -- the three t
 file: the file's own location, twice, and a secret. **One directory the user owns** rules out writing
 inside the package, XDG-split state, and per-feature configurable paths. **Single user, one process**
 rules out multi-tenant session keying, authentication on the web front end, file locking, and a job
-queue. **Verifiable without a model** rules out any test that needs a model or a key, any fixture that
-touches the real `~/.kokua`, and any code path reachable only with a live provider.
+queue. **Security explicit and user controlled** rules out a security policy hardcoded in the source,
+a control that silently does nothing when it is misspelled, and a privilege tier among agents that the
+config file does not state.
 
 None of these are missing because they were hard. They are missing because they would make Kokua a
 different kind of program, and most of them would make it a harder one to learn from.

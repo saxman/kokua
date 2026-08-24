@@ -49,7 +49,7 @@ network, or API keys.
 
 Read [docs/explanation/design-principles.md](docs/explanation/design-principles.md) first. It opens
 with why Kokua exists, then the six principles that serve it: 1 and 2 keep Kokua readable, 3 and 4 keep
-it observable, 5 and 6 keep it runnable by anyone who clones it. A change that serves none of them is
+it observable, 5 keeps it runnable by anyone who clones it, and 6 keeps its capability yours to bound. A change that serves none of them is
 probably a plugin rather than a core change, and principle 2 exists to make that an easy answer.
 
 ## Where does it go?

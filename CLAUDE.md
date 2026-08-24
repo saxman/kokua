@@ -111,7 +111,8 @@ Consequences for working in this repo:
 ## Design principles
 
 Six principles decide what belongs in this repository, and each of them serves the goal above: 1 and 2
-keep Kokua readable, 3 and 4 keep it observable, 5 and 6 keep it runnable by anyone who clones it.
+keep Kokua readable, 3 and 4 keep it observable, 5 keeps it runnable by anyone who clones it, and 6
+keeps its capability yours to bound.
 Check a proposed change against them; a change that serves none is probably a plugin, not a core
 change. Full rationale, with the code that backs each claim, is in
 [docs/explanation/design-principles.md](docs/explanation/design-principles.md).
@@ -159,8 +160,13 @@ change. Full rationale, with the code that backs each claim, is in
 5. **A single user, one process, with concurrency rules written down.** The seven turn invariants live
    at the top of `core/turns.py`, each naming the bug it prevents. Update them in the same commit as
    any change to turn concurrency.
-6. **Verifiable without a model.** The default suite is mock-only. This is why the model client is
-   injectable and the builders are free functions -- not just a testing habit.
+6. **Security is explicit and user controlled.** Capability stays real; a control is added beside it
+   and the control is yours. Every security control is a value in `config.toml` (`[security]
+   confirm_tools`, `[security] locked_config_keys`, an agent's own `tools` list), never a constant in
+   the source. A control that would do nothing, a gate naming no real tool or a lock pattern matching
+   no real key, is a hard startup error rather than a silent no-op, because nobody notices a prompt
+   that never comes. You may loosen as well as tighten; only the key holding the lock list is
+   unconditional.
 
 Kokua inherits AIMU's six library-level principles on top of these.
 
