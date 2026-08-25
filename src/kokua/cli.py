@@ -46,13 +46,6 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         action="store_true",
         help="List every toolset name an [agents.<name>].tools list may use, grouped by provider, and exit.",
     )
-    parser.add_argument(
-        "--plugins",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Discover toolset plugins via the 'kokua.toolsets' entry-point group. Default: on "
-        "(use --no-plugins to disable for this run).",
-    )
 
     parser.add_argument(
         "--config",
@@ -173,7 +166,6 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
     take("show_thinking", args.show_thinking)
     take("show_tools", args.show_tools)
     take("mcp_servers", args.mcp, _mcp_servers_from_urls)
-    take("load_plugins", args.plugins)
     take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
     take("frontend", args.frontend)
     take("host", args.host)
@@ -185,9 +177,11 @@ def resolve_config(args: argparse.Namespace) -> AssistantConfig:
     """Merge built-in defaults < config file < CLI flags into the final config.
 
     The settings table is built before the file is parsed, because the installed toolsets are what say
-    which sections exist. Toolset discovery is side-effect-free and deliberately not gated on
-    ``load_plugins``: gating it would make a config file naming a third party's section unparseable
-    whenever plugins are switched off, which is a worse failure than the capability simply being absent.
+    which sections exist. Every installed entry point is therefore loaded here, on every run, which is
+    what retired the old ``load_plugins`` switch: a flag that withheld names from the registry *after*
+    this had already imported the code could not deliver the "do not execute third-party code" promise
+    it was documented with, and its only reachable effect was to turn a working ``tools`` declaration
+    into an unknown-toolset error.
     """
     config_path, _ = settings.resolve_path(args.config)
     table = settings_sources.build_settings_table()
@@ -401,8 +395,9 @@ def main() -> None:
         print(e, file=sys.stderr)
         raise SystemExit(2) from None
 
-    # After resolve_config, not before it: the registry it lists depends on the file (load_plugins, and
-    # every [[mcp.server]] name), so this command cannot answer honestly without one.
+    # After resolve_config, not before it: the registry it lists depends on the file (every
+    # [[mcp.server]] name, and every skill under a configured skills_dir), so this command cannot
+    # answer honestly without one.
     if args.list_toolsets:
         _print_toolsets(config)
         return

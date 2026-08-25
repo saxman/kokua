@@ -140,15 +140,19 @@ def without_skill_names(names: Sequence[str], registry: ToolsetRegistry) -> list
 def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     """Every toolset an agent may name, by name.
 
-    Plugin discovery is gated on ``config.load_plugins``, which is a "do not execute third-party code"
-    switch rather than a naming switch: with it off, a config naming a plugin toolset fails at startup
-    with the unknown-name error rather than starting an agent quietly missing a capability.
+    Every installed entry point is registered, unconditionally. There is no switch, because installing a
+    distribution that registers one is the consent, and the switch that used to exist could not do what
+    it claimed: ``resolve_config`` imports every entry point before parsing the file, to learn which
+    config sections are legal, so withholding the names afterwards executed the same code and only
+    turned a working ``tools`` declaration into an unknown-toolset error. What an agent may *use* is
+    still exactly what its own table declares; this function decides what a name can resolve to, not
+    what any agent holds.
 
-    Discovered plugins are split by which distribution registered them: Kokua's own three (aimu_agents,
-    github_backup, image) get ``_BUILTIN_PLUGIN_PROVIDER`` rather than ``_PLUGIN_PROVIDER``, so
-    ``unreferenced_toolsets`` does not warn about ships-in-the-box toolsets the shipped config simply
-    never named. Both groups are still built with the same failure tolerance: the split is about what
-    counts as news when unreferenced, not about how much this codebase trusts its own plugin code.
+    Discovered toolsets are split by which distribution registered them: Kokua's own get
+    ``_BUILTIN_PLUGIN_PROVIDER`` rather than ``_PLUGIN_PROVIDER``, so ``unreferenced_toolsets`` does not
+    warn about ships-in-the-box toolsets the shipped config simply never named. Both groups are built
+    with the same failure tolerance: the split is about what counts as news when unreferenced, not about
+    how much this codebase trusts its own plugin code.
     """
     discovered = discover_toolsets()
     own_names = own_distribution_toolset_names()
@@ -157,14 +161,9 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
         (_CORE_PROVIDER, list(CORE_TOOLSETS)),
         (_MCP_PROVIDER, mcp_toolsets(config)),
         (_SKILL_PROVIDER, skill_toolsets(config)),
+        (_BUILTIN_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for n, t in discovered.items() if n in own_names]),
+        (_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for n, t in discovered.items() if n not in own_names]),
     ]
-    if config.load_plugins:
-        sources.append(
-            (_BUILTIN_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for n, t in discovered.items() if n in own_names])
-        )
-        sources.append(
-            (_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for n, t in discovered.items() if n not in own_names])
-        )
     return register(sources)
 
 

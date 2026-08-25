@@ -19,7 +19,6 @@ def _config(**kwargs) -> AssistantConfig:
     return AssistantConfig(
         agents={"assistant": AgentConfig(tools=["stocks"])},
         entry_agent="assistant",
-        load_plugins=False,
         mcp_servers=[MCPServerConfig(url="https://broker.example.com/mcp", name="stocks")],
         **kwargs,
     )
@@ -59,7 +58,6 @@ def test_a_server_whose_name_collides_with_a_core_toolset_is_rejected():
     config = AssistantConfig(
         agents={"assistant": AgentConfig(tools=["memory"])},
         entry_agent="assistant",
-        load_plugins=False,
         mcp_servers=[MCPServerConfig(url="https://example.com/mcp", name="memory")],
     )
     from kokua.toolsets.registry import ToolsetError
@@ -79,7 +77,6 @@ def test_two_servers_colliding_under_the_same_provider_label_name_their_urls():
     config = AssistantConfig(
         agents={"assistant": AgentConfig(tools=["shared"])},
         entry_agent="assistant",
-        load_plugins=False,
         mcp_servers=[
             MCPServerConfig(url="https://one.example.com/mcp", name="shared"),
             MCPServerConfig(url="https://two.example.com/mcp", name="shared"),

@@ -11,7 +11,7 @@ SPAWN = "spawn_subagent"
 
 
 def _state(tmp_path, agents, entry="assistant") -> tuple[AssistantConfig, LiveState]:
-    config = AssistantConfig(data_dir=tmp_path, agents=agents, entry_agent=entry, load_plugins=False)
+    config = AssistantConfig(data_dir=tmp_path, agents=agents, entry_agent=entry)
     state = LiveState(config=config, registry=build_registry(config))
     return config, state
 

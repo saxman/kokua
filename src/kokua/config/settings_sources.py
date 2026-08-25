@@ -96,8 +96,10 @@ def declared_settings(toolsets) -> Iterator[tuple]:
 def declaring_toolsets() -> tuple:
     """The toolsets that may own a config section: Kokua's core ones and any installed plugin.
 
-    Discovery is not gated on ``load_plugins``: reading an entry point's declaration executes no
-    plugin behavior, and a config file mentioning a plugin's section must stay parseable either way.
+    Discovery is unconditional, and it is the reason nothing gates it elsewhere either: a config file
+    mentioning an installed toolset's section has to stay parseable, so this runs on every startup and
+    imports every entry point. A switch that withheld those names from the registry afterwards would
+    have executed the same code, which is what retired ``load_plugins``.
 
     Cached, because this scans ``entry_points()`` and loads every result, at a cost (roughly 4ms) that
     is paid whether or not anything is installed to find: ``resolve_config`` alone calls it several times

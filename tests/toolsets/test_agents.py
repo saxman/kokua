@@ -9,7 +9,7 @@ from kokua.toolsets.registry import ToolsetError
 
 
 def test_registry_contains_every_provider():
-    registry = build_registry(AssistantConfig(load_plugins=True))
+    registry = build_registry(AssistantConfig())
     for name in (
         "web",
         "time",
@@ -27,17 +27,11 @@ def test_registry_contains_every_provider():
         assert name in registry, name
 
 
-def test_plugins_are_absent_when_load_plugins_is_off():
-    registry = build_registry(AssistantConfig(load_plugins=False))
-    assert "web" in registry
-    assert "aimu_agents" not in registry
-
-
 def test_kokuas_own_plugins_are_labeled_built_in_not_plugin():
     """The toolsets Kokua's own distribution registers under `kokua.toolsets` are told apart from a
     third party's by provenance (which distribution registered the entry point), not a hand-maintained
     name list, so unreferenced_toolsets can exempt them without knowing their names in advance."""
-    registry = build_registry(AssistantConfig(load_plugins=True))
+    registry = build_registry(AssistantConfig())
     for name in ("aimu_agents", "image"):
         assert registry.providers[name] == "built-in toolset", name
 
@@ -48,7 +42,7 @@ def test_a_third_party_plugin_is_still_labeled_plugin(monkeypatch):
 
     weather = Toolset(name="weather", description="Forecasts.", build=lambda ctx: [])
     monkeypatch.setattr(agents, "discover_toolsets", lambda: {"weather": weather})
-    registry = build_registry(AssistantConfig(load_plugins=True))
+    registry = build_registry(AssistantConfig())
     assert registry.providers["weather"] == "plugin"
 
 
@@ -59,7 +53,7 @@ def test_a_plugin_shadowing_a_core_name_is_rejected(monkeypatch):
     clash = Toolset(name="memory", description="clash", build=lambda ctx: [])
     monkeypatch.setattr(agents, "discover_toolsets", lambda: {"memory": clash})
     with pytest.raises(ToolsetError) as excinfo:
-        build_registry(AssistantConfig(load_plugins=True))
+        build_registry(AssistantConfig())
     assert "memory" in str(excinfo.value)
     assert "plugin" in str(excinfo.value)
 
@@ -80,7 +74,7 @@ def test_a_plugin_that_fails_to_build_is_skipped_not_fatal(monkeypatch, caplog):
     monkeypatch.setattr(agents, "discover_toolsets", lambda: {"broken": broken})
 
     with caplog.at_level(logging.WARNING, logger="kokua.toolsets.agents"):
-        registry = build_registry(AssistantConfig(load_plugins=True))
+        registry = build_registry(AssistantConfig())
 
     assert "broken" in registry  # registered by name; only *building* it is tolerant
     ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
@@ -95,13 +89,13 @@ def test_core_and_builtin_toolsets_are_not_wrapped_with_tolerance():
     from kokua.toolsets.builtin import BUILTIN_TOOLSETS
     from kokua.toolsets.core import CORE_TOOLSETS
 
-    registry = build_registry(AssistantConfig(load_plugins=True))
+    registry = build_registry(AssistantConfig())
     for source in (*BUILTIN_TOOLSETS, *CORE_TOOLSETS):
         assert registry[source.name].build is source.build, source.name
 
 
 def _config(agents, entry="assistant") -> AssistantConfig:
-    return AssistantConfig(agents=agents, entry_agent=entry, load_plugins=False)
+    return AssistantConfig(agents=agents, entry_agent=entry)
 
 
 def _valid() -> dict:
@@ -219,14 +213,14 @@ def test_unreferenced_toolsets_ignores_unnamed_builtin_and_core_groups():
 
 
 def test_unreferenced_toolsets_is_silent_on_the_real_shipped_config():
-    """The regression this guards: Kokua's own built-in toolsets (aimu_agents, github_backup, image)
-    register under the real `kokua.toolsets` entry-point group, a path neither `load_plugins=False` nor a
-    monkeypatched `discover_toolsets` (both used above) exercises, and the shipped config.example.toml
-    deliberately declares none of them. Without excluding Kokua's own distribution from the warning, every
-    default install would log three warnings about toolsets nobody chose to skip."""
+    """The regression this guards: Kokua's own built-in toolsets register under the real
+    `kokua.toolsets` entry-point group, a path a monkeypatched `discover_toolsets` (used above) does not
+    exercise, and the shipped config.example.toml declares only some of them. Without excluding Kokua's
+    own distribution from the warning, every default install would log one warning per shipped toolset
+    nobody chose to skip."""
     from tests.channels import example_agents
 
-    config = AssistantConfig(agents=example_agents(), entry_agent="assistant", load_plugins=True)
+    config = AssistantConfig(agents=example_agents(), entry_agent="assistant")
     registry = build_registry(config)
     assert unreferenced_toolsets(config, registry) == []
 
@@ -237,7 +231,7 @@ def test_unreferenced_toolsets_reports_an_unused_plugin(monkeypatch):
 
     unused = Toolset(name="weather", description="Forecasts.", build=lambda ctx: [])
     monkeypatch.setattr(agents, "discover_toolsets", lambda: {"weather": unused})
-    config = AssistantConfig(agents={"assistant": AgentConfig(tools=["time"])}, load_plugins=True)
+    config = AssistantConfig(agents={"assistant": AgentConfig(tools=["time"])})
     registry = build_registry(config)
     assert unreferenced_toolsets(config, registry) == ["weather"]
 
@@ -248,7 +242,7 @@ def test_unreferenced_toolsets_does_not_report_a_declared_plugin(monkeypatch):
 
     used = Toolset(name="weather", description="Forecasts.", build=lambda ctx: [])
     monkeypatch.setattr(agents, "discover_toolsets", lambda: {"weather": used})
-    config = AssistantConfig(agents={"assistant": AgentConfig(tools=["time", "weather"])}, load_plugins=True)
+    config = AssistantConfig(agents={"assistant": AgentConfig(tools=["time", "weather"])})
     registry = build_registry(config)
     assert unreferenced_toolsets(config, registry) == []
 

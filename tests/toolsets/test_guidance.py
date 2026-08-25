@@ -6,7 +6,7 @@ from kokua.toolsets.registry import Toolset, select
 
 
 def _assemble(agents, name="assistant", **config_kwargs):
-    config = AssistantConfig(agents=agents, entry_agent="assistant", load_plugins=False, **config_kwargs)
+    config = AssistantConfig(agents=agents, entry_agent="assistant", **config_kwargs)
     registry = build_registry(config)
     toolsets = select(agents[name].tools, registry, agent=name, entry_point="assistant")
     return assemble_system_message(config, name, toolsets)
@@ -184,7 +184,6 @@ def test_a_third_party_toolsets_guidance_reaches_the_prompt(monkeypatch):
     config = AssistantConfig(
         agents={"assistant": AgentConfig(system_message="Opener.", tools=["weather"])},
         entry_agent="assistant",
-        load_plugins=True,
     )
     registry = build_registry(config)
     toolsets = select(["weather"], registry, agent="assistant", entry_point="assistant")

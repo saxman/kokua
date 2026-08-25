@@ -395,7 +395,6 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("assistant", "system_message"): ("system_message", (str,), "a string", None),
     ("assistant", "agent"): ("entry_agent", (str,), "a string", None),
     ("assistant", "concurrent_tools"): ("concurrent_tools", (bool,), "a boolean", None),
-    ("assistant", "load_plugins"): ("load_plugins", (bool,), "a boolean", None),
     ("assistant", "agent_cache_cap"): ("agent_cache_cap", (int,), "an integer", None),
     # [email]: SMTP send settings. No `password` key on purpose -- the password comes from the
     # KOKUA_EMAIL_PASSWORD env var, so putting it here is a hard "unknown config key" error.

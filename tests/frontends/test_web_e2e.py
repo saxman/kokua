@@ -140,7 +140,7 @@ def live_server():
         thinking: str = "",
         blank_lead: str = "",
     ) -> str:
-        config = AssistantConfig(agents=example_agents(), entry_agent="assistant", load_plugins=False)
+        config = AssistantConfig(agents=example_agents(), entry_agent="assistant")
         if seed is not None:
             seed(config)
         app = build_app(

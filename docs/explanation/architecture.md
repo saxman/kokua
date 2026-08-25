@@ -187,16 +187,18 @@ anything; the last two run once per agent, whenever one is built:
    providers: AIMU capability (`builtin.py`), core subsystem (`core.py`), MCP server (one per
    `[[mcp.server]]`, named by its required `name`), skill (one per skill on disk, so a skill name sits in
    the same namespace as everything else), built-in toolset, and plugin. The last two are both the
-   `kokua.toolsets` entry-point group, skipped entirely when `load_plugins` is off, split by which
-   distribution registered them: Kokua's own four (`aimu_agents`, `benchmark`, `github_backup`, `image`) take the
-   built-in label so `unreferenced_toolsets` stays quiet about ships-in-the-box toolsets the shipped
-   config simply never named. That the shipped config names none of them is load-bearing rather than
-   incidental: `load_plugins = false` removes this whole provider, and step 3 below raises on a name it
-   cannot resolve rather than dropping it, so a shipped `[agents.*]` table declaring a plugin toolset
-   would turn that flag into a startup error on the config Kokua itself hands you. That label is the only difference between the two; both are built with the
-   same failure tolerance. `registry.register` then rejects a name two providers claim. A `Toolset` is a
-   frozen dataclass: `name`, `description`, `build`, `guidance`, `cross_cutting`, `entry_point_only`,
-   `workflow`, `settings`.
+   `kokua.toolsets` entry-point group, split by which distribution registered them: Kokua's own four
+   (`aimu_agents`, `benchmark`, `github_backup`, `image`) take the built-in label so
+   `unreferenced_toolsets` stays quiet about ships-in-the-box toolsets the shipped config simply never
+   named. That label is the only difference between the two; both are built with the same failure
+   tolerance. **Nothing gates any of this.** Registration is unconditional because installing a
+   distribution that registers an entry point is the consent, and because the switch that used to exist
+   could not do what it claimed: `resolve_config` imports every entry point before the file is parsed
+   (see [Configuration](#configuration)), so withholding the names afterwards ran the
+   same code and only turned a working `tools` declaration into an unknown-toolset error.
+   `registry.register` then rejects a name two providers claim. A `Toolset` is a frozen dataclass:
+   `name`, `description`, `build`, `guidance`, `cross_cutting`, `entry_point_only`, `workflow`,
+   `settings`.
 2. **Validate.** `agents.validate_agents` runs before the session store is opened or any server
    connected, so an unknown toolset name, a missing entry agent, an unknown delegation target, a cycle,
    or `skills` on a worker fails with nothing written and nothing connected.
@@ -257,7 +259,7 @@ unconfigured, which is what `email-report` did on the entry agent until the seco
 
 #### The shipped entry agent's inventory
 
-All 30 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
+All 31 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
 `config.example.toml` declares, not a fixed list: a different `tools` line produces a different set.
 Roughly half come from AIMU and so are not greppable in this repository, which is why this table exists
 rather than a naming convention alone:
@@ -273,6 +275,7 @@ rather than a naming convention alone:
 | `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task`, `stop_scheduled_task` | `toolsets/scheduling.py` | `scheduling` |
 | `list_conversations`, `read_conversation`, `search_conversations` | `toolsets/conversations.py` | `conversations` |
 | `list_capabilities`, `compose_subagent` | `toolsets/capabilities.py` | `capabilities` |
+| `benchmark_model` | `toolsets/benchmark.py` | `benchmark` |
 | `spawn_subagent` | AIMU `make_async_subagent_tool` | implied by a non-empty `delegates_to` |
 
 Two conventions keep this honest. Every Kokua-side agent tool lives under `toolsets/` and nowhere else,
@@ -353,11 +356,11 @@ toolsets), parses the TOML file against that table (`config/file.py`'s `load`, w
 which sections are runtime-settable and which of a toolset's remaining keys are merely cold), merges the
 result under the CLI flags into the constructed `AssistantConfig`, and only then seeds every declared
 setting's default onto it (`settings_sources.seed_toolset_defaults`) for whatever the file left unset.
-Building the table is deliberately not gated on `[assistant].load_plugins`: reading a toolset's
-declaration runs no plugin behavior, and gating it would make a config file naming a plugin's section
-fail to parse whenever plugins happen to be off, which is a worse failure than the plugin's capability
-simply being unavailable. Flag defaults are the `None` sentinel, so an unspecified flag defers to the
-file.
+Building the table imports every installed toolset, on every run, because a config file naming an
+installed toolset's section has to stay parseable. That is also why nothing gates registration: a switch
+withholding those names from the registry afterwards would have executed exactly the same code, which is
+what retired the old `load_plugins` key. Flag defaults are the `None` sentinel, so an unspecified flag
+defers to the file.
 
 The file itself is **required**: `config/file.py::load` raises rather than returning no overrides when
 it is missing. Agents live only in `[agents.*]` and the assistant cannot function without at least one,

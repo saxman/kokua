@@ -127,8 +127,6 @@ class AssistantConfig:
     email_to: Optional[str] = None  # the ONLY recipient the tool will ever send to
     # True -> SMTP_SSL (implicit TLS, usually port 465); False -> plain connect + STARTTLS (usually 587).
     email_use_ssl: bool = False
-    # Load toolset plugins discovered via the "kokua.toolsets" entry-point group.
-    load_plugins: bool = True
     # Every agent, keyed by name, read whole from [agents.*]. Nothing is defaulted in code: an agent's
     # capability is exactly what its table declares, and a capability no agent names reaches nothing.
     agents: dict[str, AgentConfig] = field(default_factory=dict)

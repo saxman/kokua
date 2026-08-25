@@ -194,6 +194,7 @@ ENTRY_AGENT_TOOLS = {
     "aimu make_skill_authoring_tool / make_skill_script_tool": {"author_skill", "add_skill_script"},
     "aimu builtin.time": {"get_current_date_and_time", "convert_time"},
     "aimu make_async_subagent_tool": {"spawn_subagent"},
+    "kokua toolsets/benchmark.py": {"benchmark_model"},
 }
 # Present because the shipped entry agent declares the `memory` and `documents` toolsets, so they are
 # asserted separately from the rest below.
@@ -232,8 +233,9 @@ def _without(*toolsets: str) -> dict[str, AgentConfig]:
 async def test_entry_agent_toolset_is_exactly_the_documented_inventory(tmp_path):
     """The entry agent's tool context is the point of the design: what the shipped [agents.assistant]
     table declares, and nothing else. It holds what mutates shared state (skills, MCP, memory, config,
-    scheduling), reading its other conversations, the clock, and the delegate; the built-in groups and
-    plugin toolsets are declared by the workers instead.
+    scheduling), reading its other conversations, the clock, the delegate, and `benchmark`, which
+    measures the model this session runs on; the built-in groups and the remaining shipped toolsets are
+    declared by the workers instead, or by nobody.
 
     Asserted as an exact set rather than a sample, so a plugin toolset leaking onto the entry agent fails
     here, and so does adding a tool without updating the inventory table this list mirrors."""
@@ -652,7 +654,6 @@ def test_wire_agent_uses_an_injected_client_as_is(tmp_path):
         data_dir=tmp_path,
         agents={"assistant": AgentConfig(tools=["time"])},
         entry_agent="assistant",
-        load_plugins=False,
     )
     state = LiveState(config=config, registry=build_registry(config))
     client = MockAsyncModelClient([])

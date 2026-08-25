@@ -250,12 +250,6 @@ Default `"assistant"`.
 Run independent tool calls in one turn concurrently, so several `spawn_subagent` calls overlap.
 Default `true`.
 
-### `load_plugins`
-
-Discover toolset plugins through the `kokua.toolsets` entry-point group. Default `true`. `--no-plugins`
-turns it off for one run. Turning it off does not change what an agent holds unless that agent named a
-plugin toolset, in which case startup fails on the now-unknown name.
-
 ### `agent_cache_cap`
 
 Maximum per-conversation agents kept live in memory. Default `8`. An evicted agent rebuilds from
@@ -790,7 +784,6 @@ Flags override the file for one run and are never written back.
 | `--show-tools` / `--no-show-tools` | `[display].show_tools` |
 | `--confirm-tools NAMES` | `[security].confirm_tools`, comma-separated; empty string disables |
 | `--mcp URL` | adds a server for this run, unauthenticated or OAuth |
-| `--plugins` / `--no-plugins` | `[assistant].load_plugins` |
 | `--host`, `--port` | `[web].host`, `[web].port` |
 
 Introspection, which exits without running the assistant:

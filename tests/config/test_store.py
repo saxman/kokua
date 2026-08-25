@@ -137,7 +137,6 @@ def test_add_mcp_server_two_urls_on_one_host_get_distinct_names(tmp_path):
     config = AssistantConfig(
         agents={"assistant": AgentConfig(tools=names)},
         entry_agent="assistant",
-        load_plugins=False,
         mcp_servers=servers,
     )
     registry = build_registry(config)  # must not raise a collision

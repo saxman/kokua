@@ -18,7 +18,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
   `kokua.frontends` and `kokua.toolsets` entry-point groups. The built-in `cli` / `web` front ends and
   the built-in toolsets register exactly as a third party's package would, so if the built-in path
   and the plugin path ever diverge, the plugin path is the broken one. Inspect with `--list-frontends`
-  and `--list-toolsets`; disable discovery with `--no-plugins`.
+  and `--list-toolsets`. Discovery is unconditional: installing a distribution that registers an
+  entry point is the consent, and there is no switch to withhold it.
 - The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
   `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
 
@@ -318,7 +319,9 @@ script is how the skill does its work.
 These register through the `kokua.toolsets` entry-point group exactly as a third party's package would,
 so they appear in `--list-toolsets` alongside anything you install -- grouped under their own
 `built-in toolset` provider rather than `plugin`, which is what keeps the unreferenced-toolset warning
-(below) from firing on them by default, since the shipped `config.example.toml` names none.
+(below) from firing on them by default: the shipped `config.example.toml` declares only
+`benchmark`, and an undeclared one that ships in the box is not the kind of news an unreferenced
+third-party plugin is.
 
 - **`image`**: `generate_image`, offered only when `AIMU_IMAGE_MODEL` is set (e.g. `gemini:nano-banana`
   or an `hf:<repo>` diffusers model).

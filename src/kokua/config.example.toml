@@ -31,9 +31,6 @@ agent = "assistant"
 # Run independent tool calls in one turn concurrently, so several spawn_subagent calls overlap.
 concurrent_tools = true
 
-# Discover toolset plugins via the "kokua.toolsets" entry-point group.
-load_plugins = true
-
 # Max per-conversation agents kept live in memory; an evicted one rebuilds from persisted state.
 agent_cache_cap = 8
 
@@ -102,7 +99,7 @@ show_tools = true
 # the spot with `capabilities`, so there is no catch-all role here to route to instead.
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
-tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "capabilities", "time"]
+tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark"]
 delegates_to = ["researcher", "coder"]
 
 [agents.researcher]

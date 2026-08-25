@@ -73,7 +73,6 @@ def test_two_mcp_urls_on_one_host_get_distinct_names():
     config = AssistantConfig(
         agents={"assistant": AgentConfig(tools=names)},
         entry_agent="assistant",
-        load_plugins=False,
         mcp_servers=servers,
     )
     registry = build_registry(config)  # must not raise a collision
@@ -319,3 +318,10 @@ def test_main_web_reports_a_broken_agents_table_as_an_instruction(monkeypatch, t
 
     assert excinfo.value.code == 2
     assert "nope" in capsys.readouterr().err
+
+
+def test_the_retired_plugins_flag_is_rejected():
+    """Removed with `[assistant].load_plugins`, the setting it overrode. argparse refusing the flag is
+    better than accepting one that no longer reaches anything."""
+    with pytest.raises(SystemExit):
+        build_arg_parser().parse_args(["--no-plugins"])

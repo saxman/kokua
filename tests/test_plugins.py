@@ -6,9 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers import MockAsyncModelClient
 from kokua import plugins
-from kokua.core.assistant import Assistant
 from kokua.config import AssistantConfig
 from tests.channels import example_agents
 from kokua.plugins import FrontEnd, Toolset
@@ -89,25 +87,10 @@ def test_an_agent_that_names_no_plugin_gets_no_plugin_tools(tmp_path):
     assert "code_review" not in {fn.__name__ for fn in specs["plain"]["tools"]}
 
 
-async def test_no_plugins_flag_omits_plugin_toolsets(tmp_path):
+def test_entry_point_toolsets_are_registered_unconditionally(tmp_path):
+    """There is no switch. Installing a distribution that registers a `kokua.toolsets` entry point is
+    the consent, so every discovered toolset is in the namespace. What an agent may *use* is unchanged:
+    exactly what its own `tools` list declares, which is what the sibling test above pins."""
     from kokua.toolsets.agents import build_registry
 
-    assert "aimu_agents" not in build_registry(_config(tmp_path, load_plugins=False))
-    assistant = await Assistant.create(
-        _config(tmp_path, load_plugins=False), FakeChannelStub(), client=MockAsyncModelClient([])
-    )
-    names = {fn.__name__ for fn in assistant._agent.tools}
-    assert "code_review" not in names
-
-
-class FakeChannelStub:
-    """Minimal Channel stand-in (Assistant.create doesn't touch the channel)."""
-
-    name = "fake"
-
-    async def receive(self):
-        if False:
-            yield None
-
-    async def send(self, content, *, reply_to=None):
-        pass
+    assert "aimu_agents" in build_registry(_config(tmp_path))

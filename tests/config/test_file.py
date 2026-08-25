@@ -96,6 +96,17 @@ def test_unknown_key_raises():
         settings.load(table=core_table())
 
 
+def test_the_retired_load_plugins_key_is_refused():
+    """`load_plugins` gated the `kokua.toolsets` entry-point group without preventing a single import:
+    `resolve_config` loads every entry point regardless, to learn which config sections are legal. Its
+    only reachable effect was to turn a working `tools` declaration into an unknown-toolset error, so it
+    is gone. Refused rather than ignored, so a config carrying it is told, instead of quietly keeping a
+    setting it believes it set."""
+    _write_config("[assistant]\nload_plugins = false\n")
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[assistant\].load_plugins"):
+        settings.load(table=core_table())
+
+
 def test_type_mismatch_raises():
     _write_config('[web]\nport = "not-an-int"\n')
     with pytest.raises(settings.ConfigError, match=r"\[web\].port must be an integer"):
