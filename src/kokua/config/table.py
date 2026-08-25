@@ -102,12 +102,14 @@ class RuntimeSetting:
 # The settings Kokua's own core owns, each backed by an ``AssistantConfig`` field. Whatever the installed
 # toolsets declared is appended to these to form the live table (see ``config.settings_sources``).
 #
-# Currently empty, and that is the expected state rather than a gap: a setting belongs here only if the
-# core itself reads it, and everything a capability reads is that capability's own declaration, which is
-# where the [planning] flags live (see ``toolsets.planning.PLANNING_SETTINGS``). The last two entries were
-# the display flags, retired when what reaches a channel stopped being a user setting (see
-# ``channels.protocol``).
-CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = ()
+# The bar for an entry here is that the *core* reads it and no capability owns it: anything a capability
+# reads is that capability's own declaration, which is where the [planning] flags live (see
+# ``toolsets.planning.PLANNING_SETTINGS``). ``generate_titles`` clears it because a conversation's title
+# is not a capability anyone grants: `Assistant._spawn_title` reads it, and nothing else can.
+# Hot rather than startup-only because the read happens per conversation, so a change genuinely applies
+# without a restart -- the test every candidate has to pass (see ``core.settings_runtime`` on the model,
+# which fails it).
+CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = (RuntimeSetting("generate_titles", "assistant", bool),)
 
 
 def _coerce_runtime(value: Any, setting: RuntimeSetting) -> Optional[Any]:

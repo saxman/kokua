@@ -142,7 +142,8 @@ immediately. Everything else is **startup-only**: change it, then restart.
 
 | Hot | Startup-only |
 | --- | --- |
-| `[planning].plan_review`, `plan_review_agent`, `result_review`, `show_reasoning` | everything in `[assistant]`, including `[assistant.generation]`, and `[planning].review_rounds` |
+| `[assistant].generate_titles` | the rest of `[assistant]`, including `[assistant.generation]`, and `[planning].review_rounds` |
+| `[planning].plan_review`, `plan_review_agent`, `result_review`, `show_reasoning` | |
 | `[capabilities].max_depth` | all of `[agents.*]`, `[mcp]` (including `[[mcp.server]]`), `[security]`, `[paths]`, `[frontend]`, `[web]`, `[logging]`, `[email]` |
 | `[scheduling].max_task_conversations` | |
 
@@ -160,7 +161,7 @@ sections](#toolset-sections).
 
 ## `[assistant]`
 
-Process-wide defaults. Everything here is read at startup.
+Process-wide defaults. Everything here is read at startup, except `generate_titles`, which is hot.
 
 ### `model`
 
@@ -253,6 +254,18 @@ Default `true`.
 
 Maximum per-conversation agents kept live in memory. Default `8`. An evicted agent rebuilds from
 persisted state on next access, so the cap bounds memory, not correctness.
+
+### `generate_titles`
+
+Have the model write each new conversation's title from the message that opened it. Default `true`.
+**Hot**, and the only hot key in `[assistant]`: the title is written per conversation, so a change
+applies to the next one with no restart.
+
+The first message truncated to 40 characters is the title the instant a conversation has one; the
+written title replaces it a moment later, in the background, on the model that conversation runs on
+(no separate model to configure). `false` stops at the truncation, which is also what stands whenever
+the call fails: an endpoint that is down, or an answer that cleans up to nothing, is silent and leaves
+the placeholder. A conversation a scheduled task minted keeps the task's name either way.
 
 ## `[assistant.generation]`
 

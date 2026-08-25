@@ -131,6 +131,10 @@ class AssistantConfig:
     entry_agent: str = "assistant"
     # Run independent tool calls in one turn concurrently, so several delegations overlap.
     concurrent_tools: bool = True
+    # Whether a new conversation's title is written by the model (core/titles.py) rather than left as
+    # the first message truncated. Runtime-mutable, so it is also a CORE_RUNTIME_SETTINGS entry: the
+    # spawn reads it per conversation, which is what makes a change apply with no restart.
+    generate_titles: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
     confirm_tools: list[str] = field(

@@ -54,9 +54,8 @@ def test_a_cold_declaration_stays_out_of_the_table_but_still_has_a_schema_entry(
 
 
 def test_kokuas_own_settings_survive_a_contributed_table():
-    """A contributed declaration is appended to the core's, never substituted for it. ``CORE_RUNTIME_SETTINGS``
-    is empty today, so this reads as a tautology; it is the guard that keeps the next core entry from being
-    dropped by a table a toolset contributes to."""
+    """A contributed declaration is appended to the core's, never substituted for it: the guard that keeps
+    a core entry from being dropped by a table a toolset contributes to."""
     table = build_settings_table([_toolset(HOT)])
     assert table.settings[: len(CORE_RUNTIME_SETTINGS)] == CORE_RUNTIME_SETTINGS
     assert table.by_toml("widgets", "rounds") is not None
@@ -81,7 +80,7 @@ def test_a_toolset_named_after_a_core_section_may_not_declare_settings():
     plugin named ``email`` declaring ``host`` would route [email].host into its own bucket and leave
     ``AssistantConfig.email_host`` unset -- the email capability switching itself off in a config nobody
     edited. Every section the core parses is refused, including the structured tables, whatever section
-    the settings table declares (none today, since ``CORE_RUNTIME_SETTINGS`` is empty), and a section a
+    the settings table declares, and a section a
     removed key used to live in (``tools``, ``subagents``) -- without which a toolset named ``tools`` would
     pass this check only to hit ``load``'s "[tools] is gone." branch for every key instead."""
     for reserved in (

@@ -45,7 +45,8 @@ src/kokua/
     agent_registry.py    per-conversation agent cache with LRU eviction and pinning
     turn_gate.py         writer-preferring readers-writer gate
     turn_registry.py     in-flight turn bookkeeping
-    messages.py          transcript helpers: text extraction, titles, image compaction
+    messages.py          transcript helpers: text extraction, the placeholder title, image compaction
+    titles.py            the generated conversation title: one context-free model call
     errors.py            describe_error: root-cause extraction for user-facing messages
 
   config/        settings: the schema, the file, the writers
@@ -335,6 +336,37 @@ ordering live; `list()` projects it and `most_recent_or_new` takes its head. It 
 conversation, which is already what a sidebar push costs. A bulk read belongs in AIMU's store, and this
 is the seam it would land behind.
 
+### Titling a conversation
+
+A conversation gets its title twice. `ConversationBook.persist` derives the placeholder the moment the
+first user message lands (`messages.derive_title`: that message, truncated to 40 characters) and returns
+that it did, which is what makes `TurnRunner._persist` push the conversation list. It then asks
+`Assistant._spawn_title` for the real one, and that runs as a background task: `core/titles.py` puts the
+opening message to a fresh, context-free, tool-less client on the same model the conversation runs on,
+and `ConversationBook.retitle` swaps the placeholder for what comes back, followed by a second sidebar
+push. A conversation a scheduled task minted is pre-titled with the task's name, so it derives nothing
+and is never retitled; on a channel with no conversation list a firing runs in the viewed conversation
+instead, and that one is titled like any other first turn.
+
+Three things about that shape are deliberate. It is **in the background** because the reply is what the
+user is waiting for and a title is worth neither a round-trip on the end of their first turn nor an error
+they have to read: every failure path -- an endpoint that is down, a model string naming nothing, an
+answer that sanitizes to nothing -- returns None, and the placeholder stands. It is **guarded on the way
+in**: `retitle` writes only if the title it was built to replace is still there, so a conversation
+deleted while the model was writing is not resurrected by a store whose `get` answers a missing key with
+a fresh empty session, and a rename, if Kokua ever grows one, wins over a title in flight. And it takes **that conversation's
+own turn slot** for the write, like `delete` and for the same bounded reason, because the store saves
+whole sessions: an unsynchronized read-modify-write would revert whatever the next turn persisted between
+the read and the write. Shutdown cancels a title still in flight rather than awaiting it, for the reason
+invariant 7 gives about the store closing under a task nobody is watching.
+
+`[assistant] generate_titles` (default `true`) turns the second half off, leaving the placeholder as the
+title. It is the one entry in `CORE_RUNTIME_SETTINGS`, and it is there rather than in a toolset because
+no capability owns it: `Assistant._spawn_title` is the only reader. It is hot rather than startup-only
+because that read happens per conversation, so a change genuinely applies without a restart, which is
+the test the model itself fails. There is no setting for *which* model writes the title, because the
+conversation already answers that.
+
 ## Plugins
 
 Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`) and `kokua.toolsets`
@@ -571,9 +603,9 @@ patterns and what removing each one permits. `update_config` applies hot-appliab
 Which settings are hot is not a list maintained by hand in several places: it is
 `config/table.py`'s `SettingsTable`, built once at startup from `CORE_RUNTIME_SETTINGS` plus every
 toolset's own hot `Setting`s, and every consumer -- the schema, the incoming-payload sanitizer, the
-live-apply loop, and the persist path -- loops over that one instance. `CORE_RUNTIME_SETTINGS` is empty
-today: every hot setting a run holds arrives from a toolset, so the table's contents depend on which
-toolsets are installed. The
+live-apply loop, and the persist path -- loops over that one instance. `CORE_RUNTIME_SETTINGS` holds one
+entry, `[assistant].generate_titles`; every other hot setting a run holds arrives from a toolset, so the
+table's contents depend on which toolsets are installed. The
 sanitizer predates the removal of the web settings window and outlived it: `update_config` is now its
 only caller, so "panel" in the surrounding code names a surface that no longer exists.
 

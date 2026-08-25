@@ -1674,3 +1674,28 @@ async def test_shutdown_waits_for_a_turn_a_later_message_displaced(tmp_path):
 
     turns = [task for task in asyncio.all_tasks() if "Assistant._handle" in repr(task.get_coro())]
     assert not turns, f"{len(turns)} turn task(s) outlived the store: {turns}"
+
+
+async def test_shutdown_cancels_a_pending_title_rather_than_waiting_on_the_endpoint(tmp_path, monkeypatch):
+    """A generated title is disposable, and the call behind it is a model request.
+
+    So shutdown cancels it instead of awaiting it: an unresponsive endpoint would otherwise hold the
+    process open long after its last turn. What it must not do is leave the task running past
+    ``store.close()``, which is invariant 7's failure (a write to a closed file, out of a task nobody
+    is watching) reached by a task that is not a turn.
+    """
+    never = asyncio.Event()
+
+    async def never_answers(model, first_message):
+        await never.wait()
+        return "too late"
+
+    monkeypatch.setattr("kokua.core.titles.summarize_title", never_answers)
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(["plan my trip"]), client=MockAsyncModelClient(["ok"])
+    )
+
+    await asyncio.wait_for(assistant.run(), timeout=5.0)
+
+    pending = [task for task in asyncio.all_tasks() if "_write_title" in repr(task.get_coro())]
+    assert not pending, f"{len(pending)} title task(s) outlived the store: {pending}"

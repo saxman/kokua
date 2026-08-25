@@ -164,10 +164,16 @@ loop, and the persist path at once -- and `tests/config/test_table.py` fails if 
 `CORE_RUNTIME_SETTINGS` entry is not also a real config field and documented in `config.example.toml`
 under its own `[section]`.
 
-`CORE_RUNTIME_SETTINGS` is currently **empty**, and that is the principle working rather than a gap.
-Every runtime setting Kokua ships belongs to a capability, so every one of them is that capability's
-own declaration; the last core entries were the display flags, and what they controlled turned out to
-be a front end's decision rather than a setting (see [principle 1](#1-a-small-transport-agnostic-core)).
+`CORE_RUNTIME_SETTINGS` holds exactly **one** entry, and the bar it had to clear says what the section
+is for. Nearly every runtime setting Kokua ships belongs to a capability, so nearly every one is that
+capability's own declaration; the entries before this one were the display flags, and what they
+controlled turned out to be a front end's decision rather than a setting at all (see [principle
+1](#1-a-small-transport-agnostic-core)). `[assistant].generate_titles` qualifies because no capability
+owns it: whether a conversation's title is written by the model is read in one place in the core
+(`Assistant._spawn_title`), and there is no toolset it could be declared on. Two questions gate an
+entry here, and a candidate has to answer both: does the *core* read it, and does a change to it apply
+without a restart? `[assistant].model` answers the first and fails the second, which is why it is
+startup-only despite reading like the most obvious setting in the file.
 
 ## 4. All state under one directory the user owns
 

@@ -46,3 +46,20 @@ def isolate_state(monkeypatch, tmp_path):
 
     home.mkdir(parents=True, exist_ok=True)
     (home / "config.toml").write_text(settings.example_text(), encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def no_generated_titles(monkeypatch):
+    """Stub out the generated conversation title, since writing one is a model call.
+
+    The suite is mock-only, and this is the one model call no test asks for: it is spawned in the
+    background by any first turn (see ``core/titles.py``). Stubbed to "the endpoint had nothing to
+    say", which is the documented fallback path, so a test that does not care keeps the truncated
+    placeholder ``derive_title`` already gave it. A test about generated titles patches this again
+    with the answer it wants.
+    """
+
+    async def no_title(model, first_message):
+        return None
+
+    monkeypatch.setattr("kokua.core.titles.summarize_title", no_title)

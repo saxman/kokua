@@ -164,10 +164,13 @@ change. Full rationale, with the code that backs each claim, is in
    own runtime-mutable settings are one entry each in `config/table.py`'s `CORE_RUNTIME_SETTINGS`; a
    toolset's are one `Setting` on the toolset itself, in its own `[<name>]` section. `SettingsTable`,
    built at startup from both, is what still drives the schema, the sanitizer, the hot-apply set, the
-   live-apply loop, and the persist path from one place. `CORE_RUNTIME_SETTINGS` is currently **empty**,
-   which is the expected state and not a gap: every runtime setting Kokua has belongs to a capability, so
-   every one of them is that capability's declaration. The last core entries were `[display]`'s
-   `show_thinking` / `show_tools`, retired along with `RuntimeSetting.mirror_on_channel` and
+   live-apply loop, and the persist path from one place. `CORE_RUNTIME_SETTINGS` holds exactly **one**
+   entry, `[assistant].generate_titles`, and an addition has to answer both of the questions it did: does
+   the *core* read it (everything a capability reads is that capability's declaration, which is where the
+   `[planning]` flags live), and does a change apply without a restart? `generate_titles` passes because
+   `Assistant._spawn_title` is its only reader and reads it per conversation; `[assistant].model` passes
+   the first and fails the second, which is why it is startup-only. The entries before it were
+   `[display]`'s `show_thinking` / `show_tools`, retired along with `RuntimeSetting.mirror_on_channel` and
    `ChannelUI.display_flag` once what reaches a channel stopped being a user setting: a channel now relays
    reasoning and tool calls unconditionally (AIMU's `stream_thinking` / `stream_tools`, both defaulting
    on), and what to *show* is the front end's call to make with the frame in hand. `[agents.*]` is locked by default (matched by
@@ -212,8 +215,8 @@ src/kokua/
   cli.py  plugins.py  images.py  logging_setup.py  config.example.toml  web_static/
   core/         assistant (composition root + serve loop), conversations, turns, interaction,
                 settings_runtime, diagnostics, build, agents (build_registry, validate_agents, prompt
-                assembly, delegation), agent_registry, turn_gate, turn_registry, messages, errors,
-                transcripts
+                assembly, delegation), agent_registry, turn_gate, turn_registry, messages, titles,
+                errors, transcripts
   config/       schema, paths, file, store (writes + write policy), table, settings_sources (joins a
                 toolset's declared settings into the table; the one module under config/ that imports
                 upward, so the rest of the layer stays at the bottom)

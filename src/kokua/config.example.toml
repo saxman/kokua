@@ -34,6 +34,11 @@ concurrent_tools = true
 # Max per-conversation agents kept live in memory; an evicted one rebuilds from persisted state.
 agent_cache_cap = 8
 
+# Have the model write each new conversation's title from the message that opened it, on the model that
+# conversation runs on. Applies immediately (no restart), and update_config may change it. false leaves
+# the title as that message truncated, which is also the fallback whenever the call fails.
+generate_titles = true
+
 # Generation parameters for every agent, per-key overridable by [agents.<name>.generation]. Restart to
 # apply, and keep this sub-table LAST in [assistant] (a plain key after the header would join it).
 # ONLY the keys you set are sent: this tier sits above the model card's tuned profile, so each one set

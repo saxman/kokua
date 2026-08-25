@@ -52,6 +52,19 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.23.0 or newer
   rest streams into the bubble replay left open. The record is dropped once the turn reaches the store,
   so nothing is shown twice. Unattended scheduled turns record the same way, so switching into a running
   task shows the sub-agent work it has done.
+- **Conversations are titled by the model.** The first user message, truncated, is the title the
+  moment a conversation has one; a background call then asks the model the conversation runs on for a
+  real one (`core/titles.py`: a fresh context-free client, no tools, no reasoning) and the sidebar
+  updates again when it lands. Best-effort throughout: an endpoint that is down, a model string naming
+  nothing, or an answer that cleans up to nothing all leave the truncated title in place, silently.
+  The write is guarded, so a conversation deleted while the model was writing is not resurrected (and
+  anything that changes the title in the meantime wins), and it takes that conversation's own turn
+  slot, since the store saves whole sessions. Shutdown cancels a title still in flight rather than
+  waiting on an endpoint. Scheduled tasks keep the task name their conversations are minted with.
+  `[assistant] generate_titles` (default `true`) turns it off, leaving the truncated title; it is hot,
+  so the change applies to the next conversation with no restart, and it is the one entry in
+  `CORE_RUNTIME_SETTINGS`, since no capability owns it. Which model writes the title is not
+  configurable: the conversation already answers that.
 - **`/stop`** cancels an in-flight reply and keeps the partial turn so the conversation continues (the
   web UI has a Stop button for the same). Built on AIMU's `aio.RunHandle`; reactive turns run as
   background tasks, so the channel keeps reading mid-turn -- which is also what lets a web approval
