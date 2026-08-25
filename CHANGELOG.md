@@ -938,6 +938,20 @@ notice on startup.
   so it answers even when a hung turn holds it. Diagnostic logs go to a rotating
   `data/logs/kokua.log` (5 × 2 MB) with turn-lifecycle lines, level set by `[logging] level`.
   `faulthandler` is enabled, so `kill -USR1 <pid>` dumps all thread stacks.
+- **A slow control cannot wedge the web UI.** `frontends/web.py`'s `pump` is two tasks over one queue:
+  one reads the WebSocket, one applies frames in arrival order. Reading has to continue regardless of how
+  long a control takes, because a disconnect *is* a read and that reader is the only task positioned to
+  notice one. Applied inline, as they were, a control waiting on the turn gate stopped the reading with
+  it, and the result was worse than slow: the disconnect behind it was never seen, so the
+  single-connection guard was never released, the reload that would have recovered the page was refused
+  as "busy in another tab", and `/stop` and `/diag` were unreachable for the same reason, since both
+  arrive through that same loop. Killing the process was the only way out of a UI that had merely been
+  asked to wait. The trigger was a conversation delete during a long turn: `ConversationBook.delete` took
+  the gate's *exclusive* hold, which drains every in-flight turn, so deleting one conversation waited out
+  an unrelated conversation's turn. It takes that conversation's own `gate.turn` instead, bounded by the
+  `cancel_turn` that precedes it. Whichever half of the pump finishes first ends the connection, in both
+  directions: an error while applying ends the reader too, which would otherwise queue frames into a
+  drain nobody reads.
 
 ### Known limitations
 
@@ -951,10 +965,16 @@ notice on startup.
   conversation with dozens of large results (PDF extractions, email fetches, big MCP responses) makes
   that frame correspondingly large.
 - **A message can bind to the wrong conversation if you switch immediately after sending.** A reactive
-  turn binds to a conversation when the serve loop dequeues its message, while the web front end handles
-  new / select / delete inline, so a control processed in that sub-millisecond window sends the reply to
-  the conversation switched *to*. Not reachable by hand; surfaced deterministically by the Playwright
-  suite, which waits for the turn to be observably running before switching.
+  turn binds to a conversation when the serve loop dequeues its message, while the web front end applies
+  new / select / delete in a task of its own, so a control applied in that sub-millisecond window sends
+  the reply to the conversation switched *to*. Not reachable by hand; surfaced deterministically by the
+  Playwright suite, which waits for the turn to be observably running before switching.
+- **A slow control still delays the controls behind it, `/stop` included.** The web front end applies
+  frames in one ordered task, because selecting a conversation and then sending a message has to bind the
+  message to the conversation just selected, and ordering is what buys that. So a control that waits on
+  the turn gate holds up whatever follows it, and `/diag`'s claim to answer past a held gate does not
+  extend to that case: it arrives behind the control. This is a delay rather than a wedge, though.
+  Reloading the page always works, and the reload tears the blocked handler down with the connection.
 
 ### Internals and development
 

@@ -663,6 +663,31 @@ carrying more than its own text, and the bare string for everything else, includ
 replies. `frontends/web.py`'s `_parse_input` decodes it and `WebChannel.feed_input` queues it; both shapes
 converge on one `ChannelMessage` in `receive`, so nothing downstream knows which path a message took.
 
+### Reading the socket, and applying what arrives
+
+`pump` is two tasks over one queue: one reads the WebSocket, one applies frames in arrival order. They are
+split because they fail differently. Applying a frame can take arbitrarily long, since a control that
+waits on the turn gate waits for in-flight turns to drain, which on a local model is minutes. Reading has
+to keep happening regardless, because a disconnect *is* a read and this is the only task positioned to
+notice one.
+
+Applied inline, as they were, a slow control stopped the reading with it, and the result was worse than
+slow. The disconnect queued behind the control was never seen, so the one-connection guard in
+`ws_endpoint` was never released, the reload that would have recovered the page was refused as "busy in
+another tab", and killing the process was the only way out of a UI that had merely been asked to wait.
+The trigger was a conversation delete during a long turn: `ConversationBook.delete` took the gate's
+*exclusive* hold, which drains every in-flight turn, so deleting one conversation waited out an unrelated
+conversation's turn. It now takes that conversation's own `gate.turn` instead, which `cancel_turn` has
+already asked to stop, so the wait is bounded by that cancellation landing.
+
+One queue and one applying task, rather than a task per frame, because order is part of the contract:
+selecting a conversation and then sending a message has to bind the message to the conversation just
+selected. A slow control therefore still delays the frames behind it, `/stop` included. That is the cost
+of ordering, and it is now a delay rather than a wedge. Whichever half finishes first ends the connection,
+in both directions: a disconnect ends the reader, and an unexpected error ends the applier and has to end
+the reader with it, since a reader left running would queue frames into a drain nobody reads, which is the
+same wedge with the halves swapped.
+
 ### Streaming the answer
 
 `token` frames accumulate into `streamingText`, which is the source of truth; the bubble's DOM is a
@@ -761,8 +786,10 @@ change reaches the next firing. The prune itself lives in `TurnRunner`, beside t
 asks `ConversationBook.sessions_for_task` for the task's conversations oldest-first (by `created_at`,
 so a late turn touching an older run cannot make it look newest), reorders them so runs holding no
 report come first, and deletes past the cap. It runs after every firing, successful or not, and outside
-the turn's gate hold, since the delete takes the gate exclusively, and swallows failures the way the run
-itself does (invariant 6): a user who deleted a run by hand must not stop the task firing.
+the turn's gate hold, since the delete takes a `gate.turn` of its own (invariant 1) and the firing's own
+conversation is a prune candidate, so run inside the hold it would wait on the per-conversation lock the
+same task already owns. It swallows failures the way the run itself does (invariant 6): a user who deleted
+a run by hand must not stop the task firing.
 
 That eviction order is what lets the prune run on the failure path at all. Pruning used to be
 success-only, so a task failing on every firing was never pruned and accumulated conversations without

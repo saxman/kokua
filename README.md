@@ -94,7 +94,7 @@ The model string is AIMU's [`provider:model_id`](https://saxman.info/aimu/how-to
 
 Useful flags: `--list-toolsets` (every capability name this install accepts, grouped by what provides it), `--mcp <url>` (repeatable), `--system` (overrides the entry agent's system message for this run only; a worker's own declared message is untouched), `--config <path>`, `--host` / `--port` (web). What each agent can *do* is not a flag: it is that agent's `tools` list in `config.toml` (see [Configuration](#configuration)).
 
-Two commands worth knowing: **`/stop`** cancels a reply that's still streaming and keeps the partial turn, so the conversation continues (the web UI has a Stop button for the same). **`/diag`** reports the in-flight turn, the gate state, and a stuck turn's async stack; it never takes the turn gate, so it answers even when a hung turn is holding it. Rotating logs go to `$KOKUA_HOME/data/logs/kokua.log`, and `kill -USR1 <pid>` dumps all thread stacks there.
+Two commands worth knowing: **`/stop`** cancels a reply that's still streaming and keeps the partial turn, so the conversation continues (the web UI has a Stop button for the same). **`/diag`** reports the in-flight turn, the gate state, and a stuck turn's async stack; it never takes the turn gate, so it answers even when a hung turn is holding it. (In the web UI it does wait behind an earlier control that is itself waiting on the gate, because the page's frames are applied in the order they arrive; reloading clears that, and always can.) Rotating logs go to `$KOKUA_HOME/data/logs/kokua.log`, and `kill -USR1 <pid>` dumps all thread stacks there.
 
 ## Key features
 

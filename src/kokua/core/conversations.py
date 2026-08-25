@@ -245,11 +245,27 @@ class ConversationBook:
         not rolled back), so this is a best-effort revert: it keeps the pointer off some OTHER
         untested conversation, but a caller that touches ``agent`` afterward hits the same build
         failure again. The front end is expected to surface the re-raised error and stop, not retry.
+
+        Held under this conversation's own turn slot rather than the gate's exclusive hold. The writer
+        drains every in-flight turn before it proceeds, so a delete used to wait out a turn on an
+        unrelated conversation, and the web front end awaits this call on the single task reading its
+        socket: one long turn elsewhere therefore froze every control in the UI, including the ``/stop``
+        that would have released it. What the hold has to cover is narrower than the writer anyway. This
+        conversation's own turn must be off its agent and message list before the store record and the
+        registry entry go, and ``cancel_turn`` above has already asked that turn to stop. So the wait is
+        bounded by this conversation's own work: the cancellation landing, plus any turn already queued on
+        it, which the per-conversation lock hands the slot to first (it is FIFO, so a queued turn is
+        drained ahead of this delete exactly as the writer used to drain it). A reader still keeps a
+        settings apply out, since that runs as the writer and so cannot overlap one.
+
+        Being one ``gate.turn`` makes this bound by invariant 1 (see ``core/turns.py``): a caller already
+        holding a turn must not reach here, which is why ``TurnRunner._prune_task_conversations`` is
+        sequenced after its firing's hold rather than inside it.
         """
         cancel_turn(conversation_id)
         deleting_active = conversation_id == self._active_id
         previous_id = self._active_id
-        async with self._gate.exclusive():
+        async with self._gate.turn(conversation_id):
             self._store.delete(conversation_id)
             self._registry.discard(conversation_id)
             if deleting_active:

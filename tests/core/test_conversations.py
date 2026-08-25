@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 
+import asyncio
+
 import pytest
 
 from aimu.aio.channels.base import ChannelMessage
 
 from kokua.core.assistant import Assistant
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
-from tests.helpers import MockAsyncModelClient
+from tests.helpers import BlockingModelClient, MockAsyncModelClient
 
 
 async def test_turn_persists_to_active_session_with_title(tmp_path):
@@ -448,3 +450,38 @@ async def test_retag_task_is_zero_when_the_task_minted_nothing(tmp_path):
     book = assistant._book
 
     assert book.retag_task("never-ran", "renamed") == 0
+
+
+async def test_delete_does_not_wait_for_a_turn_on_another_conversation(tmp_path):
+    """Deleting one conversation waits for that conversation, not for every conversation.
+
+    ``delete`` took the gate's exclusive (writer) hold, which drains *every* in-flight turn before it
+    proceeds. A delete therefore blocked for as long as an unrelated conversation's turn ran, and since
+    the web front end's socket reader awaits the delete inline, one long turn wedged the whole UI.
+    """
+    clients: dict = {}
+
+    def factory(conversation_id):
+        client = BlockingModelClient() if not clients else MockAsyncModelClient(["ok"])
+        clients[conversation_id] = client
+        return client
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    busy_id = assistant._active_id
+    blocking = clients[busy_id]
+    await assistant.new_conversation()
+    doomed_id = assistant._active_id
+    await assistant.new_conversation()  # somewhere to stand that is neither busy nor doomed
+
+    turn = asyncio.create_task(
+        assistant._handle(ChannelMessage(text="a long job", channel="fake"), conversation_id=busy_id)
+    )
+    await asyncio.wait_for(blocking.started.wait(), timeout=5)
+
+    try:
+        await asyncio.wait_for(assistant.delete_conversation(doomed_id), timeout=5)
+    finally:
+        blocking.release.set()
+        await turn
+
+    assert doomed_id not in assistant._store.list_keys()

@@ -217,13 +217,31 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
         await channel.send_tasks(assistant.list_tasks())
 
         async def pump() -> None:
+            """Read the socket in this task and apply what arrives in another, in arrival order.
+
+            The two halves are split because they fail differently. Applying a frame can take arbitrarily
+            long: a control that waits on the turn gate waits for in-flight turns to drain, which on a
+            local model is minutes. Reading has to keep happening anyway, because a disconnect *is* a
+            read, and this is the only task positioned to notice one. Handled inline (as this loop used to
+            be), a slow control stopped the reading too: the disconnect behind it was never seen, so the
+            one-connection guard in ``ws_endpoint`` was never released and the reload that would have
+            recovered the page was refused as "busy in another tab". Killing the process was the only way
+            out of a UI that had merely been asked to wait.
+
+            One queue and one applying task, rather than a task per frame, because order is part of the
+            contract: selecting a conversation and then sending a message has to bind the message to the
+            conversation just selected. So a slow control still delays the frames behind it, including a
+            ``/stop``. That is the honest cost of ordering, and it is now a delay rather than a wedge:
+            reloading always works, and the reload tears the blocked handler down with the connection.
+            """
+            inbound: asyncio.Queue = asyncio.Queue()  # unbounded: a reader that blocks is the bug above
+
             # Conversation controls (new/select/delete) are handled here and never reach the channel; an
             # "input" frame carrying attached images or a per-turn reasoning effort is decoded and fed with
             # its text; all other frames (chat, "/stop", approval "y"/"n") are fed to the channel as today.
-            # On disconnect, the sentinel ends receive(), stopping the scheduler and assistant.run().
-            try:
+            async def apply_frames() -> None:
                 while True:
-                    raw = await websocket.receive_text()
+                    raw = await inbound.get()
                     parsed = _parse_input(raw)
                     if parsed is not None:
                         text, data_urls, thinking = parsed
@@ -308,9 +326,31 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                             await channel.send("Sorry, that conversation could not be deleted.")
                             continue
                     await _sync_view(channel, assistant)
-            except WebSocketDisconnect:
-                pass
+
+            async def read_socket() -> None:
+                try:
+                    while True:
+                        inbound.put_nowait(await websocket.receive_text())
+                except WebSocketDisconnect:
+                    pass
+
+            # Whichever half finishes first ends the connection, in both directions. A disconnect ends
+            # the reader, which is the ordinary case. An unexpected error in a control ends the applier,
+            # and has to end the reader with it: left running, it would queue frames into a drain nobody
+            # reads, which is this same wedge in a new place. `result()` re-raises that error rather than
+            # letting `gather` below swallow it, so an unhandled failure still tears the connection down
+            # the way it did when controls were applied inline.
+            applying = asyncio.create_task(apply_frames())
+            reading = asyncio.create_task(read_socket())
+            try:
+                done, _ = await asyncio.wait({applying, reading}, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
             finally:
+                applying.cancel()
+                reading.cancel()
+                await asyncio.gather(applying, reading, return_exceptions=True)
+                # The sentinel ends receive(), which stops the scheduler and assistant.run().
                 await channel.feed(None)
 
         async with asyncio.TaskGroup() as tg:

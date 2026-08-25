@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from tests.helpers import MockAsyncModelClient
+from tests.helpers import BlockingModelClient, MockAsyncModelClient
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME, WebChannel, conversation_to_frames
 from kokua.config import AssistantConfig
 from tests.channels import example_agents, planning_settings
@@ -1768,3 +1768,111 @@ def test_web_channel_feed_input_leaves_metadata_empty_without_an_effort():
     received = asyncio.run(run())
     assert received[0].images == ["/tmp/a.png"]
     assert "thinking" not in received[0].metadata
+
+
+class _AsgiSocket:
+    """Drives the ``/ws`` endpoint the way a real server does: queued inbound messages, captured sends.
+
+    ``TestClient`` cannot stand in here. It delivers a disconnect by cancelling the task the app runs in,
+    which papers over exactly the failure below: uvicorn cancels nothing, it hands the app a
+    ``websocket.disconnect`` message and expects the app to notice. An app that has stopped reading never
+    does.
+    """
+
+    def __init__(self, inbound: list[dict]):
+        self._inbound: asyncio.Queue = asyncio.Queue()
+        for message in inbound:
+            self._inbound.put_nowait(message)
+        self.sent: list[dict] = []
+
+    async def receive(self) -> dict:
+        return await self._inbound.get()
+
+    async def send(self, message: dict) -> None:
+        self.sent.append(message)
+
+    def feed(self, message: dict) -> None:
+        self._inbound.put_nowait(message)
+
+    def frames(self) -> list[dict]:
+        import json
+
+        return [json.loads(m["text"]) for m in self.sent if m.get("type") == "websocket.send" and "text" in m]
+
+
+def _ws_scope() -> dict:
+    return {
+        "type": "websocket",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "scheme": "ws",
+        "path": "/ws",
+        "raw_path": b"/ws",
+        "root_path": "",
+        "query_string": b"",
+        "headers": [],
+        "client": ("test", 1),
+        "server": ("test", 8000),
+        "subprotocols": [],
+        "state": {},
+    }
+
+
+async def test_a_blocked_control_still_releases_the_connection_on_disconnect(tmp_path):
+    """A control that blocks must not cost the user their way back into the UI.
+
+    The socket reader used to handle every control inline, so a control waiting on the turn gate (a
+    settings apply drains every in-flight turn) stopped the reader entirely. The disconnect that followed
+    was never read, the one-connection guard was never released, and reloading the page was refused as
+    "busy in another tab": the only way out was killing the process.
+    """
+    import json
+
+    blocking = BlockingModelClient()
+    app = build_app(_config(tmp_path), client=blocking)
+
+    first = _AsgiSocket([{"type": "websocket.connect"}, {"type": "websocket.receive", "text": "a long job"}])
+    serving = asyncio.create_task(app(_ws_scope(), first.receive, first.send))
+    try:
+        await asyncio.wait_for(blocking.started.wait(), timeout=5)  # the turn now holds the gate
+        first.feed({"type": "websocket.receive", "text": json.dumps({"type": "settings", "values": {}})})
+        first.feed({"type": "websocket.disconnect", "code": 1000})
+
+        done, _ = await asyncio.wait({serving}, timeout=5)  # wait(), not wait_for(): must not cancel it
+        assert serving in done, "the connection never noticed the disconnect while a control was blocked"
+
+        second = _AsgiSocket([{"type": "websocket.connect"}, {"type": "websocket.disconnect", "code": 1000}])
+        await asyncio.wait_for(app(_ws_scope(), second.receive, second.send), timeout=5)
+        refusals = [f for f in second.frames() if "busy in another tab" in str(f.get("text", ""))]
+        assert not refusals, "a reload after the disconnect was refused as busy"
+    finally:
+        blocking.release.set()
+        serving.cancel()
+        await asyncio.gather(serving, return_exceptions=True)
+
+
+async def test_a_control_that_raises_tears_the_connection_down(tmp_path):
+    """The other direction of the same rule: the reader must not outlive whatever applies frames.
+
+    Applying frames in its own task is what stops a slow control wedging the socket, but it also means an
+    unexpected error there can kill that task alone. A reader left running past it would go on queueing
+    frames into something nobody drains, which is the wedge again with the halves swapped.
+    """
+    import json
+
+    calls: list[str] = []
+
+    def factory(conversation_id):
+        calls.append(conversation_id)
+        if len(calls) > 1:
+            raise RuntimeError("agent build exploded")
+        return MockAsyncModelClient(["ok"])
+
+    app = build_app(_config(tmp_path), client_factory=factory)
+    sock = _AsgiSocket(
+        [{"type": "websocket.connect"}, {"type": "websocket.receive", "text": json.dumps({"type": "new"})}]
+    )
+    serving = asyncio.create_task(app(_ws_scope(), sock.receive, sock.send))
+
+    done, _ = await asyncio.wait({serving}, timeout=5)
+    assert serving in done, "a control that raised left the socket being read with nothing applying frames"
+    assert serving.exception() is not None, "the error was swallowed instead of ending the connection"

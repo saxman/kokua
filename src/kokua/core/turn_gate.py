@@ -5,6 +5,14 @@ conversation's agent + message list, so same-conversation turns must serialize).
 (a hot settings change) are the "writer": they touch every agent, so they run exclusively, waiting for
 in-flight turns to drain and blocking new ones until they finish.
 
+Which side an operation belongs on is decided by its *reach*, not by whether it mutates. A conversation
+delete mutates the store and the registry and is still a reader, taking the deleted conversation's own
+slot: what it has to exclude is that conversation's turn, and nothing else. It took the writer once, and
+the cost was paid somewhere unrelated -- deleting one conversation waited out every other conversation's
+in-flight turn, which on a local model is minutes, and the web front end awaits that call on the one task
+reading its socket. Reaching for the writer when a single slot would do is how an unbounded wait gets
+built out of bounded parts.
+
 Writer-preferring: once an exclusive hold is waiting, new turns queue behind it so a steady stream of
 turns can't starve a settings change.
 """

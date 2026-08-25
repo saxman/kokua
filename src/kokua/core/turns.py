@@ -13,7 +13,13 @@ Every rule here was learned from a bug. Read them before changing anything in th
    ``_run_unattended`` and the child task it starts takes none of its own, which keeps the count at one
    for the firing as a whole; the gate's per-conversation lock is an ``asyncio.Lock``, which has no
    owning task, so acquiring and releasing it around a child is sound.
-   (Regression: ``test_proactive_new_session_holds_at_most_one_gate_turn``.)
+   The rule reaches one holder outside this module: ``ConversationBook.delete`` takes the deleted
+   conversation's own ``gate.turn`` (it used to take the writer, which made a delete wait out every
+   unrelated conversation's turn and froze the web front end's socket reader). So a path here that
+   deletes has to be outside its own hold, which is why ``_prune_task_conversations`` runs after
+   ``_run_unattended`` returns rather than inside it.
+   (Regressions: ``test_proactive_new_session_holds_at_most_one_gate_turn``,
+   ``test_delete_does_not_wait_for_a_turn_on_another_conversation``.)
 
 2. **Pin for the whole turn.** The agent registry evicts LRU. Without a pin, another conversation's
    turn can evict this one's agent mid-run, and persisting afterwards would rebuild a stale agent
@@ -443,8 +449,10 @@ class TurnRunner:
 
         Runs on every path, not only where the firing succeeded: a task that fails on every firing was
         otherwise never pruned at all, and minted an unbounded pile of conversations the cap was there
-        to cover. Always *after* ``_run_unattended`` has returned, though, because the delete takes the
-        conversation gate exclusively and the turn itself was holding it.
+        to cover. Always *after* ``_run_unattended`` has returned, though, because the delete takes a
+        ``gate.turn`` of its own and this firing was holding one (invariant 1). The firing's own
+        conversation is a prune candidate here, so run inside the hold this would not merely add a second
+        reader, it would wait on the per-conversation lock the same task already owns.
 
         Eviction order is failed runs before successful ones, then oldest before newest, and the
         conversation this firing just used is a candidate like any other. That ordering is what lets the

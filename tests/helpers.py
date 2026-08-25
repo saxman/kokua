@@ -6,6 +6,7 @@ self-contained and don't reach into the AIMU repo's test directory.
 
 from __future__ import annotations
 
+import asyncio
 from typing import AsyncIterator
 from unittest.mock import MagicMock
 
@@ -123,3 +124,23 @@ class MockAsyncModelClient(AsyncBaseModelClient):
     async def _generate_streamed(self, prompt, generate_kwargs=None) -> AsyncIterator[StreamChunk]:
         text = await self._generate(prompt, generate_kwargs)
         yield StreamChunk(StreamingContentType.GENERATING, text)
+
+
+class BlockingModelClient(MockAsyncModelClient):
+    """A client whose streamed reply waits for ``release``, holding a real turn in flight.
+
+    For tests about what else can happen *during* a turn: the turn holds the gate reader and the agent
+    lock it really holds, rather than a test standing in for either. Await ``started`` to know the turn
+    is in flight, and always ``release.set()`` in a ``finally``, since nothing else ends it.
+    """
+
+    def __init__(self, reply: str = "done"):
+        super().__init__([reply])
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def _chat_streamed(self, user_message, generate_kwargs=None, use_tools=True, images=None):
+        self.started.set()
+        await self.release.wait()
+        async for chunk in super()._chat_streamed(user_message, generate_kwargs, use_tools, images=images):
+            yield chunk

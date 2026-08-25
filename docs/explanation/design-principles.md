@@ -202,7 +202,9 @@ The invariants block is a teaching artifact as much as a safety one.
 *How this cashes out:* [`core/turns.py`](../../src/kokua/core/turns.py) opens with a
 `## Concurrency invariants` block -- seven rules, each stating what breaks without it, including a
 deadlock that a regression test still guards. [`TurnGate`](../../src/kokua/core/turn_gate.py) is a
-documented writer-preferring readers-writer gate: turns read, a settings change writes.
+documented writer-preferring readers-writer gate: turns read, a settings change writes, and which side an
+operation belongs on follows from its reach rather than from whether it mutates (a conversation delete
+mutates and still reads, taking only the deleted conversation's slot).
 [`AgentRegistry`](../../src/kokua/core/agent_registry.py) gives each conversation its own agent and
 model client, with LRU eviction and a pin held for the duration of any in-flight turn. A background
 or scheduled turn auto-denies a gated tool because nobody is watching it. Every human decision is a
