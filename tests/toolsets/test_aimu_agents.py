@@ -64,7 +64,7 @@ def test_pack_is_discovered_and_contributes_three_tools():
     toolsets = plugins.discover_toolsets()
     assert "aimu_agents" in toolsets
     assert isinstance(toolsets["aimu_agents"], Toolset)
-    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None, agent_name="assistant")
     names = {getattr(fn, "__name__", None) for fn in toolsets["aimu_agents"].build(ctx)}
     assert {"code_review", "research_report", "create_content"} <= names
 

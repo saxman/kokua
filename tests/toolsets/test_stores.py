@@ -15,7 +15,9 @@ from kokua.toolsets.skills import TOOLSET as SKILLS
 
 
 def _ctx(tmp_path, agent=None) -> ToolsetContext:
-    return ToolsetContext(state=LiveState(config=AssistantConfig(data_dir=tmp_path)), agent=agent)
+    return ToolsetContext(
+        state=LiveState(config=AssistantConfig(data_dir=tmp_path)), agent=agent, agent_name="assistant"
+    )
 
 
 def test_memory_builds_tools_over_the_shared_store(tmp_path):

@@ -93,7 +93,7 @@ def test_build_tools_concatenates_and_keeps_the_first_tool_of_a_repeated_name():
         pass
 
     second.__name__ = "first"
-    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None, agent_name="assistant")
     tools = build_tools([_toolset("a", tools=[first]), _toolset("b", tools=[second])], ctx=ctx)
     assert tools == [first]
 
@@ -114,7 +114,7 @@ def test_build_tools_records_every_name_it_built_on_the_shared_state():
         pass
 
     state = LiveState(config=AssistantConfig())
-    ctx = ToolsetContext(state=state, agent=None)
+    ctx = ToolsetContext(state=state, agent=None, agent_name="assistant")
     build_tools([_toolset("a", tools=[first, third]), _toolset("b", tools=[second])], ctx=ctx)
     assert state.built_tool_names == {"first", "third"}
 

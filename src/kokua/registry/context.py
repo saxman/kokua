@@ -246,10 +246,23 @@ class LiveState:
 
 @dataclass(frozen=True)
 class ToolsetContext:
-    """One agent's view of ``LiveState``, passed to every ``Toolset.build``."""
+    """One agent's view of ``LiveState``, passed to every ``Toolset.build``.
+
+    Two fields describe the same agent, and they are not interchangeable. ``agent`` is the live object
+    and exists only where Kokua constructs the agent itself, so it is ``None`` for a spawned worker and
+    for a composed sub-agent, which are AIMU specs rather than objects Kokua holds. ``agent_name`` is
+    always known, at every construction site, which is what lets a toolset scope itself to its own
+    holder: ``benchmark`` asks the config what model ``agent_name`` runs on, a question the live object
+    could not answer even where it is present, since nothing on a model client retains the model string
+    it was built from.
+
+    ``agent_name`` has no default deliberately. A construction site that forgot it would otherwise
+    produce a plausible answer about the wrong agent, which is the failure nobody notices.
+    """
 
     state: LiveState
     agent: Any
+    agent_name: str
 
     @property
     def config(self) -> AssistantConfig:

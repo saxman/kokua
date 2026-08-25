@@ -252,7 +252,7 @@ If you add one to Kokua itself rather than to your own package, note that
 `tests/toolsets/test_registration.py` will fail until the file, the entry-point line, and
 `TOOLSET.name` all agree, which is deliberate: it is what keeps that table honest as the only index.
 
-Four things to know about `build`:
+Five things to know about `build`:
 
 - **It creates closures, not process state.** `build` runs once per agent, so anything it constructs is
   constructed once per agent: two agents declaring your toolset would get two of whatever it opened.
@@ -263,6 +263,11 @@ Four things to know about `build`:
 - **`ctx.agent` is the live agent, and is `None` for a spawned worker.** A toolset that genuinely needs
   the agent object should be marked `entry_point_only=True`, which makes declaring it on any other agent
   a startup error instead of a `None` at build time. `skills` is the one built-in in that position.
+- **`ctx.agent_name` names the agent you are being built for, always.** Unlike the object it is never
+  `None`, so a toolset can scope itself to its own holder rather than to the session: `benchmark` reads
+  `config.model_for(ctx.agent_name)` so a worker declaring it is told about the model it actually runs
+  on. Ask the config, not the agent: a live model client does not retain the model string it was built
+  from.
 - **Failure is contained, not reported loudly.** An exception from a *plugin's* `build` is caught,
   logged, and the toolset contributes nothing; the assistant still starts. Nothing in the UI says so.
 - **`guidance` is optional and appended to every agent that declares you**, so write it as instructions

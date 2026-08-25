@@ -408,8 +408,10 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         agent = config.agents[name]
         toolsets = select(agent.tools, state.registry, agent=name, entry_point=config.entry_agent)
         # A spawned worker is a plain AIMU Agent, so `agent=None`: the one toolset needing the live
-        # agent object is entry-point-only and validation has already rejected it here.
-        tools = build_tools(toolsets, ToolsetContext(state=state, agent=None))
+        # agent object is entry-point-only and validation has already rejected it here. The name is
+        # carried regardless, so a toolset scoping itself to its holder (`benchmark`) resolves this
+        # worker's own model rather than the delegator's.
+        tools = build_tools(toolsets, ToolsetContext(state=state, agent=None, agent_name=name))
         if agent.delegates_to:
             tools = tools + [_spawn_tool(config, state, name)]
         # AIMU reads the first line of a spec's system_message as that agent_type's menu label (see

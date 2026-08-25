@@ -32,7 +32,10 @@ def _state(tmp_path, *, sources=None, **config_kwargs) -> LiveState:
 
 
 def _tools_by_name(state) -> dict:
-    return {fn.__name__: fn for fn in make_capability_tools(ToolsetContext(state=state, agent=object()))}
+    return {
+        fn.__name__: fn
+        for fn in make_capability_tools(ToolsetContext(state=state, agent=object(), agent_name="assistant"))
+    }
 
 
 @aimu_tool
@@ -399,7 +402,10 @@ async def test_compose_subagent_uses_the_resolved_default_not_the_holders_client
 
     spawn = _recording(monkeypatch)
     state = _state(tmp_path)
-    tools = {fn.__name__: fn for fn in make_capability_tools(ToolsetContext(state=state, agent=_Agent()))}
+    tools = {
+        fn.__name__: fn
+        for fn in make_capability_tools(ToolsetContext(state=state, agent=_Agent(), agent_name="assistant"))
+    }
     await tools["compose_subagent"]("w", "Do it.", ["web"], "Instructions.")
     assert spawn.calls[0]["model"] == TEST_DEFAULT_MODEL
 
@@ -410,3 +416,20 @@ def test_the_guidance_ranks_the_declared_roles_above_composing_one(tmp_path):
     assert "spawn_subagent" in TOOLSET.guidance
     assert "list_capabilities" in TOOLSET.guidance
     assert "compose_subagent" in TOOLSET.guidance
+
+
+def test_a_composed_sub_agents_toolsets_are_built_under_its_own_label(tmp_path):
+    """The ad-hoc label is what `ctx.agent_name` carries here, and it is the honest answer: the label is
+    in no `[agents.*]` table, so every per-agent accessor falls back to the `[assistant]` defaults, which
+    is exactly the tier a composed sub-agent runs on."""
+    holders: list[str] = []
+
+    def record(ctx) -> list:
+        holders.append(ctx.agent_name)
+        return []
+
+    state = _state(tmp_path, sources=[("test", [Toolset(name="probe", description="records", build=record)])])
+
+    _spec(state, name="quote-checker", tools=("probe",))
+
+    assert holders == ["quote-checker"]

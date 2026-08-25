@@ -316,7 +316,7 @@ def test_the_toolset_builds_the_three_read_only_tools(tmp_path):
     state = LiveState(
         config=AssistantConfig(data_dir=tmp_path), conversation_book=FakeBook(), turn_running=lambda cid: False
     )
-    names = {fn.__name__ for fn in TOOLSET.build(ToolsetContext(state=state, agent=object()))}
+    names = {fn.__name__ for fn in TOOLSET.build(ToolsetContext(state=state, agent=object(), agent_name="assistant"))}
 
     assert names == {"list_conversations", "read_conversation", "search_conversations"}
 

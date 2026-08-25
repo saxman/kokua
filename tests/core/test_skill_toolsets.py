@@ -172,4 +172,4 @@ def test_a_skill_resolves_through_select_so_a_typo_is_still_caught(tmp_path):
 def _ctx(state: LiveState):
     from kokua.registry.context import ToolsetContext
 
-    return ToolsetContext(state=state, agent=None)
+    return ToolsetContext(state=state, agent=None, agent_name="assistant")

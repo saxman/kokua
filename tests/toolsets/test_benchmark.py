@@ -136,35 +136,35 @@ def test_report_gives_the_median_and_the_range_for_both_metrics():
         _measurement(ttft=0.20, decode=2.0, tokens=100),  # 50 tok/s
     ]
 
-    report = format_report("ollama:qwen3:8b", None, warmup=_measurement(), runs=runs)
+    report = format_report("assistant", "ollama:qwen3:8b", None, warmup=_measurement(), runs=runs)
 
     assert "0.20s median (0.10s to 0.30s)" in report
     assert "50.0 tokens/sec median (25.0 to 100.0)" in report
 
 
 def test_report_names_the_model_and_the_thinking_setting():
-    report = format_report("ollama:qwen3:8b", "high", warmup=_measurement(), runs=[_measurement()])
+    report = format_report("assistant", "ollama:qwen3:8b", "high", warmup=_measurement(), runs=[_measurement()])
 
     assert "ollama:qwen3:8b" in report
     assert "thinking: high" in report
 
 
 def test_report_calls_an_undeclared_thinking_setting_unset_rather_than_none():
-    report = format_report("ollama:qwen3:8b", None, warmup=_measurement(), runs=[_measurement()])
+    report = format_report("assistant", "ollama:qwen3:8b", None, warmup=_measurement(), runs=[_measurement()])
 
     assert "thinking: unset" in report
     assert "None" not in report
 
 
 def test_report_gives_the_warmup_its_own_line():
-    report = format_report("m", None, warmup=_measurement(ttft=9.0), runs=[_measurement(ttft=0.2)])
+    report = format_report("assistant", "m", None, warmup=_measurement(ttft=9.0), runs=[_measurement(ttft=0.2)])
 
     assert "warmup" in report
     assert "9.00s" in report
 
 
 def test_report_reads_a_much_slower_warmup_as_a_model_that_had_to_be_loaded():
-    report = format_report("m", None, warmup=_measurement(ttft=9.0), runs=[_measurement(ttft=0.2)])
+    report = format_report("assistant", "m", None, warmup=_measurement(ttft=9.0), runs=[_measurement(ttft=0.2)])
 
     assert "not resident" in report
 
@@ -173,34 +173,34 @@ def test_report_does_not_cry_cold_load_over_a_warmup_in_line_with_the_rest():
     """A hint that fires whichever way the numbers came out is not a hint. On a fast local model the
     warmup lands within noise of the median, and saying "the model may not have been resident" there
     trains a reader to skip the line on the runs where it is true."""
-    report = format_report("m", None, warmup=_measurement(ttft=0.17), runs=[_measurement(ttft=0.13)])
+    report = format_report("assistant", "m", None, warmup=_measurement(ttft=0.17), runs=[_measurement(ttft=0.13)])
 
     assert "0.17s" in report
     assert "not resident" not in report
 
 
 def test_report_says_the_warmup_timed_out_when_it_did():
-    report = format_report("m", None, warmup=None, runs=[_measurement()])
+    report = format_report("assistant", "m", None, warmup=None, runs=[_measurement()])
 
     assert "warmup" in report
     assert "timed out" in report
 
 
 def test_report_marks_token_counts_approximate_when_the_provider_reported_none():
-    report = format_report("m", None, warmup=_measurement(), runs=[_measurement(from_chunks=True)])
+    report = format_report("assistant", "m", None, warmup=_measurement(), runs=[_measurement(from_chunks=True)])
 
     assert "approximate" in report
 
 
 def test_report_does_not_hedge_a_provider_reported_token_count():
-    report = format_report("m", None, warmup=_measurement(), runs=[_measurement(from_chunks=False)])
+    report = format_report("assistant", "m", None, warmup=_measurement(), runs=[_measurement(from_chunks=False)])
 
     assert "approximate" not in report
 
 
 def test_report_declines_to_divide_by_a_zero_length_decode_window():
     """A one-chunk response leaves no decode window to divide by, so there is no speed to report."""
-    report = format_report("m", None, warmup=_measurement(), runs=[_measurement(decode=0.0, tokens=1)])
+    report = format_report("assistant", "m", None, warmup=_measurement(), runs=[_measurement(decode=0.0, tokens=1)])
 
     assert "tokens/sec median" not in report
     assert "single chunk" in report
@@ -209,20 +209,20 @@ def test_report_declines_to_divide_by_a_zero_length_decode_window():
 def test_report_still_gives_a_speed_when_only_some_runs_had_no_decode_window():
     runs = [_measurement(decode=0.0, tokens=1), _measurement(decode=2.0, tokens=100)]
 
-    report = format_report("m", None, warmup=_measurement(), runs=runs)
+    report = format_report("assistant", "m", None, warmup=_measurement(), runs=runs)
 
     assert "50.0 tokens/sec" in report
 
 
 def test_report_counts_the_runs_that_timed_out():
-    report = format_report("m", None, warmup=_measurement(), runs=[_measurement(), None, None])
+    report = format_report("assistant", "m", None, warmup=_measurement(), runs=[_measurement(), None, None])
 
     assert "2 of 3" in report
     assert "timed out" in report
 
 
 def test_report_says_so_when_every_run_timed_out():
-    report = format_report("m", None, warmup=None, runs=[None, None, None])
+    report = format_report("assistant", "m", None, warmup=None, runs=[None, None, None])
 
     assert "median" not in report
     assert "timed out" in report
@@ -231,8 +231,8 @@ def test_report_says_so_when_every_run_timed_out():
 # --- the tool --------------------------------------------------------------------------------
 
 
-def _tool(config=None):
-    (fn,) = build(config or AssistantConfig())
+def _tool(config=None, agent="assistant"):
+    (fn,) = build(config or AssistantConfig(), agent)
     return fn
 
 
@@ -245,7 +245,7 @@ def _install_client(monkeypatch, client):
 
 
 def test_build_offers_one_tool():
-    assert [fn.__name__ for fn in build(AssistantConfig())] == ["benchmark_model"]
+    assert [fn.__name__ for fn in build(AssistantConfig(), "assistant")] == ["benchmark_model"]
 
 
 def test_toolset_is_named_benchmark():
@@ -305,18 +305,17 @@ async def test_benchmark_model_measures_with_the_configured_reasoning_effort(mon
 
 def test_any_agent_may_hold_the_toolset():
     """Nothing about this capability needs the agent Kokua built directly, unlike `skills`, whose script
-    tool cannot be constructed without a live agent object. What it measures is a property of the
-    session, so a worker holding it gets a real answer; the report names whose model it is."""
+    tool cannot be constructed without a live agent object: the model comes from the config by name, and
+    a name is known wherever a toolset is built."""
     assert TOOLSET.entry_point_only is False
 
 
-def test_report_says_whose_model_the_figures_describe():
-    """The tool answers a question about the session, not about its caller. An agent on a model of its
-    own could otherwise read these figures as its own, so the report names the agent as well as the
-    model rather than leaving the reader to assume."""
-    report = format_report("ollama:qwen3:8b", None, warmup=_measurement(), runs=[_measurement()])
+def test_report_names_the_agent_whose_model_it_timed():
+    """Naming the holder is what keeps two reports comparable. A worker on a model of its own and the
+    entry agent produce the same shape of text, and only the name says which one the figures describe."""
+    report = format_report("researcher", "ollama:qwen3:8b", None, warmup=_measurement(), runs=[_measurement()])
 
-    assert "main agent" in report
+    assert "researcher" in report
 
 
 def test_toolset_counts_as_self_management_rather_than_domain_work():
@@ -329,3 +328,66 @@ def test_the_toolset_is_registered_as_a_plugin():
     from kokua import plugins
 
     assert plugins.discover_toolsets()["benchmark"] is TOOLSET
+
+
+# --- whose model gets measured ----------------------------------------------------------------
+
+
+def _delegating_config(tmp_path):
+    """An entry agent on one model delegating to a worker declaring `benchmark` on another."""
+    from kokua.config.schema import AgentConfig
+
+    return AssistantConfig(
+        data_dir=tmp_path,
+        model="ollama:entry",
+        agents={
+            "assistant": AgentConfig(tools=["benchmark"], delegates_to=["researcher"]),
+            "researcher": AgentConfig(tools=["benchmark"], model="ollama:worker"),
+        },
+    )
+
+
+async def test_benchmark_model_reports_the_model_its_own_agent_runs_on(monkeypatch, tmp_path):
+    config = _delegating_config(tmp_path)
+    _install_client(monkeypatch, FakeStreamingClient([_text(["a"])] * (TIMED_RUNS + 1), usage={"output_tokens": 1}))
+
+    report = await _tool(config, "researcher")()
+
+    assert "ollama:worker" in report
+    assert "ollama:entry" not in report
+
+
+async def test_benchmark_model_measures_with_its_own_agents_reasoning_effort(monkeypatch, tmp_path):
+    """Reasoning tokens land inside both metrics, so a worker declaring an effort of its own has to be
+    timed at that effort rather than at the one the agent it was spawned from runs at."""
+    from kokua.config.schema import AgentConfig
+
+    config = AssistantConfig(
+        data_dir=tmp_path,
+        thinking="high",
+        agents={"assistant": AgentConfig(), "researcher": AgentConfig(tools=["benchmark"], thinking=False)},
+    )
+    client = _install_client(
+        monkeypatch, FakeStreamingClient([_text(["a"])] * (TIMED_RUNS + 1), usage={"output_tokens": 1})
+    )
+
+    await _tool(config, "researcher")()
+
+    assert all(call["thinking"] is False for call in client.calls)
+
+
+async def test_a_declared_worker_holding_the_toolset_measures_its_own_model(monkeypatch, tmp_path):
+    """End to end through the real spec builder, which is what proves the worker's name reaches the
+    toolset rather than the entry agent's: `build_agent_specs` is the only construction site a spawned
+    worker's tools come from."""
+    from kokua.core.agents import build_agent_specs, build_registry
+    from kokua.registry.context import LiveState
+
+    config = _delegating_config(tmp_path)
+    state = LiveState(config=config, registry=build_registry(config))
+    _install_client(monkeypatch, FakeStreamingClient([_text(["a"])] * (TIMED_RUNS + 1), usage={"output_tokens": 1}))
+
+    specs = build_agent_specs(config, state, "assistant")
+    (fn,) = [t for t in specs["researcher"]["tools"] if t.__name__ == "benchmark_model"]
+
+    assert "ollama:worker" in await fn()

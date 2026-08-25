@@ -12,7 +12,7 @@ from kokua.toolsets.web import TOOLSET
 def test_it_builds_exactly_aimus_tools(tmp_path):
     """The wrapper is a wrapper: it hands over AIMU's callables and adds none of its own. Asserted for
     one group rather than all eight, since they are generated from one shape."""
-    ctx = ToolsetContext(state=LiveState(config=AssistantConfig(data_dir=tmp_path)), agent=None)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig(data_dir=tmp_path)), agent=None, agent_name="assistant")
 
     assert TOOLSET.build(ctx) == list(aimu_builtin.web)
 

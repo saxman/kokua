@@ -167,7 +167,7 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
         concurrent_tool_calls=config.concurrent_tools,
         thinking=config.thinking_for(agent_name),
     )
-    agent.tools = build_tools(toolsets, ToolsetContext(state=state, agent=agent))
+    agent.tools = build_tools(toolsets, ToolsetContext(state=state, agent=agent, agent_name=agent_name))
     agent.tool_approval = state.tool_approval
     rebuild_delegation_tool(agent, state)
     return agent

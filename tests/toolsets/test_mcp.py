@@ -124,6 +124,6 @@ def test_the_toolset_builds_the_add_and_remove_tools(tmp_path):
         oauth=OAuthSettings(storage_dir=tmp_path),
         refresh_workers=lambda agent: None,
     )
-    ctx = ToolsetContext(state=state, agent=object())
+    ctx = ToolsetContext(state=state, agent=object(), agent_name="assistant")
 
     assert {fn.__name__ for fn in TOOLSET.build(ctx)} == {"add_mcp_server", "remove_mcp_server"}

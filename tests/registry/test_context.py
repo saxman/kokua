@@ -19,8 +19,8 @@ def _state(tmp_path) -> LiveState:
 
 def test_memory_store_is_one_object_across_two_agent_contexts(tmp_path):
     state = _state(tmp_path)
-    first = ToolsetContext(state=state, agent=object())
-    second = ToolsetContext(state=state, agent=object())
+    first = ToolsetContext(state=state, agent=object(), agent_name="assistant")
+    second = ToolsetContext(state=state, agent=object(), agent_name="assistant")
     assert first.state.memory_store is second.state.memory_store
 
 
@@ -32,7 +32,7 @@ def test_memory_store_is_not_constructed_until_asked_for(tmp_path):
 
 def test_context_passes_config_through(tmp_path):
     state = _state(tmp_path)
-    ctx = ToolsetContext(state=state, agent=object())
+    ctx = ToolsetContext(state=state, agent=object(), agent_name="assistant")
     assert ctx.config is state.config
 
 
@@ -84,3 +84,11 @@ def test_script_env_omits_unset_email_settings(tmp_path):
     env = _state(tmp_path).script_env()
     assert "KOKUA_EMAIL_HOST" not in env
     assert "KOKUA_EMAIL_TO" not in env
+
+
+def test_context_names_the_agent_it_is_building_for(tmp_path):
+    """The name, unlike the live ``agent`` object, is known at every construction site. It is what lets a
+    toolset ask the config what its own holder runs on: a live client does not retain the model string it
+    was built from, so the object could not answer even where it is present."""
+    ctx = ToolsetContext(state=_state(tmp_path), agent=None, agent_name="researcher")
+    assert ctx.agent_name == "researcher"

@@ -85,7 +85,7 @@ def test_a_toolset_that_fails_to_build_raises(monkeypatch):
     monkeypatch.setattr(agents, "discover_toolsets", lambda: {"broken": broken})
 
     registry = build_registry(AssistantConfig())
-    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None, agent_name="assistant")
     with pytest.raises(RuntimeError, match="boom"):
         registry["broken"].build(ctx)
 

@@ -87,8 +87,10 @@ def _compose_spec(
     config = state.config
     selected = select(tools, state.registry, agent=_SELECT_LABEL.format(name=name), entry_point=config.entry_agent)
     # agent=None is what a spawned sub-agent always gets. The one toolset needing a live agent object is
-    # entry-point-only, and `select` above has already rejected it here.
-    built = build_tools(selected, ToolsetContext(state=state, agent=None))
+    # entry-point-only, and `select` above has already rejected it here. The ad-hoc label is the honest
+    # value for `agent_name`: it names no `[agents.*]` table, so every per-agent accessor answers with
+    # the `[assistant]` defaults, which is the tier this sub-agent actually runs on.
+    built = build_tools(selected, ToolsetContext(state=state, agent=None, agent_name=name))
     if extra_tools:
         built = built + list(extra_tools)
     opener = instructions.strip() or DEFAULT_SUBAGENT_INSTRUCTIONS

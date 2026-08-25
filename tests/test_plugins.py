@@ -50,7 +50,7 @@ def test_a_built_in_toolset_is_discovered():
     toolsets = plugins.discover_toolsets()
     assert "aimu_agents" in toolsets
     assert isinstance(toolsets["aimu_agents"], Toolset)
-    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None, agent_name="assistant")
     built = toolsets["aimu_agents"].build(ctx)
     assert any(getattr(fn, "__name__", None) == "code_review" for fn in built)
 

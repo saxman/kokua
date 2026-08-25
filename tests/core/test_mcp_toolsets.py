@@ -39,7 +39,7 @@ def test_a_servers_toolset_builds_its_live_tools(tmp_path):
         connections=[FakeConnection("https://broker.example.com/mcp", [quote])],
         registry=registry,
     )
-    tools = registry["stocks"].build(ToolsetContext(state=state, agent=None))
+    tools = registry["stocks"].build(ToolsetContext(state=state, agent=None, agent_name="assistant"))
     assert tools == [quote]
 
 
@@ -47,7 +47,7 @@ def test_a_configured_but_unconnected_server_builds_nothing(tmp_path):
     config = _config(data_dir=tmp_path)
     registry = build_registry(config)
     state = LiveState(config=config, connections=[], registry=registry)
-    assert registry["stocks"].build(ToolsetContext(state=state, agent=None)) == []
+    assert registry["stocks"].build(ToolsetContext(state=state, agent=None, agent_name="assistant")) == []
 
 
 def test_a_server_toolset_is_not_cross_cutting():

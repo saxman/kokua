@@ -100,7 +100,7 @@ def test_no_toolset_registers_aimus_image_group(tmp_path):
     from kokua.registry import LiveState, ToolsetContext
 
     aimu_image_names = {fn.__name__ for fn in aimu_builtin.image}
-    ctx = ToolsetContext(state=LiveState(config=AssistantConfig(data_dir=tmp_path)), agent=None)
+    ctx = ToolsetContext(state=LiveState(config=AssistantConfig(data_dir=tmp_path)), agent=None, agent_name="assistant")
 
     for name, toolset in discover_toolsets().items():
         if toolset.entry_point_only:

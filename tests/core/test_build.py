@@ -503,7 +503,7 @@ def test_memory_toolset_tools_carry_dispatch_attrs(tmp_path):
 
     config = _config(tmp_path)
     state = LiveState(config=config, registry=build_registry(config))
-    ctx = ToolsetContext(state=state, agent=None)
+    ctx = ToolsetContext(state=state, agent=None, agent_name="assistant")
     tools = state.registry["memory"].build(ctx) + state.registry["documents"].build(ctx)
     assert tools
     for fn in tools:
@@ -816,3 +816,28 @@ def test_the_entry_agent_runs_skill_scripts_with_the_host_environment(tmp_path):
     assert agent.script_env == state.script_env()
     assert agent.script_env["KOKUA_EMAIL_HOST"] == "smtp.example.com"
     assert agent.script_env["KOKUA_DOWNLOADS_DIR"] == str(config.downloads_path)
+
+
+def test_a_toolset_is_told_which_agent_it_is_building_for(tmp_path):
+    """`ctx.agent_name` is the identity a toolset scoping itself to its holder needs, and unlike
+    `ctx.agent` it is known at every construction site. `benchmark` uses it to ask the config what its own
+    holder runs on, which is a question a live client cannot answer: nothing on one retains the model
+    string it was built from."""
+    from kokua.core.agents import build_registry
+    from kokua.core.build import wire_agent
+    from kokua.registry.registry import Toolset
+
+    holders: list[str] = []
+
+    def record(ctx) -> list:
+        holders.append(ctx.agent_name)
+        return []
+
+    cfg = _config(tmp_path, agents={"assistant": AgentConfig(tools=["probe"])})
+    registry = build_registry(cfg)
+    registry["probe"] = Toolset(name="probe", description="records its holder", build=record)
+    state = LiveState(config=cfg, registry=registry)
+
+    wire_agent(cfg, state, cfg.entry_agent, client=MockAsyncModelClient([]))
+
+    assert holders == [cfg.entry_agent]

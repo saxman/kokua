@@ -1,4 +1,4 @@
-"""Measure how fast the model this session runs on answers: time to first token, and output speed.
+"""Measure how fast the model an agent runs on answers: time to first token, and output speed.
 
 Contributes one tool, ``benchmark_model``, that streams a fixed short prompt and reports the two
 numbers a user actually feels. They are separated deliberately: time to first token is dominated by
@@ -21,12 +21,15 @@ Four decisions worth knowing before changing this:
   nobody runs is not worth reading. The only per-call parameter is ``max_tokens``, which bounds the
   wall-clock cost of four requests. ``max_tokens`` is AIMU's portable spelling, renamed per provider
   (``num_predict`` on Ollama), so the cap does not need a provider branch here.
-- **What it measures is the session, not the caller.** The model is the entry agent's, because "the
-  model this session runs on" is the question, and the report says so in as many words. Any agent may
-  hold the toolset: a worker on a model of its own gets a true answer about the session rather than
-  about itself, which is why the header names the agent instead of leaving a reader to assume. Scoping
-  it to the holder would mean a toolset's ``build`` knowing which agent it is building for, and the
-  context does not carry that.
+- **What it measures is its own holder.** The model is ``ctx.agent_name``'s, so a worker declaring the
+  toolset is told about the model it actually runs on, and the header names that agent rather than
+  leaving a reader to assume which one the figures describe. Resolution goes through
+  ``config.model_for`` rather than the live agent because nothing on a model client retains the string
+  it was built from, and going through the config is exact on all three routes an agent arrives by. The
+  entry agent's is its own declaration. A declared worker's spec omits the model key when it declares
+  none, which AIMU reads as the same ``[assistant].model`` default ``model_for`` falls back to. A
+  composed sub-agent's ad-hoc label names no ``[agents.*]`` table, so every per-agent accessor answers
+  with those same defaults, which is the tier such a sub-agent runs on.
 - **An in-process model cannot be benchmarked**, and the tool says so rather than trying. AIMU's async
   factory refuses to build an ``hf:`` or ``llamacpp:`` client from a string, because a second client
   over one model would load its weights a second time. That refusal arrives here as
@@ -184,6 +187,7 @@ def _was_cold(warmup: Measurement, timed_ttfts: list[float]) -> bool:
 
 
 def format_report(
+    agent: str,
     model: str,
     thinking: Optional[Union[bool, str]],
     *,
@@ -199,7 +203,7 @@ def format_report(
     """
     completed = [run for run in runs if run is not None]
     lines = [
-        f"Benchmark of {model}, the model this session's main agent runs on "
+        f"Benchmark of {model}, the model agent {agent!r} runs on "
         f"(thinking: {_render_thinking(thinking)}). {len(runs)} timed runs of a fixed short prompt "
         f"capped at {MAX_OUTPUT_TOKENS} output tokens."
     ]
@@ -237,7 +241,7 @@ def format_report(
     return "\n".join(lines)
 
 
-def build(config: AssistantConfig) -> list:
+def build(config: AssistantConfig, agent_name: str) -> list:
     @tool
     async def benchmark_model() -> str:
         """Measure the speed of the model you are running on: time to first token and tokens per second.
@@ -252,9 +256,9 @@ def build(config: AssistantConfig) -> list:
         # `validate_model_string` in the body of its tool.
         from kokua.core.build import ModelClientError, build_model_client
 
-        model = config.model_for(config.entry_agent)
+        model = config.model_for(agent_name)
         try:
-            client = build_model_client(config, "", config.entry_agent)
+            client = build_model_client(config, "", agent_name)
         except ModelClientError as error:
             return (
                 f"Could not build a client to benchmark {model}: {error}. Note that an in-process model "
@@ -262,19 +266,19 @@ def build(config: AssistantConfig) -> list:
                 "weights a second time, so AIMU refuses to build one."
             )
 
-        thinking = config.thinking_for(config.entry_agent)
+        thinking = config.thinking_for(agent_name)
         warmup = await measure_run(client, thinking=thinking, timeout_seconds=RUN_TIMEOUT_SECONDS)
         runs = [
             await measure_run(client, thinking=thinking, timeout_seconds=RUN_TIMEOUT_SECONDS) for _ in range(TIMED_RUNS)
         ]
-        return format_report(model, thinking, warmup=warmup, runs=runs)
+        return format_report(agent_name, model, thinking, warmup=warmup, runs=runs)
 
     return [benchmark_model]
 
 
 TOOLSET = Toolset(
     name=TOOLSET_NAME,
-    description="Measure the speed of the model this session runs on: time to first token and tokens per second.",
-    build=lambda ctx: build(ctx.config),
+    description="Measure the speed of the model you are running on: time to first token and tokens per second.",
+    build=lambda ctx: build(ctx.config, ctx.agent_name),
     cross_cutting=True,
 )

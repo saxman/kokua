@@ -489,6 +489,6 @@ def test_the_toolset_builds_the_read_and_update_tools(tmp_path):
     from kokua.registry import LiveState, ToolsetContext
 
     state = LiveState(config=AssistantConfig(data_dir=tmp_path), reapply_config=lambda *a: None)
-    ctx = ToolsetContext(state=state, agent=object())
+    ctx = ToolsetContext(state=state, agent=object(), agent_name="assistant")
 
     assert {fn.__name__ for fn in config_tools.TOOLSET.build(ctx)} == {"read_config", "update_config"}
