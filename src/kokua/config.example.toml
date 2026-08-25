@@ -87,7 +87,7 @@ show_tools = true
 # One namespace covers everything, so a `tools` entry may be an AIMU built-in group ("web", "fs",
 # "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own ("memory",
 # "documents", "skills", "capabilities", "config", "conversations", "mcp-admin", "planning",
-# "scheduling"), a plugin toolset ("aimu_agents", "github_backup", "image"), a skill by name, or an
+# "scheduling"), a plugin toolset ("aimu_agents", "benchmark", "github_backup", "image"), a skill by name, or an
 # MCP server by its [[mcp.server]] name. `kokua --list-toolsets` lists them; an unknown name fails
 # startup.
 #

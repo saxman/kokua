@@ -73,7 +73,7 @@ src/kokua/
     capabilities.py, config.py, conversations.py, mcp_admin.py, planning.py, scheduling.py -- Kokua's
                    own six, each wrapping one subsystem's logic as agent tools (planning wraps a
                    workflow instead, and capabilities wraps the registry itself)
-    aimu_agents.py, github_backup.py, image.py -- plugins, like a third party's
+    aimu_agents.py, benchmark.py, github_backup.py, image.py -- plugins, like a third party's
 ```
 
 `tests/` mirrors this layout.
@@ -188,9 +188,12 @@ anything; the last two run once per agent, whenever one is built:
    `[[mcp.server]]`, named by its required `name`), skill (one per skill on disk, so a skill name sits in
    the same namespace as everything else), built-in toolset, and plugin. The last two are both the
    `kokua.toolsets` entry-point group, skipped entirely when `load_plugins` is off, split by which
-   distribution registered them: Kokua's own three (`aimu_agents`, `github_backup`, `image`) take the
+   distribution registered them: Kokua's own four (`aimu_agents`, `benchmark`, `github_backup`, `image`) take the
    built-in label so `unreferenced_toolsets` stays quiet about ships-in-the-box toolsets the shipped
-   config simply never named. That label is the only difference between the two; both are built with the
+   config simply never named. That the shipped config names none of them is load-bearing rather than
+   incidental: `load_plugins = false` removes this whole provider, and step 3 below raises on a name it
+   cannot resolve rather than dropping it, so a shipped `[agents.*]` table declaring a plugin toolset
+   would turn that flag into a startup error on the config Kokua itself hands you. That label is the only difference between the two; both are built with the
    same failure tolerance. `registry.register` then rejects a name two providers claim. A `Toolset` is a
    frozen dataclass: `name`, `description`, `build`, `guidance`, `cross_cutting`, `entry_point_only`,
    `workflow`, `settings`.

@@ -324,6 +324,22 @@ so they appear in `--list-toolsets` alongside anything you install -- grouped un
   own runs on. The
   caveats are documented in the module: the prebuilts are synchronous, so a nested run gets no sub-agent
   card, no `/stop`, and no approval gate on its workers.
+- **`benchmark`**: one tool, `benchmark_model`, measures the model this session's main agent runs on and
+  reports time to first token and output speed in tokens per second, as a median and a range over three
+  timed runs. The two metrics are separated because they have different causes (prompt processing and
+  queueing against decoding), and a discarded warmup run is reported on its own line because a first
+  request can carry a cold model load worth many seconds, which would otherwise read as a slow model. It
+  takes no arguments: the model, the sampling parameters, and the reasoning effort all come from
+  `config.toml`, so there is nothing to redirect and nothing a per-call approval would protect. Token
+  counts come from the provider's own usage report where there is one (Ollama, Anthropic, and the
+  OpenAI-compatible providers all report it even on a streamed call) and from counting stream chunks
+  where there is not, and the report says which, since a chunk is usually a token but nothing guarantees
+  it. It builds its own client rather than borrowing the agent's, which is what keeps it from racing the
+  turn it runs inside for `last_usage`, and it carries an empty system message so the figure describes
+  the model rather than Kokua's own multi-thousand-token prompt. Any agent may hold it, and what it measures is
+  the session rather than the caller, so the report names the agent whose model it timed rather than
+  leaving a worker on its own model to read the figures as its own. An in-process model (`hf:`, `llamacpp:`) cannot be benchmarked and the tool says so: a second
+  client over one model would load its weights twice, so AIMU refuses to build one.
 - **`github_backup`**: one tool, `backup_kokua_state`, mirrors `config.toml`, `sessions.json`, the
   memory store, saved documents, and authored skills into a private GitHub repository as a git commit,
   pushing from a working tree under `data/backup`. It takes no arguments, which is what lets it run
@@ -341,7 +357,7 @@ so they appear in `--list-toolsets` alongside anything you install -- grouped un
 
 Nothing a toolset contributes reaches an agent until that agent's `tools` list names it, and startup logs
 a warning for a third-party plugin toolset (or a configured MCP server) nothing names, since it was
-provisioned specifically to be reachable -- these three ship regardless of what any agent declares, so an
+provisioned specifically to be reachable -- these four ship regardless of what any agent declares, so an
 unnamed one among them is not that kind of news; see "Startup warns about a provisioned toolset" below.
 
 ### Proactive work: scheduled tasks
