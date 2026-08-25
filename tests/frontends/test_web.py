@@ -7,7 +7,8 @@ import asyncio
 import pytest
 
 from tests.helpers import BlockingModelClient, MockAsyncModelClient
-from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME, WebChannel, conversation_to_frames
+from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME, WebChannel
+from kokua.core.transcripts import replay_items as conversation_to_frames
 from kokua.config import AssistantConfig
 from tests.channels import example_agents, planning_settings
 from kokua.frontends.web import build_app

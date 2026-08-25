@@ -9,8 +9,9 @@ import json
 from tests.helpers import MockAsyncModelClient
 from kokua import images
 from kokua.core.messages import compact_message_images, expand_message_images
+from kokua.core.transcripts import replay_items as conversation_to_frames
 from kokua.channels.cli import CLIChannel
-from kokua.channels.web import WebChannel, conversation_to_frames
+from kokua.channels.web import WebChannel
 from kokua.config import AssistantConfig
 from tests.channels import example_agents
 from kokua.frontends.web import build_app

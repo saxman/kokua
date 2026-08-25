@@ -38,9 +38,9 @@ def resolve_user_index(messages: list[dict], base_len: int) -> int:
     first ``user`` entry at or after it. Resolved by scanning rather than assumed to be ``base_len``
     itself, because AIMU appends the system message as part of a conversation's *first* turn (see
     ``_append_user_turn``), which puts that turn's user message one position later than the pre-run
-    length. The index is the key ``channels.web.conversation_to_frames`` replays a turn's sub-agent
-    cards and verbose trace under, so an index that misses by one lands on another message and the
-    replay is silently dropped.
+    length. The index is the key ``core.transcripts.replay_items`` replays a turn's sub-agent cards and
+    verbose trace under, so an index that misses by one lands on another message and the replay is
+    silently dropped.
 
     Every caller shares this so the reactive, planned, and unattended paths cannot drift apart; -1 is
     the sentinel the recording no-op guards already understand.

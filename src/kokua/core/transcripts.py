@@ -7,9 +7,18 @@ toolset's, in ``toolsets/conversations.py``.
 
 Every function here takes messages or sessions and returns data, so a front end that wanted to show a
 transcript could use the same ones the agent tools do.
+
+Two readings live here. ``readable_messages`` and ``flatten_transcript`` give the plain what-was-said
+view the agent's conversation tools read. ``replay_items`` gives the full one: reasoning, tool calls
+paired with their results, sub-agent cards, phase segments, and the notice closing a turn that failed.
+The web channel renders it as display frames and the Markdown export renders it as prose, which is why
+it sits here rather than in either of them.
 """
 
 from __future__ import annotations
+
+import re
+from typing import Any, Optional
 
 from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER, PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.sessions import Session
@@ -21,7 +30,8 @@ from kokua.core.messages import message_text
 MAX_MESSAGE_CHARS = 2_000
 
 # User-role turns the agent loop injects between tool-calling iterations: not the user's words, so they
-# are left out of a transcript. The display-side twin is ``channels.web._LOOP_PROVENANCE``.
+# are left out of a transcript. ``replay_items``'s own ``_LOOP_PROVENANCE``, below, names the same two
+# provenances for its reading, which replays them as a loop marker rather than dropping them.
 _INJECTED_USER_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
 # The system message is the agent's own guidance, and a ``tool`` message is trace rather than conversation.
 _SKIPPED_ROLES = frozenset({"system", "tool"})
@@ -198,3 +208,187 @@ def search(
     # The flag says these results came from the fallback, so an empty fallback reports False: there is
     # nothing for the caller to qualify.
     return fallback, bool(fallback)
+
+
+# --- replay --------------------------------------------------------------------------------------
+
+# User-role turns the agent loop injects between tool-calling iterations. They are byte-for-byte
+# ordinary user messages except for this provenance tag, so display keys off the tag alone.
+_LOOP_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
+
+# AIMU's make_async_subagent_tool (aimu/aio/tools/builtin.py) defaults its built tool's name to this
+# literal; kokua never overrides it. A spawn's own `subagent` card already shows its role, task, and
+# result, so the parent's `tool` frame for this one tool name is pure duplication and is suppressed
+# wherever a tool call becomes a display frame: `WebChannel.send_frame` (both live streaming paths route
+# through it) and `replay_items`'s replay of a stored message's tool_calls below. `core/build.py` imports
+# the `channels.web` copy of this same constant to find and replace the tool on a runtime rebuild.
+#
+# Kept as its own literal here rather than imported from `channels.web` (or vice versa): `core/__init__`
+# imports `assistant.py`, which imports `channels.web` for its contextvars, so either direction of import
+# between this module and `channels.web` would close a cycle through `core/__init__`.
+SPAWN_SUBAGENT_TOOL_NAME = "spawn_subagent"
+
+# A stored image reference: our own /images/<name> route, the compacted form persisted in place of inline
+# base64 (see images.py / messages.compact_message_images). Bounded to a bare filename (no slashes) so the match
+# can't run past the reference into surrounding prose.
+_IMAGE_REF_RE = re.compile(r"/images/[\w.\-]+")
+
+
+def image_refs_of(content: Any) -> list[str]:
+    """Return the image references in a message's content: image_url block urls plus any /images/ refs in text."""
+    refs: list[str] = []
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "image_url":
+                url = block.get("image_url", {}).get("url")
+                if url:
+                    refs.append(url)
+    refs.extend(_IMAGE_REF_RE.findall(message_text(content)))
+    return list(dict.fromkeys(refs))  # de-dupe, preserving order
+
+
+def _tool_results_by_call_id(messages: list[dict]) -> dict[str, str]:
+    """Map each tool result in ``messages`` to the id of the call it answers.
+
+    A live ``tool`` frame carries the call and its result together (AIMU emits ``TOOL_CALLING`` only once
+    the call has returned), but a stored transcript splits them across an assistant message's
+    ``tool_calls`` and a later ``role: "tool"`` message, joined by id. Concurrent dispatch appends those
+    results in completion order, so the join has to be by id and not by position.
+    """
+    return {
+        message["tool_call_id"]: str(message.get("content", ""))
+        for message in messages
+        if message.get("role") == "tool" and message.get("tool_call_id")
+    }
+
+
+def replay_items(
+    messages: list[dict],
+    *,
+    subagent: Optional[dict] = None,
+    trace: Optional[dict] = None,
+    failure: Optional[dict] = None,
+) -> list[dict]:
+    """Flatten stored conversation messages into ordered display items the page replays on reload.
+
+    Mirrors the live stream order per assistant message: reasoning, then the answer, then the tool calls.
+    That is the order the message was written in -- a model emits its prose and then the calls it decided
+    to make -- so a reload leaves a turn where the user watched it arrive instead of sinking its prose
+    below the cards. The system message is omitted (live chat shows none).
+
+    A ``role: "tool"`` message is not replayed as an item of its own, but its content is rejoined to the
+    call it answers (see :func:`_tool_results_by_call_id`) and rides that call's item as ``response``, so
+    a replayed tool card carries the output a live one showed. ``response`` is ``None`` where no result
+    message exists -- a transcript stored before results were replayed, or a turn cut short mid-dispatch
+    -- and the page then renders the card exactly as it always did.
+
+    Two per-turn maps key a user-message index (as a string) to that turn's recorded reviewer activity,
+    interleaved right after the user bubble so it replays in place:
+      - ``subagent``: summary verdict cards (non-verbose turns). A verbose turn's plan reviewers show
+        up in ``trace`` instead, but its executor can still spawn its own sub-agents, and those cards
+        (identified by ``task`` on the create event or ``append`` on later ones) replay regardless.
+      - ``trace``: the full raw verbose trace as ``phase`` + ``reasoning`` items. A traced turn shows
+        the raw output instead of reviewer cards, and its trace already ends with the final answer, so
+        the committed assistant message for that turn is skipped to avoid showing the answer twice.
+
+    ``failure`` is keyed the same way, but replays at the *end* of its turn rather than after the user
+    bubble: it says why the turn stopped, which only reads correctly after whatever the turn managed to
+    produce. It matters most for a scheduled run, whose error never reached this conversation live -- the
+    status line for a firing goes to whichever conversation the user was viewing at the time.
+    """
+    subagent = subagent or {}
+    trace = trace or {}
+    failure = failure or {}
+    items: list[dict] = []
+    results = _tool_results_by_call_id(messages)
+    pending_failure: Optional[tuple[str, object]] = None  # (reason, the turn's timestamp)
+
+    def add(item: dict, timestamp) -> None:
+        # Attach the source message's append-time timestamp (AIMU's inert ``timestamp`` key) so the page
+        # can caption the bubble. Omitted when absent (messages persisted before timestamping shipped),
+        # so those simply render no caption. Metadata-derived items (phase/reasoning/subagent) pass the
+        # turn's user-message timestamp, since they have no timestamp of their own.
+        if timestamp:
+            item["ts"] = timestamp
+        items.append(item)
+
+    def flush_failure() -> None:
+        """Close the turn in progress with its recorded reason, if it had one.
+
+        Held until the turn ends rather than emitted where it is read, because the reason belongs after
+        the output it cut short. A turn ends at the next user message or at the end of the transcript,
+        so this is called from both places; a conversation the user carried on in after a failed turn
+        therefore keeps the notice inside that turn instead of trailing it off the bottom.
+        """
+        nonlocal pending_failure
+        if pending_failure is not None:
+            reason, turn_ts = pending_failure
+            pending_failure = None
+            add({"type": "notice", "text": reason}, turn_ts)
+
+    for index, message in enumerate(messages):
+        role = message.get("role")
+        provenance = message.get(PROVENANCE_KEY)
+        ts = message.get("timestamp")
+        if role == "user":
+            if provenance in _LOOP_PROVENANCE:
+                # A framework-injected continuation/final-answer turn, not user input. Show a loop
+                # marker carrying the injected prompt text (for inspection), not a user bubble. It
+                # continues the turn already in progress rather than starting a new one, so it must not
+                # close that turn's failure notice either.
+                add({"type": "loop", "text": message_text(message.get("content"))}, ts)
+                continue
+            flush_failure()  # whatever turn was in progress ends where this one begins
+            if str(index) in failure:
+                pending_failure = (failure[str(index)], ts)
+            text = message_text(message.get("content"))
+            if text:
+                add({"type": "user", "text": text}, ts)
+            for url in image_refs_of(message.get("content")):  # uploaded images, replayed under the bubble
+                add({"type": "image", "url": url, "from": "user"}, ts)
+            events = subagent.get(str(index), [])
+            if str(index) in trace:  # verbose turn: replay the raw trace, not the verdict cards
+                for segment in trace[str(index)]:
+                    add({"type": "phase", "label": segment.get("label", ""), "detail": segment.get("detail", "")}, ts)
+                    if segment.get("text"):
+                        add({"type": "reasoning", "text": segment["text"]}, ts)
+                # A reviewer's verdict is already in the trace, but a sub-agent the turn spawned is
+                # not, so those cards are replayed on their own. A spawn is identified by the `task` on
+                # its create event and the rest of its lineage by that event's id: shape alone is not
+                # enough, since a spawn whose text streamed closes with a status-only event that looks
+                # exactly like a reviewer's, and dropping it strands the card at "working...".
+                spawned = {event["id"] for event in events if "task" in event and "id" in event}
+                events = [event for event in events if event.get("id") in spawned]
+            for event in events:
+                add({"type": "subagent", **event}, ts)
+        elif role == "assistant":
+            if str(index - 1) in trace:
+                # The preceding user turn was verbose; its trace already contains this final answer
+                # (in its last Executor phase), so don't emit it again as a separate message.
+                continue
+            if message.get("thinking"):
+                add({"type": "thinking", "text": message["thinking"]}, ts)
+            text = message_text(message.get("content"))
+            if text:
+                add({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE}, ts)
+            for call in message.get("tool_calls") or []:
+                fn = call.get("function", {})
+                name = fn.get("name")
+                if name == SPAWN_SUBAGENT_TOOL_NAME:
+                    continue  # shown as its own subagent card instead; see SPAWN_SUBAGENT_TOOL_NAME
+                add(
+                    {
+                        "type": "tool",
+                        "name": name,
+                        "arguments": fn.get("arguments"),
+                        "response": results.get(call.get("id")),
+                    },
+                    ts,
+                )
+        elif role == "tool":
+            # Tool results are otherwise not replayed, but a generate_image result carries an /images/
+            # reference the user asked to see, so surface it as an image of its own.
+            for url in image_refs_of(message.get("content")):
+                add({"type": "image", "url": url, "from": "assistant"}, ts)
+    flush_failure()  # the last turn ends at the end of the transcript
+    return items

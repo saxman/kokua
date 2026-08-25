@@ -1105,11 +1105,11 @@ async def test_a_proactive_turn_records_its_subagent_events(tmp_path):
 #
 # The clients below mix in _SeedsSystemMessage, so their transcripts look like a real run's: the first
 # turn is [system, user, assistant, ...] and its user message is at 1, not at the pre-run length of 0.
-# That is the position conversation_to_frames looks a turn's cards up by, so anything else drops them.
+# That is the position replay_items looks a turn's cards up by, so anything else drops them.
 
 
 def _user_positions(messages: list[dict]) -> list[int]:
-    """The real positions of the user messages, as ``conversation_to_frames`` enumerates them."""
+    """The real positions of the user messages, as ``replay_items`` enumerates them."""
     return [index for index, message in enumerate(messages) if message.get("role") == "user"]
 
 

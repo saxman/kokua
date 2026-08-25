@@ -6,7 +6,7 @@ from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROA
 
 from aimu.sessions import Session
 
-from kokua.core.transcripts import MAX_MESSAGE_CHARS, flatten_transcript, search, truncate_lines
+from kokua.core.transcripts import MAX_MESSAGE_CHARS, flatten_transcript, replay_items, search, truncate_lines
 
 
 def _said(role: str, text, **extra) -> dict:
@@ -125,3 +125,30 @@ def test_search_does_not_fall_back_for_a_single_word():
     hits, by_terms = _search(_session("a", _said("user", "nothing here")), query="dentist")
 
     assert hits == [] and by_terms is False
+
+
+# --- replay -------------------------------------------------------------------------------------
+
+
+def test_replay_items_pairs_a_tool_result_with_its_call():
+    """A stored transcript splits a call from its result across two messages, joined by id.
+
+    Concurrent dispatch appends results in completion order, so the join is by id and never by
+    position: a positional join silently attributes one tool's output to another tool's call.
+    """
+    messages = [
+        {"role": "user", "content": "read it", "timestamp": "2026-08-25T14:00:00"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_b", "function": {"name": "read_file", "arguments": '{"path": "b"}'}},
+                {"id": "call_a", "function": {"name": "read_file", "arguments": '{"path": "a"}'}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_a", "content": "contents of a"},
+        {"role": "tool", "tool_call_id": "call_b", "content": "contents of b"},
+    ]
+    items = replay_items(messages)
+    tools = [item for item in items if item["type"] == "tool"]
+    assert [t["response"] for t in tools] == ["contents of b", "contents of a"]

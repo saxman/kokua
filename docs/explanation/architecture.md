@@ -31,7 +31,9 @@ src/kokua/
   core/          the transport-agnostic runtime
     assistant.py         composition root + serve loop; delegates everything below
     conversations.py     ConversationBook: store + agent cache + active pointer, and id resolution
-    transcripts.py       reading a stored conversation as text: flatten, truncate, search
+    transcripts.py       reading a stored conversation as text (flatten, truncate, search) or as full
+                          replay items (replay_items), shared by the web channel's history replay and
+                          the Markdown export
     turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
     interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
     settings_runtime.py  SettingsApplier: read, apply live, persist
@@ -811,8 +813,7 @@ when it appears. `renderTool` puts the result in a nested foldable of its own be
 on first expand and clamped to `OUTPUT_CLAMP` characters with a button for the rest, as plain text --
 never markdown, since a tool result is untrusted input. Output travels whole and only the DOM clamps, so
 a `history` frame grows by every tool result in the conversation and is re-sent on every conversation
-switch; if that becomes a problem the fix is a server-side cap in `conversation_to_frames`, the path that
-re-sends.
+switch; if that becomes a problem the fix is a server-side cap in `replay_items`, the path that re-sends.
 
 Replay reaches the same card by a different route. A stored transcript splits a call from its result
 across an assistant message's `tool_calls` and a later `role: "tool"` message, joined by
@@ -820,6 +821,13 @@ across an assistant message's `tool_calls` and a later `role: "tool"` message, j
 The join has to be by id rather than by position, since concurrent dispatch appends results in completion
 order. A call with no matching result -- a transcript stored before results were replayed, a turn cut
 short mid-dispatch -- gets `response: None` and renders the card exactly as it always did.
+
+The flattener behind all of this, `replay_items` (with its `_tool_results_by_call_id` and
+`image_refs_of` helpers), lives in `core/transcripts.py` rather than in this channel: `send_history`
+below is one caller, and a Markdown export of a conversation is the other, so the module both share is
+where it has to sit. `WebChannel` imports it back (locally, inside `send_history`, to avoid a cycle
+through `core/__init__` -> `assistant.py` -> this module) and renders its items as display frames; the
+export renders the same items as prose instead.
 
 Muting a background turn happens per frame, in `WebChannel.send_frame`, which every live frame passes
 through. The rule is a property of the frame's *type*: the `_TURN_FRAMES` set is turn output (tokens,
@@ -872,7 +880,7 @@ logs the traceback and tells the user. The floor of what survives is the prompt,
 appends the user turn before it sends the request. The reason goes into `metadata["failure"]`, keyed by
 user-message index like `model` and `trace`, and *not* into `session.messages`: the messages are what this
 conversation's agent rebuilds its context from, so a synthesized assistant turn saying "this failed" would
-come back to the model as its own prior words. `conversation_to_frames` replays it as a `notice` item at
+come back to the model as its own prior words. `replay_items` replays it as a `notice` item at
 the *end* of its turn -- held until the next user message or the end of the transcript, so a conversation
 the user carried on in keeps the notice inside the turn it describes. An unattended run needs this most,
 since `_report`'s status line goes to whichever conversation the user was viewing at the time, leaving the
@@ -880,7 +888,7 @@ run's own conversation with no account of why it holds only half a turn.
 
 Planning's reviewer verdicts and a turn's spawned sub-agents share one `subagent` frame type and one
 persisted map (`metadata["subagent"]`); `task` on the create event is what tells the two apart.
-`conversation_to_frames` replays that map on reload, interleaved right after its user bubble; a
+`replay_items` replays that map on reload, interleaved right after its user bubble; a
 verbose-traced turn suppresses the reviewer verdict cards (their content is already in the raw trace)
 but still replays its own spawn cards, since a sub-agent it spawned is not part of that trace -- kept by
 the create event's id, not by event shape, since a spawn whose text streamed closes with a status-only
