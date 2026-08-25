@@ -25,6 +25,9 @@ DEFAULT_LOCKED_CONFIG_KEYS: tuple[str, ...] = (
     "paths.data_dir",
     "agents.*",
     "scheduling.task.*",
+    # decides which environment variables a run_command child can see; the assistant naming its own
+    # API key here would hand a shell child the credential the allowlist exists to keep out of reach.
+    "compute.command_env_passthrough",
 )
 
 
@@ -134,7 +137,13 @@ class AssistantConfig:
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
     confirm_tools: list[str] = field(
-        default_factory=lambda: ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
+        default_factory=lambda: [
+            "add_skill_script",
+            "add_mcp_server",
+            "execute_python",
+            "run_command",
+            "update_config",
+        ]
     )
     # Which config keys update_config refuses. The user's to set: see store.locked_by for the pattern
     # forms, and store.LOCK_AXIOM for the one key no list can unlock.

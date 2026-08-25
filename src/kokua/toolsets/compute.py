@@ -26,6 +26,10 @@ if TYPE_CHECKING:
     from kokua.registry.context import ToolsetContext
 
 
+#: The registry name this toolset is installed under. Defined once so `TOOLSET` and the section
+#: `_env_passthrough` reads cannot drift apart if either is renamed.
+TOOLSET_NAME = "compute"
+
 #: The ``[compute]`` section of config.toml. A comma-separated string rather than a list because
 #: ``Setting.kind`` carries one of ``str``, ``int``, or ``bool`` (see ``config/table.py``), and a list is
 #: the shape a reader would expect here. Not hot: the value is baked into the tool's closure when an
@@ -41,12 +45,12 @@ def _env_passthrough(ctx: "ToolsetContext") -> tuple[str, ...]:
     and a trailing comma behave as written. Dropping the empties is not cosmetic: an empty name would
     reach AIMU as a request to pass through a variable called ``""``.
     """
-    raw = ctx.config.toolset_settings.get("compute", {}).get("command_env_passthrough", "")
+    raw = ctx.config.toolset_settings.get(TOOLSET_NAME, {}).get("command_env_passthrough", "")
     return tuple(name.strip() for name in raw.split(",") if name.strip())
 
 
 TOOLSET = Toolset(
-    name="compute",
+    name=TOOLSET_NAME,
     description="Run Python, shell commands, and calculations.",
     build=lambda ctx: [
         builtin.calculate,

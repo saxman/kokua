@@ -3,22 +3,26 @@ what that tool's child can see in the environment."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from aimu.tools import builtin
 
+from kokua.config.schema import AssistantConfig
+from kokua.registry import LiveState, ToolsetContext
 from kokua.toolsets import compute
 
 
 def _ctx(**settings):
-    """A stand-in for ToolsetContext carrying just the config lookup `build` performs."""
-    config = SimpleNamespace(toolset_settings={"compute": settings} if settings else {})
-    return SimpleNamespace(config=config, state=None, agent=None, agent_name="coder")
+    """The real ``ToolsetContext`` `build` actually receives, carrying ``compute``'s settings the way
+    ``config/settings_sources.py`` would seed them."""
+    config = AssistantConfig(toolset_settings={"compute": settings} if settings else {})
+    return ToolsetContext(state=LiveState(config=config), agent=None, agent_name="coder")
 
 
 def test_the_toolset_carries_the_shell_tool():
     """The docstring has advertised shell commands since before one existed. This is the assertion that
-    keeps that sentence true."""
+    keeps that sentence true. Pinned against AIMU's own group rather than a literal set, so a fourth
+    member added there is either carried here too or the mismatch is caught, in either direction."""
     names = {fn.__name__ for fn in compute.TOOLSET.build(_ctx())}
-    assert names == {"calculate", "execute_python", "run_command"}
+    assert names == {fn.__name__ for fn in builtin.compute}
 
 
 def test_the_passthrough_setting_reaches_the_built_tool(monkeypatch):

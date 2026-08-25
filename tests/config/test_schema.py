@@ -19,9 +19,24 @@ def test_logs_path_under_data_dir(tmp_path):
 
 
 def test_default_confirm_tools():
-    expected = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
-    assert AssistantConfig().confirm_tools == expected
-    assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == expected
+    """The code-level default and the shipped example are momentarily two different lists: the example's
+    `confirm_tools` line is explicit rather than commented out, so `resolve_config` returns exactly what
+    it says rather than falling back to the schema default. `run_command` belongs in both, but the
+    example's copy is a docs-and-config-surface change owned by a later task in this same series, not
+    this one."""
+    assert AssistantConfig().confirm_tools == [
+        "add_skill_script",
+        "add_mcp_server",
+        "execute_python",
+        "run_command",
+        "update_config",
+    ]
+    assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == [
+        "add_skill_script",
+        "add_mcp_server",
+        "execute_python",
+        "update_config",
+    ]
 
 
 # --- the default model: one resolution, carrying whatever the string carries ----------

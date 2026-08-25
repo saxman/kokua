@@ -70,7 +70,7 @@ confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update
 # key is always locked, whatever the list says, so the assistant cannot unlock itself in one call;
 # everything else below is yours to remove. Removing "agents.*" really does let the assistant
 # rewrite any agent's tools list, and so widen its own reach, on the next restart. Restart to apply.
-locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
+locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*", "compute.command_env_passthrough"]
 
 # Every agent, declared whole, and locked by default (see [security].locked_config_keys below). An
 # agent's `tools` list IS its capability: nothing is added in code, and nothing is implicit, including
