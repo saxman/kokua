@@ -86,12 +86,15 @@ which is right for a class and wrong for a plain function, so taking it would te
 shape and date the checkout no better than the name does, since the factory and its only parameter ship
 in one commit.
 
-Worth recording, because it is the reverse of the usual problem: this release has *two* capabilities
-Kokua depends on and *two* usable handles, and only one probe. The other is ``run_command``'s membership
-in ``builtin.compute``, the widening the ``compute`` toolset relies on, which a membership check of the
-kind ``SUBAGENT_SPEC_KEYS`` needed would have covered exactly. One surface at a time is still the rule,
-and the factory is the later and narrower of the two: an AIMU carrying it carries the group entry, while
-the reverse is not guaranteed. What this check says nothing about, the version floor covers.
+Worth recording, because it is the reverse of the usual problem: this release carries *two* capabilities
+Kokua depends on, and the one with the better handle is the earlier of them. ``make_command_tool``
+arrived in the commit that added the tool; ``run_command``'s membership in ``builtin.compute``, which is
+the widening the ``compute`` toolset actually relies on, arrived in the next one. The probe therefore
+grips the earlier surface, and the limit has to be said out loud the way 0.20.0's was: a sibling parked
+between those two commits passes this check and still hands the ``compute`` toolset no shell tool.
+Closing that window would take a membership check over a list of *callables*, matching on ``__name__``,
+which is a fourth shape this probe does not have and which a fifteen-minute window does not earn. What
+this check leaves uncovered, the version floor covers.
 """
 
 from __future__ import annotations
