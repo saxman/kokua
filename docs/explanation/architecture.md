@@ -748,6 +748,16 @@ conversation changes *during* the send that is being gated. And gating purely on
 drop a background turn's sidebar refresh, because `TurnRunner._persist` pushes the conversation list from
 inside that turn's own task.
 
+Whitespace alone does not open an answer bubble. A server that separates reasoning from the answer
+itself (mlx-lm, llama-server, vLLM) sends the newlines that followed the reasoning as the answer
+segment's first tokens, so on a turn that reasons and then calls a tool the whole segment can be
+whitespace: an empty stamped bubble between the reasoning block and the tool card, reading as a section
+whose content failed to arrive. `isBlank` in `app.js` guards the three places a bubble is created from
+text (a live `token` frame, and a replayed `partial` or `message` item), so such a segment renders as
+nothing at all. Only the *opening* is guarded: once a bubble is open the same whitespace is spacing
+between words the reader can see. The frames themselves are unchanged, so nothing about the transport
+or the transcript depends on the page's rule here.
+
 Muting a turn is not losing it. Every turn frame is also folded into a per-conversation
 `_CatchUpRecord`, which models the page's own append rules (consecutive thinking text collects into one
 foldable; answer text collects into an open `partial` bubble that any other block closes, so prose keeps

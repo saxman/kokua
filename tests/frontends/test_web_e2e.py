@@ -68,6 +68,8 @@ class _SlowClient(MockAsyncModelClient):
         tail: str = "",
         tool_response: str = "",
         tool_between: str = "",
+        thinking: str = "",
+        blank_lead: str = "",
     ):
         super().__init__([])
         self._delay = delay
@@ -75,6 +77,8 @@ class _SlowClient(MockAsyncModelClient):
         self._tail = tail
         self._tool_response = tool_response
         self._tool_between = tool_between
+        self._thinking = thinking
+        self._blank_lead = blank_lead
 
     async def _chat(self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None):
         if stream:
@@ -86,6 +90,11 @@ class _SlowClient(MockAsyncModelClient):
 
     async def _chat_streamed(self, user_message, generate_kwargs=None, use_tools=True, images=None):
         self.messages.append({"role": "user", "content": user_message})
+        if self._thinking:
+            yield StreamChunk(StreamingContentType.THINKING, self._thinking)
+        if self._blank_lead:
+            # What a server that strips reasoning itself sends first: the newlines that followed it.
+            yield StreamChunk(StreamingContentType.GENERATING, self._blank_lead)
         if self._tool_response:
             yield StreamChunk(
                 StreamingContentType.TOOL_CALLING,
@@ -122,14 +131,27 @@ def live_server():
     """
     started: list[tuple] = []
 
-    def start(delay: float = 0.0, seed=None, tail: str = "", tool_response: str = "", tool_between: str = "") -> str:
+    def start(
+        delay: float = 0.0,
+        seed=None,
+        tail: str = "",
+        tool_response: str = "",
+        tool_between: str = "",
+        thinking: str = "",
+        blank_lead: str = "",
+    ) -> str:
         config = AssistantConfig(agents=example_agents(), entry_agent="assistant", load_plugins=False)
         if seed is not None:
             seed(config)
         app = build_app(
             config,
             client_factory=lambda conversation_id: _SlowClient(
-                delay, tail=tail, tool_response=tool_response, tool_between=tool_between
+                delay,
+                tail=tail,
+                tool_response=tool_response,
+                tool_between=tool_between,
+                thinking=thinking,
+                blank_lead=blank_lead,
             ),
         )
         port = _free_port()
@@ -1000,3 +1022,55 @@ def test_a_value_restored_without_a_change_event_still_shows_the_accent(page, li
 
     expect(page.locator("#thinking-level")).to_have_value("high")
     expect(page.locator("#thinking-level")).to_have_class(re.compile(r"\bactive\b"))
+
+
+def _seed_blank_answer_segment(config):
+    """Plant the conversation a tool-calling turn leaves behind on a server that strips reasoning
+    itself: the assistant's tool-call message holds only the newlines that followed the reasoning."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    config.show_thinking = True
+    config.show_tools = True
+    TinyDBSessionStore(str(config.sessions_path)).save(
+        Session(
+            key="seeded",
+            messages=[
+                {"role": "user", "content": "what time is it?"},
+                {
+                    "role": "assistant",
+                    "content": "\n\n",
+                    "thinking": "The tool is available, so call it.",
+                    "tool_calls": [{"type": "function", "function": {"name": "get_time", "arguments": {}}, "id": "1"}],
+                },
+                {"role": "tool", "name": "get_time", "content": "21:15", "tool_call_id": "1"},
+                {"role": "assistant", "content": "It is 21:15."},
+            ],
+            metadata={"title": "seeded", "created_at": "2026-08-10T00:00:00", "updated_at": "2026-08-10T00:00:00"},
+        )
+    )
+
+
+def test_a_blank_answer_segment_opens_no_bubble(page, live_server):
+    """A server that separates reasoning itself leaves the newlines that followed it as the answer
+    segment's first tokens. They render as nothing, so they must not open a bubble: between the
+    reasoning block and the tool card the user would otherwise see an empty stamped bubble, which
+    reads as a section whose content failed to arrive."""
+    _open(page, live_server(delay=0.0, thinking="Call the tool first.", blank_lead="\n\n", tool_response="21:15"))
+    page.fill("#msg", "what time is it?")
+    page.click("#send")
+
+    expect(page.locator(".bubble.tool")).to_have_count(1, timeout=10_000)
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
+    expect(page.locator(".bubble.thinking")).to_have_count(1)
+    expect(page.locator(".bubble.assistant")).to_have_count(1)
+
+
+def test_a_replayed_blank_answer_segment_is_no_bubble(page, live_server):
+    """The same turn on reload. The blank segment is persisted as the tool-call message's content, so
+    a page that skips it live and replays it anyway would show the empty bubble again on switch-in."""
+    _open(page, live_server(delay=0.0, seed=_seed_blank_answer_segment))
+
+    expect(page.locator(".bubble.thinking")).to_have_count(1)
+    expect(page.locator(".bubble.tool")).to_have_count(1)
+    expect(page.locator(".bubble.assistant", has_text="It is 21:15.")).to_be_visible()
+    expect(page.locator(".bubble.assistant")).to_have_count(1)

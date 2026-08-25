@@ -132,6 +132,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
     does, and deleting it is the fix.
   - Reloading the page replays the prior conversation, including reasoning and tool calls when
     `show_thinking` / `show_tools` are on.
+  - **A whitespace-only answer segment renders as nothing.** A server that separates reasoning from the
+    answer itself sends the newlines that followed the reasoning as the answer segment's first tokens, so
+    on a turn that reasons and then calls a tool the whole segment can be whitespace. That used to open an
+    empty stamped bubble between the reasoning block and the tool card, reading as a section whose content
+    failed to arrive. Live and on reload, whitespace alone no longer opens a bubble; inside an open one it
+    is still the spacing between words.
 
 ### Agents and tools
 

@@ -645,6 +645,13 @@ function lineMetric(text) {
   return lines + (lines === 1 ? " line" : " lines");
 }
 
+// Text that would render as an empty bubble. A server that separates reasoning from the answer
+// itself sends the newlines that followed the reasoning as the answer segment's first tokens, so a
+// segment can be whitespace and nothing else; the bubble it would open carries only its timestamp.
+function isBlank(text) {
+  return !text || !text.trim();
+}
+
 // A foldable auxiliary block: a header (identifying label, always visible) over a body (verbose
 // detail, hidden until expanded). Starts collapsed. Returns handles so callers can populate/stream
 // into `body` and update `label` (e.g. a sub-agent card whose status changes). `labelParts` is
@@ -910,6 +917,9 @@ ws.onmessage = (event) => {
     // segment it interrupted, so close that bubble and start a new one below. Moving the old bubble
     // down instead would drag prose the user already watched arrive underneath the cards it preceded.
     if (streamingBubble && log.lastElementChild !== streamingBubble) finalizeStreaming();
+    // Only the *opening* is guarded: inside a bubble the same whitespace is real spacing between
+    // words the reader can see, while ahead of one it is a section with nothing in it.
+    if (!streamingBubble && isBlank(frame.text)) return;
     if (!streamingBubble) {
       streamingBubble = addBubble("assistant", "");
       streamingText = "";
@@ -975,7 +985,7 @@ ws.onmessage = (event) => {
     for (const item of frame.items) {
       if (item.type === "user") addBubble("user", item.text, item.ts);
       // An in-flight turn's answer so far: left open (and unstamped), so the rest streams into it.
-      else if (item.type === "partial") { streamingText = item.text || ""; streamingBubble = addBubble("assistant", streamingText); }
+      else if (item.type === "partial" && !isBlank(item.text)) { streamingText = item.text; streamingBubble = addBubble("assistant", streamingText); }
       else if (item.type === "plan") renderPlan(item.text);
       else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user", item.ts);
       else if (item.type === "thinking") {
@@ -988,7 +998,7 @@ ws.onmessage = (event) => {
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
       else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);
-      else if (item.type === "message") addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text, item.ts);
+      else if (item.type === "message" && !isBlank(item.text)) addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text, item.ts);
       // Why a turn stopped early. A scheduled run's error never reached this conversation live, so on
       // reload this is the only account of it the conversation has.
       else if (item.type === "notice") addBubble("notice", item.text, item.ts);
