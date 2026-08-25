@@ -29,12 +29,12 @@ from aimu.tools import builtin
 # rejecting correct recency claims for date-unawareness). Deliberately EXCLUDES the memory/document
 # stores, skill authoring, and MCP add/remove.
 #
-# `calculate` rather than the whole `builtin.compute` group, because that group's other member is
-# `execute_python`, which runs arbitrary code with the user's privileges and no sandbox. A reviewer
-# cannot be approval-gated -- an autonomous critic has nobody to ask mid-review, and a gate it could
-# not satisfy would just deadlock it -- so mounting `execute_python` here would hand it the one
-# capability `[security] confirm_tools` exists to hold back, with the gate structurally unable to
-# apply. Arithmetic is the only thing a verdict actually needs computed, and `calculate` covers it.
+# `calculate` rather than the whole `builtin.compute` group, because that group's other members are
+# `execute_python` and `run_command`, which run arbitrary code with the user's privileges and no
+# sandbox. A reviewer cannot be approval-gated -- an autonomous critic has nobody to ask mid-review, and
+# a gate it could not satisfy would just deadlock it -- so mounting `execute_python` here would hand it
+# the one capability `[security] confirm_tools` exists to hold back, with the gate structurally unable
+# to apply. Arithmetic is the only thing a verdict actually needs computed, and `calculate` covers it.
 REVIEWER_TOOLS: list[Callable] = [*builtin.web, builtin.calculate, builtin.get_current_date_and_time]
 
 _VERDICT_PROMPT = (

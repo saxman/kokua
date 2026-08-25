@@ -112,6 +112,7 @@ def test_reviewer_toolset_holds_nothing_the_approval_gate_would_have_to_cover():
     names = {t.__name__ for t in critics.REVIEWER_TOOLS}
     assert not (names & set(AssistantConfig().confirm_tools))
     assert "execute_python" not in names  # the specific escape this guards: arbitrary code, unsandboxed
+    assert "run_command" not in names  # and the same escape one step shorter: an unsandboxed shell
 
 
 def test_reviewer_prompts_warn_about_stale_knowledge():
