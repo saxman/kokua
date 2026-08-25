@@ -87,11 +87,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
     it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
     `input` frame field, writes nothing to `config.toml`, and resets to the configured default on reload.
     It goes inert while Plan is on, because a planned turn runs its own agents at their declared efforts.
-  - **Replies render as GitHub-flavored markdown** on turn completion, via vendored `marked` +
+  - **Replies render as GitHub-flavored markdown while they stream**, via vendored `marked` +
     `DOMPurify` (bundled, served locally, no CDN). The rendered HTML is sanitized, so model and tool
-    output cannot inject scripts or markup, and links open with `rel="noopener"`. LaTeX math is typeset
-    with vendored KaTeX after sanitization, with `trust:false` and a `maxExpand` cap; a malformed
-    expression is left as source text rather than breaking the row.
+    output cannot inject scripts or markup, and links open with `rel="noopener"`. The page reparses the
+    whole accumulated answer on a 50ms timer rather than committing each finished block as it lands,
+    because a newline is not a block boundary in CommonMark: a lone newline continues the paragraph,
+    and a newline inside a fence, list, or table sits inside an open block, so a committed prefix could
+    be wrong in a way no later token could repair. Reparsing converges on the final render by
+    construction. LaTeX math is typeset with vendored KaTeX after sanitization, with `trust:false` and
+    a `maxExpand` cap (a malformed expression is left as source text rather than breaking the row), and
+    only once the turn completes: KaTeX is the expensive half of the render and half-typed TeX is noise,
+    so mid-stream the expression stands as the source the model wrote.
   - **A turn renders in the order it was produced.** An answer the model wrote before calling a tool
     stays above the card for that call: the block closes the answer bubble, and the tokens that follow
     open a new one below it. A turn that says something, calls a tool, and then says more therefore
@@ -116,8 +122,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
   - **Sub-agent work is visible.** A `spawn_subagent` call renders as
     `subagent  spawn_subagent(<role>)  <status>` over an argument line, then the nested thinking, tool calls,
     and answer the child produced, each individually foldable and built by the same builders and CSS as
-    their top-level counterparts. The child's text streams in live and re-renders as markdown when the
-    spawn ends. The parent's own duplicate `spawn_subagent` tool block is suppressed. Recording and
+    their top-level counterparts. The child's text streams in as plain text and renders as markdown when
+    the spawn ends, which is the one place the page still waits for a terminal status to render (the
+    assistant's own reply now renders as it streams). The parent's own duplicate `spawn_subagent` tool block is suppressed. Recording and
     display are independent, so a background turn's spawns are recorded even though its frames are
     muted, and switching in later shows the work.
   - **Rows carry a localized datetime caption**, revealed on hover (full precision in its tooltip) so
@@ -358,7 +365,7 @@ the shortest worked examples of the shape: one file, one `TOOLSET`, one entry-po
   own runs on. The
   caveats are documented in the module: the prebuilts are synchronous, so a nested run gets no sub-agent
   card, no `/stop`, and no approval gate on its workers.
-- **`benchmark`**: one tool, `benchmark_model`, measures the model this session's main agent runs on and
+- **`benchmark`**: one tool, `benchmark_model`, measures the model the agent holding it runs on and
   reports time to first token and output speed in tokens per second, as a median and a range over three
   timed runs. The two metrics are separated because they have different causes (prompt processing and
   queueing against decoding), and a discarded warmup run is reported on its own line because a first
@@ -370,9 +377,11 @@ the shortest worked examples of the shape: one file, one `TOOLSET`, one entry-po
   where there is not, and the report says which, since a chunk is usually a token but nothing guarantees
   it. It builds its own client rather than borrowing the agent's, which is what keeps it from racing the
   turn it runs inside for `last_usage`, and it carries an empty system message so the figure describes
-  the model rather than Kokua's own multi-thousand-token prompt. Any agent may hold it, and what it measures is
-  the session rather than the caller, so the report names the agent whose model it timed rather than
-  leaving a worker on its own model to read the figures as its own. An in-process model (`hf:`, `llamacpp:`) cannot be benchmarked and the tool says so: a second
+  the model rather than Kokua's own multi-thousand-token prompt. Any agent may hold it, and what it measures is its own holder: the
+  model comes from `ToolsetContext.agent_name`, so a worker running on a model of its own is timed on
+  that model, and the report names the agent whose model it timed rather than leaving a reader to assume.
+  Resolution goes through `config.model_for` rather than the live agent because nothing on a model client
+  retains the string it was built from. An in-process model (`hf:`, `llamacpp:`) cannot be benchmarked and the tool says so: a second
   client over one model would load its weights twice, so AIMU refuses to build one.
 - **`github_backup`**: one tool, `backup_kokua_state`, mirrors `config.toml`, `sessions.json`, the
   memory store, saved documents, and authored skills into a private GitHub repository as a git commit,

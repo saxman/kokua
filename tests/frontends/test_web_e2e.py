@@ -122,7 +122,7 @@ def _free_port() -> int:
 def live_server():
     """Factory: start the real web app (backed by a `_SlowClient`) under uvicorn in a thread.
 
-    Returns a callable `start(delay=0.0, seed=None, tail="") -> base_url`. Servers are torn down after the
+    Returns a callable `start(delay=0.0, seed=None, reply=REPLY, tail="") -> base_url`. Servers are torn down after the
     test. Plugins are off so startup is fast and model-free; the mock client handles turns. The agents
     are the shipped ones (`Assistant.create` refuses an empty set), and nothing here spawns a
     sub-agent, so they only need to exist. `seed`, if given, is called with the `AssistantConfig`
@@ -134,6 +134,7 @@ def live_server():
     def start(
         delay: float = 0.0,
         seed=None,
+        reply: str = REPLY,
         tail: str = "",
         tool_response: str = "",
         tool_between: str = "",
@@ -147,6 +148,7 @@ def live_server():
             config,
             client_factory=lambda conversation_id: _SlowClient(
                 delay,
+                reply=reply,
                 tail=tail,
                 tool_response=tool_response,
                 tool_between=tool_between,
@@ -204,6 +206,53 @@ def test_an_answer_stays_above_a_tool_call_that_followed_it(page, live_server):
     expect(blocks.nth(2)).to_have_class(re.compile(r"\btool\b"))
     expect(blocks.nth(3)).to_contain_text("And here is what it said.")
     expect(blocks.nth(1)).not_to_contain_text("And here is what it said.")
+
+
+def test_markdown_renders_while_the_answer_is_still_streaming(page, live_server):
+    """The reader should not have to wait for `done` to see structure. The client reparses the whole
+    accumulated buffer on a throttled tick, so headings and emphasis are already markup while the turn
+    is open. The single `.bubble-ts` is the assertion that the turn *is* still open: only the user
+    bubble is stamped until `finalizeStreaming` stamps the answer."""
+    reply = "## Live heading\n\nSome **bold** prose.\n"
+    _open(page, live_server(delay=5.0, reply=reply))
+    page.fill("#msg", "ping")
+    page.click("#send")
+
+    expect(page.locator(".bubble.assistant h2", has_text="Live heading")).to_be_visible(timeout=5_000)
+    expect(page.locator(".bubble.assistant strong", has_text="bold")).to_be_visible()
+    expect(page.locator("#log .bubble-ts")).to_have_count(1)
+
+
+def test_an_unterminated_code_fence_renders_as_code_while_it_streams(page, live_server):
+    """A fence that has not closed yet is the case a naive live render gets wrong: marked sees one
+    stray ``` and emits the body as paragraph text, so the block would flicker from prose to code at
+    `done`. The client closes the open fence before parsing, so the body is `<pre><code>` the whole
+    way through."""
+    _open(page, live_server(delay=5.0, reply="Here it is:\n\n```python\nx = 1\n"))
+    page.fill("#msg", "ping")
+    page.click("#send")
+
+    expect(page.locator(".bubble.assistant pre code")).to_contain_text("x = 1", timeout=5_000)
+    expect(page.locator("#log .bubble-ts")).to_have_count(1)  # still mid-turn
+
+
+def test_math_is_typeset_only_once_the_turn_finishes(page, live_server):
+    """KaTeX is the expensive half of the render and a half-typed `$x^` is noise, so `typesetMath` is
+    deferred to `finalizeStreaming`: mid-stream the TeX stands as source text, and the completed answer
+    carries KaTeX's markup."""
+    _open(page, live_server(delay=2.0, reply="## Heading\n\nGiven $E = mc^2$ we proceed.\n"))
+    page.fill("#msg", "ping")
+    page.click("#send")
+
+    bubble = page.locator(".bubble.assistant").first
+    # The heading proves the live render already ran, which is what makes the absent KaTeX mean
+    # "deferred" rather than "nothing has rendered yet".
+    expect(bubble.locator("h2", has_text="Heading")).to_be_visible(timeout=5_000)
+    expect(bubble).to_contain_text("$E = mc^2$")
+    expect(bubble.locator(".katex")).to_have_count(0)
+
+    expect(bubble.locator(".katex")).to_have_count(1, timeout=10_000)
+    expect(bubble.locator(".bubble-ts")).to_be_visible()
 
 
 def test_send_and_stop_swap_places(page, live_server):

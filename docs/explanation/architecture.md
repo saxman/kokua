@@ -214,7 +214,9 @@ anything; the last two run once per agent, whenever one is built:
    lists did, and a typo silently produced a smaller toolset.
 4. **Build.** `registry.build_tools(toolsets, ctx)` calls each `Toolset.build(ctx)` and concatenates,
    deduplicating by `__name__` and keeping the first, so declared order decides a collision. `ctx` is a
-   `ToolsetContext`: the one process-wide `LiveState` plus this agent (`None` for a spawned worker).
+   `ToolsetContext`: the one process-wide `LiveState`, this agent's live object (`None` for a spawned
+   worker), and its `agent_name`, which unlike the object is known at every construction site and is how
+   a toolset scopes itself to its own holder (`benchmark` asks the config what `agent_name` runs on).
    `build` must create only closures, never process state -- every shared singleton (the memory store,
    the document store, the `SkillManager`, the `TaskService`) is a lazy property on `LiveState`, so two
    agents declaring one toolset share one rather than constructing two, and the two stores are opened only
@@ -640,14 +642,47 @@ than a shared one.
 (`token`/`thinking`/`tool`/`done` frames and `send()`) lives in AIMU's base; Kokua's subclass adds the
 `conversations`, `history`, and `approval` frames its richer page needs. The UI is a single
 self-contained `web_static/index.html` served as package data, plus vendored `marked` + `DOMPurify`
-(GitHub-flavored markdown, sanitized, rendered client-side on turn completion) and vendored KaTeX,
-typeset after sanitization with `trust:false`. The server allowlists these assets: JS/CSS by name, the
+(GitHub-flavored markdown, sanitized, rendered client-side as the answer streams) and vendored KaTeX,
+typeset after sanitization with `trust:false` once the turn completes. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under `/fonts/`.
 
 The page sends an `input` frame (`{"type": "input", "text", "images"?, "thinking"?}`) for any message
 carrying more than its own text, and the bare string for everything else, including `/stop` and approval
 replies. `frontends/web.py`'s `_parse_input` decodes it and `WebChannel.feed_input` queues it; both shapes
 converge on one `ChannelMessage` in `receive`, so nothing downstream knows which path a message took.
+
+### Streaming the answer
+
+`token` frames accumulate into `streamingText`, which is the source of truth; the bubble's DOM is a
+view derived from it. `renderStreaming` reparses that whole buffer and replaces the bubble's
+`innerHTML`, on a 50ms timer coalesced by `scheduleStreamRender`, so a reader watches structure appear
+(headings, lists, tables, code) instead of waiting for `done`.
+
+Reparsing the whole buffer looks wasteful next to committing each finished block as it arrives, and the
+waste is the point. **A newline is not a block boundary in CommonMark**, so there is no cheap
+"everything before here is settled" mark to commit at:
+
+- With `breaks:false`, a lone newline continues the paragraph. Committing there splits one `<p>` in two.
+- A newline inside a fenced code block is inside an open block, so the commit would carry an unclosed
+  fence.
+- A newline after a list item leaves the list open, giving consecutive `<ul>`s in place of one; the same
+  holds for a table that has only its header row so far.
+- A setext heading (`Title` over `===`) is the sharpest case: the *next* line decides how the previous
+  one parses, so no prefix ending at that newline is settled at all.
+
+A blank line is a real boundary, but not inside a fence, and a loose list continues across one. Every
+one of those failures is permanent, because committed HTML is what the reader keeps. Reparsing has no
+such state to get wrong: it converges on the finalized render by construction, and `finalizeStreaming`
+runs the same `renderMarkdown` over the same buffer, so the last live tick and the final render agree.
+An unterminated fence needs no special handling for the same reason the spec gives it none, since a
+fence with no closer runs to the end of the input.
+
+Two things are deliberately *not* reparsed. `typesetMath` is deferred to `finalizeStreaming`, because
+KaTeX is the expensive half of the render and a half-typed `$x^` is noise rather than math, so
+mid-stream an expression stands as the source the model wrote. And `finalizeStreaming` cancels the
+pending timer before it stamps the bubble: a tick landing after the stamp would reset `innerHTML` and
+drop the caption. The `history` replay path cancels it too, since it drops the bubble reference the
+tick would have written into.
 
 ### The tasks section, and the settings frames behind it
 
@@ -829,9 +864,11 @@ and `task`, which is faithful because Kokua only ever builds AIMU's typed spawn 
 which no tool call backs, reads `review  <role>  <status>` instead, and that kind word is the only
 at-a-glance difference between the two, which is why an e2e test pins it. Generated text streams in
 chunk by chunk as plain text
-and is re-rendered as markdown
-when the spawn hits its terminal status, the same two steps the assistant's own reply takes, so a
-replayed card (which also ends with a terminal status) lands on the same DOM.
+and is rendered as markdown
+when the spawn hits its terminal status, so a replayed card (which also ends with a terminal status)
+lands on the same DOM. This is the one render the page still defers to a terminal status: the
+assistant's own reply renders as it streams (see [Streaming the answer](#streaming-the-answer)), and a
+card would need the same treatment per answer block to match.
 
 ## Testing
 

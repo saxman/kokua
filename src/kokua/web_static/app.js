@@ -411,7 +411,7 @@ sidebarResize.addEventListener("keydown", (e) => {
 });
 
 let streamingBubble = null;  // the assistant answer bubble accumulating tokens
-let streamingText = "";      // raw answer text, re-rendered as markdown when the turn completes
+let streamingText = "";      // raw answer text, the source of truth every live render reparses
 let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
 let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
 
@@ -761,6 +761,38 @@ function typesetMath(el) {
   }
 }
 
+// --- Live render of a partly-arrived answer ------------------------------------------------
+// The whole accumulated buffer is reparsed on a timer rather than committing finished blocks as they
+// land, because a newline is not a block boundary in CommonMark: with `breaks:false` a lone newline
+// continues the paragraph, and a newline inside a fence, list, or table sits *inside* an open block.
+// A committed prefix would therefore be wrong in a way no later token could repair, where reparsing
+// converges on the finalized render by construction. The timer matters because a reparse per token is
+// quadratic over a long answer. KaTeX is deliberately left to finalizeStreaming: it is the expensive
+// half of the render, and half-typed TeX is noise.
+const STREAM_RENDER_MS = 50;
+let streamRenderTimer = null;
+
+function renderStreaming() {
+  streamRenderTimer = null;
+  if (!streamingBubble) return;
+  const html = renderMarkdown(streamingText);
+  if (html === null) streamingBubble.textContent = streamingText;
+  else {
+    streamingBubble.classList.add("md");
+    streamingBubble.innerHTML = html;
+  }
+  autoscroll();
+}
+
+function scheduleStreamRender() {
+  if (streamRenderTimer === null) streamRenderTimer = setTimeout(renderStreaming, STREAM_RENDER_MS);
+}
+
+function cancelStreamRender() {
+  if (streamRenderTimer !== null) clearTimeout(streamRenderTimer);
+  streamRenderTimer = null;
+}
+
 function addMarkdownBubble(cls, text, ts) {
   const el = document.createElement("div");
   el.className = "bubble md " + cls;
@@ -780,6 +812,8 @@ function addMarkdownBubble(cls, text, ts) {
 // state. Shared by the `done` terminator and the `phase` divider (verbose trace), where each phase
 // closes the previous phase's bubble so the next call's output starts a fresh one.
 function finalizeStreaming() {
+  // Cancel first: a tick landing after the stamp below would reset innerHTML and drop the caption.
+  cancelStreamRender();
   if (streamingBubble) {
     const html = renderMarkdown(streamingText);
     if (html !== null) {
@@ -924,10 +958,8 @@ ws.onmessage = (event) => {
       streamingBubble = addBubble("assistant", "");
       streamingText = "";
     }
-    // Stream as plain text; partial markdown can't be rendered until the segment finishes.
     streamingText += frame.text;
-    streamingBubble.textContent = streamingText;
-    autoscroll();
+    scheduleStreamRender();
   } else if (frame.type === "done") {
     finalizeStreaming();
     autoscroll();
@@ -976,6 +1008,7 @@ ws.onmessage = (event) => {
     // the next token or thinking frame -- from any conversation -- re-attaches the old conversation's
     // partial bubble into this view and keeps writing into it. A `partial` item below re-opens the
     // streaming bubble when the conversation being replayed is the one that owns the running turn.
+    cancelStreamRender();
     streamingBubble = null;
     streamingText = "";
     thinkingBlock = null;
