@@ -127,3 +127,27 @@ def test_concurrent_turns_do_not_share_a_record():
         return await asyncio.gather(one_turn(10), one_turn(100))
 
     assert asyncio.run(both()) == [20, 200]
+
+
+def test_a_non_numeric_token_figure_is_treated_as_unreported():
+    """``last_usage`` is provider-shaped, so a server can answer with something that is not a number.
+    That is a figure nobody can use, which is not the same as a figure of zero."""
+    metrics = TurnMetrics()
+    metrics(
+        ModelTurnFinished(model="m", usage={"input_tokens": "lots", "output_tokens": 10}, duration_s=1.0, agent=None)
+    )
+    record = metrics.record(wall_seconds=1.0)
+    assert record["calls"] == 1
+    assert "input_tokens" not in record
+    assert record["output_tokens"] == 10
+
+
+def test_explicit_none_in_one_token_field_leaves_it_absent():
+    """When one call reports an input count and explicitly None for output, the absent key stays
+    absent. Only keys that were reported by at least one call appear in the totals."""
+    metrics = TurnMetrics()
+    metrics(_finished(input_tokens=100))
+    record = metrics.record(wall_seconds=1.0)
+    assert record["calls"] == 1
+    assert record["input_tokens"] == 100
+    assert "output_tokens" not in record
