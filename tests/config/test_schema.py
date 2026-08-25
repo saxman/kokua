@@ -19,11 +19,9 @@ def test_logs_path_under_data_dir(tmp_path):
 
 
 def test_default_confirm_tools():
-    """The code-level default and the shipped example are momentarily two different lists: the example's
-    `confirm_tools` line is explicit rather than commented out, so `resolve_config` returns exactly what
-    it says rather than falling back to the schema default. `run_command` belongs in both, but the
-    example's copy is a docs-and-config-surface change owned by a later task in this same series, not
-    this one."""
+    """The code-level default and the shipped example agree: `resolve_config` returns exactly what the
+    example's explicit `confirm_tools` line says, which is the same list `AssistantConfig` falls back to
+    when a `config.toml` omits the key entirely."""
     assert AssistantConfig().confirm_tools == [
         "add_skill_script",
         "add_mcp_server",
@@ -35,6 +33,7 @@ def test_default_confirm_tools():
         "add_skill_script",
         "add_mcp_server",
         "execute_python",
+        "run_command",
         "update_config",
     ]
 
