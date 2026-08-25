@@ -80,22 +80,21 @@ class SubagentReporter:
 
     async def chunk(self, spawn_id: str, chunk: StreamChunk) -> None:
         if chunk.phase == StreamingContentType.THINKING:
-            if chunk.content and self._ui.display_flag("show_thinking", False):
+            if chunk.content:
                 await self._report({"id": spawn_id, "append": {"kind": "reasoning", "text": chunk.content}})
         elif chunk.phase == StreamingContentType.TOOL_CALLING:
-            if self._ui.display_flag("show_tools", False):
-                call = chunk.content if isinstance(chunk.content, dict) else {}
-                await self._report(
-                    {
-                        "id": spawn_id,
-                        "append": {
-                            "kind": "tool",
-                            "name": call.get("name"),
-                            "arguments": call.get("arguments"),
-                            "response": call.get("response"),
-                        },
-                    }
-                )
+            call = chunk.content if isinstance(chunk.content, dict) else {}
+            await self._report(
+                {
+                    "id": spawn_id,
+                    "append": {
+                        "kind": "tool",
+                        "name": call.get("name"),
+                        "arguments": call.get("arguments"),
+                        "response": call.get("response"),
+                    },
+                }
+            )
         elif chunk.phase == StreamingContentType.GENERATING:
             if chunk.content:
                 self._streamed_answers.add(spawn_id)

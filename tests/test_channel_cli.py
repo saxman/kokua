@@ -1,7 +1,8 @@
 """The terminal channel's own commands: `/think`, and its interaction with `/attach`.
 
 `/attach` has its own coverage in `tests/test_images.py`, where it belongs with the rest of the image
-path; what is here is the reasoning-effort command and the two commands sharing one receive loop.
+path; what is here is the reasoning-effort command and the two commands sharing one receive loop, plus
+the one AIMU default this channel is built on rather than around.
 """
 
 from __future__ import annotations
@@ -78,3 +79,12 @@ def test_every_offered_level_but_default_is_a_word_the_core_accepts():
         if level == "default":
             continue
         assert thinking_request(level) is not None
+
+
+def test_a_bare_channel_streams_reasoning_and_tool_calls():
+    """Kokua has no display settings: the terminal shows the loop because AIMU's channel relays those two
+    phases unless told not to. Nothing in Kokua passes the flags, so this default is load-bearing, and an
+    AIMU that flipped it back would silently reduce Kokua to answers only (see `kokua.aimu_compat`)."""
+    channel = CLIChannel()
+    assert channel.stream_thinking is True
+    assert channel.stream_tools is True

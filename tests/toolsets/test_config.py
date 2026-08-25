@@ -13,7 +13,7 @@ from kokua.config import file as settings
 from kokua.config import schema
 from kokua.config.schema import AgentConfig, AssistantConfig
 from kokua.toolsets import config as config_tools
-from tests.helpers import core_table
+from tests.helpers import core_table, hot_table
 
 
 def _read(path):
@@ -21,7 +21,7 @@ def _read(path):
         return tomllib.load(file)
 
 
-def _tools(tmp_path, apply_hot=None, config=None, registry=None):
+def _tools(tmp_path, apply_hot=None, config=None, registry=None, table=None):
     """The two tools over a config file in `tmp_path`, and that file's path.
 
     A caller passing its own `config` passes it through `_config` or `_unlocked` below, either of which
@@ -35,7 +35,7 @@ def _tools(tmp_path, apply_hot=None, config=None, registry=None):
     path = tmp_path / "config.toml"
     read_config, update_config = config_tools.make_config_tools(
         apply_hot or _noop,
-        core_table(),
+        table if table is not None else core_table(),
         config=config if config is not None else _config(tmp_path),
         registry=registry if registry is not None else {},
     )
@@ -72,10 +72,10 @@ async def test_update_config_hot_key_applies_live(tmp_path):
     async def apply_hot(section, key, value):
         applied.append((section, key, value))
 
-    path, _, update_config = _tools(tmp_path, apply_hot)
-    result = await update_config("display", "show_tools", "false")
-    assert _read(path)["display"]["show_tools"] is False
-    assert applied == [("display", "show_tools", False)]
+    path, _, update_config = _tools(tmp_path, apply_hot, table=hot_table())
+    result = await update_config("core", "concurrent_tools", "false")
+    assert _read(path)["core"]["concurrent_tools"] is False
+    assert applied == [("core", "concurrent_tools", False)]
     assert "restart" not in result.lower()
 
 
@@ -94,8 +94,8 @@ async def test_update_config_hot_key_not_persisted_when_apply_fails(tmp_path):
     async def apply_hot(section, key, value):
         raise RuntimeError("bad flag")
 
-    path, _, update_config = _tools(tmp_path, apply_hot)
-    result = await update_config("display", "show_tools", "false")
+    path, _, update_config = _tools(tmp_path, apply_hot, table=hot_table())
+    result = await update_config("core", "concurrent_tools", "false")
     assert not path.exists()  # apply failed, so nothing was written
     assert "could not be applied" in result.lower()
 

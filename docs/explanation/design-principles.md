@@ -160,9 +160,14 @@ One of Kokua's own runtime-mutable settings is **one entry** in
 [`config/table.py`](../../src/kokua/config/table.py)'s `CORE_RUNTIME_SETTINGS`; a toolset's is one
 `Setting` on the toolset itself, in its own `[<name>]` section. `SettingsTable`, built at startup from
 both, is what drives the TOML schema, the incoming-payload sanitizer, the hot-apply set, the live-apply
-loop, the channel mirroring, and the persist path at once -- and `tests/config/test_table.py` fails if a
+loop, and the persist path at once -- and `tests/config/test_table.py` fails if a
 `CORE_RUNTIME_SETTINGS` entry is not also a real config field and documented in `config.example.toml`
 under its own `[section]`.
+
+`CORE_RUNTIME_SETTINGS` is currently **empty**, and that is the principle working rather than a gap.
+Every runtime setting Kokua ships belongs to a capability, so every one of them is that capability's
+own declaration; the last core entries were the display flags, and what they controlled turned out to
+be a front end's decision rather than a setting (see [principle 1](#1-a-small-transport-agnostic-core)).
 
 ## 4. All state under one directory the user owns
 

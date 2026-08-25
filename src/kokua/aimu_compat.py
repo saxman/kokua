@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.21.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.23.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -19,8 +19,8 @@ check's shape. A name lookup answers for a symbol; a membership check answers fo
 set whose mere existence proves nothing (``SUBAGENT_SPEC_KEYS`` shipped a release before the
 ``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a checkout); a signature
 check answers for a keyword argument no ``getattr`` would notice, which is the shape in force today and
-was once before, when it was ``SkillManager(include=...)``. Checking one surface is no claim about the
-others; covering those is the version floor's job.
+twice before, when it was ``SkillManager(include=...)`` and then ``SkillAgent(script_env=...)``. Checking
+one surface is no claim about the others; covering those is the version floor's job.
 
 A capability can also be shaped so that *nothing* can probe it, and AIMU 0.17.0's headline surface is:
 the ``"thinking"`` key Kokua writes into an ``agent_types`` spec is a dict key, neither a symbol nor a
@@ -47,8 +47,8 @@ settings missing and no error anywhere. It was the probe until 0.21.0, and it su
 check rather than trading one narrow window for another, since it landed after both of the commits that
 window sat between.
 
-AIMU 0.21.0 is the current surface, and for once the capability and its handle are the same object.
-``resolve_default_text_model`` is what ``AssistantConfig.default_model`` calls to learn the model an
+AIMU 0.21.0 was the surface until 0.23.0, and for once the capability and its handle were the same
+object. ``resolve_default_text_model`` is what ``AssistantConfig.default_model`` calls to learn the model an
 unset ``[assistant].model`` runs on, and it is a plain exported name, so a name lookup asks precisely
 the question that matters. The function is old; only its export is new, which is exactly why the floor
 and the probe are both needed and neither is redundant here. What Kokua needs is not the behavior but
@@ -60,6 +60,22 @@ Worth recording, since it is the case this module keeps meeting: the capability 
 *no* handle at all. Nothing on a live client retains the string it was constructed from, so a host
 cannot ask a built client which endpoint it is talking to. The export is the route around that gap
 rather than a fix for it, which is why the probe grips the export and not something on the client.
+
+AIMU 0.23.0 is the current surface, and it is the case this module exists for in its purest form. AIMU
+renamed its channel flags ``show_thinking`` / ``show_tools`` to ``stream_thinking`` / ``stream_tools``
+and flipped both defaults from ``False`` to ``True``; Kokua deleted its own display settings in the same
+change and now constructs both channels bare, relying on that default. Against an older AIMU the bare
+construction still *works* -- and silently streams neither reasoning nor tool calls, in a front end
+whose whole claim is that the loop is watched rather than inferred. Nothing raises, because after the
+rename Kokua no longer reads ``self.show_thinking`` anywhere, so there is not even an ``AttributeError``
+left to notice.
+
+The handle is a signature check on ``aio.WebChannel.__init__`` for ``stream_thinking``. Note what it
+does and does not establish: the parameter's presence is not itself the capability, which is the
+*default value*. It stands in for that because AIMU renamed the arguments and flipped their defaults in
+one change, so a checkout carrying the new name carries the new default. The default is directly
+inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
+checkout to the same release without teaching this module a fourth probe shape for one case.
 """
 
 from __future__ import annotations
@@ -69,16 +85,17 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 21, 0)
+MINIMUM_AIMU = (0, 23, 0)
 
-# The newest AIMU surface Kokua depends on is the `resolve_default_text_model` export, which is how
-# `AssistantConfig.default_model` learns what an unset `[assistant].model` resolves to without losing
-# the `@base_url` a default may carry. A plain name lookup, because the capability *is* the exported
-# name: the function itself is older than the release, so its presence in the public namespace is what
-# dates the checkout. See the module docstring for what this deliberately misses.
-_PROBE_MODULE = "aimu.models"
-_PROBE_SYMBOL = "resolve_default_text_model"
-_PROBE_PARAMETER: Optional[str] = None
+# The newest AIMU surface Kokua depends on is a channel that relays reasoning and tool calls by default:
+# `stream_thinking` / `stream_tools` replaced `show_thinking` / `show_tools` and default to True, which is
+# why Kokua's front ends construct both channels with no flags at all. A signature check, since the
+# rename and the default flip are one change: the new argument name is what dates the checkout past both.
+# An older AIMU accepts the same bare construction and streams neither phase, with nothing raised
+# anywhere. See the module docstring for what this deliberately misses.
+_PROBE_MODULE = "aimu.aio"
+_PROBE_SYMBOL = "WebChannel"
+_PROBE_PARAMETER: Optional[str] = "stream_thinking"
 _PROBE_MEMBER: Optional[str] = None
 
 

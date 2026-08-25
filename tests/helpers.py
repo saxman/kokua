@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 from aimu.aio._base import AsyncBaseModelClient
 from aimu.models import StreamChunk, StreamingContentType
 
-from kokua.config.table import CORE_RUNTIME_SETTINGS, SettingsTable
+from kokua.config.table import CORE_RUNTIME_SETTINGS, RuntimeSetting, SettingsTable
 
 
 def core_table() -> SettingsTable:
@@ -23,8 +23,25 @@ def core_table() -> SettingsTable:
     toolset's section will read as an unknown key through this table, which is the point when the test is
     not about a contributed setting. A test that needs one uses ``build_settings_table()``, or builds its
     own table with the entries it needs.
+
+    Empty today, since ``CORE_RUNTIME_SETTINGS`` is: nothing in Kokua's own core is runtime-mutable now
+    that the display flags are gone. A test that needs a hot key rather than a core-only *schema* wants
+    :func:`hot_table` instead.
     """
     return SettingsTable(CORE_RUNTIME_SETTINGS)
+
+
+# A stand-in hot core setting, for a test that needs one and does not care which. With no shipped core
+# runtime settings there is no real key to name, and reaching for the planning toolset's would tie a test
+# about the hot-apply path to one capability's current declarations. ``concurrent_tools`` is a real
+# ``AssistantConfig`` field, under a fictional ``[core]`` section so this double cannot claim a key the
+# shipped schema owns.
+HOT_CORE_DOUBLE = RuntimeSetting("concurrent_tools", "core", bool)
+
+
+def hot_table() -> SettingsTable:
+    """``core_table()`` plus one stand-in hot entry, for a test exercising the hot-apply path."""
+    return SettingsTable([*CORE_RUNTIME_SETTINGS, HOT_CORE_DOUBLE])
 
 
 class MockAsyncModelClient(AsyncBaseModelClient):

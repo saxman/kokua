@@ -13,22 +13,13 @@ from kokua.config.table import CORE_RUNTIME_SETTINGS, RuntimeSetting, SettingsTa
 from kokua.core.assistant import Assistant
 from kokua.core.settings_runtime import SettingsApplier
 from kokua.core.turn_gate import TurnGate
-from tests.channels import FakeChannel, _config
+from tests.channels import FakeChannel, _config, planning_settings
 from tests.helpers import MockAsyncModelClient, core_table
-
-
-class _UI:
-    def display_flag(self, name, default):
-        return default
-
-    def set_display_flag(self, name, value):
-        return None
 
 
 def _applier(config, table):
     return SettingsApplier(
         config,
-        _UI(),
         TurnGate(lambda conversation_id: None),
         table=table,
         state=lambda: None,
@@ -71,11 +62,16 @@ def test_the_panel_payload_carries_a_contributed_setting_namespaced(tmp_path: Pa
 
 
 async def test_boot_applies_config_flags(tmp_path):
-    # config.toml is the single source: its [display] values apply at boot.
-    cfg = _config(tmp_path, show_tools=False)
+    """config.toml is the single source: what it declares is what the live config holds at boot.
+
+    A toolset's section rather than a core one, since Kokua's core declares no runtime settings now that
+    the display flags are gone -- and a contributed setting is the case with a bucket to reach into, so it
+    is the one worth asserting.
+    """
+    cfg = _config(tmp_path, toolset_settings=planning_settings(plan_review=True))
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
-    assert assistant._config.show_tools is False
+    assert assistant._config.toolset_settings["planning"]["plan_review"] is True
 
 
 async def test_boot_leaves_sampling_parameters_to_aimu(tmp_path):
@@ -102,10 +98,10 @@ async def test_apply_settings_updates_and_persists_to_config(tmp_path):
     cfg = _config(tmp_path)
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
-    await assistant.apply_settings({"show_tools": False})
-    assert assistant._config.show_tools is False
-    saved = settings.load(str(cfg.config_path), table=core_table())
-    assert saved["show_tools"] is False
+    await assistant.apply_settings({"planning.plan_review": True})
+    assert assistant._config.toolset_settings["planning"]["plan_review"] is True
+    saved = settings.load(str(cfg.config_path), table=assistant._settings_table)
+    assert saved["toolset_settings"]["planning"]["plan_review"] is True
 
 
 async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
@@ -120,16 +116,13 @@ async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
     table = assistant._settings_table
 
-    def unmirrored(name, default):
-        return default
-
     def changed(setting):
         """A value of the setting's own type that differs from what it holds, so a no-op can't pass.
 
         Typed per kind rather than ``not current``: the sanitizer drops a bool handed to an int
         setting, which would look like a setting that failed to persist.
         """
-        current = setting.read(cfg, unmirrored)
+        current = setting.read(cfg)
         if setting.kind is int:
             return (current or 0) + 7
         if setting.kind is str:
@@ -146,7 +139,7 @@ async def test_every_runtime_setting_round_trips_through_config_toml(tmp_path):
 
     written = tomllib.loads(cfg.config_path.read_text(encoding="utf-8"))
     for setting, value in expected.items():
-        assert setting.read(cfg, unmirrored) == value, f"{setting.wire_key} was not applied to the live config"
+        assert setting.read(cfg) == value, f"{setting.wire_key} was not applied to the live config"
         assert written[setting.section][setting.toml_key] == value, (
             f"[{setting.section}].{setting.toml_key} did not persist to config.toml"
         )
@@ -158,9 +151,11 @@ async def test_update_config_tool_applies_a_hot_key_live_and_persists(tmp_path):
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
     update = next(t for t in assistant._agent.tools if t.__name__ == "update_config")
-    result = await update(section="display", key="show_tools", value="false")
-    assert assistant._config.show_tools is False  # applied to the live session
-    assert settings.load(str(cfg.config_path), table=core_table())["show_tools"] is False  # persisted
+    result = await update(section="planning", key="plan_review", value="true")
+    live = assistant._config.toolset_settings["planning"]["plan_review"]
+    assert live is True  # applied to the live session
+    saved = settings.load(str(cfg.config_path), table=assistant._settings_table)
+    assert saved["toolset_settings"]["planning"]["plan_review"] is True  # persisted
     assert "restart" not in result.lower()
 
 
@@ -189,7 +184,7 @@ async def test_current_settings_reports_effective(tmp_path):
     client = MockAsyncModelClient([])
     assistant = await Assistant.create(_config(tmp_path, model="m1"), FakeChannel(), client=client)
     s = assistant.current_settings()
-    assert "show_thinking" in s and "show_tools" in s
+    assert "planning.plan_review" in s and "planning.show_reasoning" in s
     assert "generate_kwargs" not in s  # sampling is AIMU's, not a panel field
 
 

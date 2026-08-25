@@ -655,12 +655,9 @@ def test_a_call_with_no_recorded_result_renders_no_output_section(page, live_ser
 
 def _seed_thinking_and_continuation(config):
     """Plant a conversation holding a reasoning block and a framework-injected continuation turn, the
-    two rows whose whole visible line is their kind word. Turns `show_thinking` on, since replay gates
-    reasoning on the same flag the live stream does."""
+    two rows whose whole visible line is their kind word."""
     from aimu.sessions import Session, TinyDBSessionStore
 
-    config.show_thinking = True
-    config.show_tools = True
     TinyDBSessionStore(str(config.sessions_path)).save(
         Session(
             key="seeded",
@@ -1078,8 +1075,6 @@ def _seed_blank_answer_segment(config):
     itself: the assistant's tool-call message holds only the newlines that followed the reasoning."""
     from aimu.sessions import Session, TinyDBSessionStore
 
-    config.show_thinking = True
-    config.show_tools = True
     TinyDBSessionStore(str(config.sessions_path)).save(
         Session(
             key="seeded",

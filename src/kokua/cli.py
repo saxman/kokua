@@ -69,18 +69,6 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         "a delegated worker's own declared message.",
     )
     parser.add_argument(
-        "--show-thinking",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Show the model's reasoning as it streams. Default: on (use --no-show-thinking to hide).",
-    )
-    parser.add_argument(
-        "--show-tools",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Show tool calls as they happen. Default: on (use --no-show-tools to hide).",
-    )
-    parser.add_argument(
         "--mcp",
         action="append",
         default=None,
@@ -163,8 +151,6 @@ def _cli_overrides(args: argparse.Namespace) -> dict:
 
     take("model", args.model)
     take("system_message_override", args.system)
-    take("show_thinking", args.show_thinking)
-    take("show_tools", args.show_tools)
     take("mcp_servers", args.mcp, _mcp_servers_from_urls)
     take("confirm_tools", args.confirm_tools, lambda v: [name.strip() for name in v.split(",") if name.strip()])
     take("frontend", args.frontend)

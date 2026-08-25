@@ -93,9 +93,6 @@ class AssistantConfig:
     # entry agent's declared `system_message` in assemble_system_message, since a prompt is not the
     # capability this design made [agents.*] the single source of; a worker's declared opener is untouched.
     system_message_override: Optional[str] = None
-    # Surface the model's reasoning and tool calls in the channel, not just the final answer.
-    show_thinking: bool = True
-    show_tools: bool = True
     # Each toolset's own config section, by toolset name: every key the toolset declared, seeded with its
     # declared default and overlaid with what config.toml sets. A toolset (and a workflow) therefore
     # always reads a complete view, and Kokua's own dataclass carries no field for a capability that may

@@ -376,8 +376,8 @@ def parse_task(name: str, spec: Any) -> dict:
 # AssistantConfig field name, or "<toolset>.<key>" for a key a toolset owns (see `_coerce_flat`).
 # `bool` is an int subclass, so it is rejected for numeric fields unless explicitly accepted.
 #
-# Startup-only keys are declared here; the runtime-mutable ones (the display flags, and each toolset's
-# hot settings) come from the settings table, so the two never drift. A toolset's *cold* keys
+# Startup-only keys are declared here; the runtime-mutable ones (each toolset's hot settings, and any the
+# core ever declares again) come from the settings table, so the two never drift. A toolset's *cold* keys
 # are neither: they come from `settings_sources.startup_schema`. `build_schema` joins all three.
 _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optional[Callable]]] = {
     # The default model every agent runs on unless its own [agents.<name>].model overrides it. Read once,

@@ -23,7 +23,7 @@ Two rules run through the whole file and explain most of what follows:
 - [Who may change which key](#who-may-change-which-key)
 - [Which keys apply live](#which-keys-apply-live)
 - Sections: [`[assistant]`](#assistant) · [`[assistant.generation]`](#assistantgeneration) ·
-  [`[security]`](#security) · [`[display]`](#display) · [`[agents.<name>]`](#agentsname) ·
+  [`[security]`](#security) · [`[agents.<name>]`](#agentsname) ·
   [`[[mcp.server]]`](#mcpserver) · [`[paths]`](#paths) · [`[frontend]`](#frontend) · [`[web]`](#web) ·
   [`[logging]`](#logging) · [`[email]`](#email) · [`[scheduling]`](#scheduling) ·
   [`[scheduling.task.<name>]`](#schedulingtaskname) · [`[planning]`](#planning) ·
@@ -142,8 +142,7 @@ immediately. Everything else is **startup-only**: change it, then restart.
 
 | Hot | Startup-only |
 | --- | --- |
-| `[display].show_thinking`, `[display].show_tools` | everything in `[assistant]`, including `[assistant.generation]` |
-| `[planning].plan_review`, `plan_review_agent`, `result_review`, `show_reasoning` | `[planning].review_rounds` |
+| `[planning].plan_review`, `plan_review_agent`, `result_review`, `show_reasoning` | everything in `[assistant]`, including `[assistant.generation]`, and `[planning].review_rounds` |
 | `[capabilities].max_depth` | all of `[agents.*]`, `[mcp]` (including `[[mcp.server]]`), `[security]`, `[paths]`, `[frontend]`, `[web]`, `[logging]`, `[email]` |
 | `[scheduling].max_task_conversations` | |
 
@@ -363,16 +362,6 @@ Neither check can see a name that does not exist yet, and neither tries to. The 
 `[scheduling.task.<name>]` sections are yours to create, so `agents.resercher.*` is accepted and locks
 nothing until an agent by that name exists. Locking a section you are about to add is a legitimate thing
 to write; a misspelling of one is indistinguishable from it.
-
-## `[display]`
-
-Both keys are hot: change one with `update_config` and it applies from the next turn and is written
-straight back to the file.
-
-| Key | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `show_thinking` | bool | `true` | stream the model's reasoning into the channel |
-| `show_tools` | bool | `true` | stream tool calls into the channel |
 
 ## `[agents.<name>]`
 
@@ -780,8 +769,6 @@ Flags override the file for one run and are never written back.
 | `--frontend NAME` | `[frontend].name` |
 | `--model STRING` | `[assistant].model` |
 | `--system TEXT` | the entry agent's opener, leaving a worker's alone |
-| `--show-thinking` / `--no-show-thinking` | `[display].show_thinking` |
-| `--show-tools` / `--no-show-tools` | `[display].show_tools` |
 | `--confirm-tools NAMES` | `[security].confirm_tools`, comma-separated; empty string disables |
 | `--mcp URL` | adds a server for this run, unauthenticated or OAuth |
 | `--host`, `--port` | `[web].host`, `[web].port` |

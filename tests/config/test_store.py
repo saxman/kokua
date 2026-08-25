@@ -8,7 +8,7 @@ import pytest
 
 from kokua.config import store as config_store
 from kokua.config import file as settings
-from tests.helpers import core_table
+from tests.helpers import core_table, hot_table
 
 
 def _read(path):
@@ -205,7 +205,7 @@ def test_is_locked_covers_the_named_keys_and_every_agent_table():
     # By prefix, because a section name is per-agent and cannot be enumerated ahead of time.
     assert config_store.is_locked("agents", "assistant", defaults)
     assert config_store.is_locked("agents.researcher", "tools", defaults)
-    assert not config_store.is_locked("display", "show_tools", defaults)
+    assert not config_store.is_locked("logging", "level", defaults)
 
 
 DEFAULTS = config_store.DEFAULT_LOCKED_CONFIG_KEYS
@@ -214,7 +214,7 @@ DEFAULTS = config_store.DEFAULT_LOCKED_CONFIG_KEYS
 def test_locked_by_returns_the_pattern_that_matched():
     assert config_store.locked_by("agents.researcher", "tools", DEFAULTS) == "agents.*"
     assert config_store.locked_by("email", "to", DEFAULTS) == "email.to"
-    assert config_store.locked_by("display", "show_tools", DEFAULTS) is None
+    assert config_store.locked_by("logging", "level", DEFAULTS) is None
 
 
 def test_locked_by_section_wildcard_covers_the_section_and_its_descendants():
@@ -232,12 +232,12 @@ def test_locked_by_exact_pattern_needs_the_key_to_match_too():
 
 
 def test_locked_by_bare_star_matches_everything():
-    assert config_store.locked_by("display", "show_tools", ["*"]) == "*"
+    assert config_store.locked_by("logging", "level", ["*"]) == "*"
 
 
 def test_the_lock_list_key_is_locked_whatever_the_list_says():
     assert config_store.is_locked("security", "locked_config_keys", [])
-    assert config_store.is_locked("security", "locked_config_keys", ["display.*"])
+    assert config_store.is_locked("security", "locked_config_keys", ["logging.*"])
 
 
 def test_an_empty_list_locks_nothing_else():
@@ -257,14 +257,14 @@ async def test_apply_setting_refuses_a_key_the_users_list_locks(tmp_path):
     with pytest.raises(config_store.SettingLocked) as error:
         await config_store.apply_setting(
             path,
-            "display",
-            "show_tools",
-            "false",
+            "logging",
+            "level",
+            "DEBUG",
             _noop_apply,
             table=core_table(),
-            locked=["display.*"],
+            locked=["logging.*"],
         )
-    assert error.value.pattern == "display.*"
+    assert error.value.pattern == "logging.*"
     assert not path.exists()
 
 
@@ -363,16 +363,16 @@ async def test_apply_setting_applies_a_hot_setting_before_persisting_it(tmp_path
     path = tmp_path / "config.toml"
     result = await config_store.apply_setting(
         path,
-        "display",
-        "show_tools",
+        "core",
+        "concurrent_tools",
         "false",
         apply_hot,
-        table=core_table(),
+        table=hot_table(),
         locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
     )
 
-    assert result.hot is True and applied == [("display", "show_tools", False)]
-    assert _read(path)["display"]["show_tools"] is False
+    assert result.hot is True and applied == [("core", "concurrent_tools", False)]
+    assert _read(path)["core"]["concurrent_tools"] is False
 
 
 async def test_apply_setting_does_not_persist_a_hot_setting_that_failed_to_apply(tmp_path):
@@ -386,11 +386,11 @@ async def test_apply_setting_does_not_persist_a_hot_setting_that_failed_to_apply
     with pytest.raises(config_store.HotApplyFailed) as failure:
         await config_store.apply_setting(
             path,
-            "display",
-            "show_tools",
+            "core",
+            "concurrent_tools",
             "false",
             apply_hot,
-            table=core_table(),
+            table=hot_table(),
             locked=config_store.DEFAULT_LOCKED_CONFIG_KEYS,
         )
 

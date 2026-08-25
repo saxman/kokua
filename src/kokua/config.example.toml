@@ -72,11 +72,6 @@ confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update
 # rewrite any agent's tools list, and so widen its own reach, on the next restart. Restart to apply.
 locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
 
-[display]
-# Stream the model's reasoning / tool calls into the channel. Both apply live (no restart).
-show_thinking = true
-show_tools = true
-
 # Every agent, declared whole, and locked by default (see [security].locked_config_keys below). An
 # agent's `tools` list IS its capability: nothing is added in code, and nothing is implicit, including
 # the clock (declare "time" to get it).

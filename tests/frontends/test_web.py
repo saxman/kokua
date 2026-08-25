@@ -78,9 +78,9 @@ async def test_web_channel_send_stream_emits_tokens_then_done():
     ]
 
 
-async def test_web_channel_emits_thinking_and_tool_frames_when_enabled():
+async def test_web_channel_emits_thinking_and_tool_frames_by_default():
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
 
     async def gen():
         yield StreamChunk(StreamingContentType.THINKING, "hmm")
@@ -101,7 +101,7 @@ async def test_web_channel_send_suppresses_spawn_subagent_tool_frame():
     for spawn_subagent specifically is dropped -- it would otherwise arrive after the card (AIMU emits
     TOOL_CALLING only once the tool returns) and duplicate what the card already shows."""
     ws = _FakeWS()
-    channel = WebChannel(ws, show_tools=True)
+    channel = WebChannel(ws)
 
     async def gen():
         yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": SPAWN_SUBAGENT_TOOL_NAME, "arguments": {}})
@@ -146,19 +146,6 @@ async def test_web_channel_skips_empty_generating_chunks():
     assert ws.frames == [{"type": "token", "text": "hi"}, {"type": "done"}]
 
 
-async def test_web_channel_omits_thinking_and_tool_frames_by_default():
-    ws = _FakeWS()
-    channel = WebChannel(ws)  # defaults: show_thinking / show_tools off
-
-    async def gen():
-        yield StreamChunk(StreamingContentType.THINKING, "hmm")
-        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {}})
-        yield StreamChunk(StreamingContentType.GENERATING, "4")
-
-    await channel.send(gen())
-    assert ws.frames == [{"type": "token", "text": "4"}, {"type": "done"}]
-
-
 async def test_web_channel_send_conversations_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -170,14 +157,14 @@ async def test_web_channel_send_conversations_emits_frame():
 async def test_web_channel_send_settings_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
-    values = {"show_thinking": True, "show_tools": False}
+    values = {"planning.plan_review": True, "planning.show_reasoning": False}
     await channel.send_settings(values)
     assert ws.frames == [{"type": "settings", "values": values}]
 
 
 async def test_web_channel_stream_activity_shows_loop_withholds_answer():
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
 
     async def gen():
         yield StreamChunk(StreamingContentType.THINKING, "pondering", iteration=0)
@@ -194,7 +181,7 @@ async def test_web_channel_stream_activity_shows_loop_withholds_answer():
 
 async def test_web_channel_stream_activity_show_answer_emits_tokens():
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
 
     async def gen():
         yield StreamChunk(StreamingContentType.THINKING, "hmm")
@@ -210,7 +197,7 @@ async def test_web_channel_stream_activity_show_answer_emits_tokens():
 
 async def test_web_channel_stream_activity_suppresses_spawn_subagent_tool_frame():
     ws = _FakeWS()
-    channel = WebChannel(ws, show_tools=True)
+    channel = WebChannel(ws)
 
     async def gen():
         yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": SPAWN_SUBAGENT_TOOL_NAME, "arguments": {}})
@@ -224,7 +211,7 @@ async def test_web_channel_stream_activity_tool_frame_carries_the_response():
     """`stream_activity` maps chunks to frames itself rather than reusing the base loop, so the result
     has to be carried on this path too or a planned turn's trace shows calls without their output."""
     ws = _FakeWS()
-    channel = WebChannel(ws, show_tools=True)
+    channel = WebChannel(ws)
 
     async def gen():
         yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 2}, "response": "4"})
@@ -256,7 +243,7 @@ async def test_web_channel_send_subagent_emits_frame():
 def test_conversation_to_frames_interleaves_subagent_after_user():
     messages = [{"role": "user", "content": "do X"}, {"role": "assistant", "content": "done"}]
     subagent = {"0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["x"], "round": 0}]}
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True, subagent=subagent)
+    items = conversation_to_frames(messages, subagent=subagent)
     assert items[0] == {"type": "user", "text": "do X"}
     assert items[1]["type"] == "subagent" and items[1]["status"] == "rejected"
     assert items[2]["type"] == "message"
@@ -267,7 +254,7 @@ def test_conversation_to_frames_threads_message_timestamp():
         {"role": "user", "content": "do X", "timestamp": "2026-07-23T15:45:00"},
         {"role": "assistant", "content": "done", "timestamp": "2026-07-23T15:45:07"},
     ]
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(messages)
     user_item = next(i for i in items if i["type"] == "user")
     message_item = next(i for i in items if i["type"] == "message")
     assert user_item["ts"] == "2026-07-23T15:45:00"
@@ -276,7 +263,7 @@ def test_conversation_to_frames_threads_message_timestamp():
 
 def test_conversation_to_frames_omits_ts_when_message_has_no_timestamp():
     messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(messages)
     assert all("ts" not in i for i in items)  # legacy messages (no timestamp) render no caption
 
 
@@ -286,14 +273,14 @@ def test_conversation_to_frames_subagent_inherits_turn_timestamp():
         {"role": "assistant", "content": "done", "timestamp": "2026-07-23T15:45:07"},
     ]
     subagent = {"0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["x"], "round": 0}]}
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True, subagent=subagent)
+    items = conversation_to_frames(messages, subagent=subagent)
     subagent_item = next(i for i in items if i["type"] == "subagent")
     assert subagent_item["ts"] == "2026-07-23T15:45:00"  # inherits its turn's user-message timestamp
 
 
 def test_conversation_to_frames_omits_subagent_by_default():
     messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(messages)
     assert not any(i["type"] == "subagent" for i in items)
 
 
@@ -308,7 +295,7 @@ def test_conversation_to_frames_replays_verbose_trace_not_committed_answer():
             {"label": "Executor", "detail": "carrying out the plan", "text": "THE ANSWER"},
         ]
     }
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True, trace=trace)
+    items = conversation_to_frames(messages, trace=trace)
     assert items == [
         {"type": "user", "text": "do X"},
         {"type": "phase", "label": "Planner", "detail": "drafting a plan"},
@@ -328,8 +315,6 @@ def test_a_traced_turn_replays_spawn_cards_but_not_reviewer_cards():
     messages = [{"role": "user", "content": "plan something"}]
     items = conversation_to_frames(
         messages,
-        show_thinking=False,
-        show_tools=False,
         subagent={
             "0": [
                 {"id": "plan-review-0", "role": "reviewer", "status": "done", "issues": ["too vague"]},
@@ -349,8 +334,6 @@ def test_a_traced_turns_spawn_card_keeps_its_closing_status():
     rendered as markdown, so a lineage's events are kept by id rather than by shape."""
     items = conversation_to_frames(
         [{"role": "user", "content": "plan something"}],
-        show_thinking=False,
-        show_tools=False,
         subagent={
             "0": [
                 {"id": "plan-review-0", "role": "reviewer", "status": "done", "issues": ["too vague"]},
@@ -369,7 +352,7 @@ async def test_web_channel_background_turn_frames_are_muted():
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
     channel.active_conversation_id = "viewed"
 
     async def gen():
@@ -388,7 +371,7 @@ async def test_web_channel_foreground_turn_frames_stream():
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
     channel.active_conversation_id = "viewed"
 
     async def gen():
@@ -408,7 +391,7 @@ async def test_a_switch_mid_stream_mutes_the_rest_of_the_reply():
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
     channel.active_conversation_id = "viewed"
 
     async def gen():
@@ -431,7 +414,7 @@ async def test_a_switch_mid_activity_stream_mutes_the_rest_but_keeps_the_text():
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
     channel.active_conversation_id = "viewed"
 
     async def gen():
@@ -454,7 +437,7 @@ async def test_switching_back_mid_turn_replays_the_turn_so_far():
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
     channel.active_conversation_id = "viewed"
     channel.begin_catch_up("viewed", "ping")
 
@@ -487,7 +470,7 @@ async def test_a_muted_turns_catch_up_keeps_the_tool_output():
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
-    channel = WebChannel(ws, show_tools=True)
+    channel = WebChannel(ws)
     channel.active_conversation_id = "other"  # the turn below runs out of view
     channel.begin_catch_up("running", "look it up")
 
@@ -516,7 +499,7 @@ async def test_the_replayed_answer_keeps_its_place_above_a_later_tool_call():
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
     channel.active_conversation_id = "other"  # background for the whole turn
     channel.begin_catch_up("running", "ping")
 
@@ -611,7 +594,7 @@ async def test_a_background_turns_sidebar_refresh_is_not_muted():
     try:
         await channel.send_conversations([{"key": "other", "title": "Background"}])
         await channel.send_history([], {})
-        await channel.send_settings({"show_tools": True})
+        await channel.send_settings({"planning.plan_review": True})
     finally:
         streaming_conversation.reset(token)
     assert [frame["type"] for frame in ws.frames] == ["conversations", "history", "settings"]
@@ -679,7 +662,7 @@ _CONVERSATION = [
 
 
 def test_conversation_to_frames_full_replay():
-    items = conversation_to_frames(_CONVERSATION, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(_CONVERSATION)
     assert items == [
         {"type": "user", "text": "what's 2+2?"},
         {"type": "thinking", "text": "adding the numbers"},
@@ -702,7 +685,7 @@ def test_conversation_to_frames_omits_spawn_subagent_tool_call():
             ],
         },
     ]
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(messages)
     tools = [item for item in items if item["type"] == "tool"]
     assert tools == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}]
 
@@ -710,7 +693,7 @@ def test_conversation_to_frames_omits_spawn_subagent_tool_call():
 def test_conversation_to_frames_attaches_the_tool_result_to_its_call():
     """A stored transcript keeps the call and its result in separate messages, so replay has to rejoin
     them or a reloaded card loses the output a live one showed."""
-    items = conversation_to_frames(_CONVERSATION, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(_CONVERSATION)
     tool = next(item for item in items if item["type"] == "tool")
     assert tool["response"] == "4"
 
@@ -726,7 +709,7 @@ def test_conversation_to_frames_omits_the_response_when_no_result_message_exists
             "tool_calls": [{"type": "function", "function": {"name": "calc", "arguments": {"x": 2}}, "id": "1"}],
         },
     ]
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(messages)
     assert items[-1] == {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}
 
 
@@ -746,54 +729,40 @@ def test_conversation_to_frames_matches_results_to_calls_by_id_not_position():
         {"role": "tool", "name": "second", "content": "B", "tool_call_id": "b"},
         {"role": "tool", "name": "first", "content": "A", "tool_call_id": "a"},
     ]
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(messages)
     assert [(item["name"], item["response"]) for item in items if item["type"] == "tool"] == [
         ("first", "A"),
         ("second", "B"),
     ]
 
 
-def test_conversation_to_frames_gating():
-    items = conversation_to_frames(_CONVERSATION, show_thinking=False, show_tools=False)
-    assert items == [
-        {"type": "user", "text": "what's 2+2?"},
-        {"type": "message", "text": "4", "proactive": False},
-    ]
-
-
 def test_conversation_to_frames_extracts_text_from_content_blocks():
     messages = [{"role": "user", "content": [{"type": "text", "text": "hi"}, {"type": "image", "url": "x"}]}]
-    assert conversation_to_frames(messages, show_thinking=True, show_tools=True) == [{"type": "user", "text": "hi"}]
+    assert conversation_to_frames(messages) == [{"type": "user", "text": "hi"}]
 
 
 def test_conversation_to_frames_empty():
-    assert conversation_to_frames([], show_thinking=True, show_tools=True) == []
+    assert conversation_to_frames([]) == []
 
 
 def test_conversation_to_frames_continuation_user_turn_renders_loop_marker_with_prompt():
     messages = [{"role": "user", "content": "Continue working.", PROVENANCE_KEY: PROVENANCE_CONTINUATION}]
-    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [
-        {"type": "loop", "text": "Continue working."}
-    ]
+    assert conversation_to_frames(messages) == [{"type": "loop", "text": "Continue working."}]
 
 
 def test_conversation_to_frames_final_answer_user_turn_renders_loop_marker_with_prompt():
     messages = [{"role": "user", "content": "Give the final answer.", PROVENANCE_KEY: PROVENANCE_FINAL_ANSWER}]
-    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [
-        {"type": "loop", "text": "Give the final answer."}
-    ]
+    assert conversation_to_frames(messages) == [{"type": "loop", "text": "Give the final answer."}]
 
 
 def test_conversation_to_frames_marks_proactive_assistant_turn():
     messages = [{"role": "assistant", "content": "Don't forget lunch.", PROVENANCE_KEY: PROVENANCE_PROACTIVE}]
-    assert conversation_to_frames(messages, show_thinking=False, show_tools=False) == [
-        {"type": "message", "text": "Don't forget lunch.", "proactive": True}
-    ]
+    assert conversation_to_frames(messages) == [{"type": "message", "text": "Don't forget lunch.", "proactive": True}]
 
 
 async def test_web_channel_send_history_emits_single_frame():
     ws = _FakeWS()
-    channel = WebChannel(ws, show_thinking=True, show_tools=True)
+    channel = WebChannel(ws)
     await channel.send_history(_CONVERSATION)
     assert len(ws.frames) == 1
     assert ws.frames[0]["type"] == "history"
@@ -911,8 +880,7 @@ def test_ws_sends_settings_on_connect(tmp_path):
     app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
     with TestClient(app).websocket_connect("/ws") as ws:
         frame = _drain_until(ws, "settings")
-    assert "show_thinking" in frame["values"]
-    assert "show_thinking" in frame["values"] and "show_tools" in frame["values"]
+    assert "planning.plan_review" in frame["values"] and "planning.show_reasoning" in frame["values"]
 
 
 def test_ws_get_and_apply_settings(tmp_path):
@@ -925,11 +893,10 @@ def test_ws_get_and_apply_settings(tmp_path):
         _drain_until(ws, "settings")  # the connect-time push
         ws.send_text(json.dumps({"type": "get_settings"}))
         _drain_until(ws, "settings")
-        # Apply a display change.
-        ws.send_text(json.dumps({"type": "settings", "values": {"show_thinking": False, "show_tools": False}}))
+        # Apply a change to a contributed setting.
+        ws.send_text(json.dumps({"type": "settings", "values": {"planning.plan_review": True}}))
         echoed = _drain_until(ws, "settings")
-    assert echoed["values"]["show_thinking"] is False
-    assert echoed["values"]["show_tools"] is False
+    assert echoed["values"]["planning.plan_review"] is True
 
 
 def _seed_task(config, name="brief", enabled=True):
@@ -1614,7 +1581,7 @@ async def test_a_second_answer_after_a_phase_replays_as_its_own_bubble():
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
-    channel = WebChannel(ws, show_tools=True)
+    channel = WebChannel(ws)
     channel.active_conversation_id = "other"
     channel.begin_catch_up("running", "plan it")
 
@@ -1653,7 +1620,7 @@ def test_conversation_to_frames_replays_an_answer_above_the_calls_it_preceded():
         {"role": "assistant", "content": "Both are changed."},
     ]
 
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(messages)
 
     assert [item["type"] for item in items] == ["user", "thinking", "message", "tool", "message"]
     assert items[2]["text"] == "I see both tasks."
@@ -1664,9 +1631,7 @@ def test_conversation_to_frames_closes_a_failed_turn_with_its_reason():
     why -- the ``_report`` line that explained it went to whichever conversation the user was viewing.
     Placed after the turn's own output, where a reader looking for the end of the turn will find it."""
     messages = [{"role": "user", "content": "scan them"}, {"role": "assistant", "content": "starting"}]
-    items = conversation_to_frames(
-        messages, show_thinking=True, show_tools=True, failure={"0": "failed: out of context"}
-    )
+    items = conversation_to_frames(messages, failure={"0": "failed: out of context"})
     assert items[-1] == {"type": "notice", "text": "failed: out of context"}
 
 
@@ -1679,9 +1644,7 @@ def test_conversation_to_frames_keeps_a_failed_turns_reason_inside_that_turn():
         {"role": "user", "content": "try again"},
         {"role": "assistant", "content": "done"},
     ]
-    items = conversation_to_frames(
-        messages, show_thinking=True, show_tools=True, failure={"0": "failed: out of context"}
-    )
+    items = conversation_to_frames(messages, failure={"0": "failed: out of context"})
     kinds = [(i["type"], i.get("text")) for i in items]
     assert kinds == [
         ("user", "scan them"),
@@ -1697,13 +1660,13 @@ def test_conversation_to_frames_inherits_the_turn_timestamp_for_a_failure_notice
         {"role": "user", "content": "scan them", "timestamp": "2026-08-19T06:43:56"},
         {"role": "assistant", "content": "starting", "timestamp": "2026-08-19T06:44:10"},
     ]
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True, failure={"0": "failed: boom"})
+    items = conversation_to_frames(messages, failure={"0": "failed: boom"})
     assert next(i for i in items if i["type"] == "notice")["ts"] == "2026-08-19T06:43:56"
 
 
 def test_conversation_to_frames_omits_the_notice_by_default():
     messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(messages)
     assert not any(i["type"] == "notice" for i in items)
 
 

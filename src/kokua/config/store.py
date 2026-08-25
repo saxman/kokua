@@ -609,8 +609,8 @@ async def apply_setting(
 ) -> AppliedSetting:
     """Coerce, apply, and persist one setting. Raises rather than reporting.
 
-    A hot-appliable change (the display flags, and whatever the installed toolsets declared as hot) is
-    applied to the live session BEFORE it is written, so a value that coerces but cannot be applied is
+    A hot-appliable change (whatever the installed toolsets declared as hot; Kokua's own core declares
+    none) is applied to the live session BEFORE it is written, so a value that coerces but cannot be applied is
     not persisted and left to break the next startup. That ordering is the whole reason this is one
     function rather than a coerce call and a write call at the call site.
 

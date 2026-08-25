@@ -32,8 +32,6 @@ class RichChannelDouble(BareChannel):
         super().__init__()
         self.calls: list[tuple[str, tuple]] = []
         self.active_conversation_id: Optional[str] = None
-        self.show_thinking = False
-        self.show_tools = False
 
     async def send_conversations(self, items: list[dict]) -> None:
         self.calls.append(("conversations", (items,)))
@@ -150,8 +148,6 @@ async def test_stream_activity_drains_and_returns_empty_without_streaming():
 def test_mirrored_attributes_are_no_ops_without_them():
     ui = ChannelUI(BareChannel())
     ui.set_active_conversation("c1")  # no error
-    ui.set_display_flag("show_thinking", True)
-    assert ui.display_flag("show_thinking", False) is False  # falls back to the caller's default
 
 
 # --- pass-through on a rich channel ---------------------------------------------------------------
@@ -196,12 +192,9 @@ def test_mirrored_attributes_reach_a_rich_channel():
     channel = RichChannelDouble()
     ui = ChannelUI(channel)
     ui.set_active_conversation("c1")
-    ui.set_display_flag("show_thinking", True)
     ui.begin_catch_up("c1", "hi", ["/tmp/a.png"])
     ui.end_catch_up("c1")
     assert channel.active_conversation_id == "c1"
-    assert channel.show_thinking is True
-    assert ui.display_flag("show_thinking", False) is True  # the channel's copy wins
     assert channel.calls == [("begin_catch_up", ("c1", "hi", ["/tmp/a.png"])), ("end_catch_up", ("c1",))]
 
 

@@ -41,15 +41,12 @@ def test_file_overrides_built_in_defaults():
         [assistant]
         model = "anthropic:claude-sonnet-4-6"
         concurrent_tools = false
-        [display]
-        show_thinking = false
         [web]
         port = 9100
         """
     )
     cfg = _resolve()
     assert cfg.model == "anthropic:claude-sonnet-4-6"
-    assert cfg.show_thinking is False
     assert cfg.concurrent_tools is False
     assert cfg.port == 9100
 
@@ -167,7 +164,7 @@ def test_every_unmatchable_lock_pattern_fails_startup(tmp_path, pattern, fault):
         "*",
         "agents.*",
         "security.*",
-        "display.*",
+        "logging.*",
         "email.to",
         "paths.data_dir",
         "scheduling.task.*",
@@ -398,8 +395,7 @@ def test_agent_cache_cap_parsed(tmp_path, monkeypatch):
 
 def test_coerce_config_string_scalars():
     assert settings.coerce_config_string("assistant", "model", "anthropic:x", table=core_table()) == "anthropic:x"
-    assert settings.coerce_config_string("display", "show_thinking", "false", table=core_table()) is False
-    assert settings.coerce_config_string("display", "show_tools", "true", table=core_table()) is True
+    assert settings.coerce_config_string("assistant", "concurrent_tools", "false", table=core_table()) is False
     assert settings.coerce_config_string("web", "port", "9100", table=core_table()) == 9100
 
 
@@ -440,7 +436,7 @@ def test_shipped_example_loads_cleanly(caplog):
     assert not any(rec.levelno >= logging.WARNING for rec in caplog.records)
     assert overrides  # the example leaves several keys active at their default
     cfg = _resolve()
-    assert cfg.show_thinking is True
+    assert cfg.concurrent_tools is True
 
 
 def test_explicit_missing_file_is_also_an_error(tmp_path):

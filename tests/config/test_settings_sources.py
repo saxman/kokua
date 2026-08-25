@@ -54,7 +54,12 @@ def test_a_cold_declaration_stays_out_of_the_table_but_still_has_a_schema_entry(
 
 
 def test_kokuas_own_settings_survive_a_contributed_table():
-    assert build_settings_table([_toolset(HOT)]).by_field("show_tools") is not None
+    """A contributed declaration is appended to the core's, never substituted for it. ``CORE_RUNTIME_SETTINGS``
+    is empty today, so this reads as a tautology; it is the guard that keeps the next core entry from being
+    dropped by a table a toolset contributes to."""
+    table = build_settings_table([_toolset(HOT)])
+    assert table.settings[: len(CORE_RUNTIME_SETTINGS)] == CORE_RUNTIME_SETTINGS
+    assert table.by_toml("widgets", "rounds") is not None
 
 
 def test_seeding_fills_a_declared_default_without_overwriting_what_the_file_set():
@@ -75,13 +80,12 @@ def test_a_toolset_named_after_a_core_section_may_not_declare_settings():
     """A toolset's section is always its own name, and a contributed entry wins the schema merge, so a
     plugin named ``email`` declaring ``host`` would route [email].host into its own bucket and leave
     ``AssistantConfig.email_host`` unset -- the email capability switching itself off in a config nobody
-    edited. Every section the core parses is refused, including the structured tables, the ones only the
-    settings table declares (``display``), and a section a removed key used to live in (``tools``,
-    ``subagents``) -- without which a toolset named ``tools`` would pass this check only to hit
-    ``load``'s "[tools] is gone." branch for every key instead."""
+    edited. Every section the core parses is refused, including the structured tables, whatever section
+    the settings table declares (none today, since ``CORE_RUNTIME_SETTINGS`` is empty), and a section a
+    removed key used to live in (``tools``, ``subagents``) -- without which a toolset named ``tools`` would
+    pass this check only to hit ``load``'s "[tools] is gone." branch for every key instead."""
     for reserved in (
         "email",
-        "display",
         "assistant",
         "security",
         "paths",
@@ -244,7 +248,7 @@ def test_a_section_only_kokua_defaulted_is_not_reported_as_configured(monkeypatc
     """Seeding fills every declared key, so afterwards only ``configured_sections`` can still tell a
     section the user wrote from one Kokua supplied."""
     monkeypatch.setattr(settings_sources, "declaring_toolsets", lambda: [_toolset(HOT, COLD)])
-    _write_config("[display]\nshow_tools = false\n")
+    _write_config('[logging]\nlevel = "INFO"\n')
 
     config = _resolve()
 

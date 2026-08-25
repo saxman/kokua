@@ -51,7 +51,7 @@ Then [architecture](docs/explanation/architecture.md) for the whole map, and [de
 kokua --frontend web
 ```
 
-Reasoning, tool calls, tool results, sub-agent cards, and plan phases are all visible by default, because `show_thinking` and `show_tools` start on. You watch the loop instead of inferring it: what the model was thinking, which tool it chose, what arguments it passed, what came back, and what it did next. Ask for something on a schedule and watch the task fire on its own. Send `/plan <task>` and the assistant shows you the plan it drafted before it acts on it; turn on adversarial review and *Show all reasoning* (see [Planning and self-review](#planning-and-self-review)) and every call in that turn, planner through reviewer through executor, streams under its own labeled phase. `/diag` reports the in-flight turn and the gate state even when a turn is stuck, and `kokua --list-toolsets` prints every capability this install can offer, grouped by what provides it.
+Reasoning, tool calls, tool results, sub-agent cards, and plan phases are all visible by default: the core streams every one of them and leaves it to a front end to decide how to draw them. You watch the loop instead of inferring it: what the model was thinking, which tool it chose, what arguments it passed, what came back, and what it did next. Ask for something on a schedule and watch the task fire on its own. Send `/plan <task>` and the assistant shows you the plan it drafted before it acts on it; turn on adversarial review and *Show all reasoning* (see [Planning and self-review](#planning-and-self-review)) and every call in that turn, planner through reviewer through executor, streams under its own labeled phase. `/diag` reports the in-flight turn and the gate state even when a turn is stuck, and `kokua --list-toolsets` prints every capability this install can offer, grouped by what provides it.
 
 The entire state of a running assistant is plain files under `~/.kokua`, so you can read what it remembers while it is still running.
 
@@ -67,7 +67,7 @@ The practical consequence: the assistant core is a few hundred lines that knows 
 
 ## Install
 
-Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer.
+Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.23.0 or newer.
 
 ```bash
 uv sync --all-extras --no-sources        # AIMU from PyPI; what you want to just run Kokua
@@ -82,7 +82,7 @@ The `web` extra (included in `--all-extras`, or `pip install '.[web]'`) adds the
 > uv sync --all-extras                        # installs ../aimu editable; picks up your edits live
 > ```
 >
-> The `aimu>=0.21.0` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
+> The `aimu>=0.23.0` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
 
 ## Quick start
 
@@ -100,11 +100,11 @@ Two commands worth knowing: **`/stop`** cancels a reply that's still streaming a
 
 ### The turn loop, in the open
 
-- **The loop is the interface.** With `show_thinking` and `show_tools` on by default, a turn arrives as a sequence of typed frames rather than a finished answer: the model's reasoning, each tool call with its arguments, each result, a card per sub-agent, a header per plan phase. Those frames are optional, and every one of them degrades exactly once, in `ChannelUI`, to a documented fallback, so the CLI shows the same loop with less decoration rather than showing less of the loop.
+- **The loop is the interface.** A turn arrives as a sequence of typed frames rather than a finished answer: the model's reasoning, each tool call with its arguments, each result, a card per sub-agent, a header per plan phase. Those frames are optional, and every one of them degrades exactly once, in `ChannelUI`, to a documented fallback, so the CLI shows the same loop with less decoration rather than showing less of the loop.
 - **A reactive turn runs as a background handle.** [`core/turns.py`](src/kokua/core/turns.py) opens with seven concurrency invariants, each naming the bug it prevents. The turn runs as an AIMU `RunHandle` while the channel keeps reading, and that one decision is what makes the rest work: **`/stop`** can cancel a reply mid-stream and keep the partial turn, and a web Allow/Deny click can reach the tool call still waiting on it.
 - **Switching conversations does not cancel a turn.** Each conversation owns its own agent and model client, so a reply you walk away from keeps running: it persists to its own conversation, mutes its stream, and posts a dismissible notification when it lands. Switch back into one still working and it catches you up (the reasoning, tool calls, and answer so far, with a pulsing indicator and Stop in the composer) then keeps streaming from where it left off.
 - **Tool calls show their results.** A tool card carries what the call returned as well as what it was called with, in a nested foldable labeled with the result's size and clamped behind a "show all" button. It renders as plain text rather than markdown, because a tool result is untrusted input: whatever a web page or an MCP server just returned is now in the model's context, and it does not get to be markup. Results show on live cards, on a background turn's catch-up, inside a sub-agent's card, and on reload, where a stored call is rejoined to its result by `tool_call_id` so a replayed card shows what the live one did.
-- **Replayable transcripts.** Reloading replays the conversation, reasoning and tool calls included when `show_thinking` / `show_tools` are on. Auxiliary blocks (thinking, tool calls, phases, sub-agent cards, drafted plans) come back collapsed behind a one-line header carrying the call, its condensed arguments, and a result size, while messages and prompts stay open.
+- **Replayable transcripts.** Reloading replays the conversation, reasoning and tool calls included: what streamed live is what comes back. Auxiliary blocks (thinking, tool calls, phases, sub-agent cards, drafted plans) come back collapsed behind a one-line header carrying the call, its condensed arguments, and a result size, while messages and prompts stay open.
 
 ### Tools, and how an agent gets one
 

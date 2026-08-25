@@ -19,7 +19,7 @@ _STARTUP_NOTICE = (
 
 async def run(config: AssistantConfig, args: argparse.Namespace) -> None:
     print(_STARTUP_NOTICE, file=sys.stderr)
-    channel = CLIChannel(show_thinking=config.show_thinking, show_tools=config.show_tools)
+    channel = CLIChannel()
     try:
         assistant = await Assistant.create(config, channel)
     except ModelClientError as e:

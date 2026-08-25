@@ -150,19 +150,16 @@ def _tool_results_by_call_id(messages: list[dict]) -> dict[str, str]:
 def conversation_to_frames(
     messages: list[dict],
     *,
-    show_thinking: bool,
-    show_tools: bool,
     subagent: Optional[dict] = None,
     trace: Optional[dict] = None,
     failure: Optional[dict] = None,
 ) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
-    Mirrors the live stream order per assistant message: reasoning, then the answer, then the tool calls,
-    each gated by the same ``show_thinking`` / ``show_tools`` flags the live stream uses. That is the
-    order the message was written in -- a model emits its prose and then the calls it decided to make --
-    so a reload leaves a turn where the user watched it arrive instead of sinking its prose below the
-    cards. The system message is omitted (live chat shows none).
+    Mirrors the live stream order per assistant message: reasoning, then the answer, then the tool calls.
+    That is the order the message was written in -- a model emits its prose and then the calls it decided
+    to make -- so a reload leaves a turn where the user watched it arrive instead of sinking its prose
+    below the cards. The system message is omitted (live chat shows none).
 
     A ``role: "tool"`` message is not replayed as an item of its own, but its content is rejoined to the
     call it answers (see :func:`_tool_results_by_call_id`) and rides that call's item as ``response``, so
@@ -254,29 +251,28 @@ def conversation_to_frames(
                 # The preceding user turn was verbose; its trace already contains this final answer
                 # (in its last Executor phase), so don't emit it again as a separate message.
                 continue
-            if show_thinking and message.get("thinking"):
+            if message.get("thinking"):
                 add({"type": "thinking", "text": message["thinking"]}, ts)
             text = _text_of(message.get("content"))
             if text:
                 add({"type": "message", "text": text, "proactive": provenance == PROVENANCE_PROACTIVE}, ts)
-            if show_tools:
-                for call in message.get("tool_calls") or []:
-                    fn = call.get("function", {})
-                    name = fn.get("name")
-                    if name == SPAWN_SUBAGENT_TOOL_NAME:
-                        continue  # shown as its own subagent card instead; see SPAWN_SUBAGENT_TOOL_NAME
-                    add(
-                        {
-                            "type": "tool",
-                            "name": name,
-                            "arguments": fn.get("arguments"),
-                            "response": results.get(call.get("id")),
-                        },
-                        ts,
-                    )
+            for call in message.get("tool_calls") or []:
+                fn = call.get("function", {})
+                name = fn.get("name")
+                if name == SPAWN_SUBAGENT_TOOL_NAME:
+                    continue  # shown as its own subagent card instead; see SPAWN_SUBAGENT_TOOL_NAME
+                add(
+                    {
+                        "type": "tool",
+                        "name": name,
+                        "arguments": fn.get("arguments"),
+                        "response": results.get(call.get("id")),
+                    },
+                    ts,
+                )
         elif role == "tool":
             # Tool results are otherwise not replayed, but a generate_image result carries an /images/
-            # reference the user asked to see, so surface it as an image (regardless of show_tools).
+            # reference the user asked to see, so surface it as an image of its own.
             for url in _image_refs_of(message.get("content")):
                 add({"type": "image", "url": url, "from": "assistant"}, ts)
     flush_failure()  # the last turn ends at the end of the transcript
@@ -370,8 +366,8 @@ class _CatchUpRecord:
 class WebChannel(BaseWebChannel):
     """AIMU's ``WebChannel`` plus Kokua's conversation-sidebar, history-replay, and approval frames."""
 
-    def __init__(self, websocket: Any, *, show_thinking: bool = False, show_tools: bool = False):
-        super().__init__(websocket, show_thinking=show_thinking, show_tools=show_tools)
+    def __init__(self, websocket: Any):
+        super().__init__(websocket)
         # The conversation this socket is currently viewing (set by the front end). None until then,
         # which _foreground() treats as "always foreground" (nothing to compare against).
         self.active_conversation_id: Optional[str] = None
@@ -496,10 +492,9 @@ class WebChannel(BaseWebChannel):
     async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
         """Stream the agentic loop live and return the accumulated GENERATING text.
 
-        Mirrors the base ``send()`` per-chunk mapping (thinking / tool / loop-boundary frames, gated by
-        ``show_thinking`` / ``show_tools``) but emits no ``done`` terminator, so the turn keeps its
-        processing state (``/stop`` still works) until the caller sends the final frame. ``GENERATING`` is
-        withheld by default (the caller shows the returned text once it's ready -- a reviewed answer or a
+        Mirrors the base ``send()`` per-chunk mapping (thinking / tool / loop-boundary frames) but emits
+        no ``done`` terminator, so the turn keeps its processing state (``/stop`` still works) until the
+        caller sends the final frame. ``GENERATING`` is withheld by default (the caller shows the returned text once it's ready -- a reviewed answer or a
         plan bubble); with ``show_answer=True`` it is also streamed as ``token`` frames (verbose trace,
         where every version and each reviewer's prose is shown live).
 
@@ -520,9 +515,9 @@ class WebChannel(BaseWebChannel):
                     parts.append(chunk.content)
                     if show_answer and chunk.content:
                         await self.send_frame({"type": "token", "text": chunk.content})
-            elif chunk.phase == StreamingContentType.THINKING and self.show_thinking and chunk.content:
+            elif chunk.phase == StreamingContentType.THINKING and chunk.content:
                 await self.send_frame({"type": "thinking", "text": chunk.content})
-            elif chunk.phase == StreamingContentType.TOOL_CALLING and self.show_tools:
+            elif chunk.phase == StreamingContentType.TOOL_CALLING:
                 call = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame(
                     {
@@ -578,8 +573,6 @@ class WebChannel(BaseWebChannel):
         meta = metadata or {}
         items = conversation_to_frames(
             messages,
-            show_thinking=self.show_thinking,
-            show_tools=self.show_tools,
             subagent=meta.get("subagent"),
             trace=meta.get("trace"),
             failure=meta.get("failure"),

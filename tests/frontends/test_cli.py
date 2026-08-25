@@ -56,7 +56,7 @@ async def test_run_builds_the_assistant_and_serves_until_the_channel_closes(tmp_
     assert "[notice]" in capsys.readouterr().err  # the no-sandbox warning reaches the user
 
 
-async def test_run_passes_the_display_flags_to_the_channel(tmp_path, monkeypatch):
+async def test_run_constructs_the_channel_with_no_arguments(tmp_path, monkeypatch):
     captured = {}
 
     class _Channel:
@@ -83,14 +83,14 @@ async def test_run_passes_the_display_flags_to_the_channel(tmp_path, monkeypatch
 
     config = AssistantConfig(
         data_dir=tmp_path,
-        show_thinking=False,
-        show_tools=True,
         agents=example_agents(),
         entry_agent="assistant",
     )
     await cli_frontend.run(config, args=None)
 
-    assert captured == {"show_thinking": False, "show_tools": True}
+    # Nothing to thread: what reaches the terminal is AIMU's channel default, not a Kokua setting. This
+    # fails the moment a flag is threaded back in without a config key and a doc to go with it.
+    assert captured == {}
 
 
 async def test_run_reports_an_unbuildable_model_and_exits_nonzero(tmp_path, monkeypatch, capsys):

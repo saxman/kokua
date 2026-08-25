@@ -198,9 +198,7 @@ async def test_a_hot_contributed_setting_written_mid_turn_reaches_the_same_conte
             captured["before"] = self.ctx.settings.review_rounds
             # Applied directly with RuntimeSetting.write, not through SettingsApplier.apply: that path
             # takes an exclusive gate hold, which this turn already holds, and would deadlock against it.
-            RuntimeSetting("review_rounds", "planning", int, toolset="planning").write(
-                self.ctx.config, 9, lambda field, value: None
-            )
+            RuntimeSetting("review_rounds", "planning", int, toolset="planning").write(self.ctx.config, 9)
             captured["after"] = self.ctx.settings.review_rounds
             return WorkflowResult(committed=False)
 

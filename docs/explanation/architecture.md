@@ -522,12 +522,22 @@ folder into a skill script the *entry* agent runs (see
 [What a skill script sees](#what-a-skill-script-sees) above). That was a signature check, the shape this
 probe has taken twice.
 
-The repository floor is now `aimu>=0.21.0`, for the `resolve_default_text_model` export that
-[`default_model`](#the-model-every-agent-runs-on) calls, and the probe grips that name. It is the
-cleanest case this preflight has had: the capability *is* the exported symbol, so a plain name lookup
-asks exactly the question that matters, where the three shapes before it each had to settle for the
-nearest available handle. The probe covers one surface at a time; the version floor is what covers every
-earlier release's.
+AIMU 0.21.0 raised the floor for the `resolve_default_text_model` export that
+[`default_model`](#the-model-every-agent-runs-on) calls, and while that was the newest surface the probe
+gripped that name. It is the cleanest case this preflight has had: the capability *is* the exported
+symbol, so a plain name lookup asks exactly the question that matters, where the shapes before it each
+had to settle for the nearest available handle.
+
+The repository floor is now `aimu>=0.23.0`, which renamed the channel flags `show_thinking` /
+`show_tools` to `stream_thinking` / `stream_tools` and flipped both defaults to `True`. Kokua deleted its
+own display settings in the same change and constructs both channels bare, so that default is what puts
+reasoning and tool calls in front of a user at all. The probe is a signature check on
+`aio.WebChannel.__init__` for `stream_thinking`: the parameter is not itself the capability (the default
+value is), but the rename and the flip shipped together, so the new name dates a checkout past both.
+Against an older AIMU the bare construction still works and streams neither phase, and since Kokua no
+longer reads `self.show_thinking` anywhere there is not even an `AttributeError` to notice -- which is
+the failure mode this preflight exists for. The probe covers one surface at a time; the version floor is
+what covers every earlier release's.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
@@ -561,7 +571,9 @@ patterns and what removing each one permits. `update_config` applies hot-appliab
 Which settings are hot is not a list maintained by hand in several places: it is
 `config/table.py`'s `SettingsTable`, built once at startup from `CORE_RUNTIME_SETTINGS` plus every
 toolset's own hot `Setting`s, and every consumer -- the schema, the incoming-payload sanitizer, the
-live-apply loop, the channel mirroring, and the persist path -- loops over that one instance. The
+live-apply loop, and the persist path -- loops over that one instance. `CORE_RUNTIME_SETTINGS` is empty
+today: every hot setting a run holds arrives from a toolset, so the table's contents depend on which
+toolsets are installed. The
 sanitizer predates the removal of the web settings window and outlived it: `update_config` is now its
 only caller, so "panel" in the surrounding code names a surface that no longer exists.
 
@@ -847,8 +859,8 @@ but still replays its own spawn cards, since a sub-agent it spawned is not part 
 the create event's id, not by event shape, since a spawn whose text streamed closes with a status-only
 event indistinguishable from a reviewer's verdict. The
 page's `renderSubagent` builds or updates one foldable card per id, filling its body as `append` frames
-arrive; nested reasoning honors `show_thinking` and nested tool calls honor `show_tools`, the same flags
-the top-level turn uses, while the card itself and its generated text always show.
+arrive; a nested reasoning chunk and a nested tool call are reported the same way a top-level one is,
+with nothing in the core deciding whether they are worth sending.
 
 A card's body is built from the page's own top-level components, not from card-specific markup:
 `addFoldable` and `renderTool` take an optional parent element (`opts.parent`), so a nested `thinking`

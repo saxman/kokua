@@ -2,7 +2,9 @@
 
 The `test_every_core_runtime_setting_*` tests are the enforcement mechanism for the table's promise:
 adding a core runtime setting is one CORE_RUNTIME_SETTINGS entry, one AssistantConfig field, and one
-web-panel input. They fail loudly if an entry is added without its counterparts.
+web-panel input. They fail loudly if an entry is added without its counterparts. They pass vacuously
+today, since CORE_RUNTIME_SETTINGS is empty -- which is why the core half of the mechanism is exercised
+through `_CORE_DOUBLE` below instead of through a shipped entry.
 """
 
 from __future__ import annotations
@@ -20,8 +22,16 @@ from kokua.config.table import (
 )
 
 
+# A stand-in core entry. Kokua ships none right now, but the table still has to handle one: the core
+# half of read/write, the bare wire key, and the duplicate-key message all describe that case, and the
+# next core setting should find the machinery already tested. ``concurrent_tools`` is a real
+# ``AssistantConfig`` field so the attribute writes below land somewhere, under a fictional ``[core]``
+# section so this double cannot claim a key the shipped schema owns.
+_CORE_DOUBLE = RuntimeSetting("concurrent_tools", "core", bool)
+
+
 def _table() -> SettingsTable:
-    """The core table plus a third party's two settings.
+    """The core stand-in plus a third party's three settings.
 
     A fictional ``widgets`` toolset rather than a shipped one (``planning``), so these tests describe the
     mechanism and not one capability's current declaration.
@@ -29,6 +39,7 @@ def _table() -> SettingsTable:
     return SettingsTable(
         [
             *CORE_RUNTIME_SETTINGS,
+            _CORE_DOUBLE,
             RuntimeSetting("verbose", "widgets", bool, toolset="widgets"),
             RuntimeSetting("rounds", "widgets", int, toolset="widgets"),
             RuntimeSetting("label", "widgets", str, toolset="widgets"),
@@ -43,7 +54,7 @@ def test_a_contributed_setting_is_hot_and_findable_by_its_toml_location():
 
 
 def test_a_core_setting_keeps_a_bare_wire_key():
-    assert SettingsTable(CORE_RUNTIME_SETTINGS).by_field("show_tools").wire_key == "show_tools"
+    assert SettingsTable([_CORE_DOUBLE]).by_field("concurrent_tools").wire_key == "concurrent_tools"
 
 
 def test_a_contributed_setting_is_namespaced_on_the_wire():
@@ -53,13 +64,13 @@ def test_a_contributed_setting_is_namespaced_on_the_wire():
 def test_sanitize_accepts_both_wire_shapes_and_drops_junk():
     cleaned = _table().sanitize(
         {
-            "show_tools": True,
+            "concurrent_tools": True,
             "widgets.verbose": True,
             "widgets.rounds": "not an int",
             "unknown": 1,
         }
     )
-    assert cleaned["show_tools"] is True
+    assert cleaned["concurrent_tools"] is True
     assert cleaned["widgets.verbose"] is True
     assert "widgets.rounds" not in cleaned
     assert "unknown" not in cleaned
@@ -69,17 +80,18 @@ def test_a_contributed_setting_reads_and_writes_the_toolset_bucket():
     config = AssistantConfig(toolset_settings={"widgets": {"verbose": False}})
     setting = _table().by_toml("widgets", "verbose")
 
-    assert setting.read(config, lambda name, default: default) is False
-    setting.write(config, True, lambda name, value: None)
+    assert setting.read(config) is False
+    setting.write(config, True)
     assert config.toolset_settings["widgets"]["verbose"] is True
 
 
 def test_a_core_setting_still_reads_and_writes_a_config_attribute():
     config = AssistantConfig()
-    setting = SettingsTable(CORE_RUNTIME_SETTINGS).by_field("show_tools")
+    setting = SettingsTable([_CORE_DOUBLE]).by_field("concurrent_tools")
 
-    setting.write(config, False, lambda name, value: None)
-    assert config.show_tools is False
+    assert setting.read(config) is True
+    setting.write(config, False)
+    assert config.concurrent_tools is False
 
 
 def test_the_toml_schema_covers_contributed_sections():
@@ -101,8 +113,8 @@ def test_the_duplicate_message_names_both_sides():
     """The core-versus-toolset case, which is what makes naming both sides worth doing. ``settings_sources``
     refuses a toolset named after a core section before it can reach here, so this is the backstop that
     makes that refusal not the only thing standing between the panel and one key written to two places."""
-    with pytest.raises(ValueError, match="Kokua's core and toolset 'display'"):
-        SettingsTable([*CORE_RUNTIME_SETTINGS, RuntimeSetting("show_tools", "display", bool, toolset="display")])
+    with pytest.raises(ValueError, match="Kokua's core and toolset 'core'"):
+        SettingsTable([_CORE_DOUBLE, RuntimeSetting("concurrent_tools", "core", bool, toolset="core")])
 
 
 def test_every_core_runtime_setting_is_an_assistant_config_field():
@@ -158,10 +170,10 @@ def test_sanitize_drops_a_key_no_setting_declares():
 
 
 def test_sanitize_strings_and_flags():
-    result = _table().sanitize({"widgets.label": "  x  ", "show_thinking": True, "show_tools": "yes"})
+    result = _table().sanitize({"widgets.label": "  x  ", "concurrent_tools": True, "widgets.verbose": "yes"})
     assert result["widgets.label"] == "x"  # trimmed
-    assert result["show_thinking"] is True
-    assert "show_tools" not in result  # non-bool dropped
+    assert result["concurrent_tools"] is True
+    assert "widgets.verbose" not in result  # non-bool dropped
 
 
 def test_sanitize_blank_string_omitted():

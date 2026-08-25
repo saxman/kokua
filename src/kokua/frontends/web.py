@@ -187,7 +187,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             await websocket.close()
             return
         busy["active"] = True
-        channel = WebChannel(websocket, show_thinking=config.show_thinking, show_tools=config.show_tools)
+        channel = WebChannel(websocket)
         try:
             await serve_connection(websocket, channel)
         finally:

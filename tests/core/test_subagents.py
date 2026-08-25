@@ -11,8 +11,8 @@ from kokua.core.subagents import SubagentReporter, subagent_events
 from tests.channels import SubagentCapturingChannel
 
 
-def _reporter(model_for=lambda agent_type: None, thinking_for=lambda agent_type: None, **flags):
-    channel = SubagentCapturingChannel(**flags)
+def _reporter(model_for=lambda agent_type: None, thinking_for=lambda agent_type: None):
+    channel = SubagentCapturingChannel()
     return SubagentReporter(ChannelUI(channel), model_for=model_for, thinking_for=thinking_for), channel
 
 
@@ -55,28 +55,25 @@ async def test_generic_spawn_without_a_role_still_names_the_card():
     assert channel.subagent_frames[0]["role"] == "subagent"
 
 
-async def test_nested_reasoning_needs_show_thinking():
-    reporter, channel = _reporter(show_thinking=False)
-    _collect()
-    await reporter.spawned("r-1", "researcher", "find X")
-    await reporter.chunk("r-1", _thinking("hmm"))
-    assert len(channel.subagent_frames) == 1
-
-    reporter, channel = _reporter(show_thinking=True)
+async def test_nested_reasoning_reaches_the_card():
+    reporter, channel = _reporter()
     _collect()
     await reporter.spawned("r-1", "researcher", "find X")
     await reporter.chunk("r-1", _thinking("hmm"))
     assert channel.subagent_frames[-1] == {"id": "r-1", "append": {"kind": "reasoning", "text": "hmm"}}
 
 
-async def test_nested_tool_calls_need_show_tools():
-    reporter, channel = _reporter(show_tools=False)
+async def test_nested_reasoning_with_no_text_appends_nothing():
+    """An empty THINKING chunk would open a reasoning block with nothing in it."""
+    reporter, channel = _reporter()
     _collect()
     await reporter.spawned("r-1", "researcher", "find X")
-    await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "https://example.com"}))
+    await reporter.chunk("r-1", _thinking(""))
     assert len(channel.subagent_frames) == 1
 
-    reporter, channel = _reporter(show_tools=True)
+
+async def test_nested_tool_calls_reach_the_card():
+    reporter, channel = _reporter()
     _collect()
     await reporter.spawned("r-1", "researcher", "find X")
     await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "https://example.com"}))
@@ -94,17 +91,16 @@ async def test_nested_tool_calls_need_show_tools():
 async def test_a_nested_tool_entry_carries_what_the_call_returned():
     """A sub-agent's card is the only place its nested calls are ever shown, so dropping the result
     would leave no way to see what the spawn actually retrieved."""
-    reporter, channel = _reporter(show_tools=True)
+    reporter, channel = _reporter()
     _collect()
     await reporter.spawned("r-1", "researcher", "find X")
     await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "https://example.com"}, "<html>X</html>"))
     assert channel.subagent_frames[-1]["append"]["response"] == "<html>X</html>"
 
 
-async def test_generated_text_streams_chunk_by_chunk_and_is_not_gated():
-    """The card's text arrives live like the parent's own answer, which the display flags don't gate
-    either."""
-    reporter, channel = _reporter(show_thinking=False, show_tools=False)
+async def test_generated_text_streams_chunk_by_chunk():
+    """The card's text arrives live, like the parent's own answer."""
+    reporter, channel = _reporter()
     _collect()
     await reporter.spawned("r-1", "researcher", "find X")
     await reporter.chunk("r-1", _generating("half "))
@@ -144,7 +140,7 @@ async def test_answer_chunks_coalesce_when_recorded_but_arrive_as_separate_frame
 async def test_a_tool_call_between_two_generations_starts_a_second_answer_entry():
     """One answer entry per round, so a multi-round spawn reads as rounds rather than one run-on
     block. The parent's own iterations are separated the same way, by its continuation marker."""
-    reporter, _channel = _reporter(show_tools=True)
+    reporter, _channel = _reporter()
     events = _collect()
     await reporter.spawned("r-1", "researcher", "find X")
     await reporter.chunk("r-1", _generating("first round"))
@@ -222,7 +218,7 @@ async def test_a_cancelled_spawn_records_before_it_tries_to_send():
 
 
 async def test_events_are_recorded_for_replay_and_reasoning_is_coalesced():
-    reporter, _channel = _reporter(show_thinking=True)
+    reporter, _channel = _reporter()
     events = _collect()
     await reporter.spawned("r-1", "researcher", "find X")
     await reporter.chunk("r-1", _thinking("one "))
@@ -236,7 +232,7 @@ async def test_events_are_recorded_for_replay_and_reasoning_is_coalesced():
 
 
 async def test_coalescing_never_merges_across_two_concurrent_spawns():
-    reporter, _channel = _reporter(show_thinking=True)
+    reporter, _channel = _reporter()
     events = _collect()
     await reporter.spawned("r-1", "researcher", "a")
     await reporter.spawned("r-2", "researcher", "b")
@@ -253,7 +249,7 @@ async def test_coalescing_survives_interleaving_with_another_turns_activity():
     turn's coalescing state; this drives two turns as real overlapping tasks, each with its own
     subagent_events list, and asserts each still coalesces its own consecutive chunks into one entry,
     in order, despite the interleaving."""
-    reporter, _channel = _reporter(show_thinking=True)
+    reporter, _channel = _reporter()
 
     async def run_turn(spawn_id, chunks):
         events: list[dict] = []
@@ -278,7 +274,7 @@ async def test_coalescing_survives_interleaving_with_another_turns_activity():
 
 
 async def test_recording_is_a_copy_so_coalescing_cannot_mutate_a_sent_frame():
-    reporter, channel = _reporter(show_thinking=True)
+    reporter, channel = _reporter()
     _collect()
     await reporter.spawned("r-1", "researcher", "find X")
     await reporter.chunk("r-1", _thinking("one "))

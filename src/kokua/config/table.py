@@ -1,16 +1,16 @@
 """The table of runtime-mutable settings, and the sanitizer for an incoming settings payload.
 
-A *runtime* setting is one the user can change without restarting: the display flags, the planning
-flags, and whatever a toolset declared as hot. Everything else in ``config.toml`` is startup-only and
-is declared in ``config.file._STARTUP_SCHEMA`` instead. The model is one of those, not a runtime
+A *runtime* setting is one the user can change without restarting: the planning flags, and whatever
+else a toolset declared as hot. Everything else in ``config.toml`` is startup-only and is declared in
+``config.file._STARTUP_SCHEMA`` instead. The model is one of those, not a runtime
 setting, however much it reads like one: nothing rebinds a live client, so a hot ``update_config``
 write for it could only report a change it had not made (see
 ``core.settings_runtime``, which says the same from the applying end).
 
-The table is the single declaration of that set. It drives, in one place, what used to be repeated
-across nine sites: the TOML schema entry, the incoming-payload sanitizer, the hot-appliable key set that
-``update_config`` checks, the settings dict a client reads back, the live-apply loop, the
-channel-mirroring of the display flags, and the persist loop.
+The table is the single declaration of that set. It drives, in one place, what used to be repeated at
+every consumer: the TOML schema entry, the incoming-payload sanitizer, the hot-appliable key set that
+``update_config`` checks, the settings dict a client reads back, the live-apply loop, and the persist
+loop.
 
 A runtime setting may be Kokua's own or a toolset's, and the two are added differently:
 
@@ -39,7 +39,7 @@ cold keys are what keep "absent means absent" true.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 TYPE_LABELS = {bool: "a boolean", str: "a string", int: "an integer"}
 
@@ -53,9 +53,6 @@ class RuntimeSetting:
     while a contributed one is ``config.toolset_settings[toolset][key]``. Reading and writing go through
     :meth:`read` and :meth:`write` so no caller has to know which kind it holds.
 
-    ``mirror_on_channel`` also sets the attribute on the channel, which is how the display flags reach
-    ``WebChannel`` while it is streaming.
-
     There is no ``hot`` flag: being in the table *is* what makes a setting hot.
     """
 
@@ -63,7 +60,6 @@ class RuntimeSetting:
     section: str
     kind: type
     key: Optional[str] = None
-    mirror_on_channel: bool = False
     toolset: Optional[str] = None
 
     @property
@@ -85,42 +81,33 @@ class RuntimeSetting:
         """The human phrase a ConfigError uses ("must be a boolean")."""
         return TYPE_LABELS[self.kind]
 
-    def read(self, config, display_flag: Callable[[str, Any], Any]) -> Any:
-        """This setting's effective value.
-
-        ``display_flag`` resolves a mirrored flag from the channel, whose copy wins: that is the one
-        actually consulted while streaming.
-        """
+    def read(self, config) -> Any:
+        """This setting's effective value."""
         if self.toolset:
             value = config.toolset_settings.get(self.toolset, {}).get(self.toml_key)
         else:
             value = getattr(config, self.field)
         if self.kind is str:
             return str(value) if value else ""
-        if self.mirror_on_channel:
-            return display_flag(self.field, value)
         return value
 
-    def write(self, config, value: Any, set_display_flag: Callable[[str, Any], None]) -> None:
-        """Apply a value to the live config, mirroring it onto the channel when this flag is mirrored."""
+    def write(self, config, value: Any) -> None:
+        """Apply a value to the live config."""
         if self.toolset:
             config.toolset_settings.setdefault(self.toolset, {})[self.toml_key] = value
         else:
             setattr(config, self.field, value)
-        if self.mirror_on_channel:
-            set_display_flag(self.field, value)
 
 
 # The settings Kokua's own core owns, each backed by an ``AssistantConfig`` field. Whatever the installed
 # toolsets declared is appended to these to form the live table (see ``config.settings_sources``).
 #
-# Short on purpose: a setting belongs here only if the core itself reads it. Everything a capability
-# reads is that capability's own declaration, which is where the [planning] flags live (see
-# ``toolsets.planning.PLANNING_SETTINGS``).
-CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = (
-    RuntimeSetting("show_thinking", "display", bool, mirror_on_channel=True),
-    RuntimeSetting("show_tools", "display", bool, mirror_on_channel=True),
-)
+# Currently empty, and that is the expected state rather than a gap: a setting belongs here only if the
+# core itself reads it, and everything a capability reads is that capability's own declaration, which is
+# where the [planning] flags live (see ``toolsets.planning.PLANNING_SETTINGS``). The last two entries were
+# the display flags, retired when what reaches a channel stopped being a user setting (see
+# ``channels.protocol``).
+CORE_RUNTIME_SETTINGS: tuple[RuntimeSetting, ...] = ()
 
 
 def _coerce_runtime(value: Any, setting: RuntimeSetting) -> Optional[Any]:

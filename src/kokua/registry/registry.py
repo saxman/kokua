@@ -35,7 +35,7 @@ class Setting:
 
     This is the author's declaration, deliberately separate from ``config.table.RuntimeSetting``, which
     is the table entry the applier and the persist path drive off. A toolset author should not have to
-    know about ``AssistantConfig`` attribute names or channel mirroring to own a setting.
+    know where a core setting's value lives to own one of their own.
     """
 
     key: str

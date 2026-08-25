@@ -54,12 +54,10 @@ class _ConvCapturingChannel(FakeChannel):
 
 
 class SubagentCapturingChannel(FakeChannel):
-    """A channel that records ``subagent`` frames, with the display flags a reporter reads."""
+    """A channel that records ``subagent`` frames."""
 
-    def __init__(self, *, show_thinking: bool = False, show_tools: bool = False):
+    def __init__(self):
         super().__init__()
-        self.show_thinking = show_thinking
-        self.show_tools = show_tools
         self.subagent_frames: list[dict] = []
 
     async def send_subagent(self, event: dict) -> None:

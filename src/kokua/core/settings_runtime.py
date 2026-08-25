@@ -1,9 +1,9 @@
 """Applying a settings change to a running assistant, and persisting it to config.toml.
 
 Everything here is driven by the :class:`~kokua.config.table.SettingsTable` it is handed: reading the
-current values back, applying them live, mirroring the display flags onto the channel, and writing them
-to their own ``[section].key``. Adding a setting -- Kokua's own or a toolset's -- touches none of this
-code, and a setting a toolset owns is applied and persisted exactly the way a core one is.
+current values back, applying them live, and writing them to their own ``[section].key``. Adding a
+setting -- Kokua's own or a toolset's -- touches none of this code, and a setting a toolset owns is
+applied and persisted exactly the way a core one is.
 
 The model is deliberately absent: every agent's model comes from its own ``[agents.*]`` table or the
 ``[assistant].model`` default, both read at startup, and no live client is ever rebound to another one.
@@ -34,14 +34,12 @@ class SettingsApplier:
     def __init__(
         self,
         config: AssistantConfig,
-        ui,
         gate,
         *,
         table: SettingsTable,
         state: Callable[[], LiveState],
     ):
         self._config = config
-        self._ui = ui
         self._gate = gate
         self._table = table
         # Lazy accessor rather than the object itself: constructed before Assistant.create builds the
@@ -64,7 +62,7 @@ class SettingsApplier:
 
     def current(self) -> dict:
         """The effective runtime settings, in the wire shape a settings client reads."""
-        return {s.wire_key: s.read(self._config, self._ui.display_flag) for s in self._table.settings}
+        return {s.wire_key: s.read(self._config) for s in self._table.settings}
 
     # --- write -----------------------------------------------------------------------------------
 
@@ -83,7 +81,7 @@ class SettingsApplier:
             for setting in self._table.settings:
                 if setting.wire_key not in settings:
                     continue
-                setting.write(self._config, settings[setting.wire_key], self._ui.set_display_flag)
+                setting.write(self._config, settings[setting.wire_key])
         return settings
 
     def persist(self, settings: dict) -> None:

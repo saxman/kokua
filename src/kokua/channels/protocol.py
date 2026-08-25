@@ -24,9 +24,6 @@ class RichChannel(Protocol):
     #: conversation onto it so the channel can mute a background turn's frames.
     active_conversation_id: Optional[str]
 
-    show_thinking: bool
-    show_tools: bool
-
     async def send_conversations(self, items: list[dict]) -> None:
         """Render the conversation list (a sidebar). Supporting this also enables scheduled tasks to
         run in their own conversation rather than the one being viewed."""

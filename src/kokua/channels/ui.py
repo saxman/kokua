@@ -188,12 +188,3 @@ class ChannelUI:
         turn ended without getting there). Called on both, so it must tolerate being called twice."""
         if self._end_catch_up is not None:
             self._end_catch_up(conversation_id)
-
-    def display_flag(self, name: str, default: bool) -> bool:
-        """A display flag's effective value: the channel's copy wins, since that is the one consulted
-        while streaming."""
-        return getattr(self._channel, name, default)
-
-    def set_display_flag(self, name: str, value: bool) -> None:
-        if hasattr(self._channel, name):
-            setattr(self._channel, name, value)

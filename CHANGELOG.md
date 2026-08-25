@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.23.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -136,8 +136,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
     than as the user's own turn. A proactive message keeps its uppercase label.
   - **No settings window.** The page's one settings control is a theme button in the header, cycling
     auto / light / dark; it is a per-browser `localStorage` preference applied before first paint and
-    never reaches the server. Everything else runtime-mutable -- the display preferences and the
-    planning toggles -- is changed by asking the assistant, whose `update_config` hot-applies the change
+    never reaches the server. Everything else runtime-mutable -- the planning toggles, and whatever else
+    a toolset declares hot -- is changed by asking the assistant, whose `update_config` hot-applies the change
     for the next turn and persists it to `config.toml`. That keeps one path for every hot setting,
     including a third party toolset's, instead of a panel that could only show the ones its markup
     named. (The `settings` / `get_settings` control frames remain part of the web transport's contract
@@ -152,8 +152,9 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
     lost it to whatever that section set. `[generation]` gets no special handling on the way out: it is now
     an unrecognized section, so a stale one left in a `config.toml` fails to load the way any unknown key
     does, and deleting it is the fix.
-  - Reloading the page replays the prior conversation, including reasoning and tool calls when
-    `show_thinking` / `show_tools` are on.
+  - Reloading the page replays the prior conversation, reasoning and tool calls included. What was
+    streamed live is what is replayed: nothing in the core decides which frames are worth sending, so a
+    front end that wants to fold or hide a block does that with the block in hand.
   - **A whitespace-only answer segment renders as nothing.** A server that separates reasoning from the
     answer itself sends the newlines that followed the reasoning as the answer segment's first tokens, so
     on a turn that reasons and then calls a tool the whole segment can be whitespace. That used to open an
@@ -604,9 +605,11 @@ alone. The case that does cost something is a configured MCP server, which conne
 - **One runtime-settings table.** `config/table.py`'s `SettingsTable` -- built at startup from
   `CORE_RUNTIME_SETTINGS` plus every installed toolset's own hot `Setting`s -- is the single
   declaration of what can change without a restart, driving the TOML schema, the incoming-payload
-  sanitizer, the hot-apply set, the live-apply loop, the channel mirroring, and the persist path at once. Adding one of
+  sanitizer, the hot-apply set, the live-apply loop, and the persist path at once. Adding one of
   Kokua's own is one `CORE_RUNTIME_SETTINGS` entry; adding a toolset's is one `Setting` on the toolset
-  and nothing else. Both are enforced by tests.
+  and nothing else. Both are enforced by tests. `CORE_RUNTIME_SETTINGS` ships **empty**: every runtime
+  setting Kokua has turned out to belong to a capability rather than to the core, so every one of them
+  is that capability's own declaration.
 - **The assistant can inspect and repair its own configuration**: `read_config` / `update_config`.
   `update_config` validates and coerces the value, applies hot-appliable keys immediately and persists
   only after a successful apply (so a flag that cannot be applied is not saved), and reports "restart
@@ -895,18 +898,18 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.21.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.23.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
   claims, not what its code contains -- and names both fixes: update the sibling, or
   `uv sync --no-sources` to take AIMU from PyPI instead. The probe tracks the newest surface Kokua leans
   on and takes that surface's shape, which is why it has moved several times and has been a
-  set-membership check, a signature check (`SkillManager(include=...)`, later
-  `SkillAgent(script_env=...)`), and today a plain name lookup for the `resolve_default_text_model`
-  export. That last is the shape to hope for: the capability *is* the exported name, so the check asks
-  exactly the question that matters, where each earlier shape had to settle for the nearest handle on the
-  capability's path. It covers one surface at a time by design; every earlier release's capabilities are
+  set-membership check, a plain name lookup (the `resolve_default_text_model` export, the shape to hope
+  for: the capability *is* the exported name), and a signature check -- `SkillManager(include=...)`, then
+  `SkillAgent(script_env=...)`, and today `aio.WebChannel(stream_thinking=...)`, the rename that carried
+  the default flip Kokua relies on for reasoning and tool calls to reach a front end at all. It covers one
+  surface at a time by design; every earlier release's capabilities are
   the floor's job.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from

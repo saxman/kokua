@@ -94,7 +94,7 @@ def test_the_agents_section_cannot_be_written_by_the_assistant():
     assert config_store.is_locked("agents.assistant", "tools", defaults)
     assert config_store.is_locked("agents", "assistant", defaults)
     assert config_store.is_locked("security", "confirm_tools", defaults)
-    assert not config_store.is_locked("display", "show_tools", defaults)
+    assert not config_store.is_locked("logging", "level", defaults)
 
 
 async def test_update_config_refuses_an_agent_table_and_still_writes_a_runtime_setting(tmp_path):

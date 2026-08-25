@@ -97,7 +97,7 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
     auto-denies a gated tool, even though streaming_conversation == _active_id would otherwise look
     foreground and wrongly prompt. Unattended turns must never prompt."""
     cfg = _config(tmp_path, confirm_tools=["update_config"])
-    client = _RequestsToolOnce("update_config", {"section": "display", "key": "show_tools", "value": "false"})
+    client = _RequestsToolOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
 
     # No streaming_conversation is set by the test; _proactive sets it to _active_id (the viewed
@@ -111,7 +111,7 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
 async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
     """The minted-conversation path (never the viewed one) also auto-denies."""
     cfg = _config(tmp_path, confirm_tools=["update_config"])
-    client = _RequestsToolOnce("update_config", {"section": "display", "key": "show_tools", "value": "false"})
+    client = _RequestsToolOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: client)
 
@@ -499,7 +499,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
         cfg,
         channel,
         client_factory=lambda cid: _RecordingRequestsToolOnce(
-            "update_config", {"section": "display", "key": "show_tools", "value": "false"}
+            "update_config", {"section": "planning", "key": "plan_review", "value": "true"}
         ),
     )
     viewed = assistant._active_id

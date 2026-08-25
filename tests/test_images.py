@@ -95,7 +95,7 @@ def test_expand_missing_file_left_as_reference(tmp_path):
 
 def test_conversation_to_frames_emits_user_image_item():
     messages = [_image_message("/images/abc.png")]
-    items = conversation_to_frames(messages, show_thinking=True, show_tools=True)
+    items = conversation_to_frames(messages)
     assert {"type": "user", "text": "look"} in items
     assert {"type": "image", "url": "/images/abc.png", "from": "user"} in items
 
@@ -104,7 +104,7 @@ def test_conversation_to_frames_emits_generated_image_from_tool_result():
     messages = [
         {"role": "tool", "name": "generate_image", "content": "Generated image (/images/gen.png).", "tool_call_id": "1"}
     ]
-    items = conversation_to_frames(messages, show_thinking=False, show_tools=False)
+    items = conversation_to_frames(messages)
     assert items == [{"type": "image", "url": "/images/gen.png", "from": "assistant"}]
 
 
