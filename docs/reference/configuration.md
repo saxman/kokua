@@ -755,11 +755,16 @@ shipped `[security].confirm_tools`, so a command reaches you for approval before
 a sub-agent asked for, since a worker's gated calls route to the parent's gate rather than running
 unattended.
 
-**Neither execution tool is a sandbox.** They buy a hard timeout, a process-group kill so a backgrounded
-command does not outlive it, crash isolation, and no parent environment variables. They do not confine
-the filesystem, the network, or process signalling: a command runs as you, reads what you can read, and
-can signal Kokua's own process. The approval gate is the control; reach for a container if you need
-containment.
+**Neither execution tool is a sandbox.** They buy a hard timeout, crash isolation, and no parent
+environment variables. The process-group kill only fires on timeout or on interruption: a command that
+returns normally is not waited on beyond its own exit, so `run_command("./build.sh > log 2>&1 &")` can
+report `exit 0` in milliseconds while the build keeps running untouched, its captured output going to a
+temp directory already deleted by the time you read the answer. `run_command` also carries no memory
+cap, unlike `execute_python`'s 512 MB address-space limit: that limit would break compilers and test
+suites, and applying one to a shell child needs `preexec_fn`, which is neither portable nor safe
+alongside threads. Neither tool confines the filesystem, the network, or process signalling: a command
+runs as you, reads what you can read, and can signal Kokua's own process. The approval gate is the
+control; reach for a container if you need containment.
 
 ## Toolset sections
 

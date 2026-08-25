@@ -260,7 +260,9 @@ level = "INFO"
 # Declared by the `compute` toolset: an agent's `tools` must list "compute" to get calculate,
 # execute_python, and run_command. Both execution tools run as this process's user, so both are in
 # [security].confirm_tools above; neither offers containment, and run_command offers one step less of
-# it, since a shell string reaches a credential in a file with no code to read first.
+# it, since a shell string reaches a credential in a file with no code to read first. run_command also
+# carries no memory cap, unlike execute_python's 512 MB limit: that cap would break compilers and test
+# suites, and a shell child's own cap would need preexec_fn, which is neither portable nor thread-safe.
 # A command's child sees a small environment allowlist with no API keys in it, which is what stops
 # `run_command("env")` handing the model your credentials, and which also makes gh, ssh, and git push
 # over ssh fail. Name the variables you want admitted, comma separated, to grant one of those back. A

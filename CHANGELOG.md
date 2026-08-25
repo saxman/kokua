@@ -385,7 +385,10 @@ a restart would be worse than a cold one that says so up front. The key is also 
 since without it the assistant could name one of its own credentials there and read it back out of a
 command's environment. **Neither execution tool is a sandbox, and `run_command` is one step less of one
 than `execute_python`:** a shell string reaches a credential sitting in a file with no code for anyone
-to read first, and process signalling is unconfined either way. The approval gate is the control.
+to read first, and process signalling is unconfined either way. `run_command` also carries no memory
+cap, unlike `execute_python`'s 512 MB address-space limit, since that cap would break compilers and
+test suites and a shell child's own cap would need `preexec_fn`, which is neither portable nor
+thread-safe. The approval gate is the control.
 `tests/toolsets/test_compute.py`, `tests/core/test_build.py`, and `tests/workflows/planning/test_reviewers.py`
 cover it.
 

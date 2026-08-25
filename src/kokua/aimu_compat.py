@@ -61,7 +61,7 @@ Worth recording, since it is the case this module keeps meeting: the capability 
 cannot ask a built client which endpoint it is talking to. The export is the route around that gap
 rather than a fix for it, which is why the probe grips the export and not something on the client.
 
-AIMU 0.23.0 is the current surface, and it is the case this module exists for in its purest form. AIMU
+AIMU 0.23.0 was the surface until 0.24.0, and it is the case this module exists for in its purest form. AIMU
 renamed its channel flags ``show_thinking`` / ``show_tools`` to ``stream_thinking`` / ``stream_tools``
 and flipped both defaults from ``False`` to ``True``; Kokua deleted its own display settings in the same
 change and now constructs both channels bare, relying on that default. Against an older AIMU the bare
