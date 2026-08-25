@@ -179,11 +179,11 @@ session store or connects to anything, so a bad config fails with nothing writte
 | No `[agents.*]` tables at all | **Startup fails**, pointing at `config.example.toml` to copy from, or `kokua config init --force` to overwrite this file with it. |
 | Two providers claiming one toolset name | **Startup fails**, naming both providers and their descriptions. |
 | A third-party plugin toolset or MCP server no agent names | Starts fine. One warning line in the log: it reaches no agent. Kokua's own built-in toolsets and your installed skills are exempt: they ship, or sit on disk, regardless of what any agent declares. |
-| A plugin toolset whose `build` raises | Logged and skipped; the agent starts without those tools. A core or AIMU toolset failing this way is a bug and is *not* tolerated. |
+| A toolset that fails to import, or whose `build` raises | **Startup fails**, naming the module. No source is exempt: a build failure is a bug in whoever wrote the toolset, and a log line nobody reads is not how you should find out an agent lost a capability. |
 | Two declared toolsets sharing a tool name | The one declared first wins. |
 
-Two of those are quiet by design, and both land in `$KOKUA_HOME/data/logs/kokua.log`. There is no
-console log handler, so they do not appear in your terminal.
+One of those is quiet by design, and it lands in `$KOKUA_HOME/data/logs/kokua.log`. There is no
+console log handler, so it does not appear in your terminal.
 
 The most direct check that an agent got what you meant is to ask the assistant to delegate to it and
 report its tools.

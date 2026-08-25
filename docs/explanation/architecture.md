@@ -190,8 +190,9 @@ anything; the last two run once per agent, whenever one is built:
    `kokua.toolsets` entry-point group, split by which distribution registered them: Kokua's own four
    (`aimu_agents`, `benchmark`, `github_backup`, `image`) take the built-in label so
    `unreferenced_toolsets` stays quiet about ships-in-the-box toolsets the shipped config simply never
-   named. That label is the only difference between the two; both are built with the same failure
-   tolerance. **Nothing gates any of this.** Registration is unconditional because installing a
+   named. That label is the only difference between the two, and every toolset keeps the `build` its
+   author wrote: nothing is wrapped, so a toolset that fails to import or to build takes startup down
+   naming itself, whichever route it arrived by. **Nothing gates any of this either.** Registration is unconditional because installing a
    distribution that registers an entry point is the consent, and because the switch that used to exist
    could not do what it claimed: `resolve_config` imports every entry point before the file is parsed
    (see [Configuration](#configuration)), so withholding the names afterwards ran the

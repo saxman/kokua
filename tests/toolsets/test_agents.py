@@ -58,11 +58,10 @@ def test_a_plugin_shadowing_a_core_name_is_rejected(monkeypatch):
     assert "plugin" in str(excinfo.value)
 
 
-def test_a_plugin_that_fails_to_build_is_skipped_not_fatal(monkeypatch, caplog):
-    """Third-party code is the only thing this registry is tolerant of: a broken plugin logs a warning
-    and contributes no tools, rather than taking the whole assistant down."""
-    import logging
-
+def test_a_toolset_that_fails_to_build_raises(monkeypatch):
+    """No source is tolerated, because there is no source this codebase is willing to be quiet about.
+    A build failure is a bug in whoever wrote the toolset, and a warning in a log file is not how a
+    person finds out an agent silently lost a capability."""
     from kokua.toolsets import agents
     from kokua.toolsets.context import LiveState, ToolsetContext
     from kokua.toolsets.registry import Toolset
@@ -73,24 +72,22 @@ def test_a_plugin_that_fails_to_build_is_skipped_not_fatal(monkeypatch, caplog):
     broken = Toolset(name="broken", description="broken", build=_boom)
     monkeypatch.setattr(agents, "discover_toolsets", lambda: {"broken": broken})
 
-    with caplog.at_level(logging.WARNING, logger="kokua.toolsets.agents"):
-        registry = build_registry(AssistantConfig())
-
-    assert "broken" in registry  # registered by name; only *building* it is tolerant
+    registry = build_registry(AssistantConfig())
     ctx = ToolsetContext(state=LiveState(config=AssistantConfig()), agent=None)
-    assert registry["broken"].build(ctx) == []
-    assert any("broken" in record.getMessage() for record in caplog.records)
+    with pytest.raises(RuntimeError, match="boom"):
+        registry["broken"].build(ctx)
 
 
-def test_core_and_builtin_toolsets_are_not_wrapped_with_tolerance():
-    """The asymmetry is the point: only plugin-sourced toolsets are wrapped in the try/except that
-    swallows a build failure. A core or AIMU toolset keeps its own ``build`` unchanged in the registry,
-    so a bug there raises loudly instead of silently degrading to no tools."""
+def test_no_toolset_is_wrapped_in_the_registry():
+    """Every toolset in the registry carries the ``build`` its author wrote, whatever route it arrived
+    by. The registry used to substitute a swallowing wrapper for entry-point toolsets, which meant a bug
+    in one of Kokua's own became a log line while the same bug elsewhere took startup down."""
+    from kokua.plugins import discover_toolsets
     from kokua.toolsets.builtin import BUILTIN_TOOLSETS
     from kokua.toolsets.core import CORE_TOOLSETS
 
     registry = build_registry(AssistantConfig())
-    for source in (*BUILTIN_TOOLSETS, *CORE_TOOLSETS):
+    for source in (*BUILTIN_TOOLSETS, *CORE_TOOLSETS, *discover_toolsets().values()):
         assert registry[source.name].build is source.build, source.name
 
 

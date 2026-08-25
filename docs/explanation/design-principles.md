@@ -60,8 +60,10 @@ a built-in toolset worth reading as a template: the code you study is the code y
 
 *How this cashes out:* `pyproject.toml`'s `kokua.frontends` and `kokua.toolsets` groups list
 `kokua.frontends.web:FRONTEND` and `kokua.toolsets.image:TOOLSET` in the same table a third party's
-entry would go in. [`plugins.py`](../../src/kokua/plugins.py) is the only loader. A plugin toolset that
-raises in `build()` is logged and skipped, so one bad plugin cannot stop startup. `plugins` imports the
+entry would go in. [`plugins.py`](../../src/kokua/plugins.py) is the only loader, and it treats
+every registration alike: a toolset that fails to import, or whose `build()` raises, takes startup down
+naming itself, whoever wrote it. Kokua ships no third-party code, so it carries no special handling for
+code it does not ship, and the symmetry above is what makes that defensible rather than harsh. `plugins` imports the
 built-in front ends lazily, and `kokua/__init__.py` exposes `Assistant` through PEP 562, so
 `import kokua` never pulls in `aimu.aio` or starlette for a caller that only wanted to list plugins.
 [`toolsets/image.py`](../../src/kokua/toolsets/image.py) exists as the template.

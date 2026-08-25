@@ -94,3 +94,22 @@ def test_entry_point_toolsets_are_registered_unconditionally(tmp_path):
     from kokua.toolsets.agents import build_registry
 
     assert "aimu_agents" in build_registry(_config(tmp_path))
+
+
+def test_an_entry_point_that_fails_to_import_is_not_swallowed(monkeypatch):
+    """Discovery used to catch every exception from `ep.load()` and continue with no log line, so a
+    module that raised on import vanished and the user was told their toolset name was unknown, with
+    the actual ImportError recorded nowhere. Kokua ships no third-party code, so it carries no special
+    handling for code that cannot load: the failure names the module."""
+
+    class _BoomEntryPoint:
+        name = "boom"
+        dist = None
+
+        def load(self):
+            raise ImportError("no module named nope")
+
+    monkeypatch.setattr(plugins, "entry_points", lambda group: [_BoomEntryPoint()])
+
+    with pytest.raises(ImportError, match="no module named nope"):
+        plugins.discover_toolsets()

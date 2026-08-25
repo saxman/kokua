@@ -7,8 +7,6 @@ collision is an error, not a precedence rule, so nothing here depends on one pro
 from __future__ import annotations
 
 import difflib
-import logging
-from dataclasses import replace
 from typing import Callable, Mapping, Optional, Sequence
 
 from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
@@ -29,29 +27,6 @@ from kokua.toolsets.registry import (
     workflows_of,
 )
 from kokua.workflows import Workflow
-
-logger = logging.getLogger(__name__)
-
-
-def _tolerate_build_failures(toolset: Toolset) -> Toolset:
-    """Wrap a plugin's ``build`` so a failure logs a warning and yields no tools, instead of taking the
-    assistant down.
-
-    Applied only to plugin-sourced toolsets, deliberately: a core or AIMU toolset failing to build is a
-    bug in this codebase and must be loud, so wrapping those too would hide the one class of failure this
-    registry should never tolerate. Third-party code is the only thing the assistant should be tolerant
-    of, since it is the only source whose failures this codebase cannot fix by editing itself.
-    """
-    build = toolset.build
-
-    def _safe_build(ctx: ToolsetContext) -> list:
-        try:
-            return list(build(ctx))
-        except Exception:
-            logger.warning("Plugin toolset %r failed to build; skipping.", toolset.name, exc_info=True)
-            return []
-
-    return replace(toolset, build=_safe_build)
 
 
 # Provider labels `build_registry` hands to `register`. Named once here so `unreferenced_toolsets` can
@@ -150,9 +125,10 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
 
     Discovered toolsets are split by which distribution registered them: Kokua's own get
     ``_BUILTIN_PLUGIN_PROVIDER`` rather than ``_PLUGIN_PROVIDER``, so ``unreferenced_toolsets`` does not
-    warn about ships-in-the-box toolsets the shipped config simply never named. Both groups are built
-    with the same failure tolerance: the split is about what counts as news when unreferenced, not about
-    how much this codebase trusts its own plugin code.
+    warn about ships-in-the-box toolsets the shipped config simply never named. That label is the only
+    difference between them. Every toolset here keeps the ``build`` its author wrote: no source is
+    wrapped in a swallowing try/except, because a build failure is a bug in whoever wrote the toolset,
+    and a warning in a log file is not how a person finds out an agent lost a capability.
     """
     discovered = discover_toolsets()
     own_names = own_distribution_toolset_names()
@@ -161,8 +137,8 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
         (_CORE_PROVIDER, list(CORE_TOOLSETS)),
         (_MCP_PROVIDER, mcp_toolsets(config)),
         (_SKILL_PROVIDER, skill_toolsets(config)),
-        (_BUILTIN_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for n, t in discovered.items() if n in own_names]),
-        (_PLUGIN_PROVIDER, [_tolerate_build_failures(t) for n, t in discovered.items() if n not in own_names]),
+        (_BUILTIN_PLUGIN_PROVIDER, [t for n, t in discovered.items() if n in own_names]),
+        (_PLUGIN_PROVIDER, [t for n, t in discovered.items() if n not in own_names]),
     ]
     return register(sources)
 

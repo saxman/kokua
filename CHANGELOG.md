@@ -19,7 +19,10 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
   the built-in toolsets register exactly as a third party's package would, so if the built-in path
   and the plugin path ever diverge, the plugin path is the broken one. Inspect with `--list-frontends`
   and `--list-toolsets`. Discovery is unconditional: installing a distribution that registers an
-  entry point is the consent, and there is no switch to withhold it.
+  entry point is the consent, and there is no switch to withhold it. Nor is any registration treated
+  as untrusted: a toolset that fails to import, or whose `build` raises, fails startup naming itself,
+  whichever route it arrived by. Kokua ships no third-party code, so it carries no special handling
+  for code it does not ship.
 - The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
   `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
 

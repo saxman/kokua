@@ -74,13 +74,14 @@ def _builtin_frontends() -> dict[str, FrontEnd]:
 
 
 def _load_group(group: str) -> dict[str, object]:
-    loaded: dict[str, object] = {}
-    for ep in entry_points(group=group):
-        try:
-            loaded[ep.name] = ep.load()
-        except Exception:  # a broken third-party plugin must not take down discovery
-            continue
-    return loaded
+    """Load every entry point in ``group``, letting an import failure surface.
+
+    Deliberately not guarded. This used to catch everything and continue, which meant a module that
+    raised on import vanished from discovery and the user was told the name was unknown, with the real
+    ImportError recorded nowhere. Kokua ships no third-party code, so it carries no special handling for
+    code that cannot load: whatever went wrong names the module it went wrong in.
+    """
+    return {ep.name: ep.load() for ep in entry_points(group=group)}
 
 
 def discover_frontends() -> dict[str, FrontEnd]:
