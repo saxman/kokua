@@ -412,6 +412,26 @@ async def test_the_turn_thinking_is_recorded_alongside_the_model(tmp_path):
     assert metadata["thinking"] == {"0": "high"}
 
 
+async def test_record_turn_provenance_persists_usage_under_the_turn_index(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance(
+        [], "some-model", 2, assistant._active_id, usage={"calls": 3, "input_tokens": 90}
+    )
+
+    stored = assistant._store.get(assistant._active_id).metadata["usage"]["2"]
+    assert stored == {"calls": 3, "input_tokens": 90}
+
+
+async def test_record_turn_provenance_writes_nothing_when_there_is_nothing_to_write(tmp_path):
+    """Usage joins the other guards: a call carrying none of them must not touch the file."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "", -1, assistant._active_id, usage=None)
+
+    assert "usage" not in assistant._store.get(assistant._active_id).metadata
+
+
 async def test_a_turn_that_reasoned_at_no_configured_effort_records_no_thinking(tmp_path):
     """``None`` is the common case (AIMU's own default), so recording it would bloat every session file."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))

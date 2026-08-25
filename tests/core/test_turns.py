@@ -1291,6 +1291,54 @@ async def test_an_unattended_turn_opens_a_catch_up_record_for_the_conversation_i
     assert channel.calls.index(("end", task_id)) > channel.calls.index(("begin", task_id, "run the report"))
 
 
+async def test_a_turn_records_what_it_cost(tmp_path):
+    """The sink is attached for the turn, so its model calls land in the conversation's metadata."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["hello"]))
+
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    usage = assistant._store.get(assistant._active_id).metadata["usage"]
+    record = next(iter(usage.values()))
+    assert record["calls"] >= 1
+    assert record["wall_seconds"] >= 0
+    # The mock reports no usage, which is the case a local server also presents.
+    assert "input_tokens" not in record
+
+
+async def test_the_turns_accumulator_is_cleared_afterwards(tmp_path):
+    """Left set, a later turn on another conversation would accumulate into a finished turn's
+    record. The ContextVar reset in the `finally` is what prevents it."""
+    from kokua.core.metrics import current_metrics
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["hello"]))
+
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    assert current_metrics.get() is None
+
+
+async def test_two_conversations_turns_are_recorded_separately(tmp_path):
+    """The isolation that matters in practice: a backgrounded turn on one conversation must not
+    have its cost folded into the turn the user is watching on another."""
+    client = _InterleavingSpawningClient({"delegate a": "r-a", "delegate b": "r-b"})
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=lambda cid: client)
+    client.reporter = assistant._subagent_reporter
+    conv_a = assistant._active_id
+    conv_b = assistant._book.new_session().key
+
+    await asyncio.gather(
+        assistant._handle(ChannelMessage(text="delegate a", channel="fake"), conversation_id=conv_a),
+        assistant._handle(ChannelMessage(text="delegate b", channel="fake"), conversation_id=conv_b),
+    )
+
+    usage_a = assistant._store.get(conv_a).metadata["usage"]
+    usage_b = assistant._store.get(conv_b).metadata["usage"]
+    record_a = next(iter(usage_a.values()))
+    record_b = next(iter(usage_b.values()))
+    assert record_a["calls"] >= 1
+    assert record_b["calls"] >= 1
+
+
 async def test_a_turn_records_the_thinking_it_ran_at(tmp_path):
     agents = example_agents()
     agents["assistant"].thinking = "high"

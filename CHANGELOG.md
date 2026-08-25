@@ -56,6 +56,14 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.23.0 or newer
   web UI has a Stop button for the same). Built on AIMU's `aio.RunHandle`; reactive turns run as
   background tasks, so the channel keeps reading mid-turn -- which is also what lets a web approval
   reply reach the waiting tool call.
+- **A turn records what it cost.** `core/metrics.py`'s `TurnMetrics` accumulates each model call's
+  count, model, seconds, and (when a provider reports them) tokens, stored under
+  `session.metadata["usage"][str(user_index)]` beside the model and effort already recorded there.
+  The sink attaches to the conversation's client for the turn's duration rather than being passed to
+  `run()`, which is what makes a planned turn count too, since a workflow drives the conversation's
+  own agent. Recorded on every exit branch of a turn -- success, cancellation, a connection error, a
+  generic error -- with the wall-clock figure measured at the moment of recording, so a turn that
+  raised still reports what it cost up to the point it stopped.
 
 ### Front ends
 

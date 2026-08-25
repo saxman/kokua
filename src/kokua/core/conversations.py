@@ -319,9 +319,10 @@ class ConversationBook:
         conversation_id: str,
         thinking: Optional[Union[bool, str]] = None,
         failure: Optional[str] = None,
+        usage: Optional[dict] = None,
     ) -> None:
         """Persist what produced a turn's output: its sub-agent activity, the model that answered, the
-        reasoning effort it ran at, and why it stopped early if it did.
+        reasoning effort it ran at, why it stopped early if it did, and what it cost.
 
         The cards are what reload replays. The model and the effort are recorded per turn rather than
         once per conversation because a conversation outlives the config that started it:
@@ -339,8 +340,14 @@ class ConversationBook:
         failed" would come back to the model as its own prior words. An unattended run needs it most --
         its status line goes to whichever conversation the user is viewing, leaving the run's own
         conversation with no account of why it has only half a turn in it.
+
+        ``usage`` is what the turn cost: model calls, tokens, and seconds, as ``core.metrics.TurnMetrics``
+        accumulated them. It belongs here for the same reason the model does, and one more: a token
+        figure is only meaningful beside the model that produced it, and this is the record that already
+        says which model that was. A turn whose provider reported no token counts stores the record
+        without them rather than storing zeros, so a reader can tell an unmeasured turn from a free one.
         """
-        if user_index < 0 or not (events or model or thinking is not None or failure):
+        if user_index < 0 or not (events or model or thinking is not None or failure or usage):
             return
         session = self._store.get(conversation_id)
         if events:
@@ -351,6 +358,8 @@ class ConversationBook:
             session.metadata.setdefault("thinking", {})[str(user_index)] = thinking
         if failure:
             session.metadata.setdefault("failure", {})[str(user_index)] = failure
+        if usage:
+            session.metadata.setdefault("usage", {})[str(user_index)] = usage
         self._store.save(session)
 
     def exists(self, conversation_id: str) -> bool:

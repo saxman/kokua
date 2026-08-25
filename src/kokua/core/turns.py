@@ -127,6 +127,7 @@ from kokua.config.file import thinking_request
 from kokua.core.build import model_label
 from kokua.core.errors import describe_error
 from kokua.core.messages import derive_title, resolve_user_index
+from kokua.core.metrics import TurnMetrics, current_metrics, record_event
 from kokua.core.subagents import subagent_events
 from kokua.core.turn_registry import TurnInfo
 from kokua.workflows import SettingsView, WorkflowContext, is_rich
@@ -216,6 +217,13 @@ class TurnRunner:
         self._book.pin(conversation_id)  # invariant 2
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
+        metrics = TurnMetrics()
+        metrics_token = current_metrics.set(metrics)
+        # The client carries the forwarder, not this turn's accumulator: the forwarder holds no turn
+        # state, so it is safe as the durable client-wide setting AIMU calls it, and the contextvar
+        # above is what keeps concurrent turns on other conversations out of this record. Assigned
+        # here rather than at agent build time only because a test may inject its own client.
+        agent.model_client.events = record_event
         # Record this turn's output for a user who switches into its conversation before it finishes;
         # ended below by `_persist` (and again in the `finally`, for a turn that never got that far).
         self._ui.begin_catch_up(conversation_id, msg.text, msg.images)
@@ -263,7 +271,9 @@ class TurnRunner:
                     # propagate straight past a record placed after -- see invariant 5. Keep the
                     # partial state (the agent snapshots it in a finally), and return so the daemon
                     # keeps serving.
-                    self._record_provenance(conversation_id, user_index, thinking=thinking)
+                    self._record_provenance(
+                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                    )
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                     try:
                         await self._ui.send("(stopped)", reply_to=msg)
@@ -273,7 +283,9 @@ class TurnRunner:
                     return
                 except ModelConnectionError as exc:
                     # before the send: invariant 5
-                    self._record_provenance(conversation_id, user_index, thinking=thinking)
+                    self._record_provenance(
+                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                    )
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
                     await self._ui.send(
@@ -281,16 +293,21 @@ class TurnRunner:
                     )
                 except Exception as exc:
                     # before the send: invariant 5
-                    self._record_provenance(conversation_id, user_index, thinking=thinking)
+                    self._record_provenance(
+                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                    )
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"failed: {describe_error(exc)}"
                     await self._ui.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
                 else:
-                    self._record_provenance(conversation_id, user_index, thinking=thinking)
+                    self._record_provenance(
+                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                    )
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
                 await self._persist(conversation_id)
         finally:
+            current_metrics.reset(metrics_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
             # Normally already done by `_persist`; this covers a turn that raised before reaching it,
@@ -352,16 +369,26 @@ class TurnRunner:
         failure: Optional[str] = None,
         *,
         thinking: Optional[Union[bool, str]],
+        metrics: Optional[TurnMetrics] = None,
+        started: Optional[float] = None,
     ) -> None:
         """Persist what produced this turn: whatever its spawns reported, the model that answered, the
-        reasoning effort it ran at, and why it stopped early if it did. Synchronous, so it also runs on
-        the cancelled path where an await could be cut short.
+        reasoning effort it ran at, why it stopped early if it did, and what it cost. Synchronous, so it
+        also runs on the cancelled path where an await could be cut short.
 
         ``thinking`` is passed in rather than read from the config here, and is keyword-only and required
         so no caller can forget it. A turn can now carry its own effort request, so the config says what a
         turn *would* have run at and this record has to say what it *did*. Each caller resolves the value
         once and hands the same one to the run and to this record, which is what keeps the two in step.
+
+        ``metrics`` and ``started`` are the turn's sink and its start, not a finished record, so that the
+        wall-clock figure is measured at the moment of recording. That matters on the failure paths: a
+        turn that raised still cost what it cost up to the point it stopped, and a record made from a
+        duration computed earlier would under-report exactly the turns a reader most wants to examine.
         """
+        usage = None
+        if metrics is not None and started is not None:
+            usage = metrics.record(wall_seconds=time.monotonic() - started)
         self._book.record_turn_provenance(
             subagent_events.get() or [],
             self._answering_model(conversation_id),
@@ -369,6 +396,7 @@ class TurnRunner:
             conversation_id,
             thinking=thinking,
             failure=failure,
+            usage=usage,
         )
 
     def _answering_model(self, conversation_id: str) -> str:
@@ -559,73 +587,87 @@ class TurnRunner:
         ordinary return.
         """
         conversation_id = spec.conversation_id
-        # The run's conversation reaches the sidebar here, at the start, marked as running: it is what
-        # the task panel offers a Stop button against, and a firing that only pushed on success left a
-        # run in flight (or one that failed) invisible in the list.
-        await self._push_conversations()
-        # Record the turn for a user who switches into its conversation before it finishes. An
-        # unattended turn's only display frames are its spawns' cards, so without this a task
-        # delegating in a conversation nobody is watching shows nothing of that work on the
-        # switch-in, and the spawn's later `append` frames arrive with no card to update.
-        # Opened inside the gate rather than beside the contextvars in the caller (as the reactive
-        # path does; see invariant 3): a firing that has to queue behind a turn already running on
-        # this conversation would otherwise replace that turn's record while it is still needed.
-        self._ui.begin_catch_up(conversation_id, prompt)
-        agent = self._book.agent_for(conversation_id)
-        # The agent doesn't reset on run (the system prompt lives on the client), so the
-        # pre-run length is a stable start index for the exchange.
-        start = len(agent.model_client.messages)
-        # A failed run is snapshotted as far as it got, so the conversation the firing minted is
-        # never indistinguishable from one that never ran: the model client appends the user turn
-        # before it sends the request, so even a firing that got no answer has its prompt (and
-        # any completed tool rounds) on the transcript. The error is held rather than allowed to
-        # propagate straight out, so the record and the snapshot below run on every path, and
-        # re-raised afterwards so `proactive` still logs the traceback and tells the user.
-        # Deliberately not a `finally`: `_persist` awaits, and a store failure raised from a
-        # `finally` would replace the run's own error as the reason reported.
-        error: Optional[BaseException] = None
-        failure: Optional[str] = None
-        stopped = False
+        started = time.monotonic()
+        # This run's own accumulator and sink, opened and torn down here rather than by the caller: an
+        # unattended turn has no counterpart to the reactive path's outer `finally`, since the child task
+        # this runs in ends by returning or raising, not by falling through a shared teardown block.
+        metrics = TurnMetrics()
+        metrics_token = current_metrics.set(metrics)
         try:
-            reply = await agent.run(prompt)
-            if spec.echo_reply:
-                await self._ui.send(reply)
-        except asyncio.CancelledError:
-            # Stopped. Handled alongside the failures rather than left to propagate, so the partial
-            # turn is recorded and snapshotted the way a failed one is; re-raised below, after that.
-            stopped, failure = True, "stopped"
-        except ModelConnectionError as exc:
-            error, failure = exc, f"couldn't reach the model server: {describe_error(exc)}"
-        except Exception as exc:
-            error, failure = exc, f"failed: {describe_error(exc)}"
-        for message in agent.model_client.messages[start:]:
-            # Tag every message this unprompted run appended, so replayed history can distinguish
-            # it from a user-driven turn. setdefault, not assignment: the agent loop tags the
-            # turns it injects itself (`continuation`, `final_answer`), and those tags are how a
-            # transcript tells an injected nudge from something the user typed. Overwriting them
-            # made every nudge replay as a user bubble.
-            message.setdefault(PROVENANCE_KEY, PROVENANCE_PROACTIVE)
-        # The reason is recorded here rather than left to `_report`, whose status line goes to
-        # whichever conversation the user is viewing rather than to this one. Before the persist,
-        # and synchronously, for invariant 5's reason.
-        self._record_provenance(
-            conversation_id,
-            resolve_user_index(agent.model_client.messages, start),
-            failure=failure,
-            # An unattended run has no message from a user and so carries no request: the configured
-            # effort is both what it would run at and what it did.
-            thinking=self._config.thinking_for(self._config.entry_agent),
-        )
-        await self._persist(conversation_id)
-        if stopped:
-            if spec.echo_reply:  # the user is watching this conversation, as the CLI's one user is
-                try:
-                    await self._ui.send("(stopped)")
-                except Exception:
-                    pass
-            raise asyncio.CancelledError
-        if error is not None:
-            raise error
+            # The run's conversation reaches the sidebar here, at the start, marked as running: it is what
+            # the task panel offers a Stop button against, and a firing that only pushed on success left a
+            # run in flight (or one that failed) invisible in the list.
+            await self._push_conversations()
+            # Record the turn for a user who switches into its conversation before it finishes. An
+            # unattended turn's only display frames are its spawns' cards, so without this a task
+            # delegating in a conversation nobody is watching shows nothing of that work on the
+            # switch-in, and the spawn's later `append` frames arrive with no card to update.
+            # Opened inside the gate rather than beside the contextvars in the caller (as the reactive
+            # path does; see invariant 3): a firing that has to queue behind a turn already running on
+            # this conversation would otherwise replace that turn's record while it is still needed.
+            self._ui.begin_catch_up(conversation_id, prompt)
+            agent = self._book.agent_for(conversation_id)
+            # See the identical assignment (and its comment) in `reactive`: the forwarder is the durable,
+            # client-wide setting, and the contextvar above is what keeps this run's record isolated.
+            agent.model_client.events = record_event
+            # The agent doesn't reset on run (the system prompt lives on the client), so the
+            # pre-run length is a stable start index for the exchange.
+            start = len(agent.model_client.messages)
+            # A failed run is snapshotted as far as it got, so the conversation the firing minted is
+            # never indistinguishable from one that never ran: the model client appends the user turn
+            # before it sends the request, so even a firing that got no answer has its prompt (and
+            # any completed tool rounds) on the transcript. The error is held rather than allowed to
+            # propagate straight out, so the record and the snapshot below run on every path, and
+            # re-raised afterwards so `proactive` still logs the traceback and tells the user.
+            # Deliberately not a `finally`: `_persist` awaits, and a store failure raised from a
+            # `finally` would replace the run's own error as the reason reported.
+            error: Optional[BaseException] = None
+            failure: Optional[str] = None
+            stopped = False
+            try:
+                reply = await agent.run(prompt)
+                if spec.echo_reply:
+                    await self._ui.send(reply)
+            except asyncio.CancelledError:
+                # Stopped. Handled alongside the failures rather than left to propagate, so the partial
+                # turn is recorded and snapshotted the way a failed one is; re-raised below, after that.
+                stopped, failure = True, "stopped"
+            except ModelConnectionError as exc:
+                error, failure = exc, f"couldn't reach the model server: {describe_error(exc)}"
+            except Exception as exc:
+                error, failure = exc, f"failed: {describe_error(exc)}"
+            for message in agent.model_client.messages[start:]:
+                # Tag every message this unprompted run appended, so replayed history can distinguish
+                # it from a user-driven turn. setdefault, not assignment: the agent loop tags the
+                # turns it injects itself (`continuation`, `final_answer`), and those tags are how a
+                # transcript tells an injected nudge from something the user typed. Overwriting them
+                # made every nudge replay as a user bubble.
+                message.setdefault(PROVENANCE_KEY, PROVENANCE_PROACTIVE)
+            # The reason is recorded here rather than left to `_report`, whose status line goes to
+            # whichever conversation the user is viewing rather than to this one. Before the persist,
+            # and synchronously, for invariant 5's reason.
+            self._record_provenance(
+                conversation_id,
+                resolve_user_index(agent.model_client.messages, start),
+                failure=failure,
+                # An unattended run has no message from a user and so carries no request: the configured
+                # effort is both what it would run at and what it did.
+                thinking=self._config.thinking_for(self._config.entry_agent),
+                metrics=metrics,
+                started=started,
+            )
+            await self._persist(conversation_id)
+            if stopped:
+                if spec.echo_reply:  # the user is watching this conversation, as the CLI's one user is
+                    try:
+                        await self._ui.send("(stopped)")
+                    except Exception:
+                        pass
+                raise asyncio.CancelledError
+            if error is not None:
+                raise error
+        finally:
+            current_metrics.reset(metrics_token)
 
     async def _report(self, text: str) -> None:
         """Send an unattended run's own status line, tolerating a channel that cannot take it.
