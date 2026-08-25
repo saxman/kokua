@@ -54,21 +54,6 @@ streaming_conversation: ContextVar[Optional[str]] = ContextVar("streaming_conver
 # gated tool for any proactive turn (nobody is watching to confirm an unattended full-access call).
 proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)
 
-# AIMU's make_async_subagent_tool (aimu/aio/tools/builtin.py) defaults its built tool's name to this
-# literal; kokua never overrides it. A spawn's own `subagent` card already shows its role, task, and
-# result, so the parent's `tool` frame for this one tool name is pure duplication and is suppressed
-# wherever a tool call becomes a display frame: send_frame() below (both live streaming paths route
-# through it) and replay_items()'s replay of a stored message's tool_calls. core/build.py imports this
-# same constant (from this module) to find and replace the tool on a runtime rebuild.
-#
-# Duplicated as a literal in kokua.core.transcripts rather than imported from there: core/__init__.py
-# imports assistant.py, which imports this module for streaming_conversation/proactive_turn above, so a
-# module-level `from kokua.core.transcripts import ...` here is circular whenever this module is the one
-# that starts the import (core/__init__ resumes into assistant.py, which re-enters this module before it
-# has defined those two names). A one-line tool-name literal is worth keeping in sync by hand rather than
-# threading an import around that.
-SPAWN_SUBAGENT_TOOL_NAME = "spawn_subagent"
-
 # Frames that belong to a running turn, and so are muted when that turn is not the conversation being
 # viewed. Every other frame type describes the channel's own state -- the sidebar, replayed history,
 # settings, a background turn's completion notification, a human-decision prompt -- and is sent no
@@ -234,6 +219,12 @@ class WebChannel(BaseWebChannel):
         handled separately, by :func:`kokua.core.transcripts.replay_items`, since a stored turn's tool
         calls reach the browser batched inside one ``history`` frame rather than through here.
         """
+        # Imported here, not at module level: kokua.core's __init__ imports assistant.py, which
+        # imports this module (for streaming_conversation/proactive_turn, above) before this module
+        # has finished loading, so a top-level `from kokua.core.transcripts import ...` back from here
+        # would be circular whenever this module is what starts the import chain.
+        from kokua.core.transcripts import SPAWN_SUBAGENT_TOOL_NAME
+
         frame_type = frame.get("type")
         if frame_type == "tool" and frame.get("name") == SPAWN_SUBAGENT_TOOL_NAME:
             return
@@ -390,10 +381,8 @@ class WebChannel(BaseWebChannel):
         frames is what makes that safe: a live frame from the running turn can land between two awaits,
         which would both misorder the catch-up and duplicate the frame it interleaved with.
         """
-        # Imported here, not at module level: kokua.core's __init__ imports assistant.py, which imports
-        # this module for streaming_conversation/proactive_turn, so a top-level import back from here
-        # would be circular whenever this module starts the import chain (see SPAWN_SUBAGENT_TOOL_NAME's
-        # comment above for the same cycle).
+        # Imported here, not at module level: the same cycle as send_frame's SPAWN_SUBAGENT_TOOL_NAME
+        # import above applies to any top-level import back from kokua.core.transcripts.
         from kokua.core.transcripts import replay_items
 
         meta = metadata or {}

@@ -219,13 +219,11 @@ _LOOP_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
 # AIMU's make_async_subagent_tool (aimu/aio/tools/builtin.py) defaults its built tool's name to this
 # literal; kokua never overrides it. A spawn's own `subagent` card already shows its role, task, and
 # result, so the parent's `tool` frame for this one tool name is pure duplication and is suppressed
-# wherever a tool call becomes a display frame: `WebChannel.send_frame` (both live streaming paths route
-# through it) and `replay_items`'s replay of a stored message's tool_calls below. `core/build.py` imports
-# the `channels.web` copy of this same constant to find and replace the tool on a runtime rebuild.
-#
-# Kept as its own literal here rather than imported from `channels.web` (or vice versa): `core/__init__`
-# imports `assistant.py`, which imports `channels.web` for its contextvars, so either direction of import
-# between this module and `channels.web` would close a cycle through `core/__init__`.
+# wherever a tool call becomes a display frame: `WebChannel.send_frame` and `replay_items`'s replay of a
+# stored message's tool_calls below agree on suppressing it because both read this one constant.
+# `core/build.py` imports it too, to find and replace the tool on a runtime rebuild; `channels.web`
+# imports it locally inside `send_frame`, since a top-level import back there would be circular (see
+# that method's comment).
 SPAWN_SUBAGENT_TOOL_NAME = "spawn_subagent"
 
 # A stored image reference: our own /images/<name> route, the compacted form persisted in place of inline

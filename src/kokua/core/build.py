@@ -13,8 +13,8 @@ from typing import Callable, Sequence
 
 from aimu import aio
 
-from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.config.schema import AssistantConfig
+from kokua.core.transcripts import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.registry.context import LiveState, ToolsetContext
 from kokua.registry.registry import Toolset, build_tools, select
 
