@@ -231,6 +231,27 @@ weather = "my_weather_toolset:TOOLSET"
 `pip install` it, confirm with `kokua --list-toolsets`, then give an agent `tools = ["weather", ...]`.
 Installing it is not enough, for the reason at the top of this guide.
 
+**Every toolset Kokua ships is written exactly this way**, which is the point: the shape above is not a
+simplified illustration, it is what is in the repository. Kokua's own 21 are one file each under
+[`src/kokua/toolsets/`](../../src/kokua/toolsets/), named for the toolset, with one line each in
+[Kokua's own `pyproject.toml`](../../pyproject.toml) in the same `kokua.toolsets` table your package
+writes into. So the useful thing to do next is read one:
+
+- [`toolsets/benchmark.py`](../../src/kokua/toolsets/benchmark.py) is the smallest complete one with real
+  work in it: one tool, no arguments, no dependencies beyond what Kokua already has.
+- [`toolsets/image.py`](../../src/kokua/toolsets/image.py) shows a `build` that returns *nothing* when its
+  prerequisite is missing, so the model is never offered a tool it cannot satisfy.
+- [`toolsets/github_backup.py`](../../src/kokua/toolsets/github_backup.py) shows a toolset that owns
+  `config.toml` settings of its own, via `Setting` declarations in its `[github_backup]` section.
+- [`toolsets/aimu_agents.py`](../../src/kokua/toolsets/aimu_agents.py) shows the same shape carrying a
+  whole AIMU agent rather than a plain function.
+- [`toolsets/web.py`](../../src/kokua/toolsets/web.py) is the whole of a wrapper over an existing tool
+  group: a docstring, an import, and a `Toolset`.
+
+If you add one to Kokua itself rather than to your own package, note that
+`tests/toolsets/test_registration.py` will fail until the file, the entry-point line, and
+`TOOLSET.name` all agree, which is deliberate: it is what keeps that table honest as the only index.
+
 Four things to know about `build`:
 
 - **It creates closures, not process state.** `build` runs once per agent, so anything it constructs is
