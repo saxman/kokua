@@ -49,9 +49,7 @@ from (`"stocks"`, not `"mcp:stocks"`), so this command is the one place provenan
 
 | Provider | What is in it |
 | --- | --- |
-| **AIMU capability** | the built-in tool groups (`web`, `fs`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`), plus `memory` and `documents` over AIMU's two stores and `skills` for skill authoring |
-| **core subsystem** | Kokua's own: `capabilities`, `config`, `conversations`, `mcp-admin`, `planning`, `scheduling` |
-| **built-in toolset** | the four `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group: `aimu_agents`, `benchmark`, `github_backup`, `image` |
+| **built-in toolset** | all 21 `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group, one file each under `src/kokua/toolsets/` and named for the toolset. Wrappers over AIMU's tool groups and its two stores (`web`, `fs`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`, `memory`, `documents`, `skills`); one per Kokua subsystem (`capabilities`, `config`, `conversations`, `mcp`, `scheduling`); the `/plan` workflow and nothing else (`planning`); and Kokua's own standalone capabilities (`aimu_agents`, `benchmark`, `github_backup`, `image`) |
 | **skill** | one entry per skill in your skills folder, so an individual skill is declarable by name (see [add skills](add-skills.md)) |
 | **plugin** | every other `Toolset` installed under the `kokua.toolsets` entry-point group -- i.e. one a third party's package registered |
 | **MCP server** | one per `[[mcp.server]]` table, named by its required `name` |
@@ -94,7 +92,7 @@ agent = "assistant"          # the entry agent, and the root of the delegation g
 [agents.assistant]
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
-tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "capabilities", "time"]
+tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time"]
 delegates_to = ["researcher", "report-writer"]
 
 [agents.researcher]
@@ -145,7 +143,7 @@ reaches for the web at all.
 An agent's full system message is: its own opener, then its toolsets' guidance in declared order, then
 the delegation instructions if `delegates_to` is non-empty, and finally a "you are a lean supervisor,
 you MUST delegate" clause only when *every* toolset it declares is marked cross-cutting (something an
-agent holds to manage itself: memory, documents, skills, config, `mcp-admin`, scheduling,
+agent holds to manage itself: memory, documents, skills, config, `mcp`, scheduling,
 conversations, `planning`, `capabilities`, the clock). Give that agent one domain toolset and the lean clause disappears, since it
 would then contradict the tools the model can see.
 

@@ -302,3 +302,29 @@ async def test_search_and_read_agree_through_the_wired_tools(tmp_path):
     assert "Dexter" in transcript
     assert ACTIVE_CONVERSATION_NOTE not in transcript
     assert assistant._active_id in await tools["list_conversations"]()
+
+
+def test_the_toolset_builds_the_three_read_only_tools(tmp_path):
+    """Read-only is the whole shape of this capability: three tools, none of which writes."""
+    from kokua.config.schema import AssistantConfig
+    from kokua.registry import LiveState, ToolsetContext
+    from kokua.toolsets.conversations import TOOLSET
+
+    class FakeBook:
+        pass
+
+    state = LiveState(
+        config=AssistantConfig(data_dir=tmp_path), conversation_book=FakeBook(), turn_running=lambda cid: False
+    )
+    names = {fn.__name__ for fn in TOOLSET.build(ToolsetContext(state=state, agent=object()))}
+
+    assert names == {"list_conversations", "read_conversation", "search_conversations"}
+
+
+def test_the_guidance_names_the_cross_conversation_tools():
+    """Guidance travels with the capability, so an agent that does not declare it never reads a sentence
+    about tools it does not have."""
+    from kokua.toolsets.conversations import TOOLSET
+
+    for name in ("list_conversations", "read_conversation", "search_conversations"):
+        assert name in TOOLSET.guidance

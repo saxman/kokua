@@ -54,7 +54,7 @@ def test_a_server_toolset_is_not_cross_cutting():
     assert build_registry(_config())["stocks"].cross_cutting is False
 
 
-def test_a_server_whose_name_collides_with_a_core_toolset_is_rejected():
+def test_a_server_whose_name_collides_with_a_shipped_toolset_is_rejected():
     config = AssistantConfig(
         agents={"assistant": AgentConfig(tools=["memory"])},
         entry_agent="assistant",
@@ -66,7 +66,7 @@ def test_a_server_whose_name_collides_with_a_core_toolset_is_rejected():
         build_registry(config)
     message = str(excinfo.value)
     assert "memory" in message
-    assert "AIMU capability" in message
+    assert "built-in toolset" in message
     assert "MCP server" in message
 
 

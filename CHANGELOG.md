@@ -166,8 +166,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
   `skills` authoring toolset opts an agent out of scoping**, because narrowing an author's catalogue would
   hide the skill it just wrote and make `add_skill_script`'s "callable in the same turn" promise false. A
   skill whose name collides with a toolset or an MCP server is a startup error, like any other collision,
-  and a skill on disk that no table names is never reported as unreferenced, since an authoring entry agent
-  reaches it through its catalogue anyway.
+  and a skill on disk that no table names is simply available to an authoring entry agent through its
+  catalogue anyway.
 - **Every agent is declared whole in `config.toml`.** One `[agents.<name>]` table per agent, carrying a
   `description` (the label a delegator sees), a `system_message`, a `tools` list of toolset names, and a
   `delegates_to` list. `[assistant].agent` names the **entry agent**, the one you talk to and the root of
@@ -182,7 +182,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
 - **One namespace of named toolsets.** A *toolset* is one named capability an agent can declare: a name,
   a description, a `build(ctx)` returning tool callables, and optional `guidance`. Every provider lands
   in one namespace -- AIMU's built-in tool groups plus its two stores and skills, Kokua's own `capabilities` /
-  `config` / `conversations` / `mcp-admin` / `scheduling`, each installed plugin toolset, and each configured
+  `config` / `conversations` / `mcp` / `scheduling`, each installed plugin toolset, and each configured
   MCP server by its (now required) `name` -- so a `tools` list says `"stocks"`, never `"mcp:stocks"`, and a
   capability can change provider without touching an agent. The cost is paid at startup: two providers
   claiming one name is a `ConfigError` naming both. `kokua --list-toolsets` prints the whole registry
@@ -269,7 +269,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
   saying which it used.
 - **Agent tools are findable, and are only presentation.** Every module defining an `@aimu.tool` is a
   toolset module, so `grep -rl '@tool' src/kokua/` finds only files under `toolsets/`. Kokua's own five
-  (`capabilities.py`, `config.py`, `conversations.py`, `mcp_admin.py`, `scheduling.py`) each wrap one
+  (`capabilities.py`, `config.py`, `conversations.py`, `mcp.py`, `scheduling.py`) each wrap one
   subsystem (`capabilities.py` wraps the registry itself) and export the `TOOLSET` for it, indexed in
   `toolsets/core.py`. The subsystem underneath (`core/transcripts.py`, `config/store.py`,
   `mcp/servers.py`, `scheduling/tasks.py`) holds only what agents and front ends both need: it returns
@@ -328,14 +328,25 @@ copy directly.
 A skill carrying scripts belongs on an agent that also declares `fs` and `compute`, since running the
 script is how the skill does its work.
 
-### Built-in plugin toolsets
+### Toolsets
 
-These register through the `kokua.toolsets` entry-point group exactly as a third party's package would,
-so they appear in `--list-toolsets` alongside anything you install -- grouped under their own
-`built-in toolset` provider rather than `plugin`, which is what keeps the unreferenced-toolset warning
-(below) from firing on them by default: the shipped `config.example.toml` declares only
-`benchmark`, and an undeclared one that ships in the box is not the kind of news an unreferenced
-third-party plugin is.
+**All 21 toolsets Kokua ships are one file each under `src/kokua/toolsets/`, named for the toolset, and
+registered in `pyproject.toml`'s `kokua.toolsets` entry-point table** -- the same table a third party's
+package writes into. There is no second route, no index in code, and no directory scan: that table is the
+index. Adding a toolset is a new file and one line, and `tests/toolsets/test_registration.py` fails until
+both exist and agree, in both directions and on all three names (file stem, entry-point key,
+`TOOLSET.name`). That last one matters because `register` keys on `TOOLSET.name` while the entry key feeds
+only the provenance label, so a mismatch would otherwise register a toolset under a name nobody wrote.
+
+The directory holds toolsets and nothing else. The machinery is `kokua.registry`, namespace assembly is
+`kokua.core.agents`, and `toolsets/__init__.py` exports nothing (Python needs it for the package to be
+collected into the wheel and importable by name).
+
+**`mcp-admin` is now `mcp`**, since a toolset's file name is its name. A `tools` list saying `"mcp-admin"`
+fails startup on the unknown name.
+
+The four below are Kokua's own standalone capabilities, needing nothing but `AssistantConfig`. They are
+the shortest worked examples of the shape: one file, one `TOOLSET`, one entry-point line.
 
 - **`image`**: `generate_image`, offered only when `AIMU_IMAGE_MODEL` is set (e.g. `gemini:nano-banana`
   or an `hf:<repo>` diffusers model).
@@ -378,10 +389,10 @@ third-party plugin is.
   Restore is manual: see
   [Back up to GitHub](docs/how-to/back-up-to-github.md).
 
-Nothing a toolset contributes reaches an agent until that agent's `tools` list names it, and startup logs
-a warning for a third-party plugin toolset (or a configured MCP server) nothing names, since it was
-provisioned specifically to be reachable -- these four ship regardless of what any agent declares, so an
-unnamed one among them is not that kind of news; see "Startup warns about a provisioned toolset" below.
+Nothing a toolset contributes reaches an agent until that agent's `tools` list names it, and nothing
+warns you about a name no agent named: a toolset that ships and is never declared costs nothing to leave
+alone. The case that does cost something is a configured MCP server, which connects regardless; see
+[Add MCP services](docs/how-to/add-mcp-services.md).
 
 ### Proactive work: scheduled tasks
 
@@ -476,8 +487,8 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   below, is the first workflow and is no longer a hardcoded core feature.
 - **`[agents.*].tools` must name `planning` for `/plan` to exist**, on the web Plan toggle as much as
   the CLI. An existing `config.toml` that predates this release and does not list it gets no startup
-  warning, because a core toolset (unlike a third party's) is deliberately exempt from the
-  unreferenced-toolset warning below -- but typing `/plan` still gets an actionable reply rather than
+  warning, since nothing warns about an undeclared toolset -- but typing `/plan` still gets an actionable
+  reply rather than
   the model answering the literal `"/plan <task>"` text: the serve loop recognizes any command an
   installed workflow-bearing toolset offers, even one the entry agent didn't declare, and says which
   toolset to add. The fix is one line: add `"planning"` to the entry agent's `tools`.
@@ -817,11 +828,13 @@ unnamed one among them is not that kind of news; see "Startup warns about a prov
   credentials. An authorization link still reaches the conversation only when no usable token exists, so
   the absence of one is the signal that token reuse is working, and a test pins that the challenge path
   itself posts nothing.
-- **Startup warns about a provisioned toolset no agent names**, which covers a configured server as well
-  as a third-party plugin: it connects, spends its token on the handshake, and is then reachable by
-  nobody. Built-in AIMU and core toolsets, and Kokua's own built-in plugin toolsets, are excluded from
-  the warning (told apart from a third party's by which distribution registered the entry point), since
-  they ship whether or not anything declares them.
+- **No startup warning for a registered name no agent declares.** There was one, covering a configured
+  MCP server as well as an installed third-party toolset, and it was dropped: telling a name the user
+  provisioned from one that merely ships needed a provenance rule spanning the whole namespace, and a
+  toolset nobody declares costs nothing to leave unnamed. The MCP case is the one that lost something
+  real, since a configured server connects, spends its token on the handshake, and is then reachable by
+  nobody; `docs/how-to/add-mcp-services.md` says so plainly and says what to check instead. The distinct
+  warning for a `config.toml` section whose owning toolset no agent declares is unaffected.
 
 ### Images
 

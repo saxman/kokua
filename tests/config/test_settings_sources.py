@@ -178,10 +178,13 @@ def test_a_dotted_toolset_name_is_refused():
         build_settings_table([_toolset(HOT, name="my.pack")])
 
 
-def test_kokuas_core_toolsets_are_a_declaring_source():
-    from kokua.toolsets.core import CORE_TOOLSETS
+def test_every_shipped_toolset_is_a_declaring_source():
+    """The settings schema is built from what is installed, so a toolset that owns a section has to be
+    reachable here before the file is parsed. Asserted against the shipped names that actually declare
+    settings today, since those are the ones a missing source would silently make unparseable."""
+    names = {t.name for t in declaring_toolsets()}
 
-    assert {t.name for t in CORE_TOOLSETS} <= {t.name for t in declaring_toolsets()}
+    assert {"planning", "capabilities", "scheduling", "github_backup"} <= names
 
 
 def test_an_mcp_server_cannot_own_a_config_section():

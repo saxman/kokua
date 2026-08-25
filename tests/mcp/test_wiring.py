@@ -26,7 +26,7 @@ def _using(name: str, url: str) -> dict:
     """
     return {
         "agents": {
-            "assistant": AgentConfig(tools=["mcp-admin", "time"], delegates_to=["remote"]),
+            "assistant": AgentConfig(tools=["mcp", "time"], delegates_to=["remote"]),
             "remote": AgentConfig(description="Uses the server.", tools=[name]),
         },
         "mcp_servers": [MCPServerConfig(url=url, name=name)],
@@ -172,7 +172,7 @@ async def test_a_new_server_is_persisted_but_reaches_no_agent_this_process(tmp_p
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
 
     agents = {
-        "assistant": AgentConfig(tools=["mcp-admin", "time"], delegates_to=["remote"]),
+        "assistant": AgentConfig(tools=["mcp", "time"], delegates_to=["remote"]),
         "remote": AgentConfig(description="A worker that declares no server.", tools=["time"]),
     }
     # No [[mcp.server]] at startup, and no gate: these two agents provide none of the four tools the

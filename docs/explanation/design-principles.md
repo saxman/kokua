@@ -68,22 +68,22 @@ built-in front ends lazily, and `kokua/__init__.py` exposes `Assistant` through 
 `import kokua` never pulls in `aimu.aio` or starlette for a caller that only wanted to list plugins.
 [`toolsets/image.py`](../../src/kokua/toolsets/image.py) exists as the template.
 
-This now reaches Kokua's *own* capabilities, not just third-party ones. `capabilities`, `config`,
-`conversations`, `mcp-admin`, `planning`, and `scheduling` are each a `Toolset` declared in a `toolsets/`
-module, indexed in [`toolsets/core.py`](../../src/kokua/toolsets/core.py). Five of the six wrap one
-subsystem's logic as agent tools; the sixth, `planning`, wraps a `Workflow` instead -- a named turn
-strategy an agent earns by declaring the toolset exactly the way it earns a tool, resolved into the
-agent's `/`-command from that same declared `tools` list (see
-[architecture.md](architecture.md#workflows)). memory, documents, and
-skills are toolsets wrapping AIMU's own factories in
-[`toolsets/builtin.py`](../../src/kokua/toolsets/builtin.py). All of them land in the same registry
-namespace a plugin does. `kokua --list-toolsets` prints that namespace grouped by provider, and the
-grouping is the only way to tell a built-in from a plugin from the outside: an agent's `tools` list names
-`"scheduling"`, `"image"` and a skill's own name identically, so a capability can change provider without
-touching an agent.
-Inside, one asymmetry remains and is deliberate: a plugin's `build` is wrapped so a raised exception is
-logged and yields no tools, while a core or AIMU toolset failing to build is a bug in this repository and
-must be loud.
+This reaches Kokua's *own* capabilities, not just third-party ones, and it reaches all of them: every
+toolset Kokua ships is one file under `toolsets/`, named for the toolset it declares, registered in the
+same `kokua.toolsets` entry-point table a third party writes into. Some wrap one of Kokua's own
+subsystems as agent tools (`capabilities`, `config`, `conversations`, `mcp`, `scheduling`), some wrap an
+AIMU tool group or store (`web`, `fs`, `memory`, `skills`, and the rest), one wraps a `Workflow` instead
+of tools (`planning`, a named turn strategy an agent earns by declaring the toolset exactly the way it
+earns a tool -- see [architecture.md](architecture.md#workflows)), and the rest are capabilities of
+Kokua's own (`benchmark`, `github_backup`, `image`, `aimu_agents`). Nothing in that list arrives by a
+different route than any other, which is what makes the claim above testable rather than aspirational.
+`kokua --list-toolsets` prints the namespace grouped by provider, and from the outside the grouping is
+the only way to tell a shipped toolset from a third party's, a configured server, or a skill: an agent's
+`tools` list names `"scheduling"`, `"image"` and a skill's own name identically, so a capability can
+change provider without touching an agent.
+Inside, no asymmetry remains: every toolset keeps the `build` its author wrote, and one that fails to
+import or to build stops startup naming itself, whoever wrote it. Kokua ships no third-party code, so it
+carries no special handling for code it does not ship.
 
 ### Corollary: a capability is declared, never defaulted
 

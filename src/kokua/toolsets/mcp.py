@@ -1,4 +1,4 @@
-"""The ``mcp-admin`` toolset: ``add_mcp_server`` / ``remove_mcp_server`` over ``kokua.mcp.servers``.
+"""The ``mcp`` toolset: ``add_mcp_server`` / ``remove_mcp_server`` over ``kokua.mcp.servers``.
 
 The connection machinery is in ``mcp/servers.py``; everything here is what the model reads. That split
 matters most for the docstrings below, which are long because they are load-bearing: both tools have to
@@ -160,7 +160,7 @@ def _build(ctx) -> list:
 
 
 TOOLSET = Toolset(
-    name="mcp-admin",
+    name="mcp",
     description="Connect and disconnect remote MCP servers at runtime.",
     build=_build,
     cross_cutting=True,

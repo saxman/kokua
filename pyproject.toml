@@ -68,11 +68,33 @@ kokua-web = "kokua.cli:main_web"
 cli = "kokua.frontends.cli:FRONTEND"
 web = "kokua.frontends.web:FRONTEND"
 
+# Every toolset Kokua ships, registered exactly the way a third party's package would register
+# one. This table is the index: there is no directory scan and no hand-maintained list in code, so
+# `tests/toolsets/test_registration.py` pins it against src/kokua/toolsets/ in both directions --
+# a module here with no entry, or an entry naming no module, fails the suite rather than producing a
+# toolset that silently does not exist. Each key must equal its module name and its TOOLSET.name.
 [project.entry-points."kokua.toolsets"]
 aimu_agents = "kokua.toolsets.aimu_agents:TOOLSET"
+audio = "kokua.toolsets.audio:TOOLSET"
 benchmark = "kokua.toolsets.benchmark:TOOLSET"
+capabilities = "kokua.toolsets.capabilities:TOOLSET"
+compute = "kokua.toolsets.compute:TOOLSET"
+config = "kokua.toolsets.config:TOOLSET"
+conversations = "kokua.toolsets.conversations:TOOLSET"
+documents = "kokua.toolsets.documents:TOOLSET"
+fs = "kokua.toolsets.fs:TOOLSET"
 github_backup = "kokua.toolsets.github_backup:TOOLSET"
 image = "kokua.toolsets.image:TOOLSET"
+mcp = "kokua.toolsets.mcp:TOOLSET"
+memory = "kokua.toolsets.memory:TOOLSET"
+misc = "kokua.toolsets.misc:TOOLSET"
+planning = "kokua.toolsets.planning:TOOLSET"
+scheduling = "kokua.toolsets.scheduling:TOOLSET"
+skills = "kokua.toolsets.skills:TOOLSET"
+speech = "kokua.toolsets.speech:TOOLSET"
+time = "kokua.toolsets.time:TOOLSET"
+transcription = "kokua.toolsets.transcription:TOOLSET"
+web = "kokua.toolsets.web:TOOLSET"
 
 # Kokua and AIMU are developed together, so a `uv sync` here installs the sibling checkout
 # editable: architectural changes can move code across the boundary and be exercised

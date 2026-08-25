@@ -94,7 +94,7 @@ def declared_settings(toolsets) -> Iterator[tuple]:
 
 @lru_cache(maxsize=1)
 def declaring_toolsets() -> tuple:
-    """The toolsets that may own a config section: Kokua's core ones and any installed plugin.
+    """Every installed toolset, since any of them may own a ``config.toml`` section.
 
     Discovery is unconditional, and it is the reason nothing gates it elsewhere either: a config file
     mentioning an installed toolset's section has to stay parseable, so this runs on every startup and
@@ -112,14 +112,14 @@ def declaring_toolsets() -> tuple:
     codebase currently does) should call ``declaring_toolsets.cache_clear()`` rather than monkeypatching
     ``discover_toolsets`` and expecting this function to notice.
     """
-    # Deferred rather than module-level: toolsets/config.py imports this module at module scope (for
-    # startup_schema()), and toolsets/core.py imports toolsets/config.py, so a module-level import of
-    # toolsets.core here would close that loop and break `import kokua.toolsets.core` on a
-    # partially-initialized module.
+    # The *call* is what has to stay in here rather than at module scope: it loads every entry point,
+    # which imports every toolset module, and toolsets/config.py imports this module at module scope for
+    # startup_schema(). Discovering at import time would therefore re-enter this module while it is still
+    # initializing. The import of `discover_toolsets` itself is harmless (kokua.plugins pulls in the
+    # registry types and no toolset), and is kept here beside the call it serves.
     from kokua.plugins import discover_toolsets
-    from kokua.toolsets.core import CORE_TOOLSETS
 
-    return (*CORE_TOOLSETS, *discover_toolsets().values())
+    return tuple(discover_toolsets().values())
 
 
 def build_settings_table(toolsets=None) -> SettingsTable:

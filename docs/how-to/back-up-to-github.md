@@ -134,7 +134,7 @@ list is valid on its own, so dropping one loses a capability silently rather tha
 ```toml
 [agents.assistant]
 # what `kokua config init` writes, with one name appended
-tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations",
+tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations",
          "planning", "capabilities", "time", "github_backup"]
 ```
 

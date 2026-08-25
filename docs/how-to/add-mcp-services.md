@@ -113,7 +113,7 @@ session can present a redirect URI the provider has on file under the old port a
 
 ## Add one mid-conversation
 
-The shipped entry agent declares the `mcp-admin` toolset, so it carries `add_mcp_server` and
+The shipped entry agent declares the `mcp` toolset, so it carries `add_mcp_server` and
 `remove_mcp_server` and you can just ask:
 
 > "Connect to https://broker.example.com/mcp and use it to check my positions."

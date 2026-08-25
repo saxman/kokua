@@ -27,8 +27,9 @@ from kokua.registry.registry import Toolset
 
 if TYPE_CHECKING:
     # Annotation only. A real import would run kokua/core/__init__.py, and this module is reached from
-    # toolsets/core.py, which core/build.py imports -- the cycle core/build.py and core/assistant.py
-    # already dodge with deferred imports. LiveState leaves the same field untyped for the same reason.
+    # core/agents.py (via entry-point discovery) which core/build.py also imports -- the cycle
+    # core/build.py and core/assistant.py already dodge with deferred imports. LiveState leaves the same
+    # field untyped for the same reason.
     from kokua.core.conversations import ConversationBook
 
 DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT = 30, 200

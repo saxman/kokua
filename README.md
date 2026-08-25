@@ -181,7 +181,7 @@ agent = "assistant"          # which table below is the agent you talk to
 [agents.assistant]
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
-tools = ["memory", "documents", "skills", "config", "mcp-admin", "scheduling", "conversations", "planning", "capabilities", "time"]
+tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time"]
 delegates_to = ["researcher", "coder"]
 ```
 

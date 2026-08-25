@@ -138,14 +138,16 @@ def test_main_lists_every_provider_kind_of_toolset(monkeypatch, capsys):
     _run_main(monkeypatch, ["--list-toolsets"])
     out = capsys.readouterr().out
 
-    assert "web:" in out  # an AIMU built-in group
-    assert "scheduling:" in out  # a Kokua core capability
-    assert "aimu_agents:" in out  # one of Kokua's own built-in plugin toolsets
+    assert "web:" in out  # a wrapper over an AIMU tool group
+    assert "scheduling:" in out  # a Kokua capability over one of its own subsystems
+    assert "aimu_agents:" in out  # a toolset carrying a whole AIMU agent
     assert "stocks:" in out  # a server configured in [[mcp.server]]
-    # Grouped, because a flat list of names would not tell a user where any of them comes from. No
-    # third-party plugin is installed in this test environment, so "plugin:" itself is not asserted here;
-    # test_agents.py's collision tests cover that label with a synthetic third-party toolset instead.
-    for provider in ("AIMU capability:", "core subsystem:", "built-in toolset:", "MCP server:"):
+    # Grouped, because a flat list of names would not tell a user where any of them comes from. Every
+    # shipped toolset now arrives through the one entry-point group, so they share a heading; what the
+    # grouping still separates is a shipped toolset from a configured server, an installed skill, and a
+    # third party's package. No third-party plugin is installed in this test environment, so "plugin:"
+    # itself is not asserted here; test_agents.py's collision test covers that label with a synthetic one.
+    for provider in ("built-in toolset:", "MCP server:"):
         assert provider in out, provider
 
 

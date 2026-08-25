@@ -17,7 +17,7 @@ def test_registry_contains_every_provider():
         "documents",
         "skills",
         "config",
-        "mcp-admin",
+        "mcp",
         "scheduling",
         "conversations",
         "aimu_agents",
@@ -46,16 +46,28 @@ def test_a_third_party_plugin_is_still_labeled_plugin(monkeypatch):
     assert registry.providers["weather"] == "plugin"
 
 
-def test_a_plugin_shadowing_a_core_name_is_rejected(monkeypatch):
+def test_a_third_party_shadowing_a_shipped_name_is_rejected(monkeypatch):
+    """Every toolset arrives through one entry-point group now, so a third party's package registering a
+    name Kokua ships is a collision inside that group. The two are still told apart by which
+    distribution registered them, which is what lets the message name each side, and it is the only
+    thing that split is for."""
     from kokua.core import agents
     from kokua.registry.registry import Toolset
 
-    clash = Toolset(name="memory", description="clash", build=lambda ctx: [])
-    monkeypatch.setattr(agents, "discover_toolsets", lambda: {"memory": clash})
+    shipped = Toolset(name="memory", description="Kokua's own.", build=lambda ctx: [])
+    # Registered under a different entry-point key, which is not what collides: `register` keys on
+    # TOOLSET.name, so this is a clash even though nothing in either table is spelled the same.
+    theirs = Toolset(name="memory", description="A third party's.", build=lambda ctx: [])
+    monkeypatch.setattr(agents, "discover_toolsets", lambda: {"memory": shipped, "their-key": theirs})
+    monkeypatch.setattr(agents, "own_distribution_toolset_names", lambda: {"memory"})
+
     with pytest.raises(ToolsetError) as excinfo:
         build_registry(AssistantConfig())
-    assert "memory" in str(excinfo.value)
-    assert "plugin" in str(excinfo.value)
+
+    message = str(excinfo.value)
+    assert "memory" in message
+    assert "built-in toolset" in message
+    assert "plugin" in message
 
 
 def test_a_toolset_that_fails_to_build_raises(monkeypatch):
@@ -83,11 +95,9 @@ def test_no_toolset_is_wrapped_in_the_registry():
     by. The registry used to substitute a swallowing wrapper for entry-point toolsets, which meant a bug
     in one of Kokua's own became a log line while the same bug elsewhere took startup down."""
     from kokua.plugins import discover_toolsets
-    from kokua.toolsets.builtin import BUILTIN_TOOLSETS
-    from kokua.toolsets.core import CORE_TOOLSETS
 
     registry = build_registry(AssistantConfig())
-    for source in (*BUILTIN_TOOLSETS, *CORE_TOOLSETS, *discover_toolsets().values()):
+    for source in discover_toolsets().values():
         assert registry[source.name].build is source.build, source.name
 
 

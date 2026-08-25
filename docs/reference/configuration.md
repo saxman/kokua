@@ -405,7 +405,7 @@ list is gone, and one you add is there on the next start.
 
 There is one namespace for every capability, so a name may be an AIMU built-in tool group (`web`, `fs`,
 `compute`, `time`, `misc`, `audio`, `speech`, `transcription`), one of Kokua's own (`memory`,
-`documents`, `skills`, `capabilities`, `config`, `conversations`, `mcp-admin`, `planning`, `scheduling`),
+`documents`, `skills`, `capabilities`, `config`, `conversations`, `mcp`, `planning`, `scheduling`),
 an installed plugin toolset (`aimu_agents`, `benchmark`, `github_backup`, `image`), a skill in your skills folder
 named by its own name, or an MCP server configured under `[[mcp.server]]`, named by its `name`. The list
 does not say which kind a name is. Run `kokua --list-toolsets` for every name this install accepts,

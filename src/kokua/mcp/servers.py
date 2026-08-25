@@ -6,7 +6,7 @@ server is recorded straight into config.toml's ``[[mcp.server]]`` (via config_st
 the single source of servers to reconnect at the next startup.
 
 Nothing here formats a sentence. ``add_server`` and ``remove_server`` return a result record or raise,
-and the ``mcp-admin`` toolset renders what the model reads -- including the long explanation of what a
+and the ``mcp`` toolset renders what the model reads -- including the long explanation of what a
 newly connected server can and cannot reach this session, which is presentation and belongs there.
 """
 

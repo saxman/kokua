@@ -1,8 +1,8 @@
-"""The ``mcp-admin`` toolset: how a runtime add/remove is reported back to the model."""
+"""The ``mcp`` toolset: how a runtime add/remove is reported back to the model."""
 
 from aimu import aio
 
-from kokua.toolsets.mcp_admin import make_mcp_tools
+from kokua.toolsets.mcp import make_mcp_tools
 from kokua.mcp.auth import OAuthSettings
 
 
@@ -110,3 +110,20 @@ def _named(name):
 
     fn.__name__ = name
     return fn
+
+
+def test_the_toolset_builds_the_add_and_remove_tools(tmp_path):
+    """What the entry-point table hands the registry, asserted beside the tool behavior above."""
+    from kokua.config.schema import AssistantConfig
+    from kokua.registry import LiveState, ToolsetContext
+    from kokua.toolsets.mcp import TOOLSET
+
+    state = LiveState(
+        config=AssistantConfig(data_dir=tmp_path),
+        for_each_agent=lambda apply: None,
+        oauth=OAuthSettings(storage_dir=tmp_path),
+        refresh_workers=lambda agent: None,
+    )
+    ctx = ToolsetContext(state=state, agent=object())
+
+    assert {fn.__name__ for fn in TOOLSET.build(ctx)} == {"add_mcp_server", "remove_mcp_server"}

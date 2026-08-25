@@ -14,9 +14,7 @@ from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
 from kokua.config.file import ConfigError
 from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
-from kokua.toolsets.builtin import BUILTIN_TOOLSETS
 from kokua.registry.context import LiveState, ToolsetContext
-from kokua.toolsets.core import CORE_TOOLSETS
 from kokua.registry.registry import (
     Toolset,
     ToolsetError,
@@ -36,8 +34,6 @@ from kokua.workflows import Workflow
 # are presentational, which is why nothing here computes a set of them any more: the startup warning
 # about a provisioned-but-unnamed toolset is gone, since a toolset nobody declares costs nothing at
 # runtime, and warning about one on every start taught people to ignore the log.
-_AIMU_PROVIDER = "AIMU capability"
-_CORE_PROVIDER = "core subsystem"
 _BUILTIN_PLUGIN_PROVIDER = "built-in toolset"
 _PLUGIN_PROVIDER = "plugin"
 _MCP_PROVIDER = "MCP server"
@@ -119,18 +115,21 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     still exactly what its own table declares; this function decides what a name can resolve to, not
     what any agent holds.
 
-    Discovered toolsets are split by which distribution registered them: Kokua's own get
-    ``_BUILTIN_PLUGIN_PROVIDER`` rather than ``_PLUGIN_PROVIDER``, so ``unreferenced_toolsets`` does not
-    warn about ships-in-the-box toolsets the shipped config simply never named. That label is the only
-    difference between them. Every toolset here keeps the ``build`` its author wrote: no source is
-    wrapped in a swallowing try/except, because a build failure is a bug in whoever wrote the toolset,
-    and a warning in a log file is not how a person finds out an agent lost a capability.
+    Three routes, and only one of them carries a toolset: the ``kokua.toolsets`` entry-point group, which
+    is how every toolset Kokua ships registers *and* how a third party's does. There is no directory scan
+    and no list in code, so nothing here decides which toolsets exist; ``pyproject.toml`` does, and
+    ``tests/toolsets/test_registration.py`` pins that table against ``src/kokua/toolsets/`` in both
+    directions.
+
+    The two entry-point labels split Kokua's own from a third party's, by which distribution registered
+    the entry point. That is presentation only, for ``--list-toolsets``: nothing branches on it. Every
+    toolset keeps the ``build`` its author wrote, whichever route it came by, because a build failure is
+    a bug in whoever wrote the toolset and a warning in a log file is not how a person finds out an agent
+    lost a capability.
     """
     discovered = discover_toolsets()
     own_names = own_distribution_toolset_names()
     sources: list[tuple[str, list[Toolset]]] = [
-        (_AIMU_PROVIDER, list(BUILTIN_TOOLSETS)),
-        (_CORE_PROVIDER, list(CORE_TOOLSETS)),
         (_MCP_PROVIDER, mcp_toolsets(config)),
         (_SKILL_PROVIDER, skill_toolsets(config)),
         (_BUILTIN_PLUGIN_PROVIDER, [t for n, t in discovered.items() if n in own_names]),

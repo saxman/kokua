@@ -480,3 +480,15 @@ async def test_update_config_refuses_an_agent_write_when_the_file_is_not_valid_t
 
     assert result.startswith("Rejected:")
     assert "not valid TOML" in result
+
+
+def test_the_toolset_builds_the_read_and_update_tools(tmp_path):
+    """The `TOOLSET` a toolset module exports is what the entry-point table names, so it is worth
+    asserting alongside the tool behavior above: a module can have working tools and still hand the
+    registry the wrong ones."""
+    from kokua.registry import LiveState, ToolsetContext
+
+    state = LiveState(config=AssistantConfig(data_dir=tmp_path), reapply_config=lambda *a: None)
+    ctx = ToolsetContext(state=state, agent=object())
+
+    assert {fn.__name__ for fn in config_tools.TOOLSET.build(ctx)} == {"read_config", "update_config"}

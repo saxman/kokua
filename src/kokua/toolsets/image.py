@@ -9,6 +9,14 @@ Unlike AIMU's built-in ``image`` tool group, this saves into Kokua's servable ``
 a folder inside the aimu package, and it defers building the client until the tool is first called: the
 client reads the ``AIMU_IMAGE_MODEL`` env var and raises if it is unset, so building it at toolset-load time
 would break startup for every user who has not configured an image model.
+
+**AIMU's own ``image`` group is deliberately not registered anywhere in Kokua, and this toolset is why.**
+Both contribute a tool named ``generate_image``, but AIMU's saves into a folder inside the aimu package,
+which the web front end cannot serve. Registering both would not be a startup error, which is the trap:
+two toolsets sharing a *tool* name are deduplicated first-wins by declared order, unlike two toolsets
+sharing a *toolset* name, which `register` refuses. So an agent would silently get whichever came first,
+which is the exact failure a single namespace exists to rule out. `tests/toolsets/test_image.py` pins the
+omission.
 """
 
 from __future__ import annotations

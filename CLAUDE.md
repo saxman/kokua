@@ -128,17 +128,17 @@ change. Full rationale, with the code that backs each claim, is in
    Every optional rich frame degrades once, in `ChannelUI`, to a documented fallback. No
    `isinstance(channel, WebChannel)` in `core/` or `workflows/`.
 2. **Grow by plugin, not by core change.** Capability arrives as a `FrontEnd` or a `Toolset`. A third
-   party's arrives through the `kokua.frontends` / `kokua.toolsets` entry-point groups, and Kokua's own
-   front ends and its four plugin toolsets (`aimu_agents`, `benchmark`, `github_backup`, `image`) register there identically. Kokua's *core* capabilities
-   (`capabilities`, `config`, `conversations`, `mcp-admin`, `planning`, `scheduling`, and the AIMU
-   wrappers `memory` / `documents` / `skills`) are the same kind of object, resolved through the same registry
-   and named in the same namespace -- but they do not arrive by the same route: `build_registry` adds them as their
-   own provider sources and never calls `discover_toolsets()`, so do not go looking for them in
-   `pyproject.toml`'s entry points. A `Toolset` may also carry a `Workflow`, a named turn strategy: an
-   agent gets the workflow's `/`-command exactly the way it gets the toolset's tools, by naming the
-   toolset in `[agents.<name>].tools`. `planning` is a core toolset for this reason even though it
-   contributes no tools -- only the `/plan` workflow -- which is what makes Kokua's core toolsets six
-   (`capabilities`, `config`, `conversations`, `mcp-admin`, `planning`, `scheduling`).
+   party's arrives through the `kokua.frontends` / `kokua.toolsets` entry-point groups, and **every one of
+   the 21 toolsets Kokua ships arrives the same way**, listed in `pyproject.toml`'s
+   `[project.entry-points."kokua.toolsets"]` table beside where a third party's entry would go. There is no
+   second route and no index in code: that table *is* the index, and
+   `tests/toolsets/test_registration.py` pins it against `src/kokua/toolsets/` in both directions so a
+   module nobody registered, or an entry naming no module, fails the suite instead of producing a toolset
+   that silently does not exist. Each entry key must equal its module name and its `TOOLSET.name`
+   (`register` keys on the last of those, and the key feeds only the provenance label, so a mismatch is
+   otherwise silent). A `Toolset` may also carry a `Workflow`, a named turn strategy: an agent gets the
+   workflow's `/`-command exactly the way it gets the toolset's tools, by naming the toolset in
+   `[agents.<name>].tools`. `planning` is the one toolset that does that and contributes no tools at all.
    Its corollary: **a capability is declared, never defaulted.** An agent holds exactly the toolsets its
    `[agents.<name>].tools` names, plus the delegate a non-empty `delegates_to` earns it; no code path
    grants a capability the table did not declare, and no flag can disagree with one. `compose_subagent` is
@@ -208,10 +208,12 @@ src/kokua/
   frontends/    cli, web           -- registered as plugins, exactly like a third party's
   registry/     registry (Toolset, Setting, select, build_tools, register), context (LiveState,
                 ToolsetContext) -- the machinery, and no toolsets
-  toolsets/     builtin (AIMU groups/stores/skills), core (an index over Kokua's six),
-                capabilities, config, conversations, mcp_admin, planning, scheduling -- Kokua's own six,
-                aimu_agents, benchmark, github_backup, image -- plugins, like a third party's
-                -- and nothing else: no registry machinery, no namespace assembly
+  toolsets/     audio, compute, documents, fs, memory, misc, skills, speech, time, transcription, web
+                -- wrappers over AIMU's groups and stores,
+                capabilities, config, conversations, mcp, scheduling -- one Kokua subsystem each,
+                planning -- a Workflow and no tools, aimu_agents, benchmark, github_backup, image --
+                Kokua's own, needing only the config. One file per toolset, named for the toolset, each
+                listed in pyproject.toml's kokua.toolsets table, and nothing else in the directory
 ```
 
 `tests/` mirrors this layout. Public import surface: `kokua.plugins`, `kokua.config`, `kokua.core`,
@@ -254,15 +256,16 @@ you wanted. (Existing `--` in the docs predates this rule and is fine to leave i
 when you are editing that text anyway.) Use inclusive terminology as well (allowlist/blocklist,
 primary/replica, main branch). Keep the core small; prefer a plugin over a core change.
 
-**Agent tools live under `toolsets/`, and only there.** A module that defines an `@aimu.tool` is a
-toolset module; nothing else contains one, so `grep -rl '@tool' src/kokua/` should only ever find files
-in that one directory. Each of Kokua's own five tool-bearing core toolsets (`toolsets/capabilities.py`,
-`config.py`, `conversations.py`, `mcp_admin.py`, `scheduling.py`) also exports the `TOOLSET` wrapping its
-factory, indexed in `toolsets/core.py`, so the capability is declared next to the tools it wraps rather
-than in a second list that could drift. `toolsets/planning.py` is a sixth core toolset that does not join
-that list: it carries a `Workflow` instead of tools. `workflows/` itself defines no tools either -- not even
-`workflows/critics.py`, which *mounts* AIMU's tool callables (`REVIEWER_TOOLS`) for its reviewer agent
-to call, without itself declaring an `@aimu.tool`.
+**Agent tools live under `toolsets/`, and only there, one file per toolset named for the toolset.** A
+module that defines an `@aimu.tool` is a toolset module; nothing else contains one, so
+`grep -rl '@tool' src/kokua/` should only ever find files in that one directory. Each toolset module
+exports a module-level `TOOLSET`, so a capability is declared next to the tools it wraps, and each has one
+line in `pyproject.toml`'s `kokua.toolsets` table, which is the only index: adding a toolset means a new
+file and that one line, and `tests/toolsets/test_registration.py` fails until both exist and agree.
+Nothing else lives in that directory -- the registry machinery is `registry/`, and namespace assembly is
+`core/agents.py`. `toolsets/planning.py` is the one toolset carrying a `Workflow` instead of tools.
+`workflows/` itself defines no tools either -- not even `workflows/critics.py`, which *mounts* AIMU's tool
+callables (`REVIEWER_TOOLS`) for its reviewer agent to call, without itself declaring an `@aimu.tool`.
 
 **A subsystem holds logic, not presentation.** `core/`, `config/`, `mcp/`, and `scheduling/` contain
 only what agents *and* front ends need. They return records and raise typed errors

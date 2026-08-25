@@ -69,13 +69,15 @@ src/kokua/
   registry/      the machinery a toolset is built against, and no toolsets
     registry.py    the Toolset and Setting dataclasses, `register`, `select`, `build_tools`
     context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
-  toolsets/      the named capabilities themselves, and nothing else
-    builtin.py     AIMU's tool groups, its two stores, and skills, wrapped as toolsets
-    core.py        an index over the six TOOLSET constants in the six modules below
-    capabilities.py, config.py, conversations.py, mcp_admin.py, planning.py, scheduling.py -- Kokua's
-                   own six, each wrapping one subsystem's logic as agent tools (planning wraps a
-                   workflow instead, and capabilities wraps the registry itself)
-    aimu_agents.py, benchmark.py, github_backup.py, image.py -- plugins, like a third party's
+  toolsets/      the named capabilities themselves, and nothing else: one file per toolset, each file
+                 named for the toolset it declares, each exporting a module-level TOOLSET, and each
+                 listed in pyproject.toml's kokua.toolsets entry-point table, which is the only index
+    audio.py, compute.py, documents.py, fs.py, memory.py, misc.py, skills.py, speech.py, time.py,
+                   transcription.py, web.py -- wrappers over AIMU's tool groups and stores
+    capabilities.py, config.py, conversations.py, mcp.py, scheduling.py -- one Kokua subsystem's logic
+                   each, as agent tools (capabilities wraps the registry itself)
+    planning.py    a Workflow instead of tools: the only toolset that contributes no tool at all
+    aimu_agents.py, benchmark.py, github_backup.py, image.py -- Kokua's own, needing only the config
 ```
 
 `tests/` mirrors this layout.
@@ -169,7 +171,7 @@ At least one agent is therefore required, and `Assistant.create` refuses a confi
 `[assistant].agent` names a table that does not exist.
 
 What the *shipped* config declares is a lean entry agent: `kokua config init` gives
-`[agents.assistant]` the cross-cutting toolsets (memory, documents, skills, config, `mcp-admin`,
+`[agents.assistant]` the cross-cutting toolsets (memory, documents, skills, config, `mcp`,
 scheduling, conversations, `planning`, `capabilities`, the clock) and no domain toolset, delegating web
 work to `researcher` and filesystem and compute work to `coder`. There is deliberately no catch-all role
 alongside them: a task neither specialist covers is what `compose_subagent` is for, and a `generalist`
@@ -274,7 +276,7 @@ rather than a naming convention alone:
 | `store_memory`, `search_memories`, `list_memories` | AIMU `make_memory_tools` | `memory` |
 | `save_document`, `read_document`, `list_documents`, `search_documents` | AIMU `make_document_tools` | `documents` |
 | `get_current_date_and_time`, `convert_time` | AIMU `builtin.time` | `time` |
-| `add_mcp_server`, `remove_mcp_server` | `toolsets/mcp_admin.py` | `mcp-admin` |
+| `add_mcp_server`, `remove_mcp_server` | `toolsets/mcp.py` | `mcp` |
 | `read_config`, `update_config` | `toolsets/config.py` | `config` |
 | `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task`, `stop_scheduled_task` | `toolsets/scheduling.py` | `scheduling` |
 | `list_conversations`, `read_conversation`, `search_conversations` | `toolsets/conversations.py` | `conversations` |
@@ -293,10 +295,11 @@ trustworthy.
 The pattern for a new Kokua capability is two modules, split by who reads the output. The logic goes in
 the owning subsystem (`core/`, `config/`, `mcp/`, `scheduling/`) and returns data or raises a typed
 error; it holds only what agents and front ends both need, and formats nothing. The agent tools go in
-`toolsets/<name>.py`: a `make_*_tools(...)` factory closing over the live state, the docstrings that
-steer the model, every sentence it reads, and a `TOOLSET` whose `build` pulls that state off the context,
-added to `toolsets/core.py`'s index. A capability that needs nothing but `AssistantConfig` should be a
-plugin toolset instead. Either way it reaches an agent only when a `[agents.*]` table names it.
+`toolsets/<name>.py`, one file named for the toolset: a `make_*_tools(...)` factory closing over the live
+state, the docstrings that steer the model, every sentence it reads, and a `TOOLSET` whose `build` pulls
+that state off the context, plus one line in `pyproject.toml`'s `kokua.toolsets` table, which is the only
+registration there is. A capability needing nothing but `AssistantConfig` skips the first module and is
+just the toolset. Either way it reaches an agent only when a `[agents.*]` table names it.
 
 The split earns its keep where the two readers diverge. A scheduled task's next firing is a `status` to
 `TaskService`, "~3600s" to the model, and "in 1h" in the sidebar; when the service returned one sentence,
@@ -339,9 +342,10 @@ registered in Kokua's own `pyproject.toml` exactly as a third party would regist
 as the public surface a third party imports. Add a transport or new tools as a plugin, not by editing
 the core -- see [toolsets/image.py](../../src/kokua/toolsets/image.py).
 
-A plugin toolset is only distinguished from a built-in one by its provider label in `--list-toolsets`
-and by one thing: a plugin's `build` is wrapped so a raised exception is logged and yields no tools,
-while a core or AIMU toolset failing to build is a bug in this repository and stays loud.
+A third party's toolset is distinguished from one Kokua ships by exactly one thing: its provider label
+in `--list-toolsets`, which comes from which distribution registered the entry point. Nothing branches on
+it. Both arrive through the same group, both keep the `build` their author wrote, and either one failing
+to import or to build stops startup naming itself.
 
 A toolset is also how a whole *agent* arrives. Every AIMU `Runner` exposes `.run(task) -> str`, so
 mounting one needs no core surface at all: `build()` returns a callable that runs it.
@@ -611,7 +615,7 @@ callable tool needs `AsyncRunner.as_tool()`, a concrete method the base class pr
 name Kokua looks up, so it is available only to a runner that actually subclasses `aio.AsyncRunner`,
 not one that merely matches its shape by duck-typing `run` and `messages`.
 
-`toolsets/planning.py` is the first workflow, and the only core toolset that carries one instead of
+`toolsets/planning.py` is the first workflow, and the only toolset that carries one instead of
 tools: declaring `"planning"` in `[agents.<name>].tools` is what gives that agent the `/plan` command
 (the web UI's Plan toggle sends the same command, and an agent whose `tools` omits `"planning"` has
 neither). Its runner, `PlanningWorkflow` (`workflows/planning/runner.py`), is rich tier -- it shows

@@ -717,7 +717,7 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
     if section == "subagents":
         raise ConfigError("[subagents] has no scalar keys editable with update_config")
     # [mcp] does have scalar keys, but its [[mcp.server]] array is not one of them: a server is added
-    # and removed through the mcp-admin tools, which connect it as well as write it.
+    # and removed through the mcp tools, which connect it as well as write it.
     if section == "mcp" and key == "server":
         raise ConfigError("[[mcp.server]] is not editable with update_config; use the MCP tools")
     schema = build_schema(table, {**AGENT_SCHEMA, **(extra_schema or {})})

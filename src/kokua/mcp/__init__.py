@@ -1,6 +1,6 @@
 """Remote MCP servers: connecting them, authenticating them, and adding them at runtime.
 
-The agent tools that drive this live in ``kokua.toolsets.mcp_admin``; nothing here formats a sentence.
+The agent tools that drive this live in ``kokua.toolsets.mcp``; nothing here formats a sentence.
 """
 
 from .auth import OAuthSettings, build_chat_oauth
