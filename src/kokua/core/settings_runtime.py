@@ -25,7 +25,7 @@ from typing import Callable, Optional
 from kokua.config import store as config_store
 from kokua.config.table import SettingsTable
 from kokua.config import AssistantConfig
-from kokua.toolsets.context import LiveState
+from kokua.registry.context import LiveState
 
 
 class SettingsApplier:

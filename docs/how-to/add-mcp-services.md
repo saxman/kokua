@@ -175,20 +175,15 @@ same URL reaches that agent's next worker immediately.
 
 ## Check that it reached an agent
 
-A connected-but-unreachable server is the failure mode this design invites, so Kokua looks for it at
-startup:
+A connected-but-unreachable server is the failure mode this design invites, and **nothing warns you
+about it.** A server configured here connects at startup, spends a handshake, and holds whatever
+credential its `token_env` names, whether or not any `[agents.*]` table reaches it.
 
-```
-Toolset 'stocks' is provisioned but no [agents.*] table names it in `tools`, so it reaches no agent
-of its own, only a worker composed for a single task.
-```
-
-That warning goes to `$KOKUA_HOME/data/logs/kokua.log`. There is no console log handler, so **it does not
-appear in your terminal**; check the file, or ask the assistant to delegate to the agent and list its
-tools. The server still connects and still spends a handshake either way. The check lives in
-[`unreferenced_toolsets`](../../src/kokua/toolsets/agents.py), and it reports an installed third-party
-plugin in the same position for the same reason -- Kokua's own built-in toolsets are exempt, since
-they ship whether or not anything declares them.
+Kokua used to log a line about it. That warning is gone, along with the equivalent one for an unnamed
+toolset, because telling the two cases apart meant keeping a provenance rule for every capability in the
+namespace, and a toolset nobody declares costs nothing to leave unnamed. The cost of dropping it lands
+here rather than there: a server does cost something. So check your own work, by asking the assistant to
+delegate to the agent that should have it and list its tools.
 
 ## The `--mcp` flag
 

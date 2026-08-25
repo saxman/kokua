@@ -40,7 +40,7 @@ def declared_settings(toolsets) -> Iterator[tuple]:
     A toolset declaring nothing is skipped before the per-setting checks, so a toolset merely *named* after
     a core section is fine: what is refused is claiming that section's keys.
     """
-    from kokua.toolsets.registry import ToolsetError
+    from kokua.registry.registry import ToolsetError
 
     reserved = core_sections()
     by_name: dict[str, object] = {}

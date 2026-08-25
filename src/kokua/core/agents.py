@@ -15,9 +15,9 @@ from kokua.config.file import ConfigError
 from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.toolsets.builtin import BUILTIN_TOOLSETS
-from kokua.toolsets.context import LiveState, ToolsetContext
+from kokua.registry.context import LiveState, ToolsetContext
 from kokua.toolsets.core import CORE_TOOLSETS
-from kokua.toolsets.registry import (
+from kokua.registry.registry import (
     Toolset,
     ToolsetError,
     ToolsetRegistry,
@@ -29,23 +29,19 @@ from kokua.toolsets.registry import (
 from kokua.workflows import Workflow
 
 
-# Provider labels `build_registry` hands to `register`. Named once here so `unreferenced_toolsets` can
-# tell a name nobody provisioned (a built-in AIMU group, a core subsystem, one of Kokua's own shipped
-# plugin toolsets) from a name the user actually provisioned (a third-party plugin, or a configured MCP
-# server) without duplicating the strings.
+# Provider labels `build_registry` hands to `register`. These are what `--list-toolsets` groups by, and
+# what a collision message names, so they are the words a user reads rather than an internal taxonomy.
+# One of them still decides behavior: `_SKILL_PROVIDER` is how `without_skill_names` tells a skill's
+# registry entry from every other kind, which is a question no name inspection could answer. The rest
+# are presentational, which is why nothing here computes a set of them any more: the startup warning
+# about a provisioned-but-unnamed toolset is gone, since a toolset nobody declares costs nothing at
+# runtime, and warning about one on every start taught people to ignore the log.
 _AIMU_PROVIDER = "AIMU capability"
 _CORE_PROVIDER = "core subsystem"
 _BUILTIN_PLUGIN_PROVIDER = "built-in toolset"
 _PLUGIN_PROVIDER = "plugin"
 _MCP_PROVIDER = "MCP server"
 _SKILL_PROVIDER = "skill"
-
-# Providers whose toolsets ship regardless of what any agent declares, so a name from one of these being
-# unreferenced is not news -- unlike a third-party plugin the user installed, or a server the user
-# configured, which earn a spot in the [agents.*] tables specifically so they can be reached. Skills
-# belong here too, for a different reason: an entry agent holding the authoring toolset reaches every
-# skill through its own catalogue, so a skill no [agents.*] table names is still usable.
-_UNPROVISIONED_PROVIDERS = {_AIMU_PROVIDER, _CORE_PROVIDER, _BUILTIN_PLUGIN_PROVIDER, _SKILL_PROVIDER}
 
 
 def _server_tools(url: str, state: LiveState) -> list:
@@ -507,30 +503,6 @@ def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Op
         agent_types=build_agent_specs(config, state, name),
         tool_approval=state.tool_approval,
         observer=observer,
-    )
-
-
-def unreferenced_toolsets(config: AssistantConfig, registry: ToolsetRegistry) -> list[str]:
-    """Provisioned toolsets no agent names, for the startup warning.
-
-    A toolset nobody names reaches no agent, and a plugin or MCP server in that position still cost
-    something to load or connect to be unreachable, which is worth one line in the log rather than
-    silence. A built-in AIMU group or a core subsystem toolset is excluded: it ships whether or not any
-    agent declares it, so its being unnamed says nothing about a mistake -- unlike a name the user
-    actually provisioned by installing a plugin or configuring a server, which was named specifically so
-    something could reach it.
-
-    Takes the concrete ``ToolsetRegistry`` (not a bare ``Mapping``) so ``registry.providers`` is
-    guaranteed rather than an optional attribute: every real caller builds the registry with
-    ``build_registry``, and a caller that didn't would have nothing meaningful to warn about anyway, so
-    a missing provider map should fail loudly here rather than be read as "nothing is provisioned" and
-    warn about every built-in group.
-    """
-    declared = {name for agent in config.agents.values() for name in agent.tools}
-    return sorted(
-        name
-        for name in registry
-        if name not in declared and registry.providers.get(name) not in _UNPROVISIONED_PROVIDERS
     )
 
 

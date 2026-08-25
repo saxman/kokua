@@ -36,7 +36,7 @@ from aimu.tools import tool
 
 from kokua.mcp import servers
 from kokua.mcp.servers import AlreadyConnected, BearerTokenRequired, ConnectFailed, NotConnected
-from kokua.toolsets.registry import Toolset
+from kokua.registry.registry import Toolset
 
 logger = logging.getLogger(__name__)
 

@@ -18,11 +18,11 @@ from typing import TYPE_CHECKING, Callable, Mapping
 
 from aimu.tools import tool
 
-from kokua.toolsets.registry import Setting, Toolset, ToolsetError, build_tools, select
+from kokua.registry.registry import Setting, Toolset, ToolsetError, build_tools, select
 
 if TYPE_CHECKING:
     from kokua.config.schema import AssistantConfig
-    from kokua.toolsets.context import LiveState, ToolsetContext
+    from kokua.registry.context import LiveState, ToolsetContext
 
 #: The registry name this toolset is installed under. Defined once so `TOOLSET` and the guard in
 #: `_compose_spec` that refuses to hand a composed sub-agent this name cannot drift apart.
@@ -76,7 +76,7 @@ def _compose_spec(
     recursion; keeping it out of here means these two functions are not mutually recursive and this
     one stays a pure translation from names to a spec.
     """
-    from kokua.toolsets.context import ToolsetContext
+    from kokua.registry.context import ToolsetContext
 
     if any(requested.strip().lower() == TOOLSET_NAME for requested in tools):
         raise ToolsetError(

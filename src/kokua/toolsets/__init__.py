@@ -1,16 +1,10 @@
-"""Named capability providers, and the registry that resolves an agent's declared names to tools.
+"""Kokua's toolsets: one file per toolset, each file named for the toolset it declares.
 
-A ``Toolset`` is the one shape every capability takes: Kokua's own core capabilities, AIMU's built-in
-tool groups, an installed plugin, and a configured MCP server all register here, so an agent's
-declaration names a capability without naming what kind of thing provides it.
+Nothing else lives here. The registry machinery a toolset is built against (``Toolset``, ``Setting``,
+``LiveState``, ``ToolsetContext``, and name resolution) is :mod:`kokua.registry`, and the code that
+assembles every provider into one namespace is :mod:`kokua.core.agents`, so a reader looking for a
+capability finds a file with its name and nothing else to sort through.
 
-A plugin module exposes a module-level ``TOOLSET`` (a :class:`Toolset`) registered under the
-``kokua.toolsets`` entry-point group. A third party publishes a package that registers its own
-``kokua.toolsets`` entry point, and Kokua discovers it at runtime, merging its tools into the agent
-exactly as it would one of its own.
+This module deliberately exports nothing. It exists because Python needs it for the directory to be a
+package the wheel collects and ``import_module("kokua.toolsets.web")`` resolves.
 """
-
-from kokua.toolsets.context import LiveState, ToolsetContext
-from kokua.toolsets.registry import Toolset, ToolsetError, build_tools, register, select
-
-__all__ = ["LiveState", "Toolset", "ToolsetContext", "ToolsetError", "build_tools", "register", "select"]

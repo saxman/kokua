@@ -12,8 +12,8 @@ from aimu.models import StreamChunk, StreamingContentType
 from kokua.config import AssistantConfig
 from kokua.config.file import ConfigError
 from kokua.core.assistant import Assistant
-from kokua.toolsets.agents import build_command_map, undeclared_workflow_commands, validated_registry
-from kokua.toolsets.registry import Toolset, register
+from kokua.core.agents import build_command_map, undeclared_workflow_commands, validated_registry
+from kokua.registry.registry import Toolset, register
 from kokua.workflows import Workflow
 from tests.channels import FakeChannel, _config, example_agents
 from tests.helpers import MockAsyncModelClient

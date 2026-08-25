@@ -1,8 +1,8 @@
 """An agent's prompt is assembled from what it declares, so no sentence in it can go stale."""
 
 from kokua.config.schema import AgentConfig, AssistantConfig
-from kokua.toolsets.agents import assemble_system_message, build_registry
-from kokua.toolsets.registry import Toolset, select
+from kokua.core.agents import assemble_system_message, build_registry
+from kokua.registry.registry import Toolset, select
 
 
 def _assemble(agents, name="assistant", **config_kwargs):
@@ -172,7 +172,7 @@ def test_the_default_opener_is_used_when_an_agent_declares_none():
 
 
 def test_a_third_party_toolsets_guidance_reaches_the_prompt(monkeypatch):
-    from kokua.toolsets import agents as agents_module
+    from kokua.core import agents as agents_module
 
     weather = Toolset(
         name="weather",

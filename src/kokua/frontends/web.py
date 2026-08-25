@@ -26,7 +26,7 @@ from kokua.core.assistant import Assistant, ModelClientError
 from kokua.channels.web import WebChannel
 from kokua.config import AssistantConfig, ConfigError
 from kokua.plugins import FrontEnd
-from kokua.toolsets.agents import validated_registry
+from kokua.core.agents import validated_registry
 
 logger = logging.getLogger(__name__)
 

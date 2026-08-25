@@ -31,7 +31,7 @@ from aimu.agents.prebuilt import CodeReviewAgent, ContentCreationAgent, Research
 from aimu.tools import builtin, tool
 
 from kokua.config import AssistantConfig
-from kokua.toolsets import Toolset
+from kokua.registry import Toolset
 
 
 def _research_worker_tools() -> list[Callable]:

@@ -94,9 +94,9 @@ tool an agent did not name, and no flag can disagree with a declaration.**
 than kept alongside the `memory` and `documents` toolsets, because a second switch for one capability
 means one of the two is lying. `time` is a toolset every agent that wants a clock declares, where it
 used to be added to every agent in code. The shared state a toolset draws on is a lazy property on
-[`LiveState`](../../src/kokua/toolsets/context.py), so the memory and document stores are opened because
+[`LiveState`](../../src/kokua/registry/context.py), so the memory and document stores are opened because
 some agent declared the toolset that needs them, and not otherwise. An unknown name raises rather than being
-dropped ([`toolsets/registry.py`](../../src/kokua/toolsets/registry.py)'s `select`), since a dropped name
+dropped ([`registry/registry.py`](../../src/kokua/registry/registry.py)'s `select`), since a dropped name
 is a declaration the code silently overruled.
 
 The one exception is a *composed* sub-agent. `compose_subagent`
@@ -237,7 +237,7 @@ write against the user's own patterns, and `LOCK_AXIOM` beside it is the single 
 [`core/interaction.py`](../../src/kokua/core/interaction.py)'s `HumanGate.approve` is a bare name match
 against `confirm_tools`, which is what gates a worker's call identically to the entry agent's, and a
 proactive turn auto-denies rather than running a gated tool unattended.
-[`toolsets/agents.py`](../../src/kokua/toolsets/agents.py)'s `validate_confirm_tools` and
+[`core/agents.py`](../../src/kokua/core/agents.py)'s `validate_confirm_tools` and
 [`config/file.py`](../../src/kokua/config/file.py)'s lock-pattern checks are the two startup errors
 above. [`SECURITY.md`](../../SECURITY.md) names which barrier a vulnerability report is about, and which
 behavior is the program working as documented.

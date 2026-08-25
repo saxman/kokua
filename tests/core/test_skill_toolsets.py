@@ -12,9 +12,9 @@ from __future__ import annotations
 import pytest
 
 from kokua.config.schema import AgentConfig
-from kokua.toolsets.agents import build_agent_specs, build_registry, unreferenced_toolsets
-from kokua.toolsets.context import LiveState
-from kokua.toolsets.registry import ToolsetError, select
+from kokua.core.agents import build_agent_specs, build_registry, without_skill_names
+from kokua.registry.context import LiveState
+from kokua.registry.registry import ToolsetError, select
 from tests.channels import _config
 
 
@@ -144,14 +144,18 @@ def test_an_authoring_entry_agent_sees_every_skill(tmp_path):
     assert sorted(state.skill_manager.skills) == ["declared", "undeclared"]
 
 
-def test_a_skill_on_disk_is_never_reported_as_unreferenced(tmp_path):
-    """An authoring entry agent reaches every skill through its catalogue, so a skill no [agents.*]
-    table names is not the unreachable-resource case this warning exists for."""
+def test_a_skill_name_is_dropped_from_what_a_skill_agent_resolves(tmp_path):
+    """The one thing the provider map still decides. AIMU already hands a ``SkillAgent`` the catalogue
+    and script tools of every skill in its manager, so resolving those names as toolsets as well would
+    put the catalogue in its prompt twice. Everything else in the declaration is untouched, which is why
+    this strips by provider rather than by guessing from the name.
+    """
     config = _config(tmp_path)
-    write_skill(config, "authored-later", "Written by the assistant, named by nobody.")
+    write_skill(config, "citation-check", "Verify a claim.")
+    config.agents["assistant"] = AgentConfig(tools=["time", "skills", "citation-check"])
     registry = build_registry(config)
 
-    assert "authored-later" not in unreferenced_toolsets(config, registry)
+    assert without_skill_names(config.agents["assistant"].tools, registry) == ["time", "skills"]
 
 
 def test_a_skill_resolves_through_select_so_a_typo_is_still_caught(tmp_path):
@@ -166,6 +170,6 @@ def test_a_skill_resolves_through_select_so_a_typo_is_still_caught(tmp_path):
 
 
 def _ctx(state: LiveState):
-    from kokua.toolsets.context import ToolsetContext
+    from kokua.registry.context import ToolsetContext
 
     return ToolsetContext(state=state, agent=None)

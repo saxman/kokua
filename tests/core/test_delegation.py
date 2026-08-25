@@ -4,8 +4,8 @@ delegates carries its own delegate rather than inheriting the parent's menu."""
 from aimu.tools import builtin
 
 from kokua.config.schema import AgentConfig, AssistantConfig
-from kokua.toolsets.agents import build_agent_specs, build_registry
-from kokua.toolsets.context import LiveState
+from kokua.core.agents import build_agent_specs, build_registry
+from kokua.registry.context import LiveState
 
 SPAWN = "spawn_subagent"
 
@@ -141,7 +141,7 @@ class _FakeAgent:
 
 
 def _captured_spawn_model(monkeypatch, config, state, agent) -> object:
-    from kokua.toolsets import agents as agents_mod
+    from kokua.core import agents as agents_mod
 
     captured = []
 
@@ -286,7 +286,7 @@ def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypa
     ``ValueError: No available async client for model type 'NoneType'`` at the moment it was asked to
     do something, and only then.
     """
-    from kokua.toolsets import agents as agents_mod
+    from kokua.core import agents as agents_mod
 
     from tests.conftest import TEST_DEFAULT_MODEL
 

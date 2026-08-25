@@ -23,6 +23,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.21.0 or newer
   as untrusted: a toolset that fails to import, or whose `build` raises, fails startup naming itself,
   whichever route it arrived by. Kokua ships no third-party code, so it carries no special handling
   for code it does not ship.
+- **`toolsets/` holds toolsets and nothing else.** The machinery a toolset is built against (the
+  `Toolset` and `Setting` types, name resolution, and the `LiveState` / `ToolsetContext` a `build`
+  draws on) is `kokua.registry`; assembling every provider into one namespace, validating an agent,
+  and assembling its prompt is `kokua.core.agents`. So a reader looking for a capability finds a file
+  with its name, and nothing else to sort past.
+- **No startup warning for a registered name no agent declares.** Telling a name the user provisioned
+  from one that merely ships meant a provenance rule over the whole namespace, and a toolset nobody
+  declares costs nothing to leave unnamed. A configured MCP server does cost something (a handshake,
+  and a held credential), and it is the case that lost a signal here; see
+  [Add MCP services](docs/how-to/add-mcp-services.md). The distinct warning for a `config.toml`
+  section whose owning toolset no agent declares is unaffected.
 - The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
   `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
 

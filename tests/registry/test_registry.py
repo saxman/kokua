@@ -3,8 +3,8 @@
 import pytest
 
 from kokua.config.schema import AssistantConfig
-from kokua.toolsets.context import LiveState, ToolsetContext
-from kokua.toolsets.registry import Toolset, ToolsetError, build_tools, register, select
+from kokua.registry.context import LiveState, ToolsetContext
+from kokua.registry.registry import Toolset, ToolsetError, build_tools, register, select
 
 
 def _toolset(name: str, *, tools=(), **kwargs) -> Toolset:
@@ -129,7 +129,7 @@ def test_plugins_module_reexports_the_public_contract():
 
 
 def test_a_toolset_may_carry_a_workflow():
-    from kokua.toolsets.registry import workflows_of
+    from kokua.registry.registry import workflows_of
     from kokua.workflows import Workflow
 
     workflow = Workflow(
@@ -150,7 +150,7 @@ def test_a_toolset_carries_no_workflow_by_default():
 
 
 def test_a_toolset_declares_settings_with_defaults():
-    from kokua.toolsets.registry import Setting, Toolset
+    from kokua.registry.registry import Setting, Toolset
 
     toolset = Toolset(
         name="planning",
@@ -165,6 +165,6 @@ def test_a_toolset_declares_settings_with_defaults():
 
 
 def test_a_toolset_declares_no_settings_by_default():
-    from kokua.toolsets.registry import Toolset
+    from kokua.registry.registry import Toolset
 
     assert Toolset(name="plain", description="P.", build=lambda ctx: []).settings == ()

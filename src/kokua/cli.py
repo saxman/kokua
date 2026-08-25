@@ -25,9 +25,9 @@ from kokua.config import AssistantConfig, ConfigError, MCPServerConfig
 from kokua.config import settings_sources
 from kokua.config.store import disambiguate_name, name_from_url
 
-# Safe at module level, unlike kokua.toolsets.agents below: `from . import plugins` above already imports
+# Safe at module level, unlike kokua.core.agents below: `from . import plugins` above already imports
 # kokua.toolsets, and registry.py itself imports no AIMU surface the preflight checks.
-from kokua.toolsets.registry import ToolsetError
+from kokua.registry.registry import ToolsetError
 from .logging_setup import configure_logging
 
 
@@ -320,9 +320,9 @@ def _print_toolsets(config: AssistantConfig) -> None:
     from ``[[mcp.server]]``. Reads the whole registry rather than only the plugin entry points, because a
     list that omitted the built-in groups would read as "those are unavailable to you".
     """
-    # Imported here, not at module level: kokua.toolsets.agents reaches kokua.core, which imports the
+    # Imported here, not at module level: kokua.core.agents reaches kokua.core, which imports the
     # AIMU surface `preflight` exists to check, and this module must be importable before that check runs.
-    from kokua.toolsets.agents import build_registry
+    from kokua.core.agents import build_registry
 
     try:
         registry = build_registry(config)

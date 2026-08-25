@@ -12,8 +12,8 @@ from kokua.toolsets.capabilities import (
     _compose_spec,
     make_capability_tools,
 )
-from kokua.toolsets.context import LiveState, ToolsetContext
-from kokua.toolsets.registry import Toolset, ToolsetError, register
+from kokua.registry.context import LiveState, ToolsetContext
+from kokua.registry.registry import Toolset, ToolsetError, register
 
 
 def _toolset(name: str, *, tools=(), **kwargs) -> Toolset:

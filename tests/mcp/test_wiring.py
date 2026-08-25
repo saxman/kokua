@@ -43,7 +43,7 @@ def delegates(monkeypatch):
     to see that the change actually reached that agent's workers; the entry agent's own tool list is the
     wrong place to look and would make these assertions vacuous.
     """
-    import kokua.toolsets.agents as agents_mod
+    import kokua.core.agents as agents_mod
 
     built: list[set[str]] = []
     real = agents_mod.make_async_subagent_tool
@@ -73,8 +73,8 @@ def _worker_tools(assistant) -> set[str]:
     """
     from dataclasses import replace
 
-    from kokua.toolsets.agents import build_agent_specs, build_registry
-    from kokua.toolsets.context import LiveState
+    from kokua.core.agents import build_agent_specs, build_registry
+    from kokua.registry.context import LiveState
 
     servers = [MCPServerConfig(url=conn.url, name=f"server-{i}") for i, conn in enumerate(assistant._mcp_servers)]
     agents = {
@@ -495,35 +495,3 @@ async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeyp
     assistant._registry.get(new_id)
     assert len(delegates) == 1  # built once, with no fan-out rebuild needed
     assert "remote_ping" in delegates[0]  # and already carrying the connected server
-
-
-async def test_mcp_server_no_agent_names_is_warned_about(tmp_path, monkeypatch, caplog):
-    """A server reaches only the agents that name it, so an unnamed one connects, holds a token, and is
-    reachable by nobody -- silently, without this warning."""
-    import logging
-
-    from aimu import aio
-
-    async def fake_connect(*, url=None, auth=None, **kw):
-        return _FakeMCP([_fake_mcp_tool("remote_search")])
-
-    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
-    config = _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://orphan/mcp", name="orphan")])
-    with caplog.at_level(logging.WARNING, logger="kokua.core.assistant"):
-        await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
-    assert any("orphan" in record.getMessage() for record in caplog.records)
-
-
-async def test_mcp_server_an_agent_names_is_not_warned_about(tmp_path, monkeypatch, caplog):
-    import logging
-
-    from aimu import aio
-
-    async def fake_connect(*, url=None, auth=None, **kw):
-        return _FakeMCP([_fake_mcp_tool("remote_search")])
-
-    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
-    config = _config(tmp_path, **_using("named", "https://named/mcp"))
-    with caplog.at_level(logging.WARNING, logger="kokua.core.assistant"):
-        await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
-    assert not any("named" in record.getMessage() for record in caplog.records)

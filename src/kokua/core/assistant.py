@@ -47,7 +47,7 @@ from kokua.core.settings_runtime import SettingsApplier
 from kokua.core.turn_gate import TurnGate
 from kokua.core.turns import TurnRunner
 from kokua.core.turn_registry import TurnInfo, TurnTracker
-from kokua.toolsets.context import LiveState
+from kokua.registry.context import LiveState
 
 logger = logging.getLogger(__name__)
 
@@ -148,15 +148,14 @@ class Assistant:
     async def create(
         cls, config: AssistantConfig, channel: Channel, *, client=None, client_factory=None
     ) -> "Assistant":
-        # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which
+        # Imported here, not at module level: kokua.core.agents pulls in kokua.toolsets.core, which
         # pulls in kokua.core.transcripts -- a submodule of this package -- and importing it triggers
         # kokua/core/__init__ to run, which imports this module. A top-level import here would close
         # that cycle.
-        from kokua.toolsets.agents import (
+        from kokua.core.agents import (
             build_command_map,
             configured_but_undeclared,
             undeclared_workflow_commands,
-            unreferenced_toolsets,
             validate_confirm_tools,
             validated_registry,
         )
@@ -268,12 +267,6 @@ class Assistant:
         # MCP-backed workers their tools. The fan-out is a no-op here (no agents are live yet); it just
         # fills `connections`.
         await reconnect_mcp_servers(for_each_agent, connections, config, notify=channel.send, oauth=oauth)
-        for name in unreferenced_toolsets(config, state.registry):
-            logger.warning(
-                "Toolset %r is provisioned but no [agents.*] table names it in `tools`, so it reaches no "
-                "agent of its own, only a worker composed for a single task.",
-                name,
-            )
         for name in configured_but_undeclared(config):
             logger.warning(
                 "config.toml has a [%s] section, but no agent declares the %r toolset, so its settings are "

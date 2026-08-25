@@ -39,6 +39,8 @@ src/kokua/
               command (e.g. /plan) dispatches through self._workflows, built from the toolset registry
     diagnostics.py       the /diag report
     build.py             free functions that assemble a model client and wire one declared agent
+    agents.py            assembles the registry from every provider; resolves, validates, and
+                         prompts one declared agent, and builds its delegation tool
     subagents.py         SubagentReporter: sub-agent activity as display frames + recorded events
     agent_registry.py    per-conversation agent cache with LRU eviction and pinning
     turn_gate.py         writer-preferring readers-writer gate
@@ -64,10 +66,10 @@ src/kokua/
                  tables in config.toml)
   channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
   frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
-  toolsets/      the one namespace of named capabilities
-    registry.py    the Toolset dataclass, `register`, `select`, `build_tools`
+  registry/      the machinery a toolset is built against, and no toolsets
+    registry.py    the Toolset and Setting dataclasses, `register`, `select`, `build_tools`
     context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
-    agents.py      builds the registry from every provider; resolves and validates one agent
+  toolsets/      the named capabilities themselves, and nothing else
     builtin.py     AIMU's tool groups, its two stores, and skills, wrapped as toolsets
     core.py        an index over the six TOOLSET constants in the six modules below
     capabilities.py, config.py, conversations.py, mcp_admin.py, planning.py, scheduling.py -- Kokua's
@@ -140,10 +142,12 @@ toolsets, build their tools, attach the approval gate, attach its delegate if it
 conversation's agent cannot differ from a sibling's by accident, and there is no mode to branch on.
 
 - **A declaration is the only way capability is granted.** A built-in group, an installed plugin toolset,
-  and a connected MCP server all reach nothing until some agent's `tools` names them. Startup warns about
-  a *provisioned* name nothing references (`agents.unreferenced_toolsets`, which excludes the AIMU and
-  core toolsets that ship regardless), since a plugin loaded or a server connected to be unreachable is
-  invisible otherwise and cost something.
+  and a connected MCP server all reach nothing until some agent's `tools` names them, and nothing warns
+  about a name nothing references. Startup used to, for names the user had provisioned specifically to
+  be reachable, but telling those from the ones that merely ship meant a provenance rule over the whole
+  namespace, and a toolset nobody declares costs nothing to leave unnamed. A configured MCP server does
+  cost something (a handshake, and a held credential), which is the case that lost a signal here; see
+  [Add MCP services](../how-to/add-mcp-services.md).
 - **A composed sub-agent is the one exception, and it is entered by declaration.** `compose_subagent`
   ([toolsets/capabilities.py](../../src/kokua/toolsets/capabilities.py)) resolves a sub-agent's tools from
   names the model picked out of the registry rather than from a table, and runs one task on it through
@@ -189,9 +193,8 @@ anything; the last two run once per agent, whenever one is built:
    the same namespace as everything else), built-in toolset, and plugin. The last two are both the
    `kokua.toolsets` entry-point group, split by which distribution registered them: Kokua's own four
    (`aimu_agents`, `benchmark`, `github_backup`, `image`) take the built-in label so
-   `unreferenced_toolsets` stays quiet about ships-in-the-box toolsets the shipped config simply never
-   named. That label is the only difference between the two, and every toolset keeps the `build` its
-   author wrote: nothing is wrapped, so a toolset that fails to import or to build takes startup down
+   `--list-toolsets` can group them separately. That label is the only difference between the two, and
+   every toolset keeps the `build` its author wrote: nothing is wrapped, so a toolset that fails to import or to build takes startup down
    naming itself, whichever route it arrived by. **Nothing gates any of this either.** Registration is unconditional because installing a
    distribution that registers an entry point is the consent, and because the switch that used to exist
    could not do what it claimed: `resolve_config` imports every entry point before the file is parsed

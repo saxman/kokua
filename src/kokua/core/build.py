@@ -15,8 +15,8 @@ from aimu import aio
 
 from kokua.channels.web import SPAWN_SUBAGENT_TOOL_NAME
 from kokua.config.schema import AssistantConfig
-from kokua.toolsets.context import LiveState, ToolsetContext
-from kokua.toolsets.registry import Toolset, build_tools, select
+from kokua.registry.context import LiveState, ToolsetContext
+from kokua.registry.registry import Toolset, build_tools, select
 
 
 class ModelClientError(RuntimeError):
@@ -31,10 +31,10 @@ def resolve_system_message(config: AssistantConfig, agent_name: str, toolsets: S
     Shared by every path that builds a client for an agent, so each one gives it the same message the
     agent's toolsets and delegation earn rather than recomputing a possibly different one.
     """
-    # Imported here, not at module level: kokua.toolsets.agents pulls in kokua.toolsets.core, which pulls
+    # Imported here, not at module level: kokua.core.agents pulls in kokua.toolsets.core, which pulls
     # in kokua.core.transcripts -- a submodule of this package -- and importing it triggers kokua/core/__init__
     # to run, which imports this module. A top-level import here would close that cycle.
-    from kokua.toolsets.agents import assemble_system_message
+    from kokua.core.agents import assemble_system_message
 
     return assemble_system_message(config, agent_name, toolsets)
 
@@ -149,8 +149,8 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
     script reports as being unconfigured.
     """
     # Imported here, not at module level: see the comment in resolve_system_message -- the same cycle
-    # runs through kokua.toolsets.agents.
-    from kokua.toolsets.agents import without_skill_names
+    # runs through kokua.core.agents.
+    from kokua.core.agents import without_skill_names
 
     resolvable = without_skill_names(config.agents[agent_name].tools, state.registry)
     toolsets = select(resolvable, state.registry, agent=agent_name, entry_point=config.entry_agent)
@@ -211,8 +211,8 @@ def rebuild_delegation_tool(agent: aio.SkillAgent, state: LiveState) -> None:
     rebuild it for the change to reach that worker.
     """
     # Imported here, not at module level: see the comment in resolve_system_message -- the same cycle
-    # runs through kokua.toolsets.agents.
-    from kokua.toolsets.agents import make_delegation_tool
+    # runs through kokua.core.agents.
+    from kokua.core.agents import make_delegation_tool
 
     agent.tools[:] = [t for t in agent.tools if getattr(t, "__name__", None) != SPAWN_SUBAGENT_TOOL_NAME]
     tool = make_delegation_tool(agent, state.config, state)

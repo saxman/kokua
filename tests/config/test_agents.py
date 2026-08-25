@@ -124,7 +124,7 @@ def test_the_shipped_example_config_loads_and_validates(tmp_path):
     from importlib.resources import files
 
     from kokua.config.file import load
-    from kokua.toolsets.agents import build_registry, validate_agents
+    from kokua.core.agents import build_registry, validate_agents
 
     source = files("kokua").joinpath("config.example.toml")
     path = tmp_path / "config.toml"

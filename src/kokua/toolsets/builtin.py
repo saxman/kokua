@@ -23,7 +23,7 @@ from aimu.skills import make_skill_authoring_tool, make_skill_script_tool
 from aimu.tools import builtin
 from aimu.tools.builtin import make_document_tools, make_memory_tools
 
-from kokua.toolsets.registry import Toolset
+from kokua.registry.registry import Toolset
 
 WEB_GUIDANCE = (
     " Your own knowledge has a training cutoff. When an answer could have changed since then, or the "

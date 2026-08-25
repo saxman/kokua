@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 from kokua.config.schema import AssistantConfig
-from kokua.toolsets.context import LiveState, ToolsetContext
+from kokua.registry.context import LiveState, ToolsetContext
 from kokua.toolsets.core import CORE_TOOLSETS
 from kokua.mcp.auth import OAuthSettings
 

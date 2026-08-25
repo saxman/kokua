@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from importlib.metadata import entry_points
 from typing import Awaitable, Callable
 
-from kokua.toolsets import Toolset, ToolsetContext
+from kokua.registry import Toolset, ToolsetContext
 
 FRONTEND_GROUP = "kokua.frontends"
 TOOLSET_GROUP = "kokua.toolsets"
@@ -111,7 +111,7 @@ def own_distribution_toolset_names() -> set[str]:
 
     A name here ships in the box regardless of what any config declares, so an agent not naming it is not
     news the way an unreferenced third-party plugin or a configured MCP server would be -- see
-    ``toolsets.agents.unreferenced_toolsets``. Queried independently of ``discover_toolsets`` (a second
+    ``core.agents.unreferenced_toolsets``. Queried independently of ``discover_toolsets`` (a second
     ``entry_points`` call) rather than folded into it, since provenance is a distinct question from "what
     is installed" and callers of ``discover_toolsets`` should not have to care about it.
     """

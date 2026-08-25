@@ -262,7 +262,7 @@ def test_the_example_config_ships_the_default_lock_list():
 
 
 def _stub_toolset(name):
-    from kokua.toolsets.registry import Toolset
+    from kokua.registry.registry import Toolset
 
     return Toolset(name=name, description=f"{name} for a test", build=lambda ctx: [])
 

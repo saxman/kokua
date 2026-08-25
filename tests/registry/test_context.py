@@ -2,7 +2,7 @@
 pinning directly: shared across agents when declared, never constructed when not."""
 
 from kokua.config.schema import AssistantConfig
-from kokua.toolsets.context import LiveState, ToolsetContext
+from kokua.registry.context import LiveState, ToolsetContext
 from kokua.mcp.auth import OAuthSettings
 
 

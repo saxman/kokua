@@ -51,7 +51,7 @@ from typing import Optional, Union
 from aimu.tools import tool
 
 from kokua.config import AssistantConfig
-from kokua.toolsets.registry import Toolset
+from kokua.registry.registry import Toolset
 
 TOOLSET_NAME = "benchmark"
 

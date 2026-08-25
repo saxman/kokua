@@ -194,8 +194,9 @@ model's context on every configuration question. A new or changed key goes in bo
 src/kokua/
   cli.py  plugins.py  images.py  logging_setup.py  config.example.toml  web_static/
   core/         assistant (composition root + serve loop), conversations, turns, interaction,
-                settings_runtime, diagnostics, build, agent_registry, turn_gate, turn_registry,
-                messages, errors, transcripts
+                settings_runtime, diagnostics, build, agents (build_registry, validate_agents, prompt
+                assembly, delegation), agent_registry, turn_gate, turn_registry, messages, errors,
+                transcripts
   config/       schema, paths, file, store (writes + write policy), table, settings_sources (joins a
                 toolset's declared settings into the table; the one module under config/ that imports
                 upward, so the rest of the layer stays at the bottom)
@@ -205,11 +206,12 @@ src/kokua/
   scheduling/   recurrence (pure math), tasks (TaskService, over config.toml's [scheduling.task.*])
   channels/     ui (ChannelUI), protocol (RichChannel), cli, web
   frontends/    cli, web           -- registered as plugins, exactly like a third party's
-  toolsets/     registry (Toolset, select, build_tools), context (LiveState, ToolsetContext),
-                agents (build_registry, validate_agents, prompt assembly, delegation),
-                builtin (AIMU groups/stores/skills), core (an index over Kokua's six),
+  registry/     registry (Toolset, Setting, select, build_tools, register), context (LiveState,
+                ToolsetContext) -- the machinery, and no toolsets
+  toolsets/     builtin (AIMU groups/stores/skills), core (an index over Kokua's six),
                 capabilities, config, conversations, mcp_admin, planning, scheduling -- Kokua's own six,
                 aimu_agents, benchmark, github_backup, image -- plugins, like a third party's
+                -- and nothing else: no registry machinery, no namespace assembly
 ```
 
 `tests/` mirrors this layout. Public import surface: `kokua.plugins`, `kokua.config`, `kokua.core`,

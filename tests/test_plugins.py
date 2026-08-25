@@ -10,7 +10,7 @@ from kokua import plugins
 from kokua.config import AssistantConfig
 from tests.channels import example_agents
 from kokua.plugins import FrontEnd, Toolset
-from kokua.toolsets import LiveState, ToolsetContext
+from kokua.registry import LiveState, ToolsetContext
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
@@ -56,7 +56,7 @@ def test_a_built_in_toolset_is_discovered():
 
 
 def _worker_specs(cfg) -> dict[str, dict]:
-    from kokua.toolsets.agents import build_agent_specs, build_registry
+    from kokua.core.agents import build_agent_specs, build_registry
 
     state = LiveState(config=cfg, registry=build_registry(cfg))
     return build_agent_specs(cfg, state, cfg.entry_agent)
@@ -91,7 +91,7 @@ def test_entry_point_toolsets_are_registered_unconditionally(tmp_path):
     """There is no switch. Installing a distribution that registers a `kokua.toolsets` entry point is
     the consent, so every discovered toolset is in the namespace. What an agent may *use* is unchanged:
     exactly what its own `tools` list declares, which is what the sibling test above pins."""
-    from kokua.toolsets.agents import build_registry
+    from kokua.core.agents import build_registry
 
     assert "aimu_agents" in build_registry(_config(tmp_path))
 

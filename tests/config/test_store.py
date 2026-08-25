@@ -131,7 +131,7 @@ def test_add_mcp_server_two_urls_on_one_host_get_distinct_names(tmp_path):
     assert names[0] == "broker-example-com"
     assert names[1] == "broker-example-com-2"
 
-    from kokua.toolsets.agents import build_registry
+    from kokua.core.agents import build_registry
     from kokua.config.schema import AgentConfig, AssistantConfig
 
     config = AssistantConfig(

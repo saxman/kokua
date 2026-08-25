@@ -12,7 +12,7 @@ from kokua.toolsets.conversations import TOOLSET as CONVERSATIONS_TOOLSET
 from kokua.toolsets.mcp_admin import TOOLSET as MCP_TOOLSET
 from kokua.toolsets.planning import TOOLSET as PLANNING_TOOLSET
 from kokua.toolsets.scheduling import TOOLSET as SCHEDULING_TOOLSET
-from kokua.toolsets.registry import Toolset
+from kokua.registry.registry import Toolset
 
 CORE_TOOLSETS: tuple[Toolset, ...] = (
     CAPABILITIES_TOOLSET,

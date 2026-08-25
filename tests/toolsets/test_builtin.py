@@ -5,7 +5,7 @@ from aimu.tools import builtin as aimu_builtin
 
 from kokua.config.schema import AssistantConfig
 from kokua.toolsets.builtin import BUILTIN_TOOLSETS
-from kokua.toolsets.context import LiveState, ToolsetContext
+from kokua.registry.context import LiveState, ToolsetContext
 
 BY_NAME = {t.name: t for t in BUILTIN_TOOLSETS}
 

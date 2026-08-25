@@ -23,7 +23,7 @@ from aimu.sessions import Session
 from aimu.tools import tool
 
 from kokua.core.transcripts import flatten_transcript, readable_messages, search, short_time, truncate_lines
-from kokua.toolsets.registry import Toolset
+from kokua.registry.registry import Toolset
 
 if TYPE_CHECKING:
     # Annotation only. A real import would run kokua/core/__init__.py, and this module is reached from

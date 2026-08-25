@@ -45,7 +45,7 @@ from typing import Callable
 from aimu.tools import tool
 
 from kokua.config import AssistantConfig
-from kokua.toolsets.registry import Setting, Toolset
+from kokua.registry.registry import Setting, Toolset
 
 TOOLSET_NAME = "github_backup"
 TOKEN_ENV = "GITHUB_BACKUP_TOKEN"

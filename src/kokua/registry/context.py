@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     # aimu_compat.require_aimu probes for, and this module is reached from kokua.plugins (hence loaded at
     # `import kokua.cli` time, on every invocation including --help and `config init`) well before that
     # preflight ever runs. A real import here would turn an AIMU missing the newest surface into a bare
-    # ImportError on those, defeating the preflight it would otherwise go through. toolsets/agents.py
+    # ImportError on those, defeating the preflight it would otherwise go through. core/agents.py
     # holds the real unconditional import that keeps this annotation honest -- it is only ever imported
     # lazily, after preflight has already run.
     from aimu.aio.tools.builtin import SubagentObserver
@@ -60,7 +60,7 @@ class LiveState:
     # Typed Any rather than kokua.core.conversations.ConversationBook: that class lives under kokua.core,
     # and importing it here would import kokua/core/__init__.py, which imports core/build.py, which
     # imports this module -- the same cycle resolve_system_message's docstring works around by importing
-    # kokua.toolsets.agents late. Left honestly untyped rather than worked around, unlike observer below.
+    # kokua.core.agents late. Left honestly untyped rather than worked around, unlike observer below.
     conversation_book: Optional[Any] = None
     turn_running: Optional[Callable[[str], bool]] = None
     # Cancels a scheduled task's in-flight firings, returning (how many, whether one was the run the call

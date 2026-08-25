@@ -4,8 +4,8 @@ import pytest
 
 from kokua.config.file import ConfigError
 from kokua.config.schema import AgentConfig, AssistantConfig, MCPServerConfig
-from kokua.toolsets.agents import build_registry
-from kokua.toolsets.context import LiveState, ToolsetContext
+from kokua.core.agents import build_registry
+from kokua.registry.context import LiveState, ToolsetContext
 from tests.helpers import core_table
 
 
@@ -60,7 +60,7 @@ def test_a_server_whose_name_collides_with_a_core_toolset_is_rejected():
         entry_agent="assistant",
         mcp_servers=[MCPServerConfig(url="https://example.com/mcp", name="memory")],
     )
-    from kokua.toolsets.registry import ToolsetError
+    from kokua.registry.registry import ToolsetError
 
     with pytest.raises(ToolsetError) as excinfo:
         build_registry(config)
@@ -82,7 +82,7 @@ def test_two_servers_colliding_under_the_same_provider_label_name_their_urls():
             MCPServerConfig(url="https://two.example.com/mcp", name="shared"),
         ],
     )
-    from kokua.toolsets.registry import ToolsetError
+    from kokua.registry.registry import ToolsetError
 
     with pytest.raises(ToolsetError) as excinfo:
         build_registry(config)

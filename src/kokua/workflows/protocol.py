@@ -96,7 +96,7 @@ class WorkflowContext:
 
     ``settings`` is attribute access over the carrying toolset's own ``config.toml`` section: every key
     that toolset declared, at whatever the file set or the declaration defaulted to. The section is the
-    toolset's name, which is why a workflow shares it (see ``toolsets.agents.build_command_map``).
+    toolset's name, which is why a workflow shares it (see ``core.agents.build_command_map``).
     """
 
     agent: Any

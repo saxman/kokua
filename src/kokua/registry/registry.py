@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Optional, Sequence
 
 if TYPE_CHECKING:
-    from kokua.toolsets.context import ToolsetContext
+    from kokua.registry.context import ToolsetContext
     from kokua.workflows import Workflow
 
 

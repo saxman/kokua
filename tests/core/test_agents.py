@@ -4,8 +4,8 @@ import pytest
 
 from kokua.config.file import ConfigError
 from kokua.config.schema import AgentConfig, AssistantConfig
-from kokua.toolsets.agents import build_registry, unreferenced_toolsets, validate_agents
-from kokua.toolsets.registry import ToolsetError
+from kokua.core.agents import build_registry, validate_agents
+from kokua.registry.registry import ToolsetError
 
 
 def test_registry_contains_every_provider():
@@ -37,8 +37,8 @@ def test_kokuas_own_plugins_are_labeled_built_in_not_plugin():
 
 
 def test_a_third_party_plugin_is_still_labeled_plugin(monkeypatch):
-    from kokua.toolsets import agents
-    from kokua.toolsets.registry import Toolset
+    from kokua.core import agents
+    from kokua.registry.registry import Toolset
 
     weather = Toolset(name="weather", description="Forecasts.", build=lambda ctx: [])
     monkeypatch.setattr(agents, "discover_toolsets", lambda: {"weather": weather})
@@ -47,8 +47,8 @@ def test_a_third_party_plugin_is_still_labeled_plugin(monkeypatch):
 
 
 def test_a_plugin_shadowing_a_core_name_is_rejected(monkeypatch):
-    from kokua.toolsets import agents
-    from kokua.toolsets.registry import Toolset
+    from kokua.core import agents
+    from kokua.registry.registry import Toolset
 
     clash = Toolset(name="memory", description="clash", build=lambda ctx: [])
     monkeypatch.setattr(agents, "discover_toolsets", lambda: {"memory": clash})
@@ -62,9 +62,9 @@ def test_a_toolset_that_fails_to_build_raises(monkeypatch):
     """No source is tolerated, because there is no source this codebase is willing to be quiet about.
     A build failure is a bug in whoever wrote the toolset, and a warning in a log file is not how a
     person finds out an agent silently lost a capability."""
-    from kokua.toolsets import agents
-    from kokua.toolsets.context import LiveState, ToolsetContext
-    from kokua.toolsets.registry import Toolset
+    from kokua.core import agents
+    from kokua.registry.context import LiveState, ToolsetContext
+    from kokua.registry.registry import Toolset
 
     def _boom(ctx):
         raise RuntimeError("boom")
@@ -201,52 +201,9 @@ def test_an_unresolvable_worker_model_is_still_rejected():
     assert "researcher" in str(excinfo.value)
 
 
-def test_unreferenced_toolsets_ignores_unnamed_builtin_and_core_groups():
-    """A built-in AIMU group or a core subsystem toolset ships whether or not any agent names it, so an
-    unnamed one is not a startup warning -- only a name the user provisioned earns one."""
-    config = _config({"assistant": AgentConfig(tools=["time"])})
-    registry = build_registry(config)
-    assert unreferenced_toolsets(config, registry) == []
-
-
-def test_unreferenced_toolsets_is_silent_on_the_real_shipped_config():
-    """The regression this guards: Kokua's own built-in toolsets register under the real
-    `kokua.toolsets` entry-point group, a path a monkeypatched `discover_toolsets` (used above) does not
-    exercise, and the shipped config.example.toml declares only some of them. Without excluding Kokua's
-    own distribution from the warning, every default install would log one warning per shipped toolset
-    nobody chose to skip."""
-    from tests.channels import example_agents
-
-    config = AssistantConfig(agents=example_agents(), entry_agent="assistant")
-    registry = build_registry(config)
-    assert unreferenced_toolsets(config, registry) == []
-
-
-def test_unreferenced_toolsets_reports_an_unused_plugin(monkeypatch):
-    from kokua.toolsets import agents
-    from kokua.toolsets.registry import Toolset
-
-    unused = Toolset(name="weather", description="Forecasts.", build=lambda ctx: [])
-    monkeypatch.setattr(agents, "discover_toolsets", lambda: {"weather": unused})
-    config = AssistantConfig(agents={"assistant": AgentConfig(tools=["time"])})
-    registry = build_registry(config)
-    assert unreferenced_toolsets(config, registry) == ["weather"]
-
-
-def test_unreferenced_toolsets_does_not_report_a_declared_plugin(monkeypatch):
-    from kokua.toolsets import agents
-    from kokua.toolsets.registry import Toolset
-
-    used = Toolset(name="weather", description="Forecasts.", build=lambda ctx: [])
-    monkeypatch.setattr(agents, "discover_toolsets", lambda: {"weather": used})
-    config = AssistantConfig(agents={"assistant": AgentConfig(tools=["time", "weather"])})
-    registry = build_registry(config)
-    assert unreferenced_toolsets(config, registry) == []
-
-
 def test_a_configured_section_for_an_undeclared_toolset_is_reported():
     from tests.channels import example_agents
-    from kokua.toolsets.agents import configured_but_undeclared
+    from kokua.core.agents import configured_but_undeclared
 
     agents = example_agents()
     agents["assistant"].tools = ["time"]
@@ -257,7 +214,7 @@ def test_a_configured_section_for_an_undeclared_toolset_is_reported():
 
 def test_a_configured_section_for_a_declared_toolset_is_not_reported():
     from tests.channels import example_agents
-    from kokua.toolsets.agents import configured_but_undeclared
+    from kokua.core.agents import configured_but_undeclared
 
     agents = example_agents()
     agents["assistant"].tools = ["planning"]
@@ -271,7 +228,7 @@ def test_a_defaulted_section_the_file_never_had_is_not_reported():
     section that was only ever defaulted (never in configured_sections) must not be reported even
     though it appears here."""
     from tests.channels import example_agents
-    from kokua.toolsets.agents import configured_but_undeclared
+    from kokua.core.agents import configured_but_undeclared
 
     agents = example_agents()
     agents["assistant"].tools = ["time"]

@@ -16,7 +16,7 @@ from kokua.config.settings_sources import (
     startup_schema,
 )
 from kokua.config.table import CORE_RUNTIME_SETTINGS, TYPE_LABELS
-from kokua.toolsets.registry import Setting, Toolset, ToolsetError
+from kokua.registry.registry import Setting, Toolset, ToolsetError
 
 HOT = Setting("rounds", int, 2, hot=True)
 COLD = Setting("endpoint", str, "https://example.invalid")

@@ -18,7 +18,8 @@ from tests.channels import _config as _assistant_config
 from kokua import plugins
 from kokua.config import AssistantConfig
 from kokua.plugins import Toolset
-from kokua.toolsets import LiveState, ToolsetContext, aimu_agents
+from kokua.registry import LiveState, ToolsetContext
+from kokua.toolsets import aimu_agents
 
 
 def _config(tmp_path: Path, **overrides) -> AssistantConfig:
@@ -71,7 +72,7 @@ def test_pack_is_discovered_and_contributes_three_tools():
 def test_toolset_tools_reach_an_agent_that_names_the_toolset(tmp_path):
     """The documented wiring: an agent with tools = ["aimu_agents"] gets the three agents as tools."""
     from kokua.config.schema import AgentConfig
-    from kokua.toolsets.agents import build_agent_specs, build_registry
+    from kokua.core.agents import build_agent_specs, build_registry
 
     cfg = _assistant_config(
         tmp_path,

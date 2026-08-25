@@ -28,7 +28,7 @@ from kokua.config import file as settings
 from kokua.config import store as config_store
 from kokua.config.schema import AgentConfig
 from kokua.config.settings_sources import startup_schema
-from kokua.toolsets.registry import Toolset
+from kokua.registry.registry import Toolset
 
 
 def _policy_preamble(locked: Sequence[str]) -> str:
@@ -63,7 +63,7 @@ def _resolvable_model(section: str, key: str, value: str) -> str:
     would be saved and turn up as a Kokua that will not start, with the assistant that wrote it gone.
 
     The import is function-local because ``core.build`` reaches ``toolsets/`` and a module-level import
-    here would close that cycle -- the same reason ``core.build`` imports ``toolsets.agents`` inside a
+    here would close that cycle -- the same reason ``core.build`` imports ``core.agents`` inside a
     function.
     """
     from kokua.core.build import ModelClientError, validate_model_string
@@ -163,7 +163,7 @@ def _validated_agent_write(config, registry, table) -> Callable[[str, str, Any],
     the same call a lazily built front end makes at startup, so a registry that will not even assemble
     (two toolsets claiming one name, say) arrives as a refusal rather than escaping the tool call.
     """
-    from kokua.toolsets.agents import validate_agents, validated_registry
+    from kokua.core.agents import validate_agents, validated_registry
 
     def convert(section: str, key: str, value: Any) -> Any:
         name = section.split(".")[1]

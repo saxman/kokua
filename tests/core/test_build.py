@@ -9,7 +9,7 @@ import pytest
 from kokua.config import MCPServerConfig
 from kokua.config.schema import AgentConfig
 from kokua.core.assistant import Assistant
-from kokua.toolsets.context import LiveState
+from kokua.registry.context import LiveState
 from kokua.mcp.auth import OAuthSettings
 from tests.channels import FakeChannel, _config, example_agents
 from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
@@ -29,7 +29,7 @@ _MEMORY_TOOL_NAMES = {
 
 def _specs(config, state=None) -> dict[str, dict]:
     """The AIMU ``agent_types`` the entry agent's delegate is built with, for this config."""
-    from kokua.toolsets.agents import build_agent_specs, build_registry
+    from kokua.core.agents import build_agent_specs, build_registry
 
     if state is None:
         state = LiveState(config=config, registry=build_registry(config))
@@ -68,8 +68,8 @@ def test_a_worker_resolves_a_group_an_mcp_server_and_a_plugin_from_one_list(tmp_
     toolset the same way, and receives the tools of all three."""
     from types import SimpleNamespace
 
-    from kokua.toolsets.agents import build_registry
-    from kokua.toolsets.registry import Toolset
+    from kokua.core.agents import build_registry
+    from kokua.registry.registry import Toolset
 
     def stock_quote():  # fake MCP tool callable -- the resolver only reads __name__
         pass
@@ -278,7 +278,7 @@ def test_conversation_tools_do_not_reach_the_shipped_workers(tmp_path):
 async def test_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
     """Boot reorder: config [[mcp.server]] servers connect before the first agent is built, so a worker
     declaring one receives its tools (and the entry agent, which does not declare it, does not)."""
-    import kokua.toolsets.agents as agents_mod
+    import kokua.core.agents as agents_mod
     from aimu import aio
 
     async def fake_connect(*, url=None, auth=None, **kw):
@@ -350,7 +350,7 @@ async def test_runtime_added_mcp_server_reaches_the_worker_that_declares_it(tmp_
     """Rebuild trigger: connecting a configured-but-offline server at runtime rebuilds spawn_subagent, so
     the worker declaring it gets its tools without a restart -- and the raw tools stay off the entry
     agent."""
-    import kokua.toolsets.agents as agents_mod
+    import kokua.core.agents as agents_mod
 
     captured: list = []
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
@@ -371,7 +371,7 @@ async def test_runtime_added_mcp_server_reaches_the_worker_that_declares_it(tmp_
 async def test_runtime_added_mcp_server_reaches_all_live_conversations(tmp_path, monkeypatch):
     """The rebuild fans out: a runtime connect updates the spawn_subagent of EVERY live conversation's
     agent, not just the one whose add_mcp_server ran."""
-    import kokua.toolsets.agents as agents_mod
+    import kokua.core.agents as agents_mod
 
     captured: list = []
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
@@ -394,7 +394,7 @@ async def test_runtime_added_mcp_server_reaches_all_live_conversations(tmp_path,
 
 
 async def test_runtime_removed_mcp_server_drops_from_the_worker(tmp_path, monkeypatch):
-    import kokua.toolsets.agents as agents_mod
+    import kokua.core.agents as agents_mod
 
     captured: list = []
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _capturing_subagent_factory(captured))
@@ -412,7 +412,7 @@ async def test_runtime_removed_mcp_server_drops_from_the_worker(tmp_path, monkey
 
 
 async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
-    import kokua.toolsets.agents as agents_mod
+    import kokua.core.agents as agents_mod
 
     captured = {}
 
@@ -498,8 +498,8 @@ async def test_document_tools_round_trip(tmp_path):
 def test_memory_toolset_tools_carry_dispatch_attrs(tmp_path):
     """The registry's memory + documents toolsets return AIMU's tools directly (no wrapping); they carry
     the dispatch attributes AIMU needs. Thread-safety lives inside the stores (aimu.memory), not here."""
-    from kokua.toolsets import ToolsetContext
-    from kokua.toolsets.agents import build_registry
+    from kokua.registry import ToolsetContext
+    from kokua.core.agents import build_registry
 
     config = _config(tmp_path)
     state = LiveState(config=config, registry=build_registry(config))
@@ -549,7 +549,7 @@ async def test_skill_authored_in_one_conversation_is_visible_in_another(tmp_path
 def test_make_agent_builder_wires_and_restores(tmp_path):
     from aimu.sessions import Session, TinyDBSessionStore
     from kokua.core.build import make_agent_builder
-    from kokua.toolsets.agents import build_registry
+    from kokua.core.agents import build_registry
 
     config = _config(tmp_path)  # existing helper
     store = TinyDBSessionStore(str(config.sessions_path))
@@ -607,7 +607,7 @@ def _observer_capturing_factory(captured: list):
 
 async def test_spawn_subagent_is_built_with_the_activity_reporter(tmp_path, monkeypatch):
     """The reporter must reach AIMU's factory, or a spawn stays invisible in the UI."""
-    import kokua.toolsets.agents as agents_mod
+    import kokua.core.agents as agents_mod
 
     captured: list = []
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _observer_capturing_factory(captured))
@@ -623,7 +623,7 @@ async def test_runtime_mcp_rebuild_keeps_the_activity_reporter(tmp_path, monkeyp
 
     The captures are cleared and counted rather than just read at [-1]: the boot build already handed the
     reporter over, so a bare last-element check would hold even if the add rebuilt nothing at all."""
-    import kokua.toolsets.agents as agents_mod
+    import kokua.core.agents as agents_mod
 
     captured: list = []
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _observer_capturing_factory(captured))
@@ -648,7 +648,7 @@ def test_wire_agent_uses_an_injected_client_as_is(tmp_path):
     """
     from kokua.config.schema import AssistantConfig
     from kokua.core.build import wire_agent
-    from kokua.toolsets.agents import build_registry
+    from kokua.core.agents import build_registry
 
     config = AssistantConfig(
         data_dir=tmp_path,
@@ -681,7 +681,7 @@ def _captured_client_model(monkeypatch, config, build) -> object:
 
 
 def _live_state(config) -> LiveState:
-    from kokua.toolsets.agents import build_registry
+    from kokua.core.agents import build_registry
 
     return LiveState(config=config, registry=build_registry(config))
 

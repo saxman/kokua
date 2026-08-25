@@ -30,7 +30,7 @@ from kokua.scheduling.tasks import (
     TaskNotFound,
     TaskService,
 )
-from kokua.toolsets.registry import Setting, Toolset
+from kokua.registry.registry import Setting, Toolset
 
 PROMPT_PREVIEW_CHARS = 60
 

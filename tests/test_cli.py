@@ -68,7 +68,7 @@ def test_two_mcp_urls_on_one_host_get_distinct_names():
     assert names == ["broker-example-com", "broker-example-com-2"]
 
     from kokua.config.schema import AgentConfig, AssistantConfig
-    from kokua.toolsets.agents import build_registry
+    from kokua.core.agents import build_registry
 
     config = AssistantConfig(
         agents={"assistant": AgentConfig(tools=names)},

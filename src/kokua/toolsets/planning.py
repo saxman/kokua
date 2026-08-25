@@ -15,7 +15,7 @@ there is no schema or docstring for a reader to find here.
 
 from __future__ import annotations
 
-from kokua.toolsets.registry import Setting, Toolset
+from kokua.registry.registry import Setting, Toolset
 from kokua.workflows import Workflow
 from kokua.workflows.planning import PlanningWorkflow
 

@@ -39,7 +39,7 @@ The core is small enough to hold in your head, and each module opens by saying w
 | --- | --- |
 | [core/assistant.py](src/kokua/core/assistant.py) | The composition root and the serve loop. Which AIMU primitives an assistant is actually made of, and how they are wired together. |
 | [core/turns.py](src/kokua/core/turns.py) | What one turn is, reactive and proactive. It opens with seven concurrency invariants, each naming the bug it prevents. |
-| [toolsets/registry.py](src/kokua/toolsets/registry.py), then [toolsets/image.py](src/kokua/toolsets/image.py) | How a capability becomes a tool an agent holds: one flat namespace, then the smallest complete toolset in the repo. |
+| [registry/registry.py](src/kokua/registry/registry.py), then [toolsets/image.py](src/kokua/toolsets/image.py) | How a capability becomes a tool an agent holds: one flat namespace, then the smallest complete toolset in the repo. |
 | [channels/ui.py](src/kokua/channels/ui.py) | How a core that knows no transport still renders richly. Every optional frame is degraded once, at construction. |
 | [workflows/planning/runner.py](src/kokua/workflows/planning/runner.py) | An agentic loop with more structure than chat: draft a plan, review it, execute it, review the result. |
 
@@ -257,7 +257,8 @@ mcp/          remote MCP servers and their OAuth
 scheduling/   recurrence math, the durable task lifecycle over config.toml, the agent-facing tools
 channels/     ChannelUI plus the concrete channels
 frontends/    cli, web        -- registered as plugins, exactly like a third party's would be
-toolsets/     aimu_agents, benchmark, github_backup, image
+registry/     the Toolset type, name resolution, and the live state a toolset is built against
+toolsets/     one file per toolset, and nothing else
 ```
 
 Outside `src/`, the repository also carries `skills/`: Agent Skills Kokua ships as content rather than as
