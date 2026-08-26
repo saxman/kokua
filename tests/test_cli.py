@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -327,3 +328,85 @@ def test_the_retired_plugins_flag_is_rejected():
     better than accepting one that no longer reaches anything."""
     with pytest.raises(SystemExit):
         build_arg_parser().parse_args(["--no-plugins"])
+
+
+# --- export -----------------------------------------------------------------------------------
+
+
+def _seeded_home(monkeypatch, tmp_path, messages, metadata=None):
+    """A KOKUA_HOME holding a config and one stored conversation, and that conversation's key."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    from kokua.config import file as settings  # the alias this file already uses, see line 170
+
+    monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(settings.example_text(), encoding="utf-8")
+    sessions_path = tmp_path / "data" / "sessions.json"
+    sessions_path.parent.mkdir(parents=True, exist_ok=True)
+    store = TinyDBSessionStore(str(sessions_path))
+    meta = {"created_at": "2026-08-25T14:00:00", "updated_at": "2026-08-25T15:00:00", "title": "A run"}
+    meta.update(metadata or {})
+    session = Session(key="abcdef0123456789", metadata=meta, messages=list(messages))
+    store.save(session)
+    return session.key
+
+
+_TWO_MESSAGES = [
+    {"role": "user", "content": "what is it", "timestamp": "2026-08-25T14:19:07"},
+    {"role": "assistant", "content": "it is this", "timestamp": "2026-08-25T14:19:59"},
+]
+
+
+def test_export_writes_a_markdown_file_and_prints_its_path(monkeypatch, tmp_path, capsys):
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    _run_main(monkeypatch, ["export", "latest"], expect_exit=0)
+    printed = capsys.readouterr().out.strip()
+    assert printed.endswith(".md")
+    written = Path(printed).read_text(encoding="utf-8")
+    assert written.startswith("# ")
+    assert "it is this" in written
+
+
+def test_export_resolves_a_unique_id_prefix(monkeypatch, tmp_path, capsys):
+    """Anyone who read an id out of a listing will shorten it, so a prefix has to resolve."""
+    key = _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    _run_main(monkeypatch, ["export", key[:8]], expect_exit=0)
+    assert capsys.readouterr().out.strip().endswith(".md")
+
+
+def test_export_to_stdout_with_a_dash(monkeypatch, tmp_path, capsys):
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    _run_main(monkeypatch, ["export", "latest", "-o", "-"], expect_exit=0)
+    out = capsys.readouterr().out
+    assert out.startswith("# ")
+    assert "what is it" in out
+
+
+def test_export_of_an_unknown_id_reports_it_and_exits_nonzero(monkeypatch, tmp_path, capsys):
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    _run_main(monkeypatch, ["export", "999999999999"], expect_exit=2)
+    assert "999999999999" in capsys.readouterr().err
+
+
+def test_export_reports_a_busy_store_rather_than_a_truncated_conversation(monkeypatch, tmp_path, capsys):
+    """TinyDB rewrites the whole file on save, so a read racing the daemon's persist can land on a
+    partial one. Presenting half a conversation as the conversation is the failure to avoid."""
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+
+    def torn(*args, **kwargs):
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    monkeypatch.setattr("kokua.cli.TinyDBSessionStore", torn)
+    _run_main(monkeypatch, ["export", "latest"], expect_exit=2)
+    assert "busy" in capsys.readouterr().err.lower()
+
+
+def test_export_builds_no_assistant(monkeypatch, tmp_path):
+    """No model client, no agent: an export must work with the model server down."""
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("export must not build an assistant")
+
+    monkeypatch.setattr("kokua.core.assistant.Assistant.create", boom)
+    _run_main(monkeypatch, ["export", "latest", "-o", "-"], expect_exit=0)

@@ -74,6 +74,18 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.24.0 or newer
   off a contextvar when an event fires, so a tool or agent built once at composition time reports into
   whichever turn asked for it. Recorded model calls attribute by the event's `agent` field, which is what
   makes `TurnMetrics.record`'s `by_agent` breakdown non-empty for a turn that delegated or reviewed.
+- **`kokua export` writes a conversation as Markdown.** `transcript_export.render_markdown` renders a
+  saved conversation's header, each turn's user message, reasoning, tool calls with their arguments
+  and results, sub-agent cards, and what it cost, into one Markdown document a person can read, diff,
+  or paste into a review. Pure and dependency-free (no `channels/` or `frontends/` import), so both
+  front ends and the CLI can call it. Two rules keep it honest: a figure nobody reported prints as "not
+  reported" rather than an invented zero, and a tool payload past
+  `DEFAULT_MAX_PAYLOAD_CHARS` (4000 characters) is cut with a note saying how much was removed rather
+  than shown as if it were complete (`--full` lifts the cap). `kokua export [id-or-prefix] [-o path|-]
+  [--full]` reads the session store directly and writes the file: no `Assistant`, no model client, no
+  agent, so it works with the model server down. A read that races the daemon's own persist reports the
+  store as busy rather than parsing a torn file. See
+  [Export a conversation](docs/how-to/export-a-conversation.md).
 
 ### Front ends
 

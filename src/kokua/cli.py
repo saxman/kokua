@@ -18,6 +18,15 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# Module scope, not deferred into `_export`, for two reasons: `export` reads the store directly and
+# must not pull in `kokua.core` (which reaches the AIMU surface `preflight` exists to check) just to do
+# it, and the busy-store test patches this exact name (`kokua.cli.TinyDBSessionStore`), which only works
+# on a module-level attribute. `aimu.sessions` is old, stable surface: `registry/context.py` already
+# pulls in newer AIMU modules than this one at module level via `from . import plugins` below, so this
+# adds no new risk to `config`/`skills`, which dispatch before the preflight and must stay importable
+# without it.
+from aimu.sessions import TinyDBSessionStore
+
 from . import plugins
 from .aimu_compat import AimuVersionError, require_aimu
 from kokua.config import file as settings
@@ -119,6 +128,23 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
     )
     install_parser.add_argument(
         "--force", action="store_true", help="Overwrite a skill of the same name that is already installed."
+    )
+
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Write a conversation to a Markdown file you can read, diff, or review.",
+    )
+    export_parser.add_argument(
+        "conversation",
+        nargs="?",
+        default="latest",
+        help="A conversation id, a unique leading fragment of one, or 'latest' (the default).",
+    )
+    export_parser.add_argument("-o", "--output", help="Where to write it. '-' writes to stdout.")
+    export_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Do not truncate long tool arguments and results.",
     )
     return parser
 
@@ -330,6 +356,71 @@ def _print_toolsets(config: AssistantConfig) -> None:
         print()
 
 
+def _resolve_export_session(args: argparse.Namespace, config: AssistantConfig):
+    """The stored session `args.conversation` names, or ``None`` when nothing matches.
+
+    Reads the store through a `ConversationBook` rather than reimplementing its prefix rule: the book's
+    `resolve` already answers "does this id, or a unique leading fragment of it, name exactly one
+    conversation", and a second copy of that rule here could drift from the one the rest of Kokua uses.
+    Constructing one is cheap: it takes a store, a `TurnGate` whose per-conversation lock is never
+    acquired (nothing here starts a turn), and a no-op active-pointer callback (an export changes no
+    pointer). `'latest'` is handled separately because it names no id: it is the most recently updated
+    conversation, or none, without ever minting the empty one `most_recent_or_new` would.
+    """
+    # Deferred, not module-level: `kokua.core.conversations` reaches the AIMU surface `preflight` exists
+    # to check, and `_export` (unlike this helper) is only ever reached after `preflight` has already run.
+    from kokua.core.conversations import ConversationBook
+    from kokua.core.turn_gate import TurnGate
+
+    store = TinyDBSessionStore(str(config.sessions_path))
+    book = ConversationBook(store, TurnGate(lambda _cid: asyncio.Lock()), config, on_active_change=lambda _cid: None)
+    if args.conversation == "latest":
+        sessions = book.sessions()
+        return sessions[0] if sessions else None
+    return book.resolve(args.conversation)
+
+
+def _export(args: argparse.Namespace, config: AssistantConfig) -> int:
+    """Render one stored conversation to Markdown and write it, or report why none was written.
+
+    Reads the session store directly and builds nothing else: no `Assistant`, no model client, no
+    agent, and no channel, which is what lets this run with the model server down. Also why this
+    function lives in `cli.py` rather than reaching for `kokua.channels` or `kokua.frontends`: the
+    renderer it calls, `render_markdown`, imports neither, and a CLI path that built a front end just to
+    read a file back off disk would quietly make the web extra a requirement for exporting again.
+    """
+    from kokua.transcript_export import DEFAULT_MAX_PAYLOAD_CHARS, render_markdown
+
+    try:
+        session = _resolve_export_session(args, config)
+    except ValueError:
+        # TinyDB rewrites the whole file on save, so a read racing the daemon's persist can land on a
+        # partial one; the read then raises `json.JSONDecodeError`, which is a `ValueError` subclass, so
+        # catching the parent here also catches it without a second import. Reporting a busy store is
+        # the only honest answer: parsing what arrived would present half a conversation as the whole.
+        print("The conversation store is busy: it is being written right now. Try again in a moment.", file=sys.stderr)
+        return 2
+
+    if session is None:
+        if args.conversation == "latest":
+            print("no conversations found", file=sys.stderr)
+        else:
+            print(f"no conversation found matching '{args.conversation}'", file=sys.stderr)
+        return 2
+
+    markdown = render_markdown(session, max_payload_chars=None if args.full else DEFAULT_MAX_PAYLOAD_CHARS)
+
+    if args.output == "-":
+        print(markdown, end="")
+        return 0
+
+    destination = Path(args.output) if args.output else config.downloads_path / f"{session.key}.md"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(markdown, encoding="utf-8")
+    print(str(destination))
+    return 0
+
+
 def preflight() -> None:
     """Fail with an instruction, not a traceback, when the installed AIMU is too old.
 
@@ -387,6 +478,12 @@ def main() -> None:
     if args.list_toolsets:
         _print_toolsets(config)
         return
+
+    # Also after resolve_config, for the same reason: it needs config.sessions_path and
+    # config.downloads_path. Unlike running a front end, it builds no Assistant and configures no
+    # logging, since reading a stored conversation back off disk needs neither.
+    if args.command == "export":
+        raise SystemExit(_export(args, config))
 
     configure_logging(config)  # rotating file log + faulthandler, before the assistant starts
     frontend = plugins.get_frontend(config.frontend)

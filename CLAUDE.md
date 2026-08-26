@@ -36,6 +36,7 @@ uv run kokua --frontend web              # run the web UI (or `kokua-web`); `kok
 uv run kokua config init                 # scaffold $KOKUA_HOME/config.toml from the documented example
 uv run kokua skills list                 # skills bundled in ./skills (outside the package, not in the wheel)
 uv run kokua skills install [name...]    # copy them into $KOKUA_HOME/data/skills
+uv run kokua export [id-or-prefix]       # write a saved conversation to Markdown; --full, -o, -o -
 uv run --with build python -m build      # build sdist + wheel (what CI's `package` job verifies)
 ```
 
