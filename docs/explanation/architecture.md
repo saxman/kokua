@@ -585,7 +585,7 @@ front of a user at all. The probe moved to a signature check on `aio.WebChannel.
 `stream_thinking`: the parameter is not itself the capability (the default value is), but the rename and
 the flip shipped together, so the new name dates a checkout past both. Against an older AIMU the bare
 construction still works and streams neither phase, and since Kokua no longer reads `self.show_thinking`
-anywhere there is not even an `AttributeError` to notice -- which is the failure mode this preflight
+anywhere there is not even an `AttributeError` to notice, which is the failure mode this preflight
 exists for.
 
 The repository floor is now `aimu>=0.24.0`, for `make_async_subagent_tool`'s new `events` parameter: the

@@ -111,7 +111,7 @@ Consequences for working in this repo:
   unusually, and the parameter check is still preferred: it dates the checkout to the same release without
   teaching the probe a fourth shape for one case. AIMU 0.24.0 is the current floor, and moves the probe
   onto `make_async_subagent_tool`'s new `events` parameter, the handle that lets a spawned sub-agent's
-  model turns reach the sink the delegating turn opened -- a fresh-client critic
+  model turns reach the sink the delegating turn opened; a fresh-client critic
   (`workflows.critics.reviewer_agent`) had the identical gap for the identical reason. A name lookup on
   the module would not catch either absence, because `make_async_subagent_tool` itself predates 0.24.0
   and imports fine either way; only its parameters changed, so a signature check is what the shape
