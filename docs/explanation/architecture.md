@@ -165,6 +165,22 @@ what it cost up to the point it stopped. `record()` returns `None` when the turn
 `record_turn_provenance` then writes nothing, so a turn that never reached the model is not misrecorded
 as a free one.
 
+A spawned sub-agent and a workflow critic each build their own client, which puts both outside the
+family `agent.model_client.events` reaches: without their own wiring, delegated and reviewed work would
+be invisible to `TurnMetrics` and a heavily delegating turn would read as cheap. Both take `record_event`
+directly rather than a `LiveState` field or a threaded parameter, for the same reason the top-level
+wiring does: `record_event` is a module-level constant with no turn state of its own, so a tool or agent
+built once, at composition time, reports into whichever turn is actually running when an event fires,
+with nothing to plumb back to the caller. `core.agents._spawn_tool` and `make_delegation_tool` pass it as
+`make_async_subagent_tool(events=record_event)` (needs `aimu>=0.24.0`; see
+[The model every agent runs on](#the-model-every-agent-runs-on) for the probe that enforces it), and
+`workflows.critics.reviewer_agent` passes it as
+`aio.Agent(events=record_event)`, unconditionally rather than through a parameter a caller could forget
+to pass; `review` and `stream_review` need no change, since both build their agent through
+`reviewer_agent`. Every recorded call attributes by the event's `agent` field, so a delegated or reviewed
+turn's `TurnMetrics.record()` carries a non-empty `by_agent` breakdown where an undelegated turn's does
+not (`test_omits_by_agent_when_only_the_entry_agent_ran` pins the undelegated case).
+
 ## Agents and delegation
 
 Every agent is declared whole in `config.toml`, as one `[agents.<name>]` table carrying a
@@ -562,16 +578,28 @@ gripped that name. It is the cleanest case this preflight has had: the capabilit
 symbol, so a plain name lookup asks exactly the question that matters, where the shapes before it each
 had to settle for the nearest available handle.
 
-The repository floor is now `aimu>=0.23.0`, which renamed the channel flags `show_thinking` /
-`show_tools` to `stream_thinking` / `stream_tools` and flipped both defaults to `True`. Kokua deleted its
-own display settings in the same change and constructs both channels bare, so that default is what puts
-reasoning and tool calls in front of a user at all. The probe is a signature check on
-`aio.WebChannel.__init__` for `stream_thinking`: the parameter is not itself the capability (the default
-value is), but the rename and the flip shipped together, so the new name dates a checkout past both.
-Against an older AIMU the bare construction still works and streams neither phase, and since Kokua no
-longer reads `self.show_thinking` anywhere there is not even an `AttributeError` to notice -- which is
-the failure mode this preflight exists for. The probe covers one surface at a time; the version floor is
-what covers every earlier release's.
+AIMU 0.23.0 renamed the channel flags `show_thinking` / `show_tools` to `stream_thinking` /
+`stream_tools` and flipped both defaults to `True`. Kokua deleted its own display settings in the same
+change and constructs both channels bare, so that default is what puts reasoning and tool calls in
+front of a user at all. The probe moved to a signature check on `aio.WebChannel.__init__` for
+`stream_thinking`: the parameter is not itself the capability (the default value is), but the rename and
+the flip shipped together, so the new name dates a checkout past both. Against an older AIMU the bare
+construction still works and streams neither phase, and since Kokua no longer reads `self.show_thinking`
+anywhere there is not even an `AttributeError` to notice -- which is the failure mode this preflight
+exists for.
+
+The repository floor is now `aimu>=0.24.0`, for `make_async_subagent_tool`'s new `events` parameter: the
+handle that lets a spawned sub-agent's model turns reach the sink the turn that delegated to it opened
+(see [What a turn cost](#what-a-turn-cost)). A fresh-client critic (`workflows.critics.reviewer_agent`)
+had the identical gap for the identical reason and is wired the same way. The probe moved to a signature
+check on `make_async_subagent_tool` for `events`, the third time this probe has taken that shape. Unlike
+`script_env` and `include`, which carried settings *to* an existing capability, `events` *is* the
+capability: a name lookup on the module would not catch its absence, since `make_async_subagent_tool`
+itself predates 0.24.0 and imports fine either way, and nothing else has to be true of a checkout once
+the one argument exists. What this probe still cannot see: whether a spawned worker's own spawn tool
+forwards `events` on to a grandchild it delegates to in turn, so a recursive delegation could go
+uncounted one level down without this module raising anything. The probe covers one surface at a time;
+the version floor is what covers every earlier release's.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes

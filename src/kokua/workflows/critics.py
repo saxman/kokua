@@ -23,6 +23,8 @@ from typing import Callable, Optional, Union
 from aimu import aio
 from aimu.tools import builtin
 
+from kokua.core.metrics import record_event
+
 # The reviewer's verification toolset: an independent critic that can look things up and check
 # arithmetic, but has no access to user state. web = get_weather/get_webpage/web_search/wikipedia;
 # `calculate` for numeric claims; plus the current date/time (the original motivation: reviewers were
@@ -71,6 +73,12 @@ def reviewer_agent(
     ``[assistant].thinking`` and ``[assistant.generation]`` are the only tiers it has, exactly as
     ``[assistant].model`` is for the model above it. ``thinking`` is an agent field, so it applies to
     every turn of the review, including the typed verdict.
+
+    Wired to :func:`kokua.core.metrics.record_event` unconditionally, not a parameter: a critic builds
+    its own client, so a caller's own scoped sink never reaches it, and a review's model turns are part
+    of what the turn that asked for it cost. ``record_event`` is a module-level constant that reads the
+    running turn off a contextvar when an event actually fires, so a reviewer built here reports into
+    whichever turn is running at review time with no plumbing back to the caller.
     """
     client = aio.client(model, system=system)
     # Only when there is something to set: this is the tier above the model card's own tuned profile, so
@@ -84,6 +92,7 @@ def reviewer_agent(
         max_iterations=6,  # bound verification cost
         final_answer_prompt=_VERDICT_PROMPT,  # force an assessment if it hits the cap mid-tool-call
         thinking=thinking,
+        events=record_event,
     )
 
 

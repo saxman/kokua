@@ -92,14 +92,9 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    Pinned because the probe has twice been left behind by a moving floor. The surface today is
-    ``aio.WebChannel``'s ``stream_thinking`` argument, the rename that carried the default flip Kokua now
-    relies on for reasoning and tool calls to reach a front end at all.
-
-    Exercising what the argument *means*, and not merely that it is accepted, is what keeps this from
-    degrading into the signature check the probe's own mechanics already perform. What Kokua depends on
-    is the default, since nothing in Kokua passes either flag: both phases are relayed by a channel
-    constructed bare.
+    Pinned because the probe has repeatedly been left behind by a moving floor. The surface today is
+    ``make_async_subagent_tool``'s ``events`` parameter, which is what lets a spawned sub-agent's model
+    turns reach the turn that delegated to it.
     """
     import importlib
     import inspect
@@ -107,11 +102,18 @@ def test_the_probe_targets_the_release_the_floor_names():
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
     probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_PARAMETER == "stream_thinking"
+    assert aimu_compat._PROBE_PARAMETER == "events"
 
-    parameters = inspect.signature(probe.__init__).parameters
-    assert parameters["stream_thinking"].default is True
-    assert parameters["stream_tools"].default is True
+    assert "events" in inspect.signature(probe).parameters
+
+
+def test_the_probe_checks_the_spawn_factory_carries_an_events_parameter():
+    """The capability is the parameter itself, which no getattr would notice.
+
+    Without it every export silently omits delegation cost, which is the silent-degradation class this
+    probe exists to catch: nothing raises, and a delegating run simply reads as cheap.
+    """
+    require_aimu()  # does not raise against the AIMU this suite runs on
 
 
 def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):

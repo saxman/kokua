@@ -109,11 +109,23 @@ Consequences for working in this repo:
   *default value*, not the parameter; the name stands in for it because the rename and the flip were one
   change, so a checkout carrying the new name carries the new default. The default is directly inspectable,
   unusually, and the parameter check is still preferred: it dates the checkout to the same release without
-  teaching the probe a fourth shape for one case. The probe therefore covers exactly one surface
-  at a time, in whatever shape that surface has, and it has taken three: a name lookup for a symbol
-  (`resolve_default_text_model`), a *signature* check for a keyword argument no `getattr` would notice
-  (`SkillManager(include=...)` first, `script_env` second, `stream_thinking` today), and a membership check
-  for an entry in a published set. What the current surface says nothing about, only the floor covers. If you add
+  teaching the probe a fourth shape for one case. AIMU 0.24.0 is the current floor, and moves the probe
+  onto `make_async_subagent_tool`'s new `events` parameter, the handle that lets a spawned sub-agent's
+  model turns reach the sink the delegating turn opened -- a fresh-client critic
+  (`workflows.critics.reviewer_agent`) had the identical gap for the identical reason. A name lookup on
+  the module would not catch either absence, because `make_async_subagent_tool` itself predates 0.24.0
+  and imports fine either way; only its parameters changed, so a signature check is what the shape
+  demands, the third time this probe has taken it. Unlike `script_env` and `include`, which carried
+  settings *to* an existing capability, `events` *is* the capability: nothing else has to be true of a
+  checkout once that one argument exists. What it leaves uncovered is one level down from the
+  parameter's own presence: a checkout carrying `events` but not the recursive passthrough (a spawned
+  worker forwarding its own `events` on to a grandchild it delegates to in turn) still passes, so a
+  worker spawning its own worker could go uncounted without this probe raising anything. The probe
+  therefore covers exactly one surface at a time, in whatever shape that surface has, and it has taken
+  three: a name lookup for a symbol (`resolve_default_text_model`), a *signature* check for a keyword
+  argument no `getattr` would notice (`SkillManager(include=...)` first, `script_env` second,
+  `stream_thinking` third, `events` today), and a membership check for an entry in a published set.
+  What the current surface says nothing about, only the floor covers. If you add
   a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the `pyproject.toml` floor in the same
   commit, and move the probe to whatever the new surface is. When a release genuinely offers no handle a
   probe can grip, leave the probe where it is and say so in `aimu_compat`'s docstring rather than moving it

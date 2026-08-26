@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.23.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.24.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -64,6 +64,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.23.0 or newer
   own agent. Recorded on every exit branch of a turn: success, cancellation, a connection error, a
   generic error, with the wall-clock figure measured at the moment of recording, so a turn that
   raised still reports what it cost up to the point it stopped.
+- **Delegated and reviewed work counts toward that same total.** A spawned sub-agent and a workflow
+  critic each build their own client, outside the family a turn's own scoped sink reaches, so both were
+  invisible to `TurnMetrics` and a heavily delegating turn read as cheap. Both now receive
+  `core.metrics.record_event` explicitly: `core/agents.py`'s spawn tool passes it as
+  `make_async_subagent_tool(events=...)`, and `workflows/critics.py`'s `reviewer_agent` passes it as
+  `aio.Agent(events=...)`. `record_event` is a module-level constant, not a `LiveState` field, since a
+  field would be shared across every conversation's concurrent turns; it reads the turn actually running
+  off a contextvar when an event fires, so a tool or agent built once at composition time reports into
+  whichever turn asked for it. Recorded model calls attribute by the event's `agent` field, which is what
+  makes `TurnMetrics.record`'s `by_agent` breakdown non-empty for a turn that delegated or reviewed.
 
 ### Front ends
 
@@ -906,7 +916,7 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.23.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.24.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -915,10 +925,10 @@ notice on startup.
   on and takes that surface's shape, which is why it has moved several times and has been a
   set-membership check, a plain name lookup (the `resolve_default_text_model` export, the shape to hope
   for: the capability *is* the exported name), and a signature check -- `SkillManager(include=...)`, then
-  `SkillAgent(script_env=...)`, and today `aio.WebChannel(stream_thinking=...)`, the rename that carried
-  the default flip Kokua relies on for reasoning and tool calls to reach a front end at all. It covers one
-  surface at a time by design; every earlier release's capabilities are
-  the floor's job.
+  `SkillAgent(script_env=...)`, then `aio.WebChannel(stream_thinking=...)`, and today
+  `make_async_subagent_tool(events=...)`, the parameter that lets a spawned sub-agent's model turns
+  reach the sink the delegating turn opened. It covers one surface at a time by design; every earlier
+  release's capabilities are the floor's job.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.

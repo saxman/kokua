@@ -13,6 +13,7 @@ from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
 
 from kokua.config.file import ConfigError
 from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
+from kokua.core.metrics import record_event
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.registry.context import LiveState, ToolsetContext
 from kokua.registry.registry import (
@@ -471,13 +472,20 @@ def _check_model(agent_name: str, model: Optional[str]) -> None:
 
 
 def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Callable:
-    """The ``spawn_subagent`` delegate for one agent, over that agent's own targets."""
+    """The ``spawn_subagent`` delegate for one agent, over that agent's own targets.
+
+    ``events=record_event``, not a ``LiveState`` field: a spawned worker builds its own client, so
+    without an explicit sink its model turns are invisible to whatever cost accounting the delegator
+    keeps. ``record_event`` is a module-level constant that reads the running turn off a contextvar
+    when an event fires, so a tool built once here reports into whichever turn is running at call time.
+    """
     observer: Optional[SubagentObserver] = state.observer
     return make_async_subagent_tool(
         config.default_model,
         agent_types=build_agent_specs(config, state, delegator),
         tool_approval=state.tool_approval,
         observer=observer,
+        events=record_event,
     )
 
 
@@ -504,6 +512,7 @@ def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Op
         agent_types=build_agent_specs(config, state, name),
         tool_approval=state.tool_approval,
         observer=observer,
+        events=record_event,
     )
 
 

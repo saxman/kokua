@@ -76,6 +76,20 @@ does and does not establish: the parameter's presence is not itself the capabili
 one change, so a checkout carrying the new name carries the new default. The default is directly
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
+
+AIMU 0.24.0 is the current surface, and the shape is a signature check again, the third time: a
+sub-agent built by ``make_async_subagent_tool`` used to have no way to report its model turns anywhere
+but its own return value, so a spawn was invisible to whatever cost accounting the delegator kept. The
+release adds an ``events`` parameter that forwards those turns to a sink the caller supplies, and a
+critic that builds its own client (see ``workflows.critics.reviewer_agent``) had the identical gap for
+the identical reason. Unlike ``SkillManager(include=...)`` and ``SkillAgent(script_env=...)``, where the
+parameter carried settings *to* the capability, ``events`` *is* the capability: there is nothing else an
+older AIMU is missing once this one argument exists. A name lookup on the module would not catch its
+absence, because ``make_async_subagent_tool`` itself predates 0.24.0 and is importable either way; only
+its parameters changed. What this probe still cannot see: whether a spawned worker's *own* spawn tool
+forwards ``events`` on to a grandchild it delegates to in turn. The parameter reaching the first hop is
+everything this signature check asks, so a recursive delegation could still go uncounted one level down
+without this module raising anything.
 """
 
 from __future__ import annotations
@@ -85,17 +99,21 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 23, 0)
+MINIMUM_AIMU = (0, 24, 0)
 
-# The newest AIMU surface Kokua depends on is a channel that relays reasoning and tool calls by default:
-# `stream_thinking` / `stream_tools` replaced `show_thinking` / `show_tools` and default to True, which is
-# why Kokua's front ends construct both channels with no flags at all. A signature check, since the
-# rename and the default flip are one change: the new argument name is what dates the checkout past both.
-# An older AIMU accepts the same bare construction and streams neither phase, with nothing raised
-# anywhere. See the module docstring for what this deliberately misses.
-_PROBE_MODULE = "aimu.aio"
-_PROBE_SYMBOL = "WebChannel"
-_PROBE_PARAMETER: Optional[str] = "stream_thinking"
+# The newest AIMU surface Kokua depends on is `make_async_subagent_tool`'s `events` parameter: the
+# handle that lets a spawned sub-agent's model turns reach the sink the turn that delegated to it
+# opened. A signature check, the third time this probe has taken that shape (`SkillManager(include=...)`
+# and `SkillAgent(script_env=...)` were the first two), because the capability is the keyword argument
+# itself and no `getattr` on the function would notice its absence. Unlike the 0.20.0 case, where the
+# probe's handle (`endpoint_kwargs`) sat on the capability's path rather than being it, `events` *is* the
+# depended-on capability: nothing else has to be true of the checkout for delegation cost to reach a
+# turn's record. What this deliberately misses: a checkout carrying the parameter but not the recursive
+# passthrough (a spawned worker's own spawn tool forwarding `events` to *its* children) would still pass,
+# so a worker that spawns its own worker could go uncounted without this probe raising anything.
+_PROBE_MODULE = "aimu.aio.tools.builtin"
+_PROBE_SYMBOL = "make_async_subagent_tool"
+_PROBE_PARAMETER: Optional[str] = "events"
 _PROBE_MEMBER: Optional[str] = None
 
 
@@ -161,7 +179,7 @@ def require_aimu() -> None:
         )
     if _PROBE_PARAMETER is None:
         return
-    if _PROBE_PARAMETER not in inspect.signature(probed.__init__).parameters:
+    if _PROBE_PARAMETER not in inspect.signature(probed).parameters:
         raise AimuVersionError(
             _message(
                 f"the AIMU at {where} reports version {installed} but its {_PROBE_SYMBOL} takes no "

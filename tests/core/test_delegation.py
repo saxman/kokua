@@ -140,13 +140,19 @@ class _FakeAgent:
         self.model_client = _FakeClient(model)
 
 
-def _captured_spawn_model(monkeypatch, config, state, agent) -> object:
+def _captured_spawn_call(monkeypatch, config, state, agent) -> tuple[object, dict]:
+    """The positional model and keyword arguments ``make_delegation_tool`` builds its spawn tool with.
+
+    Shared by ``_captured_spawn_model`` and ``_captured_spawn_kwargs``: what a delegate is built with
+    is not observable from the tool it returns, so capturing has to happen inside the patched factory.
+    """
     from kokua.core import agents as agents_mod
 
-    captured = []
+    captured: dict = {"model": None, "kwargs": {}}
 
     def fake_make(model, **kwargs):
-        captured.append(model)
+        captured["model"] = model
+        captured["kwargs"] = kwargs
 
         async def spawn_subagent(agent_type: str, task: str) -> str:
             """menu"""
@@ -157,7 +163,20 @@ def _captured_spawn_model(monkeypatch, config, state, agent) -> object:
 
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make)
     agents_mod.make_delegation_tool(agent, config, state)
-    return captured[0]
+    return captured["model"], captured["kwargs"]
+
+
+def _captured_spawn_model(monkeypatch, config, state, agent) -> object:
+    return _captured_spawn_call(monkeypatch, config, state, agent)[0]
+
+
+def _captured_spawn_kwargs(monkeypatch, config, state, agent) -> dict:
+    """The keyword arguments `make_delegation_tool` builds its spawn tool with.
+
+    A sibling of ``_captured_spawn_model``, which captures the positional model. Both exist because
+    what a delegate is built with is not observable from the tool it returns.
+    """
+    return _captured_spawn_call(monkeypatch, config, state, agent)[1]
 
 
 def test_the_delegate_is_built_with_the_default_model_not_the_delegators_pin(tmp_path, monkeypatch):
@@ -311,3 +330,57 @@ def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypa
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make)
     agents_mod.build_agent_specs(config, state, "assistant")
     assert captured == [TEST_DEFAULT_MODEL]
+
+
+def test_the_delegate_is_built_with_the_metrics_forwarder(tmp_path, monkeypatch):
+    """A spawn builds its own client, so without an explicit sink the delegated work is never
+    measured and a heavily delegating turn reads as cheap.
+
+    The forwarder, not a turn's own accumulator: it is built once here and reads the running turn
+    off a contextvar when an event actually fires, so one tool serves every later turn correctly.
+    """
+    from kokua.core.metrics import record_event
+
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(),
+    }
+    config, state = _state(tmp_path, agents)
+    captured = _captured_spawn_kwargs(monkeypatch, config, state, _FakeAgent("assistant", "ollama:qwen3:32b"))
+    assert captured["events"] is record_event
+
+
+def test_a_delegated_model_turn_lands_in_the_running_turns_record():
+    """The forwarder plus the contextvar, end to end: an event raised from inside a spawn reaches
+    the accumulator the turn opened, attributed to the delegate rather than folded into the entry
+    agent's own total.
+
+    Two calls, not one: ``TurnMetrics.record`` only publishes a ``by_agent`` breakdown once more than
+    one distinct agent contributed (see ``test_omits_by_agent_when_only_the_entry_agent_ran`` in
+    ``test_metrics.py``), so a lone delegated call would settle into the top-level totals with nothing
+    to distinguish it. Including the entry agent's own call is also the realistic shape: a turn that
+    delegates still made at least one call of its own before or after doing so.
+    """
+    from aimu.events import ModelTurnFinished
+
+    from kokua.core.metrics import TurnMetrics, current_metrics, record_event
+
+    metrics = TurnMetrics()
+    token = current_metrics.set(metrics)
+    try:
+        record_event(
+            ModelTurnFinished(model="m1", usage={"input_tokens": 50, "output_tokens": 5}, duration_s=1.0, agent=None)
+        )
+        # What AIMU does from inside the spawn, once the spawn factory's events= reaches the child Agent.
+        record_event(
+            ModelTurnFinished(
+                model="m2",
+                usage={"input_tokens": 900, "output_tokens": 90},
+                duration_s=2.0,
+                agent="subagent-research",
+            )
+        )
+    finally:
+        current_metrics.reset(token)
+    record = metrics.record(wall_seconds=3.0)
+    assert record["by_agent"]["subagent-research"]["input_tokens"] == 900
