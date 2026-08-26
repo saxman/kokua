@@ -61,8 +61,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.23.0 or newer
   `session.metadata["usage"][str(user_index)]` beside the model and effort already recorded there.
   The sink attaches to the conversation's client for the turn's duration rather than being passed to
   `run()`, which is what makes a planned turn count too, since a workflow drives the conversation's
-  own agent. Recorded on every exit branch of a turn -- success, cancellation, a connection error, a
-  generic error -- with the wall-clock figure measured at the moment of recording, so a turn that
+  own agent. Recorded on every exit branch of a turn: success, cancellation, a connection error, a
+  generic error, with the wall-clock figure measured at the moment of recording, so a turn that
   raised still reports what it cost up to the point it stopped.
 
 ### Front ends

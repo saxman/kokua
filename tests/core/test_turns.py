@@ -1335,8 +1335,10 @@ async def test_two_conversations_turns_are_recorded_separately(tmp_path):
     usage_b = assistant._store.get(conv_b).metadata["usage"]
     record_a = next(iter(usage_a.values()))
     record_b = next(iter(usage_b.values()))
-    assert record_a["calls"] >= 1
-    assert record_b["calls"] >= 1
+    # Exact counts, not >=1: a leak that folds one conversation's call into the other's record
+    # still satisfies >=1 on both sides, which is why that weaker assertion cannot catch it.
+    assert record_a["calls"] == 1
+    assert record_b["calls"] == 1
 
 
 async def test_a_turn_records_the_thinking_it_ran_at(tmp_path):

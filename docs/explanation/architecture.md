@@ -142,7 +142,7 @@ an AIMU upgrade that adds a new event member cannot turn this sink into an outag
 
 The wiring follows `subagent_events`'s own split between a durable seam and a per-turn scope, on purpose:
 `core.metrics.record_event` is a module-level forwarder with no turn state of its own, so it is safe to
-assign to `agent.model_client.events` -- AIMU's own words are "the durable, always-shared setting" -- once
+assign to `agent.model_client.events` (AIMU's own words are "the durable, always-shared setting") once
 per turn, unconditionally, with nothing to detach afterward. `TurnRunner` opens a fresh `TurnMetrics` and
 sets it on the `current_metrics` ContextVar for the turn's duration, alongside `subagent_events`, and
 resets it in the same `finally`. Concurrent turns on different conversations therefore never share an
@@ -158,8 +158,8 @@ no counterpart to the reactive path's outer `finally`.
 `TurnRunner._record_provenance` turns the accumulator into a stored record at the moment it is called,
 not earlier: it takes the sink and the turn's start time, calls `TurnMetrics.record(wall_seconds=...)`
 itself, and hands the result to `ConversationBook.record_turn_provenance` as `usage`, stored under
-`session.metadata["usage"][str(user_index)]`. Every exit branch of a turn -- success, cancellation, a
-connection error, a generic error -- calls it with the same two arguments, which is what makes the
+`session.metadata["usage"][str(user_index)]`. Every exit branch of a turn (success, cancellation, a
+connection error, a generic error) calls it with the same two arguments, which is what makes the
 wall-clock figure honest on the paths a reader most wants to examine: a turn that raised still cost
 what it cost up to the point it stopped. `record()` returns `None` when the turn made no model call, and
 `record_turn_provenance` then writes nothing, so a turn that never reached the model is not misrecorded
