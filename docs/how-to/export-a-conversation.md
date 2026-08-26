@@ -21,8 +21,9 @@ kokua export abcdef01 --full       # do not truncate long tool arguments and res
 
 The conversation argument takes an id, a unique leading fragment of one (at least 6 characters,
 the same rule the assistant's own `read_conversation` tool follows), or `latest` (the default). A
-fragment that matches more than one conversation is reported as ambiguous rather than opening
-either one.
+fragment that matches more than one conversation opens neither: it is reported as matching several
+conversations, with a count, so you know to type a few more characters rather than go looking for a
+typo.
 
 Without `-o`, the file lands in `$KOKUA_HOME/data/downloads/<conversation id>.md` (by default
 `~/.kokua/data/downloads/`), the same folder generated PDFs and other artifacts use, and the path

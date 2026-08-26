@@ -25,7 +25,7 @@ from typing import Optional
 # pulls in newer AIMU modules than this one at module level via `from . import plugins` below, so this
 # adds no new risk to `config`/`skills`, which dispatch before the preflight and must stay importable
 # without it.
-from aimu.sessions import TinyDBSessionStore
+from aimu.sessions import Session, TinyDBSessionStore
 
 from . import plugins
 from .aimu_compat import AimuVersionError, require_aimu
@@ -356,8 +356,9 @@ def _print_toolsets(config: AssistantConfig) -> None:
         print()
 
 
-def _resolve_export_session(args: argparse.Namespace, config: AssistantConfig):
-    """The stored session `args.conversation` names, or ``None`` when nothing matches.
+def _resolve_export_session(args: argparse.Namespace, config: AssistantConfig) -> tuple[Optional[Session], int]:
+    """The stored session `args.conversation` names (or ``None``), and how many sessions share its
+    fragment.
 
     Reads the store through a `ConversationBook` rather than reimplementing its prefix rule: the book's
     `resolve` already answers "does this id, or a unique leading fragment of it, name exactly one
@@ -366,18 +367,35 @@ def _resolve_export_session(args: argparse.Namespace, config: AssistantConfig):
     acquired (nothing here starts a turn), and a no-op active-pointer callback (an export changes no
     pointer). `'latest'` is handled separately because it names no id: it is the most recently updated
     conversation, or none, without ever minting the empty one `most_recent_or_new` would.
+
+    The count is for wording the "nothing matched" message only, never for deciding what matched:
+    `resolve` alone decides whether a fragment opens a conversation, and this count is computed only
+    after it has already said no. It floors at `ID_PREFIX_MIN` the same way `resolve` does, so a
+    fragment too short to resolve reads as "not found" rather than "ambiguous" even if it happens to
+    prefix several keys, matching what `resolve` itself would have reported. If the two ever disagreed
+    (they read the same store in the same call, so nothing should make them), the only consequence is a
+    less apt sentence: this count never chooses a session.
     """
     # Deferred, not module-level: `kokua.core.conversations` reaches the AIMU surface `preflight` exists
     # to check, and `_export` (unlike this helper) is only ever reached after `preflight` has already run.
-    from kokua.core.conversations import ConversationBook
+    from kokua.core.conversations import ID_PREFIX_MIN, ConversationBook
     from kokua.core.turn_gate import TurnGate
 
     store = TinyDBSessionStore(str(config.sessions_path))
     book = ConversationBook(store, TurnGate(lambda _cid: asyncio.Lock()), config, on_active_change=lambda _cid: None)
     if args.conversation == "latest":
         sessions = book.sessions()
-        return sessions[0] if sessions else None
-    return book.resolve(args.conversation)
+        return (sessions[0] if sessions else None), 0
+
+    session = book.resolve(args.conversation)
+    if session is not None:
+        return session, 0
+
+    fragment = args.conversation.strip().strip("'\"`")
+    if len(fragment) < ID_PREFIX_MIN:
+        return None, 0
+    match_count = sum(1 for stored in book.sessions() if stored.key.startswith(fragment))
+    return None, match_count
 
 
 def _export(args: argparse.Namespace, config: AssistantConfig) -> int:
@@ -392,7 +410,7 @@ def _export(args: argparse.Namespace, config: AssistantConfig) -> int:
     from kokua.transcript_export import DEFAULT_MAX_PAYLOAD_CHARS, render_markdown
 
     try:
-        session = _resolve_export_session(args, config)
+        session, match_count = _resolve_export_session(args, config)
     except ValueError:
         # TinyDB rewrites the whole file on save, so a read racing the daemon's persist can land on a
         # partial one; the read then raises `json.JSONDecodeError`, which is a `ValueError` subclass, so
@@ -404,6 +422,14 @@ def _export(args: argparse.Namespace, config: AssistantConfig) -> int:
     if session is None:
         if args.conversation == "latest":
             print("no conversations found", file=sys.stderr)
+        elif match_count >= 2:
+            # Distinct from "not found": resolve() itself refused to guess between several
+            # conversations rather than opening the wrong one, so the fix is more of the id, not a
+            # different id.
+            print(
+                f"'{args.conversation}' matches {match_count} conversations; use more of the id to pick one.",
+                file=sys.stderr,
+            )
         else:
             print(f"no conversation found matching '{args.conversation}'", file=sys.stderr)
         return 2

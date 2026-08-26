@@ -333,20 +333,27 @@ def test_the_retired_plugins_flag_is_rejected():
 # --- export -----------------------------------------------------------------------------------
 
 
-def _seeded_home(monkeypatch, tmp_path, messages, metadata=None):
-    """A KOKUA_HOME holding a config and one stored conversation, and that conversation's key."""
+def _seeded_home(monkeypatch, tmp_path, messages, metadata=None, key="abcdef0123456789"):
+    """A KOKUA_HOME holding a config and one stored conversation, and that conversation's key.
+
+    Calling this more than once against the same `tmp_path` (with a different `key`) seeds a second
+    conversation into the same store, which is how the ambiguous-prefix test below gets two real,
+    store-saved sessions sharing a fragment rather than two hand-built ones.
+    """
     from aimu.sessions import Session, TinyDBSessionStore
 
     from kokua.config import file as settings  # the alias this file already uses, see line 170
 
     monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
-    (tmp_path / "config.toml").write_text(settings.example_text(), encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    if not config_path.exists():
+        config_path.write_text(settings.example_text(), encoding="utf-8")
     sessions_path = tmp_path / "data" / "sessions.json"
     sessions_path.parent.mkdir(parents=True, exist_ok=True)
     store = TinyDBSessionStore(str(sessions_path))
     meta = {"created_at": "2026-08-25T14:00:00", "updated_at": "2026-08-25T15:00:00", "title": "A run"}
     meta.update(metadata or {})
-    session = Session(key="abcdef0123456789", metadata=meta, messages=list(messages))
+    session = Session(key=key, metadata=meta, messages=list(messages))
     store.save(session)
     return session.key
 
@@ -386,6 +393,24 @@ def test_export_of_an_unknown_id_reports_it_and_exits_nonzero(monkeypatch, tmp_p
     _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
     _run_main(monkeypatch, ["export", "999999999999"], expect_exit=2)
     assert "999999999999" in capsys.readouterr().err
+
+
+def test_export_of_an_ambiguous_prefix_reports_the_count_and_writes_nothing(monkeypatch, tmp_path, capsys):
+    """Two real, store-saved conversations sharing a fragment must not silently open either one:
+    `resolve()` itself refuses to guess between them, and the message has to say so, distinctly from
+    an unknown id, or a reader goes hunting for a typo that isn't there."""
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES, key="abcdef01aaaaaaaa")
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES, key="abcdef01bbbbbbbb")
+
+    _run_main(monkeypatch, ["export", "abcdef01"], expect_exit=2)
+
+    err = capsys.readouterr().err
+    assert "2" in err  # names how many conversations shared the fragment
+    assert "abcdef01" in err
+    assert "no conversation found" not in err  # distinct from the unknown-id message above
+    # Neither candidate was opened: `_export` never reaches the write step on this path, so the
+    # downloads folder it would have written into was never even created.
+    assert not (tmp_path / "data" / "downloads").exists()
 
 
 def test_export_reports_a_busy_store_rather_than_a_truncated_conversation(monkeypatch, tmp_path, capsys):
