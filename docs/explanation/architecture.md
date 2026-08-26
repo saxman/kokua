@@ -798,6 +798,26 @@ are changed through `update_config`, which hot-applies them by the same `Setting
 `settings` / `get_settings` control frames remain part of the web transport's contract for a front end
 that wants them, and `tests/frontends/test_web.py` keeps covering the server half.
 
+### Exporting a conversation from the sidebar
+
+The sidebar's export button is a third control (`export`), for the same reason the tasks and settings
+controls exist outside `RichChannel`: exporting reads a conversation, it is not part of the assistant
+loop, and there is no core capability behind it for `ChannelUI` to degrade. It could not be a plain
+`GET /export/{id}` route, because `build_app` constructs a fresh `Assistant` per WebSocket connection
+(see above), so an HTTP handler outside that connection would have no live session store to read. The
+control instead resolves the conversation through `Assistant.resolve_conversation` (a thin public
+accessor over `ConversationBook.resolve`, added alongside `list_conversations` and the rest rather than
+reaching into `_book` from `frontends/web.py`), renders it with `transcript_export.render_markdown`, and
+writes the result under `config.downloads_path`. The reply reuses the **existing**
+`/download/{name}` route (already serving generated PDFs and other artifacts) rather than adding a
+second one: `WebChannel.send_download` sends a `{"type": "download", "name", "url"}` frame, and the page
+turns it into a save by clicking a synthetic anchor carrying the `download` attribute, never by
+navigating with `location.href` (the page holds a live WebSocket and possibly a running turn, and a
+navigation would drop both). The exported filename is built from today's date, a title slug kept to
+`[a-z0-9]` runs, and a short id fragment; the slug is an allowlist rather than an escape, which is what
+keeps a title holding a `/` or a `..` segment from ever producing a name the download route's own
+`name != Path(name).name` guard would refuse to serve.
+
 **Stopping a run in flight.** A firing is a turn like any other, so stopping one is cancelling a task --
 but not the *scheduler's* task. `Scheduler.cancel` would reach the job running the firing and would also
 unregister it, which turns "stop this run" into "silently disarm this schedule". So `_run_unattended` runs

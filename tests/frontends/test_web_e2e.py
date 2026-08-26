@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 import re
 import socket
 import threading
@@ -1118,3 +1119,30 @@ def test_a_replayed_blank_answer_segment_is_no_bubble(page, live_server):
     expect(page.locator(".bubble.tool")).to_have_count(1)
     expect(page.locator(".bubble.assistant", has_text="It is 21:15.")).to_be_visible()
     expect(page.locator(".bubble.assistant")).to_have_count(1)
+
+
+# --- Sidebar export button ------------------------------------------------------------------------
+
+
+def test_the_sidebar_export_button_downloads_the_conversation_without_navigating_away(page, live_server):
+    """The server side of the "export" control is already unit-tested against a fake socket in
+    test_web.py; what only a real browser can show is that clicking the button triggers an actual
+    file save rather than, say, a blocked navigation that would tear down the live WebSocket and any
+    turn in flight. `page.expect_download()` only fires on a genuine browser download, so this fails
+    if the client-side handler navigated with `location.href` instead of the synthetic-anchor
+    `download` attribute, or if it did nothing at all."""
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "remember this for the export test")
+    page.click("#send")
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
+
+    with page.expect_download() as download_info:
+        page.locator("#conv-list .conv-export").click()
+    download = download_info.value
+
+    assert download.suggested_filename.endswith(".md")
+    content = Path(download.path()).read_text(encoding="utf-8")
+    assert content.startswith("# ")
+    assert "remember this for the export test" in content
+    # The WebSocket survived the download: the page is still live, not on a blank error page.
+    expect(page.locator("#conv-list li")).to_have_count(1)

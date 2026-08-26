@@ -12,6 +12,8 @@ import argparse
 import asyncio
 import json
 import logging
+import re
+from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Optional
@@ -23,10 +25,13 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from kokua import images
 from kokua.core.assistant import Assistant, ModelClientError
+from kokua.core.conversations import ID_PREFIX_MIN
+from kokua.core.messages import derive_title
 from kokua.channels.web import WebChannel
 from kokua.config import AssistantConfig, ConfigError
 from kokua.plugins import FrontEnd
 from kokua.core.agents import validated_registry
+from kokua.transcript_export import DEFAULT_MAX_PAYLOAD_CHARS, render_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +60,12 @@ def _static_text(filename: str) -> str:
     return files("kokua").joinpath(f"web_static/{filename}").read_text(encoding="utf-8")
 
 
-_CONTROL_TYPES = ("new", "select", "delete", "settings", "get_settings", "get_tasks", "task")
+_CONTROL_TYPES = ("new", "select", "delete", "settings", "get_settings", "get_tasks", "task", "export")
 
 
 def _parse_control(raw: str) -> Optional[dict]:
-    """Return a control object ({"type": "new"/"select"/"delete"/"settings"/"task"/..., ...}), else None.
+    """Return a control object ({"type": "new"/"select"/"delete"/"settings"/"task"/"export"/..., ...}),
+    else None.
 
     Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
     approval "y"/"n") and is fed to the channel unchanged.
@@ -114,6 +120,54 @@ async def _sync_view(channel: WebChannel, assistant: Assistant) -> None:
     await channel.send_history(assistant.history, assistant.history_metadata)
     if assistant.turn_running(assistant.active_id):
         await channel.send_working(True)
+
+
+# How many words of a conversation's title become its exported filename's slug. Enough to tell two
+# exports of the same day apart at a glance in a downloads folder; the id fragment appended after it
+# is what actually guarantees uniqueness.
+_EXPORT_SLUG_WORDS = 6
+
+
+def _export_filename(session_key: str, title: str) -> str:
+    """A bare filename (no directory component) for one conversation's Markdown export.
+
+    Built from today's date, a slug of the title, and a short leading fragment of the conversation's
+    id: readable in a downloads folder and, unlike the title itself, always safe to hand to the
+    ``/download/{name}`` route. The slug keeps only ``[a-z0-9]`` runs from the title and joins them
+    with hyphens, which is an allowlist rather than an escape: a title holding a "/" or a ".."
+    segment (either of which the route's ``name != Path(name).name`` check rejects) contributes
+    nothing to the slug rather than surviving in some encoded form, so the result can never fail that
+    check no matter what the conversation was named.
+    """
+    words = re.findall(r"[a-z0-9]+", title.lower())[:_EXPORT_SLUG_WORDS]
+    slug = "-".join(words) or "conversation"
+    date = datetime.now().strftime("%Y-%m-%d")
+    return f"{date}-{slug}-{session_key[:ID_PREFIX_MIN]}.md"
+
+
+async def _export_conversation(
+    channel: WebChannel, assistant: Assistant, config: AssistantConfig, conversation_id: str
+) -> None:
+    """Render one conversation to Markdown, write it under ``downloads_path``, and point the page at it.
+
+    Resolves through ``assistant.resolve_conversation`` rather than ``select_conversation``: an export
+    reads a conversation, it does not switch the view onto it, so the sidebar's active row and the
+    displayed history must stay exactly as they were. Raises when the id names none (or more than
+    one); the caller in ``serve_connection`` turns that into a spoken apology rather than a closed
+    socket, the same "answer, don't drop the connection" contract every other control in that loop
+    keeps.
+    """
+    session = assistant.resolve_conversation(conversation_id)
+    if session is None:
+        raise ValueError(f"no conversation found matching {conversation_id!r} to export")
+    markdown = render_markdown(session, max_payload_chars=DEFAULT_MAX_PAYLOAD_CHARS)
+    title = session.metadata.get("title") or derive_title(session.messages) or ""
+    name = _export_filename(session.key, title)
+    # The download route serves out of this directory and expects it to already exist (it 404s
+    # rather than creating anything); a fresh $KOKUA_HOME may never have had a file written into it.
+    config.downloads_path.mkdir(parents=True, exist_ok=True)
+    (config.downloads_path / name).write_text(markdown, encoding="utf-8")
+    await channel.send_download(name, f"/download/{name}")
 
 
 def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> Starlette:
@@ -271,6 +325,16 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                             logger.warning("Could not apply settings", exc_info=True)
                             await channel.send("Sorry, those settings could not be applied.")
                         await channel.send_settings(assistant.current_settings())
+                        continue
+                    # An export reads a conversation rather than switching the view onto it, so
+                    # (unlike select/new/delete) it too skips the sidebar/history refresh below: it
+                    # changes nothing about what the page is showing.
+                    if control["type"] == "export":
+                        try:
+                            await _export_conversation(channel, assistant, config, str(control.get("id", "")))
+                        except Exception:
+                            logger.warning("Could not export conversation", exc_info=True)
+                            await channel.send("Sorry, that conversation could not be exported.")
                         continue
                     # Task controls mostly touch only the scheduled-task registry, so like the settings
                     # controls they answer with a fresh task list and skip the history refresh.

@@ -109,6 +109,14 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.24.0 or newer
     collapses to an icon rail and drag-resizes between 180 and 480px; the divider is keyboard-operable.
     Width, collapsed state, and theme are per-browser preferences applied before first paint, so there
     is no flash on load.
+  - **Each row also carries an export button**, beside delete, that renders the conversation with the
+    same `transcript_export.render_markdown` the CLI uses and downloads it, without switching the row
+    into view or reloading the page. There is no `GET /export/{id}` route: the front end builds its
+    `Assistant` fresh per WebSocket connection, so a plain HTTP handler would have no live session store
+    to read. An `"export"` control on the same socket every other sidebar action uses does the read and
+    write, and the reply reuses the existing `/download/{name}` route (already serving generated PDFs)
+    rather than opening a second one. See
+    [Export a conversation](docs/how-to/export-a-conversation.md#from-the-web-ui).
   - **The composer is one bordered box** with a text area that grows to eight rows: Enter sends,
     Shift+Enter inserts a newline (an IME's Enter does neither). Send is replaced by Stop for the
     duration of a turn rather than sitting beside a permanently disabled button, and switching

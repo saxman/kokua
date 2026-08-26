@@ -1890,3 +1890,115 @@ async def test_a_control_that_raises_tears_the_connection_down(tmp_path):
     done, _ = await asyncio.wait({serving}, timeout=5)
     assert serving in done, "a control that raised left the socket being read with nothing applying frames"
     assert serving.exception() is not None, "the error was swallowed instead of ending the connection"
+
+
+def test_the_export_control_writes_a_file_and_sends_a_download_frame(tmp_path):
+    """The page needs a name to fetch, and /download/{name} already serves downloads_path."""
+    import json
+
+    from starlette.testclient import TestClient
+
+    config = _config(tmp_path)
+    app = build_app(config, client_factory=lambda cid: MockAsyncModelClient(["the reply"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("a question")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "export", "id": active_id}))
+        frame = _drain_until(ws, "download")
+    assert frame["url"] == f"/download/{frame['name']}"
+    written = (config.downloads_path / frame["name"]).read_text(encoding="utf-8")
+    assert written.startswith("# ")
+    assert "a question" in written
+
+
+def test_the_exported_name_is_a_bare_filename_the_download_route_will_serve(tmp_path):
+    """The route rejects anything where name != Path(name).name, so a title with a slash in it
+    would otherwise produce a file the page is told to fetch and cannot."""
+    import json
+    from pathlib import Path
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["ok"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("re: a/b/c and ../.. slashes")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "export", "id": active_id}))
+        frame = _drain_until(ws, "download")
+    assert frame["name"] == Path(frame["name"]).name
+
+
+def test_the_exported_file_is_actually_fetchable_over_the_download_route(tmp_path):
+    """The two halves have to agree: the frame's url and the route's guard."""
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["ok"]))
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("a question")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "export", "id": active_id}))
+        frame = _drain_until(ws, "download")
+    response = client.get(frame["url"])
+    assert response.status_code == 200
+    assert response.text.startswith("# ")
+
+
+def test_exporting_an_unknown_conversation_answers_rather_than_closing_the_socket(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["ok"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text(json.dumps({"type": "export", "id": "no-such-conversation"}))
+        frame = _drain_until(ws, "message")
+        # The socket is still live: another control still answers.
+        ws.send_text(json.dumps({"type": "get_tasks"}))
+        _drain_until(ws, "tasks")
+    assert "export" in frame["text"].lower()
+
+
+def test_the_export_control_does_not_refresh_the_sidebar_or_history(tmp_path):
+    """An export reads a conversation; it must not also push a fresh conversation list or a history
+    replay, since neither the active conversation nor what the page is displaying has changed.
+
+    A trailing "get_tasks" control (which always answers with exactly one "tasks" frame) is what makes
+    this a real check rather than a tautology: the socket is served by one queue and one applying task,
+    so "get_tasks" cannot be answered until everything the "export" control queued has already been
+    sent, and collecting every frame up to "tasks" (instead of draining straight to "download" with
+    _drain_until, which would silently step over an unwanted "conversations"/"history" frame on the
+    way) is what lets the two frames in between be asserted as none at all.
+    """
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["ok"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("a question")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "export", "id": active_id}))
+        ws.send_text(json.dumps({"type": "get_tasks"}))
+        frames = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame["type"] == "tasks":
+                break
+    assert [f["type"] for f in frames] == ["download", "tasks"]

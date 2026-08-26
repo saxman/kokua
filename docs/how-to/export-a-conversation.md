@@ -9,6 +9,10 @@ terminal is gone.
 It reads the conversation straight out of the session store and writes the file; nothing else. No
 model client, no agent, no front end, so it works even with the model server down.
 
+There are two routes to the same file: the `kokua export` command below, and a download button in
+the web UI's sidebar (see [From the web UI](#from-the-web-ui)). Both call the same renderer, so the
+file reads identically either way.
+
 ## The command
 
 ```bash
@@ -60,6 +64,21 @@ tool produced, and can be large enough to bury the turn being judged under it. P
 appends a note saying how many characters the full payload held, rather than silently showing an
 incomplete result as if it were complete. Pass `--full` to lift the cap and see every payload in
 full.
+
+## From the web UI
+
+Hover a conversation in the sidebar and a download arrow (↓) appears beside its delete button.
+Clicking it does not switch you into that conversation or reload the page: the file is rendered and
+written on the server, in the same `$KOKUA_HOME/data/downloads/` folder the command line writes to,
+and the browser saves it the way any other file download is saved. The exported filename carries
+today's date, a slug of the conversation's title, and a short fragment of its id, so several exports
+land in that folder without overwriting each other or reading as anonymous.
+
+There is no `GET /export/{id}` route: the web front end builds its assistant fresh per WebSocket
+connection, so a plain HTTP handler would have no live session store to read from. The button sends
+an `"export"` control over the same socket every other sidebar action uses, and the server answers by
+writing the file and pointing the page at the existing `/download/{name}` route (the one that already
+serves generated PDFs and other artifacts) rather than opening a second way to fetch a file.
 
 ## The store, mid-write
 

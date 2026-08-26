@@ -413,6 +413,17 @@ class WebChannel(BaseWebChannel):
         """
         await self.send_frame({"type": "tasks", "items": items})
 
+    async def send_download(self, name: str, url: str) -> None:
+        """Point the page at a file to download.
+
+        Like ``send_settings`` and ``send_tasks``, a front-end concern rather than part of
+        ``RichChannel``: the core never sends it, so there is no capability for ``ChannelUI`` to
+        degrade. The file is already written under ``downloads_path``, which the front end's
+        existing ``/download/{name}`` route serves with its own traversal guard, so this frame
+        carries a name and not bytes.
+        """
+        await self.send_frame({"type": "download", "name": name, "url": url})
+
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
 

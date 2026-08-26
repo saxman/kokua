@@ -338,6 +338,17 @@ class Assistant:
         """
         return [{**item, "running": self._tracker.running(item["id"])} for item in self._book.list()]
 
+    def resolve_conversation(self, conversation_id: str) -> Optional[Session]:
+        """The stored session `conversation_id` names (a full id or a unique leading fragment), or
+        ``None`` when it names none or more than one.
+
+        Public accessor so a front end doesn't need to reach into `_book` directly. Unlike
+        `select_conversation`, this does not move the active pointer: a caller that wants to read a
+        conversation without switching the view onto it (e.g. to export one while another stays on
+        screen) needs exactly this and nothing else.
+        """
+        return self._book.resolve(conversation_id)
+
     async def _cancel_current_turn(self) -> None:
         """Cancel the viewed conversation's in-flight turn (if any) and let it settle, so its partial
         state persists to the conversation it belongs to before we switch its agent's client (a model

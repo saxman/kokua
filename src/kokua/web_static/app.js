@@ -115,6 +115,16 @@ function renderConversations() {
     } else {
       li.addEventListener("click", () => selectConversation(item.id));
     }
+    const exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.className = "conv-export";
+    exportBtn.textContent = "↓";
+    exportBtn.title = "Export conversation as Markdown";
+    exportBtn.addEventListener("click", (e) => {
+      e.stopPropagation();  // don't also trigger switch
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "export", id: item.id }));
+    });
+    li.appendChild(exportBtn);
     const del = document.createElement("button");
     del.type = "button";
     del.className = "conv-delete";
@@ -1000,6 +1010,16 @@ ws.onmessage = (event) => {
   } else if (frame.type === "tasks") {
     lastTasks = frame.items;
     renderSidebar();
+  } else if (frame.type === "download") {
+    // A synthetic anchor rather than location.href: the page holds a live WebSocket and possibly a
+    // running turn, and navigating away would drop both. The `download` attribute makes the browser
+    // save the file instead of trying to render it in place.
+    const a = document.createElement("a");
+    a.href = frame.url;
+    a.download = frame.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   } else if (frame.type === "history") {
     // Replay a conversation (on connect or after switching), reusing the live renderers.
     log.innerHTML = "";  // replace any current transcript
