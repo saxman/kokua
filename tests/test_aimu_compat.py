@@ -57,7 +57,7 @@ def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
 def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
     """The probe follows whatever shape the newest surface has, and a set member is one of the three.
 
-    Not the shape in force today (0.23.0's surface is a keyword argument), but it was for 0.18.0, and
+    Not the shape in force today (0.25.0's surface is a keyword argument), but it was for 0.18.0, and
     the branch has to stay exercised: a published set proves nothing by existing once the set itself
     predates the capability, so only its contents can answer.
     """

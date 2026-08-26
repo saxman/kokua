@@ -53,8 +53,11 @@ class TurnMetrics:
     # A fixed label, not read from config: the entry agent's actual name is whatever `[assistant].agent`
     # names it, which this module has no way to look up (and should not import `kokua.config` to do).
     # It exists at all only because `turns.py` wires `agent.model_client.events`, not `agent.events`, for
-    # the entry agent's client; setting `agent.events` instead would give AIMU's own generated
-    # `agent-<hex>` name to every entry-agent call, and this mapping from `None` would never fire.
+    # the entry agent's client; a sink on the client sees that client's own turn events unattributed
+    # (`event.agent` is `None`), which is what this mapping labels. Wiring `agent.events` instead would
+    # attribute those calls to the agent's configured name (the entry agent is always built with one, see
+    # `core/build.py`'s `SkillAgent(name=agent_name, ...)`), and this mapping from `None` would never fire.
+    # `[assistant].agent` can still change the label: a rename changes what the export prints.
     ENTRY_AGENT = "assistant"
 
     def __init__(self) -> None:

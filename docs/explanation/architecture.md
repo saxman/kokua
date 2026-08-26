@@ -26,7 +26,7 @@ src/kokua/
   images.py            the on-disk image store and the /images/<name> reference
   logging_setup.py     rotating file log + a SIGUSR1 thread-stack dump
   transcript_export.py render_markdown: a saved conversation as Markdown a person can read and judge,
-                        pure and dependency-free so both front ends and the CLI can call it
+                        imports no channel and no front end, so the CLI export works without `web`
   config.example.toml  every key, one line each (long form: docs/reference/configuration.md)
   web_static/          the single-page web UI plus vendored marked/DOMPurify/KaTeX
 
@@ -606,7 +606,7 @@ The repository floor is now `aimu>=0.25.0`, for `make_async_subagent_tool`'s new
 handle that lets a spawned sub-agent's model turns reach the sink the turn that delegated to it opened
 (see [What a turn cost](#what-a-turn-cost)). A fresh-client critic (`workflows.critics.reviewer_agent`)
 had the identical gap for the identical reason and is wired the same way. The probe moved to a signature
-check on `make_async_subagent_tool` for `events`, the third time this probe has taken that shape. Unlike
+check on `make_async_subagent_tool` for `events`, the fourth time this probe has taken that shape. Unlike
 `script_env` and `include`, which carried settings *to* an existing capability, `events` *is* the
 capability: a name lookup on the module would not catch its absence, since `make_async_subagent_tool`
 itself predates 0.25.0 and imports fine either way, and nothing else has to be true of a checkout once

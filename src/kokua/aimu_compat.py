@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.23.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.25.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -61,7 +61,7 @@ Worth recording, since it is the case this module keeps meeting: the capability 
 cannot ask a built client which endpoint it is talking to. The export is the route around that gap
 rather than a fix for it, which is why the probe grips the export and not something on the client.
 
-AIMU 0.23.0 is the current surface, and it is the case this module exists for in its purest form. AIMU
+AIMU 0.23.0 was the surface until 0.25.0, and it is the case this module exists for in its purest form. AIMU
 renamed its channel flags ``show_thinking`` / ``show_tools`` to ``stream_thinking`` / ``stream_tools``
 and flipped both defaults from ``False`` to ``True``; Kokua deleted its own display settings in the same
 change and now constructs both channels bare, relying on that default. Against an older AIMU the bare
@@ -77,7 +77,7 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.25.0 is the current surface, and the shape is a signature check again, the third time: a
+AIMU 0.25.0 is the current surface, and the shape is a signature check again, the fourth time: a
 sub-agent built by ``make_async_subagent_tool`` used to have no way to report its model turns anywhere
 but its own return value, so a spawn was invisible to whatever cost accounting the delegator kept. The
 release adds an ``events`` parameter that forwards those turns to a sink the caller supplies, and a
@@ -109,14 +109,15 @@ MINIMUM_AIMU = (0, 25, 0)
 
 # The newest AIMU surface Kokua depends on is `make_async_subagent_tool`'s `events` parameter: the
 # handle that lets a spawned sub-agent's model turns reach the sink the turn that delegated to it
-# opened. A signature check, the third time this probe has taken that shape (`SkillManager(include=...)`
-# and `SkillAgent(script_env=...)` were the first two), because the capability is the keyword argument
-# itself and no `getattr` on the function would notice its absence. Unlike the 0.20.0 case, where the
-# probe's handle (`endpoint_kwargs`) sat on the capability's path rather than being it, `events` *is* the
-# depended-on capability: nothing else has to be true of the checkout for delegation cost to reach a
-# turn's record. What this deliberately misses: a checkout carrying the parameter but not the recursive
-# passthrough (a spawned worker's own spawn tool forwarding `events` to *its* children) would still pass,
-# so a worker that spawns its own worker could go uncounted without this probe raising anything.
+# opened. A signature check, the fourth time this probe has taken that shape (`SkillManager(include=...)`,
+# `SkillAgent(script_env=...)`, and `WebChannel(stream_thinking=...)` were the first three), because the
+# capability is the keyword argument itself and no `getattr` on the function would notice its absence.
+# Unlike the 0.20.0 case, where the probe's handle (`endpoint_kwargs`) sat on the capability's path
+# rather than being it, `events` *is* the depended-on capability: nothing else has to be true of the
+# checkout for delegation cost to reach a turn's record. What this deliberately misses: a checkout
+# carrying the parameter but not the recursive passthrough (a spawned worker's own spawn tool
+# forwarding `events` to *its* children) would still pass, so a worker that spawns its own worker
+# could go uncounted without this probe raising anything.
 _PROBE_MODULE = "aimu.aio.tools.builtin"
 _PROBE_SYMBOL = "make_async_subagent_tool"
 _PROBE_PARAMETER: Optional[str] = "events"

@@ -3,10 +3,15 @@ in rather than threaded through as a parameter. See :func:`kokua.workflows.criti
 
 Coverage of the critic seam splits into three links, none of them proven by a single test:
 
-1. Kokua wires ``reviewer_agent`` to the forwarder. Pinned by
+1. Kokua wires ``reviewer_agent`` to the forwarder, on both the agent and its client. Pinned by
    ``test_a_reviewer_reports_its_model_turns_to_the_metrics_forwarder`` below, which calls
    ``reviewer_agent`` for real and asserts ``agent.events is record_event``; severing the wiring
-   (``events=None``) fails that assertion.
+   (``events=None``) fails that assertion. The same test also asserts
+   ``agent.model_client.events is record_event``, a second wiring the agent-level one does not
+   subsume: :func:`kokua.workflows.critics.finalize_verdict` calls ``client.chat(..., schema=Verdict)``
+   directly, outside any ``run()``, where only a sink set on the client itself, not the agent, would
+   see it. Deleting either assignment in ``reviewer_agent`` fails this test; it does not need a
+   fourth link to say so, since one call already exercises both seams.
 2. AIMU delivers a sink passed as ``aio.Agent(events=...)`` to the agent's own model turns. Pinned by
    AIMU's own suite, not this one, since Kokua has no reason to re-prove a library capability it depends on.
 3. ``record_event`` routes to whichever ``TurnMetrics`` the running turn opened, and attributes by the
@@ -48,6 +53,7 @@ def test_a_reviewer_reports_its_model_turns_to_the_metrics_forwarder():
     """
     agent = reviewer_agent(None, "review it")
     assert agent.events is record_event
+    assert agent.model_client.events is record_event
 
 
 def test_the_forwarder_attributes_a_reviewers_cost_to_the_reviewer():

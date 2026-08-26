@@ -47,7 +47,7 @@ run streamed a `thinking` block or a verbose trace's `reasoning` segments), its 
 each tool call, the tool's name, its arguments, and what it returned. A line under the turn heading
 names the model and reasoning effort it ran at, when either was recorded, and a line beneath that
 reports what the turn cost. A sub-agent the turn spawned gets its own nested card with the same
-shape: its own reasoning, tool calls, answer, and cost. If a turn stopped short (a tool call was
+shape: its own reasoning, tool calls, and answer. If a turn stopped short (a tool call was
 denied, a reviewer sent it back for revision, an error cut it off), the reason appears as a quoted
 note where the turn stopped.
 
@@ -75,7 +75,7 @@ emitted, on any client. That one call per review round never enters a turn's rec
 because it never enters the count at all, no "not reported" note can point at it the way it does for a
 missing token figure.
 
-**No per-turn or per-model rollup, and no per-spawn token breakdown on a sub-agent's own card.** The
+**No per-turn or per-model rollup in the header, and no per-spawn token breakdown on a sub-agent's own card.** The
 header totals model calls, tokens, and time across the whole conversation; it does not also break that
 total down by turn, by model, or by delegation depth, and a sub-agent's card shows its reasoning, tool
 calls, and answer without a token figure of its own. Both are things a fuller export could add; this

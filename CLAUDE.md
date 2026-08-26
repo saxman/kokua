@@ -45,7 +45,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.23.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.25.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -54,7 +54,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.23.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.25.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -99,8 +99,8 @@ Consequences for working in this repo:
   the export has the behavior and no way to ask for it. The capability *behind* that export is the fourth
   kind of case, and worth remembering when you next go looking for a handle: nothing on a live client retains
   the string it was built from, so "which endpoint is this client talking to" cannot be asked at all, and the
-  export is the route around that gap rather than a fix for it. AIMU 0.23.0 is the current floor, and it is
-  the silent-degradation case in its purest form: AIMU renamed its channel flags `show_thinking` /
+  export is the route around that gap rather than a fix for it. AIMU 0.23.0 was the current floor until
+  0.25.0, and it is the silent-degradation case in its purest form: AIMU renamed its channel flags `show_thinking` /
   `show_tools` to `stream_thinking` / `stream_tools` and flipped both defaults from `False` to `True`, and
   Kokua retired its own `[display]` settings in the same change and now constructs both channels bare. An
   older AIMU accepts that same bare construction and relays neither reasoning nor tool calls, in a front end
@@ -120,7 +120,7 @@ Consequences for working in this repo:
   probe correctly rather than being a gap in it.) A name lookup on
   the module would not catch either absence, because `make_async_subagent_tool` itself predates 0.25.0
   and imports fine either way; only its parameters changed, so a signature check is what the shape
-  demands, the third time this probe has taken it. Unlike `script_env` and `include`, which carried
+  demands, the fourth time this probe has taken it. Unlike `script_env` and `include`, which carried
   settings *to* an existing capability, `events` *is* the capability: nothing else has to be true of a
   checkout once that one argument exists. What it leaves uncovered is one level down from the
   parameter's own presence: a checkout carrying `events` but not the recursive passthrough (a spawned
