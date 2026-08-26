@@ -119,3 +119,117 @@ def test_no_task_id_means_no_task_line():
     with_task = render_markdown(_session([{"role": "user", "content": "hi"}], {"task_id": "nightly-digest"}))
     assert "nightly-digest" not in without
     assert "nightly-digest" in with_task
+
+
+def test_a_tool_call_shows_its_name_arguments_and_result():
+    session = _session(
+        [
+            {"role": "user", "content": "read it"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "function": {"name": "read_file", "arguments": '{"path": "a.txt"}'}}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "the contents"},
+            {"role": "assistant", "content": "here it is"},
+        ]
+    )
+    out = render_markdown(session)
+    assert "read_file" in out
+    assert "a.txt" in out
+    assert "the contents" in out
+
+
+def test_a_payload_containing_a_fence_does_not_break_out_of_its_block():
+    """The single most likely silent failure in the export.
+
+    Tool results and messages routinely contain triple-backtick fences. A block opened with a
+    fence no longer than one inside its payload ends early, and every heading after it renders as
+    code. The renderer opens with a longer fence than any run in the content.
+    """
+    payload = "here is code:\n```python\nprint('hi')\n```\ndone"
+    session = _session(
+        [
+            {"role": "user", "content": "show me"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "function": {"name": "read_file", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": payload},
+            {"role": "assistant", "content": "there"},
+        ]
+    )
+    out = render_markdown(session)
+    assert "````" in out, "the block must open with a fence longer than the one inside it"
+    opening = next(line for line in out.splitlines() if line.startswith("````"))
+    assert len(opening.rstrip()) > 3
+
+
+def test_a_payload_of_nested_fences_escalates_past_the_longest_run():
+    payload = "a\n````\nb\n````\nc"
+    session = _session(
+        [
+            {"role": "user", "content": "x"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "function": {"name": "t", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": payload},
+        ]
+    )
+    out = render_markdown(session)
+    assert "`````" in out
+
+
+def test_an_over_long_payload_is_cut_and_says_so():
+    """Uncapped, one read_file over a large document buries the turn being judged. Cut silently,
+    the export reads as complete when it is not."""
+    session = _session(
+        [
+            {"role": "user", "content": "x"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "function": {"name": "t", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "x" * 5000},
+        ]
+    )
+    out = render_markdown(session, max_payload_chars=100)
+    assert "truncated" in out
+    assert "5000" in out
+
+
+def test_the_cap_can_be_lifted():
+    session = _session(
+        [
+            {"role": "user", "content": "x"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "function": {"name": "t", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "y" * 5000},
+        ]
+    )
+    out = render_markdown(session, max_payload_chars=None)
+    assert "truncated" not in out
+    assert "y" * 5000 in out
+
+
+def test_a_tool_call_with_no_result_says_so_rather_than_showing_an_empty_block():
+    """A turn cancelled mid-call leaves a call with no answer, which is worth seeing."""
+    session = _session(
+        [
+            {"role": "user", "content": "x"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "function": {"name": "t", "arguments": "{}"}}],
+            },
+        ]
+    )
+    out = render_markdown(session)
+    assert "no result" in out.lower()
