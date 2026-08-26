@@ -58,8 +58,10 @@ makes ungated sending safe. Anything that mails a different address is in scope.
 
 **Secret disclosure.** `KOKUA_EMAIL_PASSWORD`, an MCP server's bearer token named by its `token_env`,
 and `$GITHUB_BACKUP_TOKEN` are read from the environment and are never meant to reach `config.toml`, a
-saved conversation, a log file, or a tool result. A path that writes one of them into any of those is
-in scope.
+saved conversation, a log file, or a tool result, with one named exception: a variable you have
+deliberately listed in `[compute] command_env_passthrough` is meant to reach a `run_command` result,
+because listing it there is how you asked for exactly that. A path that writes one of them into any of
+those, for a variable you did not list there, is in scope.
 
 ## Out of scope
 

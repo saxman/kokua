@@ -65,7 +65,7 @@ What the AIMU-provided toolsets hold:
 | Toolset | Tools | Notes |
 | --- | --- | --- |
 | `web` | `web_search`, `get_webpage`, `get_webpage_html`, `wikipedia`, `get_weather` | |
-| `fs` | `list_directory`, `read_file` | **Read-only.** Writing a file needs `execute_python`. |
+| `fs` | `list_directory`, `read_file` | **Read-only.** Writing a file needs `execute_python` or `run_command`. |
 | `compute` | `calculate`, `execute_python`, `run_command` | both execution tools are approval-gated by default; `[compute] command_env_passthrough` decides what a command's environment holds |
 | `time` | `get_current_date_and_time`, `convert_time` | not implicit; declare it |
 | `misc` | `echo` | |

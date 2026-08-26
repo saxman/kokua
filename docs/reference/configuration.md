@@ -127,7 +127,7 @@ Everything else is yours to remove, and here is what removing each shipped patte
 | `paths.data_dir` | lets the assistant move its own state out from under you |
 | `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `system_message`, `description`, and `delegates_to`, set its `[agents.<name>.generation]` parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart. |
 | `scheduling.task.*` | changes the error message only. `update_config` still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule. |
-| `compute.command_env_passthrough` | lets the assistant name its own credentials for a `run_command` child to see, reading a secret back out through the command it just approved |
+| `compute.command_env_passthrough` | lets the assistant name its own credentials for a `run_command` child to see; because the key is cold, that exposure is persistent, surviving into every later session rather than one command |
 
 A flat agent key (`tools`, `model`, `thinking`, `system_message`, `description`, `delegates_to`) is
 checked before it is saved by the same `validate_agents` that runs at startup, so an unknown toolset
@@ -740,6 +740,10 @@ Declared by the `compute` toolset: an agent's `tools` must list `compute` to get
 `run_command` runs a command line through `/bin/sh -c` and returns its exit code with stdout and stderr
 labelled separately. A nonzero exit is reported rather than treated as a failure, since `pytest` exits 1
 with the answer on stdout. The timeout is per call, defaulting to 30 seconds and clamped to 600.
+Combined stdout and stderr are capped at 20,000 bytes; past that, the larger of the two streams is
+trimmed first, so a talkative command loses output before a quiet one does. `run_command` also takes a
+`cwd` argument; left unset, it defaults to Kokua's own process working directory, which for a
+launcher-started service is wherever the launcher happened to be, not anything under `$KOKUA_HOME`.
 
 **The child's environment is an allowlist, and this key is the opt-in half of it.** A command sees
 `PATH`, `HOME`, the locale and temp variables, and `SHELL`, `TERM`, `TZ`, `USER`, `LOGNAME`. Nothing

@@ -34,7 +34,10 @@ TOOLSET_NAME = "compute"
 #: ``Setting.kind`` carries one of ``str``, ``int``, or ``bool`` (see ``config/table.py``), and a list is
 #: the shape a reader would expect here. Not hot: the value is baked into the tool's closure when an
 #: agent is built, so a hot flag would silently do nothing until a restart, which is worse than a cold
-#: one that says so.
+#: one that says so. Being cold is also what keeps this key's lock in ``[security].locked_config_keys``
+#: effective: ``SettingsApplier.persist`` writes a setting straight to disk with no ``locked_by`` check
+#: at all, and it only ever iterates hot settings, so making this key hot later would silently open a
+#: write path that bypasses the lock entirely.
 COMPUTE_SETTINGS: tuple[Setting, ...] = (Setting("command_env_passthrough", str, ""),)
 
 

@@ -63,8 +63,10 @@ def test_the_setting_is_declared_on_the_toolset():
     assert not keys["command_env_passthrough"].hot  # baked into the closure at build time
 
 
-def test_the_docstring_names_both_gated_tools():
-    """The module docstring is where a reader learns that declaring this toolset is what grants the
-    reach, and it named only execute_python when only execute_python needed naming."""
+def test_the_module_docstring_names_both_execution_tools():
+    """Pins the module docstring's mention of both execution tools, not the gating itself: that is
+    pinned against the shipped confirm_tools default elsewhere. The docstring is where a reader learns
+    that declaring this toolset is what grants the reach, and it named only execute_python when
+    run_command also needed naming."""
     assert "execute_python" in compute.__doc__
     assert "run_command" in compute.__doc__
