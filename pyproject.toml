@@ -18,14 +18,16 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# 0.23.0 is the oldest AIMU carrying everything Kokua needs. Its own contribution is the channel flags
-# `stream_thinking` / `stream_tools`, whose defaults are what make a bare channel relay reasoning and
-# tool calls now that Kokua has no display settings of its own; every earlier release in the floor's
-# history is listed in `kokua.aimu_compat`, which is also what enforces this floor for a sibling
-# checkout. This pin is what ships in the wheel and what a PyPI install resolves;
-# [tool.uv.sources] below separately redirects development installs to the sibling checkout.
+# 0.24.0 is the oldest AIMU carrying everything Kokua needs. Its own contribution is two things:
+# `builtin.make_command_tool`, the factory the `compute` toolset calls so `[compute]
+# command_env_passthrough` can decide what a command's child sees in the environment, and
+# `run_command`'s membership in `builtin.compute`, which is what makes the shell tool reachable at all
+# and which nothing importable can detect; every earlier release in the floor's history is listed in
+# `kokua.aimu_compat`, which is also what enforces this floor for a sibling checkout. This pin is what
+# ships in the wheel and what a PyPI install resolves; [tool.uv.sources] below separately redirects
+# development installs to the sibling checkout.
 dependencies = [
-    "aimu[ollama,openai_compat,memory]>=0.23.0",
+    "aimu[ollama,openai_compat,memory]>=0.24.0",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
     # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
     "tomlkit>=0.13",

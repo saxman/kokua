@@ -19,9 +19,23 @@ def test_logs_path_under_data_dir(tmp_path):
 
 
 def test_default_confirm_tools():
-    expected = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
-    assert AssistantConfig().confirm_tools == expected
-    assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == expected
+    """The code-level default and the shipped example agree: `resolve_config` returns exactly what the
+    example's explicit `confirm_tools` line says, which is the same list `AssistantConfig` falls back to
+    when a `config.toml` omits the key entirely."""
+    assert AssistantConfig().confirm_tools == [
+        "add_skill_script",
+        "add_mcp_server",
+        "execute_python",
+        "run_command",
+        "update_config",
+    ]
+    assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == [
+        "add_skill_script",
+        "add_mcp_server",
+        "execute_python",
+        "run_command",
+        "update_config",
+    ]
 
 
 # --- the default model: one resolution, carrying whatever the string carries ----------

@@ -27,7 +27,7 @@ Two rules run through the whole file and explain most of what follows:
   [`[[mcp.server]]`](#mcpserver) · [`[paths]`](#paths) · [`[frontend]`](#frontend) · [`[web]`](#web) ·
   [`[logging]`](#logging) · [`[email]`](#email) · [`[scheduling]`](#scheduling) ·
   [`[scheduling.task.<name>]`](#schedulingtaskname) · [`[planning]`](#planning) ·
-  [`[capabilities]`](#capabilities) · [`[github_backup]`](#github_backup) ·
+  [`[capabilities]`](#capabilities) · [`[github_backup]`](#github_backup) · [`[compute]`](#compute) ·
   [toolset sections in general](#toolset-sections)
 - [Environment variables](#environment-variables)
 - [Command-line flags](#command-line-flags)
@@ -85,7 +85,14 @@ by a tool outlives the conversation that wrote it.
 
 ```toml
 [security]
-locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
+locked_config_keys = [
+    "security.*",
+    "email.to",
+    "paths.data_dir",
+    "agents.*",
+    "scheduling.task.*",
+    "compute.command_env_passthrough",
+]
 ```
 
 A pattern takes one of three forms:
@@ -120,6 +127,7 @@ Everything else is yours to remove, and here is what removing each shipped patte
 | `paths.data_dir` | lets the assistant move its own state out from under you |
 | `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `system_message`, `description`, and `delegates_to`, set its `[agents.<name>.generation]` parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart. |
 | `scheduling.task.*` | changes the error message only. `update_config` still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule. |
+| `compute.command_env_passthrough` | lets the assistant name its own credentials for a `run_command` child to see; because the key is cold, that exposure is persistent, surviving into every later session rather than one command |
 
 A flat agent key (`tools`, `model`, `thinking`, `system_message`, `description`, `delegates_to`) is
 checked before it is saved by the same `validate_agents` that runs at startup, so an unknown toolset
@@ -316,7 +324,7 @@ Tools that require interactive confirmation before each call: a terminal `y/N`, 
 UI. These are the tools that run with full machine access.
 
 ```toml
-confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
+confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "run_command", "update_config"]
 ```
 
 Set to `[]` to disable approval entirely. Proactive turns (scheduled tasks, anything the assistant starts
@@ -356,7 +364,8 @@ because gating a read would make an unattended scheduled run that reads history 
 ### `locked_config_keys`
 
 A list of patterns naming which keys `update_config` refuses. Default:
-`["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]`. Startup-only, and
+`["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*",
+"compute.command_env_passthrough"]`. Startup-only, and
 always locked against `update_config` regardless of its own value. See
 [Who may change which key](#who-may-change-which-key) for the pattern forms and what each shipped
 pattern is holding back. A pattern that could never match anything is a hard startup error rather than a
@@ -731,6 +740,48 @@ repository alone.
 The repository must be private. Kokua checks before it ever pushes and refuses to back up into a public
 one. A backup copies `config.toml`, the memory store, saved documents, authored skills, and the
 conversation transcripts, as a single git commit.
+
+## `[compute]`
+
+Declared by the `compute` toolset: an agent's `tools` must list `compute` to get `calculate`,
+`execute_python`, and `run_command`. The shipped `[agents.coder]` is the only agent that declares it.
+
+| Key | Type | Default | Hot | Meaning |
+| --- | --- | --- | --- | --- |
+| `command_env_passthrough` | string | `""` | no | comma-separated environment variable names a `run_command` child may see, on top of the allowlist |
+
+`run_command` runs a command line through `/bin/sh -c` and returns its exit code with stdout and stderr
+labelled separately. A nonzero exit is reported rather than treated as a failure, since `pytest` exits 1
+with the answer on stdout. The timeout is per call, defaulting to 30 seconds and clamped to 600.
+Combined stdout and stderr are capped at 20,000 bytes; past that, the larger of the two streams is
+trimmed first, so a talkative command loses output before a quiet one does. `run_command` also takes a
+`cwd` argument; left unset, it defaults to Kokua's own process working directory, which for a
+launcher-started service is wherever the launcher happened to be, not anything under `$KOKUA_HOME`.
+
+**The child's environment is an allowlist, and this key is the opt-in half of it.** A command sees
+`PATH`, `HOME`, the locale and temp variables, and `SHELL`, `TERM`, `TZ`, `USER`, `LOGNAME`. Nothing
+else, API keys included, which is what stops `run_command("env")` lifting a credential into the model's
+context on a machine whose launcher sources a `.env`. That default also makes `gh`, `ssh`, and
+`git push` over ssh fail, which is a policy rather than a bug, so naming `SSH_AUTH_SOCK` or `GH_TOKEN`
+here is how you grant one back. Whitespace around a name is ignored and empty segments are dropped, so a
+trailing comma is harmless. A name that is unset in Kokua's own environment produces no variable at all
+rather than an empty one.
+
+Not hot: the value is read when an agent is built, so a change needs a restart. `run_command` is in the
+shipped `[security].confirm_tools`, so a command reaches you for approval before it runs, including one
+a sub-agent asked for, since a worker's gated calls route to the parent's gate rather than running
+unattended.
+
+**Neither execution tool is a sandbox.** They buy a hard timeout, crash isolation, and no parent
+environment variables. The process-group kill only fires on timeout or on interruption: a command that
+returns normally is not waited on beyond its own exit, so `run_command("./build.sh > log 2>&1 &")` can
+report `exit 0` in milliseconds while the build keeps running untouched, its captured output going to a
+temp directory already deleted by the time you read the answer. `run_command` also carries no memory
+cap, unlike `execute_python`'s 512 MB address-space limit: that limit would break compilers and test
+suites, and applying one to a shell child needs `preexec_fn`, which is neither portable nor safe
+alongside threads. Neither tool confines the filesystem, the network, or process signalling: a command
+runs as you, reads what you can read, and can signal Kokua's own process. The approval gate is the
+control; reach for a container if you need containment.
 
 ## Toolset sections
 

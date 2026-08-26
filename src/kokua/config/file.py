@@ -294,6 +294,13 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
 # A dotted name is safe to route on because a toolset name may not contain a '.'.
 _TASK_SECTION = "scheduling.task"
 
+# Toolset sections named by an exact key in DEFAULT_LOCKED_CONFIG_KEYS (see `compute` below), unioned
+# into `_lock_pattern_sections` for the same reason `_TASK_SECTION` is: a shipped default has to stay
+# loadable under the core-only table a config test parses through, which knows nothing about installed
+# toolsets. Unlike `_TASK_SECTION`, `compute` is an ordinary toolset section with no structural parsing
+# of its own; it earns the carve-out only because a shipped security default names one of its keys.
+_LOCKED_TOOLSET_SECTIONS = frozenset({"compute"})
+
 # Per schedule type, the keys it requires: accepted TOML types plus the label an error uses. Only the
 # shape is checked here. Whether "25:99" is a real time is recurrence math, and `scheduling` sits above
 # `config`, which imports nothing above it; a structurally valid but unsatisfiable schedule still shows
@@ -560,17 +567,22 @@ def _lock_pattern_sections(schema: dict) -> frozenset[str]:
     """Every top-level section name a lock pattern's first segment may name.
 
     Derived from what the code already knows rather than listed, for the reason :func:`core_sections`
-    gives: a hand-written set would answer for a config file it had stopped describing. Three sources,
-    because a section reaches ``load`` three ways. The schema holds the flat sections, Kokua's own and
+    gives: a hand-written set would answer for a config file it had stopped describing. Four sources,
+    because a section reaches ``load`` four ways. The schema holds the flat sections, Kokua's own and
     each installed toolset's, and a dotted one contributes its head, since ``[assistant.generation]`` is
     reached by locking ``assistant.*``. :data:`_STRUCTURED_SECTIONS` holds the tables ``load`` parses
     itself, which have no schema entries to be found in. :data:`_TASK_SECTION` holds ``scheduling``,
     which must be a known section whether or not the scheduling toolset is installed: the shipped
     ``scheduling.task.*`` default has to survive every table this is called with, including the
-    core-only one a config test parses through.
+    core-only one a config test parses through. :data:`_LOCKED_TOOLSET_SECTIONS` holds ``compute`` for
+    the identical reason, this time for a shipped default naming an exact toolset key rather than a
+    section wildcard.
     """
     return frozenset(
-        {section.split(".")[0] for section, _ in schema} | _STRUCTURED_SECTIONS | {_TASK_SECTION.split(".")[0]}
+        {section.split(".")[0] for section, _ in schema}
+        | _STRUCTURED_SECTIONS
+        | {_TASK_SECTION.split(".")[0]}
+        | _LOCKED_TOOLSET_SECTIONS
     )
 
 

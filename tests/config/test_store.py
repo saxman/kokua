@@ -205,6 +205,9 @@ def test_is_locked_covers_the_named_keys_and_every_agent_table():
     # By prefix, because a section name is per-agent and cannot be enumerated ahead of time.
     assert config_store.is_locked("agents", "assistant", defaults)
     assert config_store.is_locked("agents.researcher", "tools", defaults)
+    # A command's environment allowlist, since a write here decides which credentials a shell child
+    # can see.
+    assert config_store.is_locked("compute", "command_env_passthrough", defaults)
     assert not config_store.is_locked("logging", "level", defaults)
 
 
@@ -215,6 +218,12 @@ def test_locked_by_returns_the_pattern_that_matched():
     assert config_store.locked_by("agents.researcher", "tools", DEFAULTS) == "agents.*"
     assert config_store.locked_by("email", "to", DEFAULTS) == "email.to"
     assert config_store.locked_by("logging", "level", DEFAULTS) is None
+
+
+def test_locked_by_refuses_the_command_env_passthrough_write():
+    """A write naming an API key here would hand a run_command child that credential, so the exact key
+    is locked by default and locked_by names the pattern that catches it."""
+    assert config_store.locked_by("compute", "command_env_passthrough", DEFAULTS) == "compute.command_env_passthrough"
 
 
 def test_locked_by_section_wildcard_covers_the_section_and_its_descendants():

@@ -21,7 +21,7 @@ jobs:
           cache: pip
       # AIMU comes from its main branch rather than PyPI on purpose: Kokua and AIMU are developed
       # together, so this job is the early warning that an AIMU change broke Kokua. The `package`
-      # job below covers the other side, installing against the released `aimu>=0.13.1`.
+      # job below covers the other side, installing against the released `aimu>=0.24.0`.
       - name: Install AIMU from main
         run: pip install "aimu @ git+https://github.com/saxman/aimu@main"
       - name: Install Kokua (dev + web)
@@ -52,7 +52,7 @@ jobs:
       - name: Check distribution metadata
         run: twine check --strict dist/*
       # Deliberately no git install of AIMU here, unlike the test job: letting pip resolve
-      # `aimu>=0.13.1` from PyPI is what makes this job also a check that the pin is satisfiable,
+      # `aimu>=0.24.0` from PyPI is what makes this job also a check that the pin is satisfiable,
       # which is the half of a release the test job cannot see.
       - name: Install the wheel into a clean environment
         run: |

@@ -61,7 +61,7 @@ Worth recording, since it is the case this module keeps meeting: the capability 
 cannot ask a built client which endpoint it is talking to. The export is the route around that gap
 rather than a fix for it, which is why the probe grips the export and not something on the client.
 
-AIMU 0.23.0 is the current surface, and it is the case this module exists for in its purest form. AIMU
+AIMU 0.23.0 was the surface until 0.24.0, and it is the case this module exists for in its purest form. AIMU
 renamed its channel flags ``show_thinking`` / ``show_tools`` to ``stream_thinking`` / ``stream_tools``
 and flipped both defaults from ``False`` to ``True``; Kokua deleted its own display settings in the same
 change and now constructs both channels bare, relying on that default. Against an older AIMU the bare
@@ -76,6 +76,25 @@ does and does not establish: the parameter's presence is not itself the capabili
 one change, so a checkout carrying the new name carries the new default. The default is directly
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
+
+AIMU 0.24.0 is the current floor, and its surface is the easy shape for the second time running:
+``make_command_tool``, the factory Kokua's ``compute`` toolset calls to hand a command child the
+environment variables ``[compute] command_env_passthrough`` names. The capability and its handle are the
+same object, so a name lookup asks precisely the question that matters, and the stricter check available
+here was declined on purpose: a signature check for ``env_passthrough`` inspects ``probed.__init__``,
+which is right for a class and wrong for a plain function, so taking it would teach this probe a fourth
+shape and date the checkout no better than the name does, since the factory and its only parameter ship
+in one commit.
+
+Worth recording, because it is the reverse of the usual problem: this release carries *two* capabilities
+Kokua depends on, and the one with the better handle is the earlier of them. ``make_command_tool``
+arrived in the commit that added the tool; ``run_command``'s membership in ``builtin.compute``, which is
+the widening the ``compute`` toolset actually relies on, arrived in the next one. The probe therefore
+grips the earlier surface, and the limit has to be said out loud the way 0.20.0's was: a sibling parked
+between those two commits passes this check and still hands the ``compute`` toolset no shell tool.
+Closing that window would take a membership check over a list of *callables*, matching on ``__name__``,
+which is a fourth shape this probe does not have and which a fifteen-minute window does not earn. What
+this check leaves uncovered, the version floor covers.
 """
 
 from __future__ import annotations
@@ -85,17 +104,24 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 23, 0)
+MINIMUM_AIMU = (0, 24, 0)
 
-# The newest AIMU surface Kokua depends on is a channel that relays reasoning and tool calls by default:
-# `stream_thinking` / `stream_tools` replaced `show_thinking` / `show_tools` and default to True, which is
-# why Kokua's front ends construct both channels with no flags at all. A signature check, since the
-# rename and the default flip are one change: the new argument name is what dates the checkout past both.
-# An older AIMU accepts the same bare construction and streams neither phase, with nothing raised
-# anywhere. See the module docstring for what this deliberately misses.
-_PROBE_MODULE = "aimu.aio"
-_PROBE_SYMBOL = "WebChannel"
-_PROBE_PARAMETER: Optional[str] = "stream_thinking"
+# The newest AIMU surface Kokua depends on is the factory behind the `[compute]`
+# `command_env_passthrough` setting: `make_command_tool(env_passthrough=...)`, which is how a user's
+# config decides whether a command sees SSH_AUTH_SOCK or GH_TOKEN. A plain name lookup, because the
+# capability and its handle are the same object, as with `resolve_default_text_model` before it.
+#
+# A signature check for `env_passthrough` would be closer to what Kokua actually calls, and is
+# deliberately not taken: the parameter branch below inspects `probed.__init__`, right for a class and
+# wrong for a plain function, so adopting it would teach this probe a fourth shape to gain nothing. The
+# factory and its only parameter ship in one commit, so the name dates the checkout exactly as well.
+#
+# What this says nothing about is the release's other half, `run_command` being a member of
+# `builtin.compute`: that is the widening Kokua's `compute` toolset relies on, and a membership check
+# could have covered it. One surface at a time is the rule, and the floor covers the rest.
+_PROBE_MODULE = "aimu.tools.builtin"
+_PROBE_SYMBOL = "make_command_tool"
+_PROBE_PARAMETER: Optional[str] = None
 _PROBE_MEMBER: Optional[str] = None
 
 
