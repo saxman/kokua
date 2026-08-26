@@ -29,6 +29,12 @@ would hand a worker a fresh composition budget.
 - [Back up to GitHub](back-up-to-github.md): the `github_backup` toolset, a private repository and a
   scoped token, and the scheduled task that runs it unattended.
 
+## Working with conversations
+
+- [Export a conversation](export-a-conversation.md): `kokua export` writes one saved conversation as
+  Markdown you can diff, paste into a review, or keep once the terminal is gone, whether from the
+  command line or the web UI's sidebar.
+
 ## Beyond these guides
 
 - [Configuration reference](../reference/configuration.md): every `config.toml` key, what it accepts,

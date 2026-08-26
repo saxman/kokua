@@ -427,7 +427,12 @@ def test_export_reports_a_busy_store_rather_than_a_truncated_conversation(monkey
 
 
 def test_export_builds_no_assistant(monkeypatch, tmp_path):
-    """No model client, no agent: an export must work with the model server down."""
+    """`export` never reaches `Assistant.create`, since an export must work with the model server down.
+
+    Narrow to what this actually checks: patching `Assistant.create` alone does not prove no model
+    client or agent is built by any other route (a direct `aio.client()` call would pass this test
+    undetected). It pins the one construction path `_export` is documented to avoid.
+    """
     _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
 
     def boom(*args, **kwargs):

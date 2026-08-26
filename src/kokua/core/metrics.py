@@ -50,6 +50,11 @@ class TurnMetrics:
     names itself by not having a name.
     """
 
+    # A fixed label, not read from config: the entry agent's actual name is whatever `[assistant].agent`
+    # names it, which this module has no way to look up (and should not import `kokua.config` to do).
+    # It exists at all only because `turns.py` wires `agent.model_client.events`, not `agent.events`, for
+    # the entry agent's client; setting `agent.events` instead would give AIMU's own generated
+    # `agent-<hex>` name to every entry-agent call, and this mapping from `None` would never fire.
     ENTRY_AGENT = "assistant"
 
     def __init__(self) -> None:
@@ -80,6 +85,8 @@ class TurnMetrics:
             return None
         record = _totals(self._calls)
         record["wall_seconds"] = round(float(wall_seconds), 1)
+        # Kept even though no renderer reads it yet: it is the honest answer to which models a
+        # delegating turn actually used, where `metadata["model"]` names only the one that answered.
         record["models"] = list(dict.fromkeys(call["model"] for call in self._calls if call["model"]))
         agents = {call["agent"] for call in self._calls}
         if len(agents) > 1:
@@ -112,6 +119,9 @@ def _totals(calls: list[dict]) -> dict:
         "calls": len(calls),
         "model_seconds": round(sum(call["seconds"] for call in calls), 1),
     }
+    # A call counts as "reported" if either token key came back, not only when both did, so
+    # `reported_calls` is not itself split by key; a call that reported only one of the two is not
+    # distinguishable from one that reported both once it lands in this count.
     reported = [call for call in calls if call["input_tokens"] is not None or call["output_tokens"] is not None]
     if reported:
         totals["reported_calls"] = len(reported)

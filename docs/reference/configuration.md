@@ -523,7 +523,7 @@ $KOKUA_HOME/
     documents/           the document store
     skills/              installed skills
     images/              uploaded and generated images, served at /images
-    downloads/           generated binary artifacts, served at /download
+    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
     logs/kokua.log       the rotating diagnostic log
 ```
 

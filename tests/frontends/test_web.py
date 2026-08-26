@@ -9,7 +9,7 @@ import pytest
 from tests.helpers import BlockingModelClient, MockAsyncModelClient
 from kokua.channels.web import WebChannel
 from kokua.core.transcripts import SPAWN_SUBAGENT_TOOL_NAME
-from kokua.core.transcripts import replay_items as conversation_to_frames
+from kokua.core.transcripts import replay_items
 from kokua.config import AssistantConfig
 from tests.channels import example_agents, planning_settings
 from kokua.frontends.web import build_app
@@ -242,10 +242,10 @@ async def test_web_channel_send_subagent_emits_frame():
     ]
 
 
-def test_conversation_to_frames_interleaves_subagent_after_user():
+def test_replay_items_interleaves_subagent_after_user():
     messages = [{"role": "user", "content": "do X"}, {"role": "assistant", "content": "done"}]
     subagent = {"0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["x"], "round": 0}]}
-    items = conversation_to_frames(messages, subagent=subagent)
+    items = replay_items(messages, subagent=subagent)
     # This test is about the subagent card landing right after the user bubble, not about the
     # bubble's own shape, so it checks type and text rather than the whole dict (which now also
     # carries a message_index this test has no stake in).
@@ -254,42 +254,42 @@ def test_conversation_to_frames_interleaves_subagent_after_user():
     assert items[2]["type"] == "message"
 
 
-def test_conversation_to_frames_threads_message_timestamp():
+def test_replay_items_threads_message_timestamp():
     messages = [
         {"role": "user", "content": "do X", "timestamp": "2026-07-23T15:45:00"},
         {"role": "assistant", "content": "done", "timestamp": "2026-07-23T15:45:07"},
     ]
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
     user_item = next(i for i in items if i["type"] == "user")
     message_item = next(i for i in items if i["type"] == "message")
     assert user_item["ts"] == "2026-07-23T15:45:00"
     assert message_item["ts"] == "2026-07-23T15:45:07"
 
 
-def test_conversation_to_frames_omits_ts_when_message_has_no_timestamp():
+def test_replay_items_omits_ts_when_message_has_no_timestamp():
     messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
     assert all("ts" not in i for i in items)  # legacy messages (no timestamp) render no caption
 
 
-def test_conversation_to_frames_subagent_inherits_turn_timestamp():
+def test_replay_items_subagent_inherits_turn_timestamp():
     messages = [
         {"role": "user", "content": "do X", "timestamp": "2026-07-23T15:45:00"},
         {"role": "assistant", "content": "done", "timestamp": "2026-07-23T15:45:07"},
     ]
     subagent = {"0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["x"], "round": 0}]}
-    items = conversation_to_frames(messages, subagent=subagent)
+    items = replay_items(messages, subagent=subagent)
     subagent_item = next(i for i in items if i["type"] == "subagent")
     assert subagent_item["ts"] == "2026-07-23T15:45:00"  # inherits its turn's user-message timestamp
 
 
-def test_conversation_to_frames_omits_subagent_by_default():
+def test_replay_items_omits_subagent_by_default():
     messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
     assert not any(i["type"] == "subagent" for i in items)
 
 
-def test_conversation_to_frames_replays_verbose_trace_not_committed_answer():
+def test_replay_items_replays_verbose_trace_not_committed_answer():
     # A verbose turn persists its raw trace; reload replays phase + reasoning items and must NOT also
     # emit the committed assistant message (the trace's last Executor phase already holds the answer).
     messages = [{"role": "user", "content": "do X"}, {"role": "assistant", "content": "THE ANSWER"}]
@@ -300,7 +300,7 @@ def test_conversation_to_frames_replays_verbose_trace_not_committed_answer():
             {"label": "Executor", "detail": "carrying out the plan", "text": "THE ANSWER"},
         ]
     }
-    items = conversation_to_frames(messages, trace=trace)
+    items = replay_items(messages, trace=trace)
     assert items == [
         {"type": "user", "text": "do X", "message_index": 0},
         {"type": "phase", "label": "Planner", "detail": "drafting a plan"},
@@ -318,7 +318,7 @@ def test_a_traced_turn_replays_spawn_cards_but_not_reviewer_cards():
     """A verbose planned turn shows its raw trace instead of verdict cards, but a sub-agent it
     spawned is real work that must still appear."""
     messages = [{"role": "user", "content": "plan something"}]
-    items = conversation_to_frames(
+    items = replay_items(
         messages,
         subagent={
             "0": [
@@ -337,7 +337,7 @@ def test_a_traced_turns_spawn_card_keeps_its_closing_status():
     """A spawn whose text streamed closes with a status-only event, carrying neither `task` nor
     `append`. Dropping it leaves the replayed card stuck at "working..." with its answer never
     rendered as markdown, so a lineage's events are kept by id rather than by shape."""
-    items = conversation_to_frames(
+    items = replay_items(
         [{"role": "user", "content": "plan something"}],
         subagent={
             "0": [
@@ -563,7 +563,7 @@ async def test_a_conversation_with_no_running_turn_replays_only_the_store():
 
 async def test_catch_up_records_the_turns_uploaded_images_and_generated_ones():
     """A user's upload replays under their bubble and a generated image as the assistant's, matching how
-    `conversation_to_frames` aligns each when the same turn is later replayed from the store."""
+    `replay_items` aligns each when the same turn is later replayed from the store."""
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
@@ -666,8 +666,8 @@ _CONVERSATION = [
 ]
 
 
-def test_conversation_to_frames_full_replay():
-    items = conversation_to_frames(_CONVERSATION)
+def test_replay_items_full_replay():
+    items = replay_items(_CONVERSATION)
     # message_index is 1, not 0: _CONVERSATION's leading system message shifts the user message
     # one position later, which is exactly the off-by-one the stamping has to get right.
     assert items == [
@@ -678,7 +678,7 @@ def test_conversation_to_frames_full_replay():
     ]
 
 
-def test_conversation_to_frames_omits_spawn_subagent_tool_call():
+def test_replay_items_omits_spawn_subagent_tool_call():
     """Replay must not resurrect the spawn_subagent tool card either -- only its subagent card (fed
     separately via the `subagent` map) represents the spawn."""
     messages = [
@@ -692,20 +692,20 @@ def test_conversation_to_frames_omits_spawn_subagent_tool_call():
             ],
         },
     ]
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
     tools = [item for item in items if item["type"] == "tool"]
     assert tools == [{"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}]
 
 
-def test_conversation_to_frames_attaches_the_tool_result_to_its_call():
+def test_replay_items_attaches_the_tool_result_to_its_call():
     """A stored transcript keeps the call and its result in separate messages, so replay has to rejoin
     them or a reloaded card loses the output a live one showed."""
-    items = conversation_to_frames(_CONVERSATION)
+    items = replay_items(_CONVERSATION)
     tool = next(item for item in items if item["type"] == "tool")
     assert tool["response"] == "4"
 
 
-def test_conversation_to_frames_omits_the_response_when_no_result_message_exists():
+def test_replay_items_omits_the_response_when_no_result_message_exists():
     """Conversations stored before results were replayed have the call but no matching result, and a
     turn cut short mid-dispatch never records one. Those cards render as they always did."""
     messages = [
@@ -716,11 +716,11 @@ def test_conversation_to_frames_omits_the_response_when_no_result_message_exists
             "tool_calls": [{"type": "function", "function": {"name": "calc", "arguments": {"x": 2}}, "id": "1"}],
         },
     ]
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
     assert items[-1] == {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": None}
 
 
-def test_conversation_to_frames_matches_results_to_calls_by_id_not_position():
+def test_replay_items_matches_results_to_calls_by_id_not_position():
     """Concurrent dispatch appends results in completion order, so a positional pairing would hand a
     card the wrong call's output."""
     messages = [
@@ -736,39 +736,39 @@ def test_conversation_to_frames_matches_results_to_calls_by_id_not_position():
         {"role": "tool", "name": "second", "content": "B", "tool_call_id": "b"},
         {"role": "tool", "name": "first", "content": "A", "tool_call_id": "a"},
     ]
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
     assert [(item["name"], item["response"]) for item in items if item["type"] == "tool"] == [
         ("first", "A"),
         ("second", "B"),
     ]
 
 
-def test_conversation_to_frames_extracts_text_from_content_blocks():
+def test_replay_items_extracts_text_from_content_blocks():
     messages = [{"role": "user", "content": [{"type": "text", "text": "hi"}, {"type": "image", "url": "x"}]}]
     # This is about text extraction from a content-block list, not the item's full shape, so it
     # checks the type and the extracted text rather than pinning message_index too.
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
     assert len(items) == 1
     assert items[0]["type"] == "user" and items[0]["text"] == "hi"
 
 
-def test_conversation_to_frames_empty():
-    assert conversation_to_frames([]) == []
+def test_replay_items_empty():
+    assert replay_items([]) == []
 
 
-def test_conversation_to_frames_continuation_user_turn_renders_loop_marker_with_prompt():
+def test_replay_items_continuation_user_turn_renders_loop_marker_with_prompt():
     messages = [{"role": "user", "content": "Continue working.", PROVENANCE_KEY: PROVENANCE_CONTINUATION}]
-    assert conversation_to_frames(messages) == [{"type": "loop", "text": "Continue working."}]
+    assert replay_items(messages) == [{"type": "loop", "text": "Continue working."}]
 
 
-def test_conversation_to_frames_final_answer_user_turn_renders_loop_marker_with_prompt():
+def test_replay_items_final_answer_user_turn_renders_loop_marker_with_prompt():
     messages = [{"role": "user", "content": "Give the final answer.", PROVENANCE_KEY: PROVENANCE_FINAL_ANSWER}]
-    assert conversation_to_frames(messages) == [{"type": "loop", "text": "Give the final answer."}]
+    assert replay_items(messages) == [{"type": "loop", "text": "Give the final answer."}]
 
 
-def test_conversation_to_frames_marks_proactive_assistant_turn():
+def test_replay_items_marks_proactive_assistant_turn():
     messages = [{"role": "assistant", "content": "Don't forget lunch.", PROVENANCE_KEY: PROVENANCE_PROACTIVE}]
-    assert conversation_to_frames(messages) == [{"type": "message", "text": "Don't forget lunch.", "proactive": True}]
+    assert replay_items(messages) == [{"type": "message", "text": "Don't forget lunch.", "proactive": True}]
 
 
 async def test_web_channel_send_history_emits_single_frame():
@@ -1618,7 +1618,7 @@ async def test_a_second_answer_after_a_phase_replays_as_its_own_bubble():
     assert items[5]["text"] == " more"
 
 
-def test_conversation_to_frames_replays_an_answer_above_the_calls_it_preceded():
+def test_replay_items_replays_an_answer_above_the_calls_it_preceded():
     """A stored assistant message holds its prose and the calls it went on to make, and the prose came
     first: the model wrote it, then called the tools. Replay has to keep that order, or a reload
     rearranges a turn the user watched arrive the other way round."""
@@ -1634,22 +1634,22 @@ def test_conversation_to_frames_replays_an_answer_above_the_calls_it_preceded():
         {"role": "assistant", "content": "Both are changed."},
     ]
 
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
 
     assert [item["type"] for item in items] == ["user", "thinking", "message", "tool", "message"]
     assert items[2]["text"] == "I see both tasks."
 
 
-def test_conversation_to_frames_closes_a_failed_turn_with_its_reason():
+def test_replay_items_closes_a_failed_turn_with_its_reason():
     """A failed turn ends mid-exchange, so without the notice the replay just stops with no account of
     why -- the ``_report`` line that explained it went to whichever conversation the user was viewing.
     Placed after the turn's own output, where a reader looking for the end of the turn will find it."""
     messages = [{"role": "user", "content": "scan them"}, {"role": "assistant", "content": "starting"}]
-    items = conversation_to_frames(messages, failure={"0": "failed: out of context"})
+    items = replay_items(messages, failure={"0": "failed: out of context"})
     assert items[-1] == {"type": "notice", "text": "failed: out of context"}
 
 
-def test_conversation_to_frames_keeps_a_failed_turns_reason_inside_that_turn():
+def test_replay_items_keeps_a_failed_turns_reason_inside_that_turn():
     """The user can carry on in a conversation whose earlier turn failed, so the notice belongs at the
     end of the turn it describes rather than at the end of the transcript."""
     messages = [
@@ -1658,7 +1658,7 @@ def test_conversation_to_frames_keeps_a_failed_turns_reason_inside_that_turn():
         {"role": "user", "content": "try again"},
         {"role": "assistant", "content": "done"},
     ]
-    items = conversation_to_frames(messages, failure={"0": "failed: out of context"})
+    items = replay_items(messages, failure={"0": "failed: out of context"})
     kinds = [(i["type"], i.get("text")) for i in items]
     assert kinds == [
         ("user", "scan them"),
@@ -1669,18 +1669,18 @@ def test_conversation_to_frames_keeps_a_failed_turns_reason_inside_that_turn():
     ]
 
 
-def test_conversation_to_frames_inherits_the_turn_timestamp_for_a_failure_notice():
+def test_replay_items_inherits_the_turn_timestamp_for_a_failure_notice():
     messages = [
         {"role": "user", "content": "scan them", "timestamp": "2026-08-19T06:43:56"},
         {"role": "assistant", "content": "starting", "timestamp": "2026-08-19T06:44:10"},
     ]
-    items = conversation_to_frames(messages, failure={"0": "failed: boom"})
+    items = replay_items(messages, failure={"0": "failed: boom"})
     assert next(i for i in items if i["type"] == "notice")["ts"] == "2026-08-19T06:43:56"
 
 
-def test_conversation_to_frames_omits_the_notice_by_default():
+def test_replay_items_omits_the_notice_by_default():
     messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "ok"}]
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
     assert not any(i["type"] == "notice" for i in items)
 
 

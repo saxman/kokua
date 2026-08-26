@@ -18,11 +18,12 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Module scope, not deferred into `_export`, for two reasons: `export` reads the store directly and
-# must not pull in `kokua.core` (which reaches the AIMU surface `preflight` exists to check) just to do
-# it, and the busy-store test patches this exact name (`kokua.cli.TinyDBSessionStore`), which only works
-# on a module-level attribute. `aimu.sessions` is old, stable surface: `registry/context.py` already
-# pulls in newer AIMU modules than this one at module level via `from . import plugins` below, so this
+# Module scope, not deferred into `_export`: the busy-store test patches this exact name
+# (`kokua.cli.TinyDBSessionStore`), which only works on a module-level attribute. `export` does reach
+# `kokua.core` at runtime (`_resolve_export_session` below imports `kokua.core.conversations` and
+# `kokua.core.turn_gate`, deferred there rather than avoided), but `aimu.sessions` itself is old, stable
+# surface that predates any of the preflight's concerns: `registry/context.py` already pulls in newer
+# AIMU modules than this one at module level via `from . import plugins` below, so importing it here
 # adds no new risk to `config`/`skills`, which dispatch before the preflight and must stay importable
 # without it.
 from aimu.sessions import Session, TinyDBSessionStore
@@ -377,7 +378,10 @@ def _resolve_export_session(args: argparse.Namespace, config: AssistantConfig) -
     less apt sentence: this count never chooses a session.
     """
     # Deferred, not module-level: `kokua.core.conversations` reaches the AIMU surface `preflight` exists
-    # to check, and `_export` (unlike this helper) is only ever reached after `preflight` has already run.
+    # to check. This helper has exactly one caller, `_export`, which itself runs only after `main()` has
+    # already called `preflight()`, so the ordering is never actually at risk here. Deferred anyway so
+    # importing this module (for `config` or `skills`, which dispatch before `preflight` and must stay
+    # importable without it) never pays for a surface those subcommands don't touch.
     from kokua.core.conversations import ID_PREFIX_MIN, ConversationBook
     from kokua.core.turn_gate import TurnGate
 

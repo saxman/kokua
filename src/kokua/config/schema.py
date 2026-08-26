@@ -262,8 +262,9 @@ class AssistantConfig:
 
     @property
     def downloads_path(self) -> Path:
-        """Generated binary artifacts (e.g. PDFs) the web UI serves at /download. Kept out of
-        ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at startup."""
+        """Generated artifacts (PDFs, exported conversation Markdown) the web UI serves at /download.
+        Kept out of ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at
+        startup, which a binary PDF would not survive."""
         return self.data_dir / "downloads"
 
     @property
