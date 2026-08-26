@@ -1,5 +1,7 @@
 """The Markdown export: what a reader judging a run has to be able to see."""
 
+import re
+
 from aimu.sessions import Session
 
 from kokua.transcript_export import render_markdown
@@ -233,3 +235,289 @@ def test_a_tool_call_with_no_result_says_so_rather_than_showing_an_empty_block()
     )
     out = render_markdown(session)
     assert "no result" in out.lower()
+
+
+# --- cost, delegation, and failure -----------------------------------------------------------
+#
+# metadata["usage"][idx] is what core/metrics.py's TurnMetrics.record actually produces: always
+# calls/model_seconds/wall_seconds/models, plus input_tokens/output_tokens only when at least one
+# call reported them, plus reported_calls alongside those two, plus by_agent only when more than
+# one agent contributed. metadata["subagent"][idx] is a *sequence* of lifecycle events per spawn id
+# (SubagentReporter in core/subagents.py): a create event carrying "role"/"task"/"status": "running"
+# (plus "model"/"thinking" when configured), zero or more {"id", "append": {"kind": ...}} chunks,
+# and a terminal {"id", "status": "done"|"stopped"|"error"} that may itself carry a final "append".
+# replay_items emits one {"type": "subagent", **event} item per event, so a card is several items
+# sharing one "id" that the renderer has to regroup.
+
+
+def test_a_turns_cost_is_reported_beside_it():
+    session = _session(
+        [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey"}],
+        {
+            "usage": {
+                "0": {
+                    "calls": 4,
+                    "input_tokens": 41230,
+                    "output_tokens": 3120,
+                    "model_seconds": 37.4,
+                    "wall_seconds": 52.1,
+                    "models": ["m"],
+                }
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert "41,230" in out, "large figures are grouped, because a reader compares them by eye"
+    assert "3,120" in out
+    # The call count as a standalone token. Asserting a bare "4" would pass on the fixture's own
+    # "14:00" timestamp (from _session's default created_at) without the count ever rendering.
+    assert re.search(r"\b4\b\s*(model )?calls?", out), "the number of model calls should be stated"
+
+
+def test_a_turn_whose_provider_reported_no_tokens_says_not_reported():
+    """Never zero. A stored absence rendered as 0 is a false claim about what the run cost."""
+    session = _session(
+        [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey"}],
+        {"usage": {"0": {"calls": 2, "model_seconds": 3.0, "wall_seconds": 4.0, "models": ["m"]}}},
+    )
+    out = render_markdown(session)
+    assert "not reported" in out
+    assert "0 in" not in out
+
+
+def test_a_turn_with_partially_reported_calls_is_qualified_not_presented_as_complete():
+    """reported_calls below calls means only some of the turn's model calls told us their token
+    counts. The summed figure is still real, but showing it unqualified would let a partial sum
+    read as a complete one."""
+    session = _session(
+        [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey"}],
+        {
+            "usage": {
+                "0": {
+                    "calls": 5,
+                    "reported_calls": 3,
+                    "input_tokens": 300,
+                    "output_tokens": 30,
+                    "model_seconds": 2.0,
+                    "wall_seconds": 3.0,
+                }
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert "300" in out
+    assert "3 of 5" in out, "the qualifier must name both how many calls reported and how many ran"
+
+
+def test_totals_across_the_conversation_appear_in_the_header():
+    session = _session(
+        [
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "a"},
+            {"role": "user", "content": "two"},
+            {"role": "assistant", "content": "b"},
+        ],
+        {
+            "usage": {
+                "0": {"calls": 1, "input_tokens": 100, "output_tokens": 10, "model_seconds": 1.0, "wall_seconds": 2.0},
+                "2": {"calls": 1, "input_tokens": 200, "output_tokens": 20, "model_seconds": 3.0, "wall_seconds": 4.0},
+            }
+        },
+    )
+    out = render_markdown(session)
+    header = out.split("## Turn 1")[0]
+    # "30" alone would be satisfied by "300" containing it as a prefix, so both figures are pinned
+    # to the word next to them rather than asserted as bare substrings.
+    assert "300 in" in header
+    assert "30 out" in header
+
+
+def test_a_conversation_with_no_usage_omits_totals_rather_than_printing_zeros():
+    session = _session([{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey"}])
+    out = render_markdown(session)
+    assert "Totals" not in out
+
+
+def test_a_spawned_sub_agent_appears_with_its_own_model_and_cost():
+    session = _session(
+        [{"role": "user", "content": "delegate"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "s1", "role": "research", "task": "research the thing", "status": "running", "model": "m2"},
+                    {"id": "s1", "status": "done", "append": {"kind": "answer", "text": "found it"}},
+                ]
+            },
+            "usage": {
+                "0": {
+                    "calls": 5,
+                    "input_tokens": 1000,
+                    "output_tokens": 100,
+                    "model_seconds": 9.0,
+                    "wall_seconds": 10.0,
+                    "by_agent": {
+                        "assistant": {"calls": 2, "input_tokens": 100, "output_tokens": 10},
+                        "subagent-research": {"calls": 3, "input_tokens": 900, "output_tokens": 90},
+                    },
+                }
+            },
+        },
+    )
+    out = render_markdown(session)
+    assert "research the thing" in out
+    assert "found it" in out
+    assert "m2" in out
+    assert "900" in out
+    assert "subagent-research" in out, "the measured breakdown must name the agent it measured, not just a number"
+    assert "not counted" not in out.lower(), "a measured spawn must not also be flagged as uncounted"
+
+
+def test_spawns_that_happened_without_being_measured_are_named_as_uncounted():
+    """Distinct from "no spawns happened". An entry-agent total presented as the whole run's cost
+    would read as a cheap delegating run, which is the opposite of true."""
+    session = _session(
+        [{"role": "user", "content": "delegate"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "s1", "role": "subagent", "task": "research", "status": "running"},
+                    {"id": "s1", "status": "done", "append": {"kind": "answer", "text": "found it"}},
+                ]
+            },
+            "usage": {
+                "0": {
+                    "calls": 2,
+                    "input_tokens": 100,
+                    "output_tokens": 10,
+                    "model_seconds": 1.0,
+                    "wall_seconds": 2.0,
+                }
+            },
+        },
+    )
+    out = render_markdown(session)
+    assert "not counted" in out.lower()
+
+
+def test_a_multi_round_sub_agent_groups_all_its_events_into_one_card():
+    """A spawn's lifecycle arrives as several events sharing one id: a create, then whatever it
+    produced, then a terminal status. replay_items emits one item per event, so the renderer has to
+    regroup them into a single card instead of one heading per event."""
+    session = _session(
+        [{"role": "user", "content": "delegate"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "s1", "role": "research", "task": "look into it", "status": "running"},
+                    {"id": "s1", "append": {"kind": "reasoning", "text": "checking sources"}},
+                    {
+                        "id": "s1",
+                        "append": {"kind": "tool", "name": "web_search", "arguments": "{}", "response": "results"},
+                    },
+                    {"id": "s1", "status": "done", "append": {"kind": "answer", "text": "the answer"}},
+                ]
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert out.count("research") >= 1
+    assert out.count("Sub-agent") == 1, "one spawn is one card, not one heading per lifecycle event"
+    assert "checking sources" in out
+    assert "web_search" in out
+    assert "the answer" in out
+
+
+def test_two_interleaved_spawns_each_get_their_own_card():
+    """Concurrent spawns append into the same list in emission order, so a card has to be assembled
+    by id, not by contiguous position."""
+    session = _session(
+        [{"role": "user", "content": "delegate"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "s1", "role": "a", "task": "task a", "status": "running"},
+                    {"id": "s2", "role": "b", "task": "task b", "status": "running"},
+                    {"id": "s1", "status": "done", "append": {"kind": "answer", "text": "answer a"}},
+                    {"id": "s2", "status": "done", "append": {"kind": "answer", "text": "answer b"}},
+                ]
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert out.count("Sub-agent") == 2
+    assert "answer a" in out
+    assert "answer b" in out
+
+
+def test_a_sub_agent_answer_containing_a_fence_does_not_break_the_document():
+    """A spawn's answer is arbitrary model-produced text, exactly like a tool result, and can
+    contain a fence of its own. Rendered with a fence no longer than the payload's own, everything
+    after it would render as code."""
+    payload = "here:\n```python\nx = 1\n```\ndone"
+    session = _session(
+        [{"role": "user", "content": "go"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "s1", "role": "coder", "task": "write it", "status": "running"},
+                    {"id": "s1", "status": "done", "append": {"kind": "answer", "text": payload}},
+                ]
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert "````" in out
+
+
+def test_a_reviewer_verdict_card_renders_without_being_mistaken_for_a_spawn():
+    """A workflow reviewer's verdict card shares the "subagent" item type with a real spawn but
+    carries no "task" on its create event, which is the same test channels/web.py uses to tell the
+    two apart. It still has to render (its issues are the whole point of the round) and must not
+    trip the uncounted-delegation note, since no delegation happened at all."""
+    session = _session(
+        [{"role": "user", "content": "plan it"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "r1", "role": "critic", "status": "running"},
+                    {"id": "r1", "status": "rejected", "issues": "the plan skips error handling"},
+                ]
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert "the plan skips error handling" in out
+    assert "not counted" not in out.lower()
+
+
+def test_a_failed_turn_carries_its_reason_after_the_output_it_cut_short():
+    session = _session(
+        [{"role": "user", "content": "do it"}, {"role": "assistant", "content": "partial"}],
+        {"failure": {"0": "couldn't reach the model server: connection refused"}},
+    )
+    out = render_markdown(session)
+    assert "connection refused" in out
+    assert out.index("partial") < out.index("connection refused")
+
+
+def test_a_failure_notice_renders_as_a_blockquote_aside():
+    session = _session(
+        [{"role": "user", "content": "do it"}, {"role": "assistant", "content": "partial"}],
+        {"failure": {"0": "boom"}},
+    )
+    out = render_markdown(session)
+    assert re.search(r"^> .*boom", out, re.MULTILINE)
+
+
+def test_a_very_long_failure_reason_is_capped_like_any_other_payload():
+    session = _session(
+        [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "partial"}],
+        {"failure": {"0": "x" * 5000}},
+    )
+    out = render_markdown(session, max_payload_chars=100)
+    assert "truncated" in out
+
+
+def test_a_scheduled_runs_task_is_named_in_the_header():
+    session = _session([{"role": "user", "content": "run"}], {"task_id": "nightly-digest"})
+    assert "nightly-digest" in render_markdown(session).split("## Turn")[0]

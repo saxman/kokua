@@ -20,11 +20,16 @@ Pure: it takes a ``Session`` and returns a string. Both front ends and the CLI c
 why it lives here rather than under ``channels/`` or ``frontends/``, and why it imports neither.
 
 This module renders the header and the per-turn structure: the user's words, the model's answer,
-its reasoning (both the plain ``thinking`` field and a verbose trace's ``reasoning`` segments),
-the model and effort recorded for the turn, and each tool call's name, arguments, and result.
-Sub-agent cards and failure notices are a later task's to render; until then, each of those item
-types gets a one-line placeholder here rather than disappearing, so their absence is something a
-reader (and a later task's tests) can notice instead of something they have to take on faith.
+its reasoning (both the plain ``thinking`` field and a verbose trace's ``reasoning`` segments), the
+model and effort recorded for the turn, each tool call's name, arguments, and result, what the turn
+and any spawned sub-agent cost, and why a turn stopped when it stopped short.
+
+Cost follows the same correctness rule: a figure nobody reported prints as "not reported", never as
+an invented zero, since a stored absence rendered as zero is a false claim about what a run cost.
+The same principle covers delegation: a turn that spawned a sub-agent but whose usage record carries
+no per-agent breakdown (``by_agent``) says so explicitly ("delegation ... not counted"), rather than
+showing the entry agent's own total as if it were the whole run's, which would make a heavily
+delegating turn read as cheap.
 """
 
 from __future__ import annotations
@@ -36,14 +41,9 @@ from aimu.sessions import Session
 from kokua.core.messages import derive_title
 from kokua.core.transcripts import replay_items, short_time
 
-# Item types a later task owns: rendering them here would collide with that task's own rendering.
-# Each still gets a placeholder line (see ``_render_item``) so its absence is visible rather than silent.
-_DEFERRED_TYPES = frozenset({"subagent", "notice"})
-
-# The rendered size of a tool call's arguments or result, past which the export cuts the payload
-# rather than let one large call bury the turn being judged. Read by later tasks bounding a
-# sub-agent transcript's or notice's own payload the same way, which is why it is a module constant
-# rather than a literal inline here.
+# The rendered size of a tool call's arguments or result, a sub-agent's own text, or a failure
+# notice, past which the export cuts the payload rather than let one large piece of text bury the
+# turn being judged.
 DEFAULT_MAX_PAYLOAD_CHARS = 4000
 
 # The shortest fence Markdown accepts. Anything longer is escalation past the content's own runs.
@@ -126,6 +126,9 @@ def _render_header(session: Session) -> list[str]:
     task_id = session.metadata.get("task_id")
     if task_id:
         lines.append(f"- Task: {task_id}")
+    usage = session.metadata.get("usage") or {}
+    if usage:
+        lines.append(f"- Totals: {_format_usage(_sum_usage(list(usage.values())))}")
     return lines
 
 
@@ -171,6 +174,179 @@ def _turn_meta_line(message_index: Optional[int], metadata: dict) -> Optional[st
     return "_" + ", ".join(parts) + "_"
 
 
+def _reported_calls(record: dict) -> int:
+    """How many of ``record``'s calls reported token usage.
+
+    Prefers the stored ``reported_calls`` (what ``TurnMetrics`` actually writes: set whenever any
+    call in the record reported a figure). A record missing that key but carrying ``input_tokens``
+    or ``output_tokens`` anyway (a hand-built one, or a caller summing raw provider usage) is read
+    as fully reported rather than as reporting nothing, since the tokens are proof that something did.
+    """
+    if "reported_calls" in record:
+        return record["reported_calls"]
+    if record.get("input_tokens") is not None or record.get("output_tokens") is not None:
+        return record.get("calls", 0)
+    return 0
+
+
+def _format_tokens(record: dict) -> str:
+    """``record``'s input/output token figures as prose.
+
+    Never zero: a key absent from the record means no provider reported it, and printing "not
+    reported" instead of "0" is the one correctness rule this whole feature exists to enforce. When
+    fewer calls reported than ran, the figure is qualified rather than presented as a complete sum.
+    """
+    input_tokens = record.get("input_tokens")
+    output_tokens = record.get("output_tokens")
+    if input_tokens is None and output_tokens is None:
+        return "tokens not reported"
+    in_text = f"{input_tokens:,}" if input_tokens is not None else "not reported"
+    out_text = f"{output_tokens:,}" if output_tokens is not None else "not reported"
+    text = f"{in_text} in / {out_text} out tokens"
+    calls = record.get("calls", 0)
+    reported_calls = _reported_calls(record)
+    if reported_calls and reported_calls < calls:
+        text += f" (reported by {reported_calls} of {calls} calls)"
+    return text
+
+
+def _format_usage(record: dict) -> str:
+    """One usage record (a turn's, or the conversation's summed total) as one line of prose."""
+    calls = record.get("calls", 0)
+    plural = "" if calls == 1 else "s"
+    parts = [
+        f"{calls} model call{plural}",
+        _format_tokens(record),
+        f"{record.get('model_seconds', 0.0)}s model time ({record.get('wall_seconds', 0.0)}s wall)",
+    ]
+    return ", ".join(parts)
+
+
+def _sum_usage(records: list[dict]) -> dict:
+    """The conversation-wide total of every turn's usage record, in the same shape ``_format_usage``
+    already knows how to render.
+
+    Mirrors ``TurnMetrics._totals``'s own rule one level up: a token figure is summed only from the
+    records that reported one, and the header must not claim a total more complete than what was
+    actually measured.
+    """
+    total = {
+        "calls": sum(record.get("calls", 0) for record in records),
+        "model_seconds": round(sum(record.get("model_seconds", 0.0) for record in records), 1),
+        "wall_seconds": round(sum(record.get("wall_seconds", 0.0) for record in records), 1),
+    }
+    input_figures = [record["input_tokens"] for record in records if record.get("input_tokens") is not None]
+    output_figures = [record["output_tokens"] for record in records if record.get("output_tokens") is not None]
+    if input_figures:
+        total["input_tokens"] = sum(input_figures)
+    if output_figures:
+        total["output_tokens"] = sum(output_figures)
+    return total
+
+
+def _render_by_agent(by_agent: dict) -> list[str]:
+    """One bullet per agent that contributed to a turn, sorted by name for a stable order.
+
+    Only ever called when ``by_agent`` is present, which ``TurnMetrics`` sets only once more than
+    one agent contributed: this is exactly the delegated-work cost a heavily delegating turn would
+    otherwise hide behind the entry agent's own total.
+    """
+    lines = []
+    for name in sorted(by_agent):
+        record = by_agent[name]
+        calls = record.get("calls", 0)
+        plural = "" if calls == 1 else "s"
+        lines.append(f"- {name}: {calls} call{plural}, {_format_tokens(record)}")
+    return lines
+
+
+def _turn_cost_blocks(message_index: Optional[int], metadata: dict) -> list[list[str]]:
+    """What a turn cost, as paragraph-sized blocks of lines (each rendered with a blank line before
+    it, but no blank line splitting it internally).
+
+    Two things can appear, independently: the turn's own measured cost (with a per-agent breakdown
+    when more than one agent contributed), and a note that delegation happened but was not measured
+    at all (a turn can spawn a sub-agent under an AIMU predating the seam that attributes calls to
+    it), and presenting that turn's entry-agent-only total as the whole run's cost would read as a
+    cheap delegating run, which is the opposite of true. A spawn is identified the same way
+    ``channels/web.py`` tells one apart from a workflow reviewer's verdict card: a "task" key on its
+    create event.
+    """
+    if message_index is None:
+        return []
+    key = str(message_index)
+    blocks: list[list[str]] = []
+    record = metadata.get("usage", {}).get(key)
+    if record is not None:
+        block = ["_" + _format_usage(record) + "_"]
+        by_agent = record.get("by_agent")
+        if by_agent:
+            block.extend(_render_by_agent(by_agent))
+        blocks.append(block)
+    spawned = any("task" in event for event in metadata.get("subagent", {}).get(key, []))
+    if spawned and not (record or {}).get("by_agent"):
+        blocks.append(["_Delegation happened this turn, but it was not counted separately._"])
+    return blocks
+
+
+def _render_subagent(events: list[dict], max_payload_chars: Optional[int]) -> list[str]:
+    """One spawn's whole lifecycle, grouped by its caller into a single card.
+
+    ``events`` is every event recorded for one spawn id, in emission order (see
+    ``core/subagents.py``'s ``SubagentReporter``). The first is always the create event, carrying
+    the role, the task, and, when configured, the model and reasoning effort; the rest are whatever
+    it produced (reasoning, a tool call, generated text) and the terminal status that closed it,
+    which may itself carry a final chunk when nothing streamed live. A sub-agent's reasoning and
+    generated text are arbitrary model output exactly like a tool result, so they get the same
+    fencing and capping: an answer containing its own code fence must not break the rest of the
+    document, and a long one must not bury the turn that spawned it.
+    """
+    create = events[0]
+    role = create.get("role", "subagent")
+    task = create.get("task", "")
+    header = f"**Sub-agent ({role}):**" + (f" {task}" if task else "")
+    lines = [header]
+    details = []
+    model = create.get("model")
+    if model:
+        details.append(f"model {model}")
+    if "thinking" in create:
+        details.append(f"effort {_format_effort(create['thinking'])}")
+    if details:
+        lines.append("")
+        lines.append("_" + ", ".join(details) + "_")
+    for event in events[1:]:
+        append = event.get("append")
+        if append is not None:
+            kind = append.get("kind")
+            text = _capped(append.get("text", ""), max_payload_chars)
+            lines.append("")
+            if kind == "tool":
+                lines.extend(_render_tool(append, max_payload_chars))
+            elif kind == "reasoning":
+                lines.append("**Reasoning:**")
+                lines.append("")
+                lines.append(_fenced(text))
+            elif kind == "answer":
+                lines.append(_fenced(text))
+            elif kind == "error":
+                lines.append("**Error:**")
+                lines.append("")
+                lines.append(_fenced(text))
+        elif event.get("issues"):
+            # A workflow reviewer's verdict round, told apart from a spawn by having no "task" on
+            # its create event (see ``_turn_cost_blocks``): it carries no "append" of its own, but
+            # its issues are the whole point of the round and must not be silently dropped just
+            # because they arrive shaped differently from a spawn's chunks.
+            lines.append("")
+            lines.append(f"**Issues:** {_capped(str(event['issues']), max_payload_chars)}")
+    status = events[-1].get("status")
+    if status:
+        lines.append("")
+        lines.append(f"_status: {status}_")
+    return lines
+
+
 def _render_tool(item: dict, max_payload_chars: Optional[int]) -> list[str]:
     """A tool call's name, arguments, and result, each payload capped and fenced.
 
@@ -195,10 +371,11 @@ def _render_tool(item: dict, max_payload_chars: Optional[int]) -> list[str]:
 def _render_item(item: dict, max_payload_chars: Optional[int]) -> list[str]:
     """One replay item as Markdown lines, dispatched on its ``type``.
 
-    Every type ``replay_items`` can emit is named here, even the ones this task does not render in
-    full: a type this function doesn't recognize at all (grown after this was written) gets the
-    same visible placeholder as a deliberately deferred one, rather than vanishing from the export
-    with nothing to show it was ever there.
+    ``subagent`` items are handled by ``_render_body`` before an item ever reaches here, since a
+    spawn's several lifecycle events have to be grouped by id into one card rather than rendered
+    line by line. Every other type ``replay_items`` can emit is named here; a type this function
+    doesn't recognize at all (grown after this was written) gets a visible placeholder rather than
+    vanishing from the export with nothing to show it was ever there.
     """
     item_type = item["type"]
     if item_type == "message":
@@ -219,16 +396,52 @@ def _render_item(item: dict, max_payload_chars: Optional[int]) -> list[str]:
         return [f"_[continued: {item['text']}]_"]
     if item_type == "tool":
         return _render_tool(item, max_payload_chars)
-    if item_type in _DEFERRED_TYPES:
-        return [f"_({item_type} not yet rendered here)_"]
+    if item_type == "notice":
+        # A blockquote, so the reason a turn stopped reads as an aside on whatever it produced
+        # before stopping, not as more of that output.
+        text = _capped(item.get("text", ""), max_payload_chars)
+        return [f"> {line}" for line in text.splitlines()] or ["> "]
     return [f"_(unrendered item type: {item_type})_"]
+
+
+def _render_subagent_run(items: list[dict], start: int, max_payload_chars: Optional[int]) -> tuple[list[str], int]:
+    """The contiguous run of ``subagent`` items starting at ``start``, as one card per spawn id.
+
+    ``replay_items`` emits a turn's whole set of spawn events together, right after its user item
+    and before any of the turn's own assistant output, so they always arrive as one contiguous run;
+    but several ids can interleave within that run (concurrent spawns append to one shared list in
+    whatever order they actually produced something), so grouping has to be by id, not by position.
+    Returns the rendered lines and the index of the first item past the run.
+    """
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    index = start
+    while index < len(items) and items[index]["type"] == "subagent":
+        event = items[index]
+        spawn_id = event.get("id")
+        if spawn_id not in groups:
+            groups[spawn_id] = []
+            order.append(spawn_id)
+        groups[spawn_id].append(event)
+        index += 1
+    lines: list[str] = []
+    for spawn_id in order:
+        lines.append("")
+        lines.extend(_render_subagent(groups[spawn_id], max_payload_chars))
+    return lines, index
 
 
 def _render_body(items: list[dict], metadata: dict, max_payload_chars: Optional[int]) -> list[str]:
     """Every item, one per turn heading at a ``user`` item and its content after."""
     lines: list[str] = []
     turn_number = 0
-    for item in items:
+    index = 0
+    while index < len(items):
+        item = items[index]
+        if item["type"] == "subagent":
+            card_lines, index = _render_subagent_run(items, index, max_payload_chars)
+            lines.extend(card_lines)
+            continue
         lines.append("")
         if item["type"] == "user":
             turn_number += 1
@@ -237,8 +450,12 @@ def _render_body(items: list[dict], metadata: dict, max_payload_chars: Optional[
             if meta_line:
                 lines.append("")
                 lines.append(meta_line)
+            for block in _turn_cost_blocks(item.get("message_index"), metadata):
+                lines.append("")
+                lines.extend(block)
             lines.append("")
             lines.append(f"**User:** {item['text']}")
         else:
             lines.extend(_render_item(item, max_payload_chars))
+        index += 1
     return lines
