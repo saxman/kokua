@@ -812,8 +812,13 @@ writes the result under `config.downloads_path`. The reply reuses the **existing
 `/download/{name}` route (already serving generated PDFs and other artifacts) rather than adding a
 second one: `WebChannel.send_download` sends a `{"type": "download", "name", "url"}` frame, and the page
 turns it into a save by clicking a synthetic anchor carrying the `download` attribute, never by
-navigating with `location.href` (the page holds a live WebSocket and possibly a running turn, and a
-navigation would drop both). The exported filename is built from today's date, a title slug kept to
+navigating with `location.href`. Today the two would behave the same: the route answers with
+`FileResponse(path, filename=name)`, which Starlette gives a `Content-Disposition: attachment`
+header, and Chromium treats that as a download rather than a navigation either way, so the live
+WebSocket and any running turn survive `location.href` too as things stand. The anchor's `download`
+attribute is what keeps that true independent of the server: if the route ever answered without that
+header, `location.href` would load the response in place and drop both, where the anchor still would
+not. The exported filename is built from today's date, a title slug kept to
 `[a-z0-9]` runs, and a short id fragment; the slug is an allowlist rather than an escape, which is what
 keeps a title holding a `/` or a `..` segment from ever producing a name the download route's own
 `name != Path(name).name` guard would refuse to serve.

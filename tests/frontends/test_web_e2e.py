@@ -1127,10 +1127,17 @@ def test_a_replayed_blank_answer_segment_is_no_bubble(page, live_server):
 def test_the_sidebar_export_button_downloads_the_conversation_without_navigating_away(page, live_server):
     """The server side of the "export" control is already unit-tested against a fake socket in
     test_web.py; what only a real browser can show is that clicking the button triggers an actual
-    file save rather than, say, a blocked navigation that would tear down the live WebSocket and any
-    turn in flight. `page.expect_download()` only fires on a genuine browser download, so this fails
-    if the client-side handler navigated with `location.href` instead of the synthetic-anchor
-    `download` attribute, or if it did nothing at all."""
+    file save, with real bytes landing on disk, and that the page is still alive and usable
+    afterward. `page.expect_download()` only fires on a genuine browser download, so this fails if the
+    client-side handler is missing or a no-op (nothing to download, a timeout waiting for the event).
+
+    It does not distinguish the synthetic-anchor `download` attribute from a plain `location.href`:
+    `/download/{name}` currently answers as an attachment (`Content-Disposition`, from Starlette's
+    `FileResponse(path, filename=name)`), which Chromium downloads rather than navigates to either
+    way, so this test would still pass today if the handler used `location.href` instead. The anchor
+    is kept anyway because it does not depend on the server continuing to answer that way; this test
+    just cannot be the thing proving that, since proving it would require the attachment header to be
+    absent."""
     _open(page, live_server(delay=0.0))
     page.fill("#msg", "remember this for the export test")
     page.click("#send")

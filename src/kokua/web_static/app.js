@@ -1011,9 +1011,12 @@ ws.onmessage = (event) => {
     lastTasks = frame.items;
     renderSidebar();
   } else if (frame.type === "download") {
-    // A synthetic anchor rather than location.href: the page holds a live WebSocket and possibly a
-    // running turn, and navigating away would drop both. The `download` attribute makes the browser
-    // save the file instead of trying to render it in place.
+    // A synthetic anchor rather than location.href. Today /download/{name} answers as an attachment
+    // (Content-Disposition, from FileResponse(path, filename=name) on the server), so Chromium never
+    // navigates away for either approach: the live WebSocket and any running turn would survive
+    // location.href too, right now. The `download` attribute is what keeps that true even if the
+    // server side ever stopped setting that header: an anchor with `download` still saves rather than
+    // navigates, while location.href would then load the response in place and drop both.
     const a = document.createElement("a");
     a.href = frame.url;
     a.download = frame.name;
