@@ -172,7 +172,7 @@ directly rather than a `LiveState` field or a threaded parameter, for the same r
 wiring does: `record_event` is a module-level constant with no turn state of its own, so a tool or agent
 built once, at composition time, reports into whichever turn is actually running when an event fires,
 with nothing to plumb back to the caller. `core.agents._spawn_tool` and `make_delegation_tool` pass it as
-`make_async_subagent_tool(events=record_event)` (needs `aimu>=0.24.0`; see
+`make_async_subagent_tool(events=record_event)` (needs `aimu>=0.25.0`; see
 [The model every agent runs on](#the-model-every-agent-runs-on) for the probe that enforces it), and
 `workflows.critics.reviewer_agent` passes it as
 `aio.Agent(events=record_event)`, unconditionally rather than through a parameter a caller could forget
@@ -588,18 +588,21 @@ construction still works and streams neither phase, and since Kokua no longer re
 anywhere there is not even an `AttributeError` to notice, which is the failure mode this preflight
 exists for.
 
-The repository floor is now `aimu>=0.24.0`, for `make_async_subagent_tool`'s new `events` parameter: the
+The repository floor is now `aimu>=0.25.0`, for `make_async_subagent_tool`'s new `events` parameter: the
 handle that lets a spawned sub-agent's model turns reach the sink the turn that delegated to it opened
 (see [What a turn cost](#what-a-turn-cost)). A fresh-client critic (`workflows.critics.reviewer_agent`)
 had the identical gap for the identical reason and is wired the same way. The probe moved to a signature
 check on `make_async_subagent_tool` for `events`, the third time this probe has taken that shape. Unlike
 `script_env` and `include`, which carried settings *to* an existing capability, `events` *is* the
 capability: a name lookup on the module would not catch its absence, since `make_async_subagent_tool`
-itself predates 0.24.0 and imports fine either way, and nothing else has to be true of a checkout once
+itself predates 0.25.0 and imports fine either way, and nothing else has to be true of a checkout once
 the one argument exists. What this probe still cannot see: whether a spawned worker's own spawn tool
 forwards `events` on to a grandchild it delegates to in turn, so a recursive delegation could go
 uncounted one level down without this module raising anything. The probe covers one surface at a time;
-the version floor is what covers every earlier release's.
+the version floor is what covers every earlier release's. (The capability first shipped tagged 0.24.0,
+but that number collided with a different, unrelated 0.24.0 that AIMU's own `main` released first; the
+branch carrying `events` rebased past it and renumbered to 0.25.0, so a real, released 0.24.0 correctly
+fails this probe rather than exposing a gap in it.)
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes

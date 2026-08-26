@@ -110,11 +110,15 @@ Consequences for working in this repo:
   *default value*, not the parameter; the name stands in for it because the rename and the flip were one
   change, so a checkout carrying the new name carries the new default. The default is directly inspectable,
   unusually, and the parameter check is still preferred: it dates the checkout to the same release without
-  teaching the probe a fourth shape for one case. AIMU 0.24.0 is the current floor, and moves the probe
+  teaching the probe a fourth shape for one case. AIMU 0.25.0 is the current floor, and moves the probe
   onto `make_async_subagent_tool`'s new `events` parameter, the handle that lets a spawned sub-agent's
   model turns reach the sink the delegating turn opened; a fresh-client critic
-  (`workflows.critics.reviewer_agent`) had the identical gap for the identical reason. A name lookup on
-  the module would not catch either absence, because `make_async_subagent_tool` itself predates 0.24.0
+  (`workflows.critics.reviewer_agent`) had the identical gap for the identical reason. (This capability
+  was first published as 0.24.0, but that number collided with a different 0.24.0 AIMU's own `main`
+  released first, carrying an unrelated `run_command` tool and none of this capability; the branch
+  that added `events` rebased past it and renumbered to 0.25.0, so the real, released 0.24.0 fails this
+  probe correctly rather than being a gap in it.) A name lookup on
+  the module would not catch either absence, because `make_async_subagent_tool` itself predates 0.25.0
   and imports fine either way; only its parameters changed, so a signature check is what the shape
   demands, the third time this probe has taken it. Unlike `script_env` and `include`, which carried
   settings *to* an existing capability, `events` *is* the capability: nothing else has to be true of a

@@ -77,7 +77,7 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.24.0 is the current surface, and the shape is a signature check again, the third time: a
+AIMU 0.25.0 is the current surface, and the shape is a signature check again, the third time: a
 sub-agent built by ``make_async_subagent_tool`` used to have no way to report its model turns anywhere
 but its own return value, so a spawn was invisible to whatever cost accounting the delegator kept. The
 release adds an ``events`` parameter that forwards those turns to a sink the caller supplies, and a
@@ -85,11 +85,17 @@ critic that builds its own client (see ``workflows.critics.reviewer_agent``) had
 the identical reason. Unlike ``SkillManager(include=...)`` and ``SkillAgent(script_env=...)``, where the
 parameter carried settings *to* the capability, ``events`` *is* the capability: there is nothing else an
 older AIMU is missing once this one argument exists. A name lookup on the module would not catch its
-absence, because ``make_async_subagent_tool`` itself predates 0.24.0 and is importable either way; only
+absence, because ``make_async_subagent_tool`` itself predates 0.25.0 and is importable either way; only
 its parameters changed. What this probe still cannot see: whether a spawned worker's *own* spawn tool
 forwards ``events`` on to a grandchild it delegates to in turn. The parameter reaching the first hop is
 everything this signature check asks, so a recursive delegation could still go uncounted one level down
 without this module raising anything.
+
+The capability was first published as part of a 0.24.0, but that version number collided: AIMU's own
+``main`` branch released a different 0.24.0 first, one carrying an unrelated ``run_command`` tool and
+none of this capability. The branch that added ``events`` rebased past that release and renumbered to
+0.25.0, so an installed 0.24.0 (the real one) fails this probe correctly, exactly as an old checkout
+should, and is not itself a bug in the probe.
 """
 
 from __future__ import annotations
@@ -99,7 +105,7 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 24, 0)
+MINIMUM_AIMU = (0, 25, 0)
 
 # The newest AIMU surface Kokua depends on is `make_async_subagent_tool`'s `events` parameter: the
 # handle that lets a spawned sub-agent's model turns reach the sink the turn that delegated to it
@@ -140,8 +146,10 @@ def _message(problem: str) -> str:
     floor = ".".join(str(n) for n in MINIMUM_AIMU)
     return (
         f"Kokua needs AIMU {floor} or newer, but {problem}.\n"
-        f"  Using the sibling checkout (the default here): update it -- "
-        f"git -C ../aimu checkout main && git -C ../aimu pull, then `uv sync --all-extras`.\n"
+        f"  Using the sibling checkout (the default here): confirm what it is actually on with "
+        f"git -C ../aimu log -1, then check out or pull a branch that reaches {floor} (`main` moves "
+        f"independently of this floor and is not guaranteed to have caught up), and run `uv sync "
+        f"--all-extras`.\n"
         f"  Not developing AIMU? `uv sync --all-extras --no-sources` installs AIMU {floor} from PyPI "
         f"and ignores the sibling entirely."
     )
