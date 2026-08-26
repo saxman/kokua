@@ -9,9 +9,10 @@ terminal is gone.
 It reads the conversation straight out of the session store and writes the file; nothing else. No
 model client, no agent, no front end, so it works even with the model server down.
 
-There are two routes to the same file: the `kokua export` command below, and a download button in
-the web UI's sidebar (see [From the web UI](#from-the-web-ui)). Both call the same renderer, so the
-file reads identically either way.
+There are two routes to the same content, written to different files: the `kokua export` command
+below, and a download button in the web UI's sidebar (see [From the web UI](#from-the-web-ui)). Both
+call the same renderer, so the two files read identically; only their names differ (see each route's
+section below).
 
 ## The command
 
@@ -65,6 +66,21 @@ appends a note saying how many characters the full payload held, rather than sil
 incomplete result as if it were complete. Pass `--full` to lift the cap and see every payload in
 full.
 
+## What this does not include
+
+**A workflow review's typed verdict is not counted, and nothing marks it.** A `/plan` review's
+tool-calling assessment is counted like any other delegated work, but the call that turns it into a
+structured verdict goes through AIMU's schema-only path, which returns before any turn event is
+emitted, on any client. That one call per review round never enters a turn's recorded cost, and
+because it never enters the count at all, no "not reported" note can point at it the way it does for a
+missing token figure.
+
+**No per-turn or per-model rollup, and no per-spawn token breakdown on a sub-agent's own card.** The
+header totals model calls, tokens, and time across the whole conversation; it does not also break that
+total down by turn, by model, or by delegation depth, and a sub-agent's card shows its reasoning, tool
+calls, and answer without a token figure of its own. Both are things a fuller export could add; this
+one does not, so the total is what you have to work from until a later change adds them.
+
 ## From the web UI
 
 Hover a conversation in the sidebar and a download arrow (↓) appears beside its delete button.
@@ -79,6 +95,16 @@ connection, so a plain HTTP handler would have no live session store to read fro
 an `"export"` control over the same socket every other sidebar action uses, and the server answers by
 writing the file and pointing the page at the existing `/download/{name}` route (the one that already
 serves generated PDFs and other artifacts) rather than opening a second way to fetch a file.
+
+**The web route cannot lift the truncation cap.** `--full` is a command-line flag; the web download
+always exports with `DEFAULT_MAX_PAYLOAD_CHARS` in effect, so a browser-only user can never see an
+untruncated tool payload. Use `kokua export --full` from the command line if you need one.
+
+**Data at rest.** A full transcript, once exported, persists indefinitely under `downloads_path` and
+is served by `/download/{name}` over plain HTTP with no authentication. The path-traversal guards on
+that route are sound and the default `[web] host` is loopback-only, but `host` is a setting a user can
+change, and a conversation is often the most sensitive thing Kokua holds. Treat an exported file, and
+the host it is served from, accordingly.
 
 ## The store, mid-write
 

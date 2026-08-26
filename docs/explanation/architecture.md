@@ -25,6 +25,8 @@ src/kokua/
   plugins.py           entry-point discovery for front ends and toolsets
   images.py            the on-disk image store and the /images/<name> reference
   logging_setup.py     rotating file log + a SIGUSR1 thread-stack dump
+  transcript_export.py render_markdown: a saved conversation as Markdown a person can read and judge,
+                        pure and dependency-free so both front ends and the CLI can call it
   config.example.toml  every key, one line each (long form: docs/reference/configuration.md)
   web_static/          the single-page web UI plus vendored marked/DOMPurify/KaTeX
 
@@ -49,6 +51,8 @@ src/kokua/
     turn_registry.py     in-flight turn bookkeeping
     messages.py          transcript helpers: text extraction, titles, image compaction
     errors.py            describe_error: root-cause extraction for user-facing messages
+    metrics.py           TurnMetrics + record_event: what a turn cost, accumulated from AIMU's
+                          ModelTurnFinished events into calls/tokens/seconds
 
   config/        settings: the schema, the file, the writers
     schema.py      AssistantConfig, AgentConfig, MCPServerConfig, the default prompt
@@ -142,12 +146,14 @@ an AIMU upgrade that adds a new event member cannot turn this sink into an outag
 
 The wiring follows `subagent_events`'s own split between a durable seam and a per-turn scope, on purpose:
 `core.metrics.record_event` is a module-level forwarder with no turn state of its own, so it is safe to
-assign to `agent.model_client.events` (AIMU's own words are "the durable, always-shared setting") once
-per turn, unconditionally, with nothing to detach afterward. `TurnRunner` opens a fresh `TurnMetrics` and
-sets it on the `current_metrics` ContextVar for the turn's duration, alongside `subagent_events`, and
-resets it in the same `finally`. Concurrent turns on different conversations therefore never share an
-accumulator, by the same ContextVar-per-execution-context mechanism `subagent_events` relies on; nothing
-is attached or detached around a turn, so no failure path can strand a live sink on a client.
+assign to `agent.model_client.events` (AIMU's own words are "the durable, always-shared setting")
+permanently, unconditionally, with nothing to detach afterward. What *is* opened and closed around a
+turn is the `current_metrics` ContextVar: `TurnRunner` opens a fresh `TurnMetrics`, sets it on that
+ContextVar for the turn's duration alongside `subagent_events`, and resets it in the same `finally`.
+Concurrent turns on different conversations therefore never share an accumulator, by the same
+ContextVar-per-execution-context mechanism `subagent_events` relies on. The client-side sink itself never
+needs that dance: it sits on the client permanently, inert whenever the ContextVar it reads is unset, so
+no failure path can strand it there by failing to take it back off.
 
 Because the sink lives on the client rather than being threaded through `agent.run()`, a planned turn's
 model calls count for free: `PlanRunner` drives `ctx.agent`, the conversation's own agent, so its calls
@@ -174,12 +180,20 @@ built once, at composition time, reports into whichever turn is actually running
 with nothing to plumb back to the caller. `core.agents._spawn_tool` and `make_delegation_tool` pass it as
 `make_async_subagent_tool(events=record_event)` (needs `aimu>=0.25.0`; see
 [The model every agent runs on](#the-model-every-agent-runs-on) for the probe that enforces it), and
-`workflows.critics.reviewer_agent` passes it as
-`aio.Agent(events=record_event)`, unconditionally rather than through a parameter a caller could forget
+`workflows.critics.reviewer_agent` passes it as both `aio.Agent(events=record_event)` and
+`client.events = record_event`, unconditionally rather than through a parameter a caller could forget
 to pass; `review` and `stream_review` need no change, since both build their agent through
-`reviewer_agent`. Every recorded call attributes by the event's `agent` field, so a delegated or reviewed
-turn's `TurnMetrics.record()` carries a non-empty `by_agent` breakdown where an undelegated turn's does
-not (`test_omits_by_agent_when_only_the_entry_agent_ran` pins the undelegated case).
+`reviewer_agent`. The client-level assignment is what covers any direct call a caller makes on the
+client rather than through `run()`, since the agent's own `events` override only applies inside a
+`run()` call; `finalize_verdict`'s `client.chat(..., schema=Verdict)` is exactly such a call. It does
+not, however, close the gap for that specific call: AIMU's structured (`schema=`) path returns before a
+turn event is ever emitted, on any client, so no sink, however wired, can observe it. A `/plan` turn's
+recorded cost is therefore short by exactly one model call per review round, with nothing able to flag
+the gap, since the missing call never enters the count a partial-report qualifier could point at. Every
+call that *is* recorded attributes by the event's `agent` field, so a
+delegated or reviewed turn's `TurnMetrics.record()` carries a non-empty `by_agent` breakdown where an
+undelegated turn's does not (`test_omits_by_agent_when_only_the_entry_agent_ran` pins the undelegated
+case).
 
 ## Agents and delegation
 

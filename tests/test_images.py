@@ -9,7 +9,7 @@ import json
 from tests.helpers import MockAsyncModelClient
 from kokua import images
 from kokua.core.messages import compact_message_images, expand_message_images
-from kokua.core.transcripts import replay_items as conversation_to_frames
+from kokua.core.transcripts import replay_items
 from kokua.channels.cli import CLIChannel
 from kokua.channels.web import WebChannel
 from kokua.config import AssistantConfig
@@ -91,23 +91,26 @@ def test_expand_missing_file_left_as_reference(tmp_path):
     assert out[0]["content"][1]["image_url"]["url"] == "/images/deadbeef.png"
 
 
-# --- conversation_to_frames display -----------------------------------------------------------
+# --- replay_items display -----------------------------------------------------------
 
 
-def test_conversation_to_frames_emits_user_image_item():
+def test_replay_items_emits_user_image_item():
     messages = [_image_message("/images/abc.png")]
-    items = conversation_to_frames(messages)
-    # A bubble carrying the message's text, regardless of the message_index it is also stamped with,
-    # which is not what this test is about.
+    items = replay_items(messages)
+    # Both items carry the turn's message_index (see core/transcripts.py and
+    # test_transcript_export.py's image-only-turn coverage), which is not what this test is about, so
+    # membership is checked on the fields this test does care about rather than by exact dict equality.
     assert any(item["type"] == "user" and item["text"] == "look" for item in items)
-    assert {"type": "image", "url": "/images/abc.png", "from": "user"} in items
+    assert any(
+        item["type"] == "image" and item["url"] == "/images/abc.png" and item["from"] == "user" for item in items
+    )
 
 
-def test_conversation_to_frames_emits_generated_image_from_tool_result():
+def test_replay_items_emits_generated_image_from_tool_result():
     messages = [
         {"role": "tool", "name": "generate_image", "content": "Generated image (/images/gen.png).", "tool_call_id": "1"}
     ]
-    items = conversation_to_frames(messages)
+    items = replay_items(messages)
     assert items == [{"type": "image", "url": "/images/gen.png", "from": "assistant"}]
 
 

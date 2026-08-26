@@ -59,21 +59,29 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.25.0 or newer
 - **A turn records what it cost.** `core/metrics.py`'s `TurnMetrics` accumulates each model call's
   count, model, seconds, and (when a provider reports them) tokens, stored under
   `session.metadata["usage"][str(user_index)]` beside the model and effort already recorded there.
-  The sink attaches to the conversation's client for the turn's duration rather than being passed to
-  `run()`, which is what makes a planned turn count too, since a workflow drives the conversation's
-  own agent. Recorded on every exit branch of a turn: success, cancellation, a connection error, a
-  generic error, with the wall-clock figure measured at the moment of recording, so a turn that
-  raised still reports what it cost up to the point it stopped.
-- **Delegated and reviewed work counts toward that same total.** A spawned sub-agent and a workflow
-  critic each build their own client, outside the family a turn's own scoped sink reaches, so both were
-  invisible to `TurnMetrics` and a heavily delegating turn read as cheap. Both now receive
-  `core.metrics.record_event` explicitly: `core/agents.py`'s spawn tool passes it as
+  The sink (`core.metrics.record_event`) is assigned to the conversation's client once, durably,
+  rather than being passed to `run()`; what is turn-scoped is a `ContextVar` the sink reads at emit
+  time, so the client-wide assignment is inert outside a turn and needs no teardown after one. This is
+  what makes a planned turn count too, since a workflow drives the conversation's own agent. Recorded
+  on every exit branch of a turn: success, cancellation, a connection error, a generic error, with the
+  wall-clock figure measured at the moment of recording, so a turn that raised still reports what it
+  cost up to the point it stopped.
+- **Delegated and reviewed work counts toward that same total, with one named exception.** A spawned
+  sub-agent and a workflow critic each build their own client, outside the family a turn's own scoped
+  sink reaches, so both were invisible to `TurnMetrics` and a heavily delegating turn read as cheap.
+  Both now receive `core.metrics.record_event` explicitly: `core/agents.py`'s spawn tool passes it as
   `make_async_subagent_tool(events=...)`, and `workflows/critics.py`'s `reviewer_agent` passes it as
-  `aio.Agent(events=...)`. `record_event` is a module-level constant, not a `LiveState` field, since a
-  field would be shared across every conversation's concurrent turns; it reads the turn actually running
-  off a contextvar when an event fires, so a tool or agent built once at composition time reports into
-  whichever turn asked for it. Recorded model calls attribute by the event's `agent` field, which is what
-  makes `TurnMetrics.record`'s `by_agent` breakdown non-empty for a turn that delegated or reviewed.
+  both `aio.Agent(events=...)` and `client.events = record_event`, since its typed verdict is fetched
+  with a direct `client.chat(..., schema=Verdict)` call outside any `run()`, where the agent's own
+  `events` override does not apply. `record_event` is a module-level constant, not a `LiveState` field,
+  since a field would be shared across every conversation's concurrent turns; it reads the turn actually
+  running off a contextvar when an event fires, so a tool or agent built once at composition time
+  reports into whichever turn asked for it. Recorded model calls attribute by the event's `agent` field,
+  which is what makes `TurnMetrics.record`'s `by_agent` breakdown non-empty for a turn that delegated or
+  reviewed. **The verdict call itself stays uncounted regardless**: AIMU's structured (`schema=`) path
+  emits no turn event on any client, so wiring `client.events` closes the gap for every other direct
+  client call but not this one. A `/plan` turn's recorded cost is short by exactly one call per review
+  round, with no qualifier able to say so.
 - **`kokua export` writes a conversation as Markdown.** `transcript_export.render_markdown` renders a
   saved conversation's header, each turn's user message, reasoning, tool calls with their arguments
   and results, sub-agent cards, and what it cost, into one Markdown document a person can read, diff,

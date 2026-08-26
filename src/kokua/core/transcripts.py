@@ -293,6 +293,12 @@ def replay_items(
     bubble: it says why the turn stopped, which only reads correctly after whatever the turn managed to
     produce. It matters most for a scheduled run, whose error never reached this conversation live -- the
     status line for a firing goes to whichever conversation the user was viewing at the time.
+
+    ``message_index`` (the user message's own position in ``messages``, what ``record_turn_provenance``
+    keys a turn's model/effort/usage under) is stamped on every item this function emits for a user
+    message, not only its text: a message sent with an image and no text yields no ``"user"`` item at
+    all, and the Markdown export opens a turn's heading at whichever item carries this key first, so an
+    image-only turn still needs one somewhere to anchor to.
     """
     subagent = subagent or {}
     trace = trace or {}
@@ -347,7 +353,10 @@ def replay_items(
                 # resolve_user_index's docstring warns about would come back in a second place.
                 add({"type": "user", "text": text, "message_index": index}, ts)
             for url in image_refs_of(message.get("content")):  # uploaded images, replayed under the bubble
-                add({"type": "image", "url": url, "from": "user"}, ts)
+                # Carries the same message_index as the text item above (or is the only item to carry
+                # it, when the user sent an image with no text): the renderer opens a turn at the first
+                # item bearing this index, and an image-only user message must still open one.
+                add({"type": "image", "url": url, "from": "user", "message_index": index}, ts)
             events = subagent.get(str(index), [])
             if str(index) in trace:  # verbose turn: replay the raw trace, not the verdict cards
                 for segment in trace[str(index)]:

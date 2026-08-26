@@ -28,6 +28,17 @@ from kokua.core.metrics import TurnMetrics, current_metrics, record_event
 from kokua.workflows.critics import reviewer_agent
 
 
+def test_reviewer_agent_names_itself_reviewer_by_default():
+    """Pins the label an export actually prints, cheaply, without contorting reviewer_agent for
+    injectability into a full round-trip test.
+
+    Without a real name, AIMU assigns a per-object ``agent-<hex>`` that renders as opaque hex in a
+    turn's cost breakdown, unreadable and unstable across reviews. A caller (see
+    ``workflows.planning.critics``) can still override it for a finer-grained label.
+    """
+    assert reviewer_agent(None, "x").name == "reviewer"
+
+
 def test_a_reviewer_reports_its_model_turns_to_the_metrics_forwarder():
     """A critic builds its own client, so without an explicit sink its cost is invisible.
 
@@ -58,8 +69,9 @@ def test_the_forwarder_attributes_a_reviewers_cost_to_the_reviewer():
         record_event(
             ModelTurnFinished(model="m1", usage={"input_tokens": 50, "output_tokens": 5}, duration_s=1.0, agent=None)
         )
-        # A stand-in for what a reviewer's own model turn would carry, once AIMU delivers
-        # reviewer_agent's events=record_event to it.
+        # "reviewer" matches what a real reviewer_agent() call actually names its agent by default
+        # (see test_reviewer_agent_names_itself_reviewer_by_default above), not a stand-in value picked
+        # for convenience.
         record_event(
             ModelTurnFinished(
                 model="m2", usage={"input_tokens": 300, "output_tokens": 40}, duration_s=1.5, agent="reviewer"

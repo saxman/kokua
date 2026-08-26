@@ -60,6 +60,7 @@ def reviewer_agent(
     tools: Optional[list[Callable]] = None,
     thinking: Optional[Union[bool, str]] = None,
     generate_kwargs: Optional[dict] = None,
+    name: str = "reviewer",
 ) -> aio.Agent:
     """A fresh, context-free reviewer agent with the verification toolset (an independent, tool-using
     critic). ``tools`` overrides ``REVIEWER_TOOLS``, for a workflow that needs its judge grounded in a
@@ -67,6 +68,14 @@ def reviewer_agent(
     unattended, so the toolset is curated to hold nothing that would need one -- see ``REVIEWER_TOOLS``.
     Public so a workflow that needs a judge shaped differently (a debate round, a scored rubric) can
     build on the same independent agent instead of assembling its own.
+
+    ``name`` is what a caller measuring cost sees: with no ``name=`` on construction, AIMU assigns a
+    generated ``agent-<hex>`` unique to the Python object, which is stable for exactly one review and
+    unreadable in an export meant for a person to read. ``"reviewer"`` is a sensible default for a
+    caller with no finer-grained label to offer; a workflow that runs more than one kind of review (see
+    ``workflows.planning.critics``) can pass its own, and every review from the same workflow round
+    shares one name, so the export's per-agent breakdown groups them rather than listing one hex per
+    call.
 
     ``thinking`` is the reviewer's reasoning effort and ``generate_kwargs`` its generation parameters,
     and both are the caller's to decide: a reviewer is not an ``[agents.*]`` agent, so
@@ -79,6 +88,13 @@ def reviewer_agent(
     of what the turn that asked for it cost. ``record_event`` is a module-level constant that reads the
     running turn off a contextvar when an event actually fires, so a reviewer built here reports into
     whichever turn is running at review time with no plumbing back to the caller.
+
+    ``client.events`` is set as well as the agent's, because :func:`finalize_verdict` calls
+    ``client.chat(..., schema=Verdict)`` directly, outside any ``run()``, where the agent's own
+    ``events`` override never applies. That still leaves the verdict call itself uncounted: AIMU's
+    structured (``schema=``) path returns before a turn event is ever emitted, on any client, so no sink
+    can observe it. The tool-calling assessment that precedes it is fully counted; the one call that
+    turns it into a typed ``Verdict`` is not, and nothing in this module can close that gap.
     """
     client = aio.client(model, system=system)
     # Only when there is something to set: this is the tier above the model card's own tuned profile, so
@@ -86,6 +102,9 @@ def reviewer_agent(
     # is no [agents.*] agent, so [assistant.generation] is the only tier it has.
     if generate_kwargs:
         client.default_generate_kwargs = dict(generate_kwargs)
+    # Covers any call a caller makes directly on the client (finalize_verdict's schema= call included),
+    # not just the agent's own run() loop, which has its own events= below.
+    client.events = record_event
     return aio.Agent(
         client,
         tools=REVIEWER_TOOLS if tools is None else tools,
@@ -93,6 +112,7 @@ def reviewer_agent(
         final_answer_prompt=_VERDICT_PROMPT,  # force an assessment if it hits the cap mid-tool-call
         thinking=thinking,
         events=record_event,
+        name=name,
     )
 
 
@@ -102,14 +122,15 @@ async def review(
     user_input: str,
     thinking: Optional[Union[bool, str]] = None,
     generate_kwargs: Optional[dict] = None,
+    name: str = "reviewer",
 ) -> Verdict:
     """Run one context-free review: a bounded tool-calling assessment, then the typed verdict.
 
     The prompts are the caller's, not this module's: a critic is the reusable half (a fresh agent, a
     curated verification toolset, a typed verdict), while what counts as approvable is the workflow's
-    own business.
+    own business. ``name`` is forwarded to :func:`reviewer_agent`, unchanged.
     """
-    agent = reviewer_agent(model, system, thinking=thinking, generate_kwargs=generate_kwargs)
+    agent = reviewer_agent(model, system, thinking=thinking, generate_kwargs=generate_kwargs, name=name)
     await agent.run(user_input)  # free-text tool-calling loop; assessment lands in the agent's client
     return await finalize_verdict(agent.model_client)
 
@@ -120,6 +141,7 @@ async def stream_review(
     user_input: str,
     thinking: Optional[Union[bool, str]] = None,
     generate_kwargs: Optional[dict] = None,
+    name: str = "reviewer",
 ):
     """Open a streamed review. Returns ``(client, chunk_stream)``; the caller streams the chunks (the
     reviewer's prose reasoning and tool activity) then calls :func:`finalize_verdict`.
@@ -129,11 +151,18 @@ async def stream_review(
     it is a forced tool: JSON only, no thinking). So the assessment loop streams and the typed verdict
     is extracted from that reasoning afterwards, on the same client.
     """
-    agent = reviewer_agent(model, system, thinking=thinking, generate_kwargs=generate_kwargs)
+    agent = reviewer_agent(model, system, thinking=thinking, generate_kwargs=generate_kwargs, name=name)
     stream = await agent.run(user_input, stream=True)
     return agent.model_client, stream
 
 
 async def finalize_verdict(client) -> Verdict:
-    """Extract the structured verdict from the reviewer's assessment (now in ``client``'s context)."""
+    """Extract the structured verdict from the reviewer's assessment (now in ``client``'s context).
+
+    Uncounted: AIMU's ``schema=`` path returns through ``_chat_structured`` before a turn event is
+    emitted at all, on any client, so this call never reaches ``TurnMetrics`` no matter what ``client``
+    is set to report to. A ``/plan`` turn's recorded cost is therefore short by exactly one model call
+    per review round, with no qualifier able to say so, since the missing call never enters the count
+    `_format_tokens` reports against.
+    """
     return await client.chat(_VERDICT_PROMPT, schema=Verdict, use_tools=False)

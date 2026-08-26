@@ -389,7 +389,7 @@ async def test_the_configured_thinking_reaches_every_planning_reviewer(monkeypat
 
     seen: list = []
 
-    def fake_reviewer(model, system, tools=None, thinking=None, generate_kwargs=None):
+    def fake_reviewer(model, system, tools=None, thinking=None, generate_kwargs=None, name=None):
         seen.append(thinking)
         return _StubAgent()
 
@@ -453,7 +453,7 @@ async def test_the_configured_generation_reaches_every_planning_reviewer(monkeyp
 
     seen: list = []
 
-    def fake_reviewer(model, system, tools=None, thinking=None, generate_kwargs=None):
+    def fake_reviewer(model, system, tools=None, thinking=None, generate_kwargs=None, name=None):
         seen.append(generate_kwargs)
         return _StubAgent()
 

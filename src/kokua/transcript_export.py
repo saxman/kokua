@@ -274,7 +274,7 @@ def _turn_cost_blocks(message_index: Optional[int], metadata: dict) -> list[list
     at all (a turn can spawn a sub-agent under an AIMU predating the seam that attributes calls to
     it), and presenting that turn's entry-agent-only total as the whole run's cost would read as a
     cheap delegating run, which is the opposite of true. A spawn is identified the same way
-    ``channels/web.py`` tells one apart from a workflow reviewer's verdict card: a "task" key on its
+    ``core/transcripts.py`` tells one apart from a workflow reviewer's verdict card: a "task" key on its
     create event.
     """
     if message_index is None:
@@ -478,9 +478,19 @@ def _render_subagent_run(items: list[dict], start: int, max_payload_chars: Optio
 
 
 def _render_body(items: list[dict], metadata: dict, max_payload_chars: Optional[int]) -> list[str]:
-    """Every item, one per turn heading at a ``user`` item and its content after."""
+    """Every item, one per turn heading at the first item carrying a ``message_index`` and its content
+    after.
+
+    A turn heading opens on ``message_index`` rather than on ``item["type"] == "user"``: a user message
+    sent with an image and no text yields no ``"user"`` item at all (see ``replay_items``), only an
+    image item carrying the index instead, and that item still has to open the turn or its heading, its
+    model/effort line, and its cost block all go missing while the header total still counts it. A
+    user's text and image items can share one index, so a new heading opens only the first time a given
+    index is seen (tracked in ``open_index``), not on every item carrying one.
+    """
     lines: list[str] = []
     turn_number = 0
+    open_index: object = object()  # sentinel: no real message_index (an int, or None) ever equals it
     index = 0
     while index < len(items):
         item = items[index]
@@ -489,17 +499,20 @@ def _render_body(items: list[dict], metadata: dict, max_payload_chars: Optional[
             lines.extend(card_lines)
             continue
         lines.append("")
-        if item["type"] == "user":
+        message_index = item.get("message_index")
+        if message_index is not None and message_index != open_index:
+            open_index = message_index
             turn_number += 1
             lines.append(f"## Turn {turn_number}{_when_suffix(item)}")
-            meta_line = _turn_meta_line(item.get("message_index"), metadata)
+            meta_line = _turn_meta_line(message_index, metadata)
             if meta_line:
                 lines.append("")
                 lines.append(meta_line)
-            for block in _turn_cost_blocks(item.get("message_index"), metadata):
+            for block in _turn_cost_blocks(message_index, metadata):
                 lines.append("")
                 lines.extend(block)
             lines.append("")
+        if item["type"] == "user":
             lines.append(f"**User:** {item['text']}")
         else:
             lines.extend(_render_item(item, max_payload_chars))

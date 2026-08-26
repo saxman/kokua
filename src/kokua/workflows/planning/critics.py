@@ -24,14 +24,21 @@ async def review_plan(
     plan: str,
     thinking: Optional[Union[bool, str]] = None,
     generate_kwargs: Optional[dict] = None,
+    name: str = "Plan reviewer",
 ) -> critics.Verdict:
-    """Independently review a plan against the request (no conversation context)."""
+    """Independently review a plan against the request (no conversation context).
+
+    ``name`` defaults to the same label ``workflows/planning/runner.py`` shows for this reviewer in the
+    UI, so a turn's cost export groups a plan review's calls under the label a reader already recognizes
+    rather than a second, unrelated name for the same round.
+    """
     return await critics.review(
         model,
         PLAN_REVIEW_SYSTEM,
         PLAN_INPUT.format(request=request, plan=plan),
         thinking=thinking,
         generate_kwargs=generate_kwargs,
+        name=name,
     )
 
 
@@ -43,17 +50,20 @@ async def review_result(
     evidence: str = "",
     thinking: Optional[Union[bool, str]] = None,
     generate_kwargs: Optional[dict] = None,
+    name: str = "Result reviewer",
 ) -> critics.Verdict:
     """Independently review a final result against the request and plan (no conversation context).
 
     ``evidence`` is the agent's tool-result transcript (see ``runner._tool_evidence``); when given, the
-    reviewer weighs it as fresher than its own memory instead of rejecting on stale-knowledge suspicion."""
+    reviewer weighs it as fresher than its own memory instead of rejecting on stale-knowledge suspicion.
+    ``name`` defaults to the same label the UI shows for this reviewer; see :func:`review_plan`."""
     return await critics.review(
         model,
         RESULT_REVIEW_SYSTEM,
         result_input(request, plan, answer, evidence),
         thinking=thinking,
         generate_kwargs=generate_kwargs,
+        name=name,
     )
 
 
@@ -63,15 +73,18 @@ async def stream_plan_review(
     plan: str,
     thinking: Optional[Union[bool, str]] = None,
     generate_kwargs: Optional[dict] = None,
+    name: str = "Plan reviewer",
 ):
     """Open a streamed plan review (see :func:`kokua.workflows.critics.stream_review`). Returns
-    ``(client, chunk_stream)``; the caller streams the chunks, then finalizes the verdict."""
+    ``(client, chunk_stream)``; the caller streams the chunks, then finalizes the verdict. ``name``
+    defaults as in :func:`review_plan`."""
     return await critics.stream_review(
         model,
         PLAN_REVIEW_SYSTEM,
         PLAN_INPUT.format(request=request, plan=plan),
         thinking=thinking,
         generate_kwargs=generate_kwargs,
+        name=name,
     )
 
 
@@ -83,13 +96,16 @@ async def stream_result_review(
     evidence: str = "",
     thinking: Optional[Union[bool, str]] = None,
     generate_kwargs: Optional[dict] = None,
+    name: str = "Result reviewer",
 ):
     """Open a streamed result review (see :func:`stream_plan_review`). ``evidence`` is the agent's
-    tool-result transcript, weighed as fresher than the reviewer's own memory when present."""
+    tool-result transcript, weighed as fresher than the reviewer's own memory when present. ``name``
+    defaults as in :func:`review_result`."""
     return await critics.stream_review(
         model,
         RESULT_REVIEW_SYSTEM,
         result_input(request, plan, answer, evidence),
         thinking=thinking,
         generate_kwargs=generate_kwargs,
+        name=name,
     )

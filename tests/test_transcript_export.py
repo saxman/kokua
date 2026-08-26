@@ -4,7 +4,7 @@ import re
 
 from aimu.sessions import Session
 
-from kokua.transcript_export import render_markdown
+from kokua.transcript_export import _render_item, render_markdown
 
 
 def _session(messages, metadata=None):
@@ -235,6 +235,77 @@ def test_a_tool_call_with_no_result_says_so_rather_than_showing_an_empty_block()
     )
     out = render_markdown(session)
     assert "no result" in out.lower()
+
+
+# --- item types the renderer dispatches on ---------------------------------------------------
+
+
+def test_an_image_only_user_message_still_opens_a_turn_with_its_cost():
+    """A user message with no text (an image sent alone) yields no ``"user"`` item at all; its image
+    item has to open the turn instead, or the heading, the cost line, and the model/effort line all
+    go missing while the header total still counts the turn. Regresses if the turn-opening item's
+    ``message_index`` is only ever stamped on a ``"user"``-typed item."""
+    session = _session(
+        [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "https://ex.test/a.png"}}]}],
+        {
+            "usage": {
+                "0": {"calls": 1, "input_tokens": 50, "output_tokens": 5, "model_seconds": 1.0, "wall_seconds": 1.5}
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert "## Turn 1" in out
+    assert "a.png" in out
+    assert "50" in out, "the turn's own cost must still render, not just the header total"
+
+
+def test_an_image_item_with_a_url_names_it():
+    assert _render_item({"type": "image", "url": "https://ex.test/a.png"}, None) == ["_[image: https://ex.test/a.png]_"]
+
+
+def test_an_image_item_without_a_url_still_renders_a_placeholder():
+    """Not reachable through a real message (``image_refs_of`` only ever returns a non-empty url),
+    but ``replay_items``'s output shape does not guarantee one, so the renderer must not assume it."""
+    assert _render_item({"type": "image", "url": ""}, None) == ["_[image]_"]
+
+
+def test_a_loop_continuation_item_names_the_injected_prompt():
+    session = _session(
+        [
+            {"role": "user", "content": "do it"},
+            {"role": "assistant", "content": "partial"},
+            {"role": "user", "content": "keep going", "provenance": "continuation"},
+            {"role": "assistant", "content": "done"},
+        ]
+    )
+    out = render_markdown(session)
+    assert "[continued: keep going]" in out
+
+
+def test_a_phase_with_detail_shows_both_the_label_and_the_detail():
+    session = _session(
+        [{"role": "user", "content": "plan it"}],
+        {"trace": {"0": [{"label": "Planner", "detail": "round 1", "text": ""}]}},
+    )
+    out = render_markdown(session)
+    assert "**Planner**" in out
+    assert "(round 1)" in out
+
+
+def test_a_phase_with_no_detail_shows_only_the_label():
+    session = _session(
+        [{"role": "user", "content": "plan it"}],
+        {"trace": {"0": [{"label": "Planner", "detail": "", "text": ""}]}},
+    )
+    out = render_markdown(session)
+    assert "**Planner**" in out
+    assert "(" not in out.split("**Planner**")[1].split("\n")[0]
+
+
+def test_an_unrecognized_item_type_gets_a_visible_placeholder_not_silence():
+    """A type ``replay_items`` grows after this renderer was written must still show up as
+    something, rather than vanishing from the export with no trace it was ever there."""
+    assert _render_item({"type": "a-future-type"}, None) == ["_(unrendered item type: a-future-type)_"]
 
 
 # --- cost, delegation, and failure -----------------------------------------------------------
