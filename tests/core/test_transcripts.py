@@ -152,3 +152,19 @@ def test_replay_items_pairs_a_tool_result_with_its_call():
     items = replay_items(messages)
     tools = [item for item in items if item["type"] == "tool"]
     assert [t["response"] for t in tools] == ["contents of b", "contents of a"]
+
+
+def test_replay_items_stamps_each_user_item_with_its_transcript_index():
+    """The key a turn's recorded model, effort, usage, and failure are all stored under.
+
+    An index that misses by one lands on another turn and every one of those lookups silently
+    reports another turn's figures, which is worse than reporting none.
+    """
+    messages = [
+        {"role": "system", "content": "you are helpful"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "a"},
+        {"role": "user", "content": "second"},
+    ]
+    users = [item for item in replay_items(messages) if item["type"] == "user"]
+    assert [item["message_index"] for item in users] == [1, 3]

@@ -341,7 +341,11 @@ def replay_items(
                 pending_failure = (failure[str(index)], ts)
             text = message_text(message.get("content"))
             if text:
-                add({"type": "user", "text": text}, ts)
+                # Stamped with this message's position in the transcript, the key record_turn_provenance
+                # writes a turn's model, effort, usage, and failure under. A caller (the Markdown export)
+                # joins on this instead of deriving the index itself, which is how the off-by-one
+                # resolve_user_index's docstring warns about would come back in a second place.
+                add({"type": "user", "text": text, "message_index": index}, ts)
             for url in image_refs_of(message.get("content")):  # uploaded images, replayed under the bubble
                 add({"type": "image", "url": url, "from": "user"}, ts)
             events = subagent.get(str(index), [])
