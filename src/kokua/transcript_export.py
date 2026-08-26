@@ -227,20 +227,25 @@ def _sum_usage(records: list[dict]) -> dict:
     already knows how to render.
 
     Mirrors ``TurnMetrics._totals``'s own rule one level up: a token figure is summed only from the
-    records that reported one, and the header must not claim a total more complete than what was
-    actually measured.
+    records that reported one. ``reported_calls`` is summed too and carried into the total, which is
+    what lets ``_format_tokens`` qualify the header's figure the same way it qualifies a turn's own:
+    without it, a conversation of five unmeasured calls and one measured one would sum to "six calls,
+    the one measured call's tokens" with no caveat at all, stating a partial figure as complete.
     """
     total = {
         "calls": sum(record.get("calls", 0) for record in records),
         "model_seconds": round(sum(record.get("model_seconds", 0.0) for record in records), 1),
         "wall_seconds": round(sum(record.get("wall_seconds", 0.0) for record in records), 1),
     }
-    input_figures = [record["input_tokens"] for record in records if record.get("input_tokens") is not None]
-    output_figures = [record["output_tokens"] for record in records if record.get("output_tokens") is not None]
-    if input_figures:
-        total["input_tokens"] = sum(input_figures)
-    if output_figures:
-        total["output_tokens"] = sum(output_figures)
+    reported_calls = sum(_reported_calls(record) for record in records)
+    if reported_calls:
+        total["reported_calls"] = reported_calls
+        input_figures = [record["input_tokens"] for record in records if record.get("input_tokens") is not None]
+        output_figures = [record["output_tokens"] for record in records if record.get("output_tokens") is not None]
+        if input_figures:
+            total["input_tokens"] = sum(input_figures)
+        if output_figures:
+            total["output_tokens"] = sum(output_figures)
     return total
 
 
@@ -300,6 +305,10 @@ def _render_subagent(events: list[dict], max_payload_chars: Optional[int]) -> li
     generated text are arbitrary model output exactly like a tool result, so they get the same
     fencing and capping: an answer containing its own code fence must not break the rest of the
     document, and a long one must not bury the turn that spawned it.
+
+    Only ever called on a spawn's events (grouped by id in ``_render_subagent_run``); a workflow
+    reviewer's id-less verdict round is a different shape entirely and goes through
+    :func:`_render_verdict` instead.
     """
     create = events[0]
     role = create.get("role", "subagent")
@@ -317,30 +326,49 @@ def _render_subagent(events: list[dict], max_payload_chars: Optional[int]) -> li
         lines.append("_" + ", ".join(details) + "_")
     for event in events[1:]:
         append = event.get("append")
-        if append is not None:
-            kind = append.get("kind")
-            text = _capped(append.get("text", ""), max_payload_chars)
+        if append is None:
+            continue
+        kind = append.get("kind")
+        lines.append("")
+        if kind == "tool":
+            lines.extend(_render_tool(append, max_payload_chars))
+        elif kind == "reasoning":
+            lines.append("**Reasoning:**")
             lines.append("")
-            if kind == "tool":
-                lines.extend(_render_tool(append, max_payload_chars))
-            elif kind == "reasoning":
-                lines.append("**Reasoning:**")
-                lines.append("")
-                lines.append(_fenced(text))
-            elif kind == "answer":
-                lines.append(_fenced(text))
-            elif kind == "error":
-                lines.append("**Error:**")
-                lines.append("")
-                lines.append(_fenced(text))
-        elif event.get("issues"):
-            # A workflow reviewer's verdict round, told apart from a spawn by having no "task" on
-            # its create event (see ``_turn_cost_blocks``): it carries no "append" of its own, but
-            # its issues are the whole point of the round and must not be silently dropped just
-            # because they arrive shaped differently from a spawn's chunks.
+            lines.append(_fenced(_capped(append.get("text", ""), max_payload_chars)))
+        elif kind == "answer":
+            lines.append(_fenced(_capped(append.get("text", ""), max_payload_chars)))
+        elif kind == "error":
+            lines.append("**Error:**")
             lines.append("")
-            lines.append(f"**Issues:** {_capped(str(event['issues']), max_payload_chars)}")
+            lines.append(_fenced(_capped(append.get("text", ""), max_payload_chars)))
     status = events[-1].get("status")
+    if status:
+        lines.append("")
+        lines.append(f"_status: {status}_")
+    return lines
+
+
+def _render_verdict(event: dict, max_payload_chars: Optional[int]) -> list[str]:
+    """One workflow reviewer's verdict round as its own card.
+
+    ``planning/runner.py``'s ``_verdict_event`` persists a round as one complete, id-less record
+    (``role``, ``status``, ``issues``, ``round``) rather than a lifecycle to reassemble: there is no
+    create-then-chunks-then-terminal sequence here, which is why ``_render_subagent_run`` hands this
+    function exactly one event at a time instead of grouping several together. ``issues`` is a list
+    (empty on an approved round), rendered as its own bullet per item; each item is capped like any
+    other payload, since a reviewer's issue text is free-form and could in principle be large.
+    """
+    role = event.get("role", "reviewer")
+    round_ = event.get("round")
+    heading = f"**Reviewer ({role})" + (f", round {round_ + 1}" if isinstance(round_, int) else "") + ":**"
+    lines = [heading]
+    issues = event.get("issues") or []
+    if issues:
+        lines.append("")
+        for issue in issues:
+            lines.append(f"- {_capped(str(issue), max_payload_chars)}")
+    status = event.get("status")
     if status:
         lines.append("")
         lines.append(f"_status: {status}_")
@@ -405,29 +433,47 @@ def _render_item(item: dict, max_payload_chars: Optional[int]) -> list[str]:
 
 
 def _render_subagent_run(items: list[dict], start: int, max_payload_chars: Optional[int]) -> tuple[list[str], int]:
-    """The contiguous run of ``subagent`` items starting at ``start``, as one card per spawn id.
+    """The contiguous run of ``subagent`` items starting at ``start``, as one card per spawn (or
+    per reviewer verdict round).
 
     ``replay_items`` emits a turn's whole set of spawn events together, right after its user item
     and before any of the turn's own assistant output, so they always arrive as one contiguous run;
     but several ids can interleave within that run (concurrent spawns append to one shared list in
-    whatever order they actually produced something), so grouping has to be by id, not by position.
+    whatever order they actually produced something), so a spawn's events are grouped by ``id``
+    rather than by position.
+
+    A workflow reviewer's verdict round has no ``id`` at all (``planning/runner.py``'s
+    ``_verdict_event`` persists "the persisted (id-less) form of a reviewer verdict", by its own
+    docstring): every such event is already a complete, standalone record, never a fragment of a
+    lifecycle to reassemble. Grouping those by their shared, absent id would merge unrelated rounds
+    (even rounds from two different reviewers) into one mislabeled card and drop every round but the
+    last, so each id-less event becomes its own card instead of joining any group.
+
     Returns the rendered lines and the index of the first item past the run.
     """
     groups: dict[str, list[dict]] = {}
-    order: list[str] = []
+    order: list[list[dict]] = []
     index = start
     while index < len(items) and items[index]["type"] == "subagent":
         event = items[index]
         spawn_id = event.get("id")
-        if spawn_id not in groups:
-            groups[spawn_id] = []
-            order.append(spawn_id)
-        groups[spawn_id].append(event)
+        if spawn_id is None:
+            order.append([event])
+        else:
+            group = groups.get(spawn_id)
+            if group is None:
+                group = []
+                groups[spawn_id] = group
+                order.append(group)
+            group.append(event)
         index += 1
     lines: list[str] = []
-    for spawn_id in order:
+    for group in order:
         lines.append("")
-        lines.extend(_render_subagent(groups[spawn_id], max_payload_chars))
+        if group[0].get("id") is None:
+            lines.extend(_render_verdict(group[0], max_payload_chars))
+        else:
+            lines.extend(_render_subagent(group, max_payload_chars))
     return lines, index
 
 

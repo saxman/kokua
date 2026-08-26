@@ -332,6 +332,39 @@ def test_totals_across_the_conversation_appear_in_the_header():
     assert "30 out" in header
 
 
+def test_the_headers_total_is_qualified_when_some_turns_measured_nothing():
+    """One turn made 5 calls a local provider never reported tokens for; another turn made 1
+    measured call. Six calls happened, one was measured, and summing the two turns' calls while
+    dropping reported_calls would let the single measured call's figure stand in for the whole
+    conversation's, unqualified: the same rule that keeps a per-turn figure from presenting a
+    partial sum as complete has to hold one level up, in the header total, or it isn't a rule."""
+    session = _session(
+        [
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "a"},
+            {"role": "user", "content": "two"},
+            {"role": "assistant", "content": "b"},
+        ],
+        {
+            "usage": {
+                "0": {"calls": 5, "model_seconds": 5.0, "wall_seconds": 6.0},
+                "2": {
+                    "calls": 1,
+                    "reported_calls": 1,
+                    "input_tokens": 100,
+                    "output_tokens": 10,
+                    "model_seconds": 1.0,
+                    "wall_seconds": 2.0,
+                },
+            }
+        },
+    )
+    out = render_markdown(session)
+    header = out.split("## Turn 1")[0]
+    assert "6 model calls" in header or re.search(r"\b6\b\s*(model )?calls?", header)
+    assert "1 of 6" in header, "the total must be qualified, not presented as a complete six-call figure"
+
+
 def test_a_conversation_with_no_usage_omits_totals_rather_than_printing_zeros():
     session = _session([{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hey"}])
     out = render_markdown(session)
@@ -469,25 +502,59 @@ def test_a_sub_agent_answer_containing_a_fence_does_not_break_the_document():
     assert "````" in out
 
 
-def test_a_reviewer_verdict_card_renders_without_being_mistaken_for_a_spawn():
-    """A workflow reviewer's verdict card shares the "subagent" item type with a real spawn but
-    carries no "task" on its create event, which is the same test channels/web.py uses to tell the
-    two apart. It still has to render (its issues are the whole point of the round) and must not
-    trip the uncounted-delegation note, since no delegation happened at all."""
+def test_a_reviewer_verdict_round_renders_its_issues():
+    """A workflow reviewer's verdict shares the "subagent" item type with a real spawn but is a
+    different shape entirely: planning/runner.py's ``_verdict_event`` persists it as
+    ``{"role", "status", "issues": [...], "round"}`` with **no** "id" at all ("the persisted
+    (id-less) form of a reviewer verdict, for replay", per that function's own docstring). It has to
+    render (its issues are the whole point of the round) and must not trip the uncounted-delegation
+    note, since no delegation happened at all."""
+    session = _session(
+        [{"role": "user", "content": "plan it"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["skips error handling"], "round": 0}]
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert "skips error handling" in out
+    assert "not counted" not in out.lower()
+
+
+def test_an_approved_verdict_with_no_issues_still_renders():
+    """An approved round's ``issues`` list is empty, not absent; the card must say it approved
+    rather than rendering nothing (or breaking on an empty list where text was expected)."""
+    session = _session(
+        [{"role": "user", "content": "plan it"}, {"role": "assistant", "content": "done"}],
+        {"subagent": {"0": [{"role": "Plan reviewer", "status": "approved", "issues": [], "round": 0}]}},
+    )
+    out = render_markdown(session)
+    assert "approved" in out.lower()
+
+
+def test_multiple_id_less_verdict_rounds_in_one_turn_each_get_their_own_card():
+    """Every round is already a complete, standalone record (there is no lifecycle to reassemble,
+    unlike a spawn's create/chunks/terminal sequence), and none of them carries an id. Grouping by
+    id would put every id-less event in the same bucket and collapse two rounds of one reviewer
+    plus one round of another into a single mislabeled card, discarding two of the three verdicts."""
     session = _session(
         [{"role": "user", "content": "plan it"}, {"role": "assistant", "content": "done"}],
         {
             "subagent": {
                 "0": [
-                    {"id": "r1", "role": "critic", "status": "running"},
-                    {"id": "r1", "status": "rejected", "issues": "the plan skips error handling"},
+                    {"role": "Plan reviewer", "status": "rejected", "issues": ["missing rollback plan"], "round": 0},
+                    {"role": "Plan reviewer", "status": "approved", "issues": [], "round": 1},
+                    {"role": "Result reviewer", "status": "rejected", "issues": ["unverified claim"], "round": 0},
                 ]
             }
         },
     )
     out = render_markdown(session)
-    assert "the plan skips error handling" in out
-    assert "not counted" not in out.lower()
+    assert "missing rollback plan" in out
+    assert "unverified claim" in out
+    assert out.count("Plan reviewer") == 2
+    assert out.count("Result reviewer") == 1
 
 
 def test_a_failed_turn_carries_its_reason_after_the_output_it_cut_short():
