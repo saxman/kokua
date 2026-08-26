@@ -41,7 +41,14 @@ def test_the_shipped_agents_give_their_workers_the_tools_they_declare(tmp_path):
     resolve to actual tools on the workers the entry agent delegates to."""
     worker_tools = {fn.__name__ for spec in _specs(_config(tmp_path)).values() for fn in spec["tools"]}
     # The groups the shipped workers declare are present...
-    assert {"get_weather", "read_file", "calculate", "get_current_date_and_time", "convert_time"} <= worker_tools
+    assert {
+        "get_weather",
+        "read_file",
+        "calculate",
+        "run_command",
+        "get_current_date_and_time",
+        "convert_time",
+    } <= worker_tools
     # ...and the generative toolsets, which no shipped agent names and nothing adds in code, are not.
     assert "generate_image" not in worker_tools
 

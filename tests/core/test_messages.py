@@ -5,7 +5,7 @@ The image-rewriting half of this module is covered by tests/test_images.py.
 
 from __future__ import annotations
 
-from kokua.core.messages import derive_title, message_text
+from kokua.core.messages import derive_title, first_user_text, message_text
 
 
 def test_message_text_reads_a_plain_string():
@@ -56,3 +56,15 @@ def test_derive_title_is_bounded_and_single_line():
     title = derive_title([{"role": "user", "content": long_first_turn + "\nsecond line"}])
     assert title and len(title) < len(long_first_turn)
     assert "\n" not in title
+
+
+def test_first_user_text_is_the_whole_message_the_title_truncates():
+    """The generated title is written from the message, not from the 40-character placeholder."""
+    long_message = "plan my week " * 10
+    messages = [{"role": "user", "content": long_message}]
+    assert first_user_text(messages) == long_message.strip()
+    assert derive_title(messages) == first_user_text(messages)[:40]
+
+
+def test_first_user_text_is_none_without_a_user_message():
+    assert first_user_text([{"role": "assistant", "content": "hi"}]) is None

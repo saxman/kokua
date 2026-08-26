@@ -52,6 +52,19 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.25.0 or newer
   rest streams into the bubble replay left open. The record is dropped once the turn reaches the store,
   so nothing is shown twice. Unattended scheduled turns record the same way, so switching into a running
   task shows the sub-agent work it has done.
+- **Conversations are titled by the model.** The first user message, truncated, is the title the
+  moment a conversation has one; a background call then asks the model the conversation runs on for a
+  real one (`core/titles.py`: a fresh context-free client, no tools, no reasoning) and the sidebar
+  updates again when it lands. Best-effort throughout: an endpoint that is down, a model string naming
+  nothing, or an answer that cleans up to nothing all leave the truncated title in place, silently.
+  The write is guarded, so a conversation deleted while the model was writing is not resurrected (and
+  anything that changes the title in the meantime wins), and it takes that conversation's own turn
+  slot, since the store saves whole sessions. Shutdown cancels a title still in flight rather than
+  waiting on an endpoint. Scheduled tasks keep the task name their conversations are minted with.
+  `[assistant] generate_titles` (default `true`) turns it off, leaving the truncated title; it is hot,
+  so the change applies to the next conversation with no restart, and it is the one entry in
+  `CORE_RUNTIME_SETTINGS`, since no capability owns it. Which model writes the title is not
+  configurable: the conversation already answers that.
 - **`/stop`** cancels an in-flight reply and keeps the partial turn so the conversation continues (the
   web UI has a Stop button for the same). Built on AIMU's `aio.RunHandle`; reactive turns run as
   background tasks, so the channel keeps reading mid-turn -- which is also what lets a web approval
@@ -399,6 +412,45 @@ collected into the wheel and importable by name).
 **`mcp-admin` is now `mcp`**, since a toolset's file name is its name. A `tools` list saying `"mcp-admin"`
 fails startup on the unknown name.
 
+**The `compute` toolset now carries a shell tool, `run_command`, alongside `calculate` and
+`execute_python`.** It runs a command line through `/bin/sh -c` and returns the exit code with stdout
+and stderr labelled separately; a nonzero exit comes back as output rather than an error, since `pytest`
+exits 1 with the answer on stdout. The timeout is per call, defaulting to 30 seconds and clamped to 600.
+The shipped `[agents.coder]` is the only agent declaring `compute`, and its `system_message` already told
+it to run "Python, shell, or calculations," which is true for the first time; the toolset module's
+identical docstring claim was equally aspirational and is now accurate. **It arrives gated**:
+`config.example.toml` adds `run_command` next to `execute_python` in `[security].confirm_tools`, so a
+command reaches you for approval before it runs, including one a sub-agent asked for, since a worker's
+gated call routes to the parent's gate rather than running unattended. A `config.toml` scaffolded before
+this release still gates `execute_python` alone; add `run_command` to it by hand. **The reviewer does not
+get it.** `workflows/critics.py` names `builtin.calculate` individually rather than taking the whole
+`compute` group, precisely so a future widening of that group cannot reach an agent with nobody to ask
+for approval, and `tests/workflows/planning/test_reviewers.py` now asserts the absence by name rather
+than relying on a set intersection staying empty. Needs `aimu>=0.24.0`, which is what moved the floor
+there: `builtin.make_command_tool` and `run_command`'s membership in `builtin.compute` are both new in
+that release, and the startup preflight's capability probe moved to `make_command_tool`, a plain name
+lookup, since the capability and its handle are the same object.
+
+**`[compute] command_env_passthrough`** names, comma separated, which environment variables a
+`run_command` child may see on top of a fixed allowlist (`PATH`, `HOME`, the locale and temp variables,
+plus `SHELL`, `TERM`, `TZ`, `USER`, `LOGNAME`). Nothing else reaches the child, API keys included, which
+is what stops `run_command("env")` lifting a credential into the model's context on a machine whose
+launcher sources a `.env`; the same default makes `gh`, `ssh`, and `git push` over ssh fail, which is the
+policy working as intended, and naming the variable here is how you grant it back. It is a string rather
+than a list because a toolset setting is a string, an int, or a bool, and it is cold rather than hot
+because the value is baked into the tool's closure when an agent is built; a hot flag doing nothing until
+a restart would be worse than a cold one that says so up front. The key is also locked by default in
+`[security].locked_config_keys`, added beside `email.to` rather than matched by an existing pattern,
+since without it the assistant could name one of its own credentials there and read it back out of a
+command's environment. **Neither execution tool is a sandbox, and `run_command` is one step less of one
+than `execute_python`:** a shell string reaches a credential sitting in a file with no code for anyone
+to read first, and process signalling is unconfined either way. `run_command` also carries no memory
+cap, unlike `execute_python`'s 512 MB address-space limit, since that cap would break compilers and
+test suites and a shell child's own cap would need `preexec_fn`, which is neither portable nor
+thread-safe. The approval gate is the control.
+`tests/toolsets/test_compute.py`, `tests/core/test_build.py`, and `tests/workflows/planning/test_reviewers.py`
+cover it.
+
 The four below are Kokua's own standalone capabilities, needing nothing but `AssistantConfig`. They are
 the shortest worked examples of the shape: one file, one `TOOLSET`, one entry-point line.
 
@@ -597,10 +649,11 @@ alone. The case that does cost something is a configured MCP server, which conne
 - **Reviewers are tool-using and grounded.** Each runs a bounded tool-calling assessment over a curated
   verification toolset and then extracts its typed verdict in a follow-up structured call. The toolset
   is web lookup, `calculate`, and the current date and time; it deliberately excludes the user's memory
-  and documents, skill authoring, MCP mutation, and `execute_python` -- a reviewer cannot be
-  approval-gated, since an autonomous critic has nobody to ask mid-review, so it is given nothing that
-  would need a gate. Both prompts warn that the reviewer's own knowledge may be stale, that disagreement
-  with memory is not evidence of fabrication, and that a suspected inaccuracy must be verified with
+  and documents, skill authoring, MCP mutation, and both execution tools, `execute_python` and
+  `run_command` -- a reviewer cannot be approval-gated, since an autonomous critic has nobody to ask
+  mid-review, so it is given nothing that would need a gate. Both prompts warn that the reviewer's own
+  knowledge may be stale, that disagreement with memory is not evidence of fabrication, and that a
+  suspected inaccuracy must be verified with
   tools before flagging. The result reviewer is additionally shown an Evidence section -- the tool
   results the agent actually retrieved -- so it judges against real sources.
 - **Verbose trace ("Show all reasoning")**, off by default: turns a planned turn into a labeled, live
@@ -919,7 +972,7 @@ notice on startup.
   model you configured running code you approved).
 - **Tool approval.** Configured risky tools require confirmation before each call -- terminal `y/N`, web
   Allow/Deny -- built on AIMU's `ToolApproval` gate. The default set is `add_skill_script`,
-  `add_mcp_server`, `execute_python`, and `update_config`; adjust with `[security] confirm_tools` or
+  `add_mcp_server`, `execute_python`, `run_command`, and `update_config`; adjust with `[security] confirm_tools` or
   `--confirm-tools` (empty disables). Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
   are currently viewing. The reply is routed through the single channel reader, so it is safe alongside
@@ -953,10 +1006,15 @@ notice on startup.
   on and takes that surface's shape, which is why it has moved several times and has been a
   set-membership check, a plain name lookup (the `resolve_default_text_model` export, the shape to hope
   for: the capability *is* the exported name), and a signature check -- `SkillManager(include=...)`, then
-  `SkillAgent(script_env=...)`, then `aio.WebChannel(stream_thinking=...)`, and today
+  `SkillAgent(script_env=...)`, then `aio.WebChannel(stream_thinking=...)`, the rename that carried
+  the default flip Kokua relies on for reasoning and tool calls to reach a front end at all. A plain
+  name lookup on `aimu.tools.builtin.make_command_tool`, the factory behind `[compute]
+  command_env_passthrough` where the capability and its handle are the same object, was the surface
+  until 0.25.0, when it gave way to a signature check again: today it is
   `make_async_subagent_tool(events=...)`, the parameter that lets a spawned sub-agent's model turns
-  reach the sink the delegating turn opened. It covers one surface at a time by design; every earlier
-  release's capabilities are the floor's job.
+  reach the sink the
+  delegating turn opened. It covers one surface at a time by design; every earlier release's
+  capabilities are the floor's job.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.

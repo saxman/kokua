@@ -39,7 +39,9 @@ from kokua.config import AssistantConfig
 from kokua.core.conversations import ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
+from kokua.core.messages import first_user_text
 from kokua.core.subagents import SubagentReporter
+from kokua.core import titles
 from kokua.mcp.auth import OAuthSettings
 from kokua.mcp.servers import ServerConnection, reconnect_mcp_servers
 from kokua.core.settings_runtime import SettingsApplier
@@ -140,7 +142,12 @@ class Assistant:
             decide=self._human.decide,
             push_conversations=self._maybe_push_conversations,
             delete_conversation=self.delete_conversation,
+            spawn_title=self._spawn_title,
         )
+        # The background title writers still in flight (see `core/titles.py`). Held so shutdown can
+        # end them: a task that outlives `self._store.close()` writes to a closed file, out of a task
+        # nobody is watching -- the same failure invariant 7 in `core/turns.py` describes for turns.
+        self._title_tasks: set[asyncio.Task] = set()
 
     @classmethod
     async def create(
@@ -443,6 +450,47 @@ class Assistant:
         """If the channel supports it, send a refreshed conversation list (e.g. after a new title)."""
         await self._ui.push_conversations(self.list_conversations())
 
+    def _spawn_title(self, conversation_id: str) -> None:
+        """Start writing a generated title for a conversation that just derived a placeholder one.
+
+        In the background, deliberately: the reply is what the user is waiting for, and a title is
+        worth neither a round-trip added to the end of their first turn nor a failure they have to
+        read about. It runs outside the turn's gate hold (a separate task), which is what lets
+        `ConversationBook.retitle` take that conversation's slot for the write.
+
+        `[assistant] generate_titles` is read here rather than held anywhere, which is what makes it
+        hot: the next conversation asks again.
+        """
+        if not self._config.generate_titles:
+            return
+        task = asyncio.create_task(self._write_title(conversation_id))
+        self._title_tasks.add(task)
+        task.add_done_callback(self._title_tasks.discard)
+
+    async def _write_title(self, conversation_id: str) -> None:
+        """Ask the model for a title for `conversation_id` and, if it answers, show it.
+
+        Nothing awaits this, so nothing escapes it: an error here would surface only as an unretrieved
+        exception on the event loop, which is the rule invariant 6 in `core/turns.py` states for the
+        other work no user is waiting on. `titles.summarize_title` already handles its own failures;
+        what this catches is everything around it, including a `model_for` that resolves to nothing on
+        a machine with no model configured.
+        """
+        try:
+            session = self._book.get(conversation_id)
+            placeholder = session.metadata.get("title") or ""
+            opening = first_user_text(session.messages)
+            if not placeholder or not opening:
+                return
+            title = await titles.summarize_title(self._config.model_for(self._config.entry_agent), opening)
+            if title and title != placeholder:
+                if await self._book.retitle(conversation_id, title, replacing=placeholder):
+                    await self._maybe_push_conversations()
+        except Exception:
+            logger.warning(
+                "Could not title a conversation; keeping the one derived from its first message", exc_info=True
+            )
+
     async def run(self) -> None:
         """Serve the channel and run the scheduler concurrently until the channel closes."""
         try:
@@ -460,6 +508,15 @@ class Assistant:
                 handle.cancel()
             if turns:
                 await asyncio.gather(*(handle.task for handle in turns), return_exceptions=True)
+            # Titles go the same way, and are cancelled rather than awaited: a title is disposable and
+            # the call behind it is a model request, so waiting one out would let an unresponsive
+            # endpoint hold up the whole shutdown. What must not happen is the task outliving the
+            # store it writes to. After the turns, not before: a cancelled turn still persists on its
+            # way down, so it can spawn a title task from inside the drain above.
+            for task in list(self._title_tasks):
+                task.cancel()
+            if self._title_tasks:
+                await asyncio.gather(*list(self._title_tasks), return_exceptions=True)
             for conn in self._mcp_servers:
                 try:
                     await conn.client.aclose()

@@ -182,7 +182,20 @@ def _holds_no_report(session: Session) -> bool:
 
 
 class TurnRunner:
-    def __init__(self, book, ui, gate, config, *, tracker, decide, push_conversations, delete_conversation, state=None):
+    def __init__(
+        self,
+        book,
+        ui,
+        gate,
+        config,
+        *,
+        tracker,
+        decide,
+        push_conversations,
+        delete_conversation,
+        spawn_title,
+        state=None,
+    ):
         self._book = book
         # Where a firing registers itself while it runs, so a stop can reach it. The reactive path's own
         # entries are added by the serve loop, which owns the handle it starts.
@@ -197,6 +210,10 @@ class TurnRunner:
         # The assistant's own delete, not the book's: it also abandons a pending approval and switches
         # the view away, which matters when a firing prunes the run the user is reading.
         self._delete_conversation = delete_conversation
+        # Starts the background write of a generated title, once a conversation has derived its
+        # placeholder one. The assistant's, because the task outlives this turn and shutdown has to be
+        # able to end it; all this module knows is the moment a conversation first gets a title.
+        self._spawn_title = spawn_title
         # Shared toolset state, passed through to a workflow's context. Assigned after construction by
         # the composition root, which builds it later (see Assistant.create).
         self.state = state
@@ -698,3 +715,6 @@ class TurnRunner:
         self._ui.end_catch_up(conversation_id)
         if title_derived:
             await self._push_conversations()
+            # After the push, not instead of it: the truncated title shows now and the generated one
+            # replaces it (with a push of its own) whenever the model answers.
+            self._spawn_title(conversation_id)

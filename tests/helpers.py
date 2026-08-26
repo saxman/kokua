@@ -25,8 +25,8 @@ def core_table() -> SettingsTable:
     not about a contributed setting. A test that needs one uses ``build_settings_table()``, or builds its
     own table with the entries it needs.
 
-    Empty today, since ``CORE_RUNTIME_SETTINGS`` is: nothing in Kokua's own core is runtime-mutable now
-    that the display flags are gone. A test that needs a hot key rather than a core-only *schema* wants
+    Holds Kokua's own runtime settings, which today is ``[assistant].generate_titles`` and nothing else.
+    A test that needs a hot key it can set freely, rather than a core-only *schema*, wants
     :func:`hot_table` instead.
     """
     return SettingsTable(CORE_RUNTIME_SETTINGS)
@@ -144,3 +144,15 @@ class BlockingModelClient(MockAsyncModelClient):
         await self.release.wait()
         async for chunk in super()._chat_streamed(user_message, generate_kwargs, use_tools, images=images):
             yield chunk
+
+
+async def settle_titles(assistant) -> None:
+    """Await the background title tasks a turn spawned (see ``core/titles.py``).
+
+    A generated title lands after the turn that triggered it has returned, so a test asserting on one
+    has to wait for it. Production waits for nothing here: shutdown cancels these rather than blocking
+    on an endpoint.
+    """
+    pending = list(assistant._title_tasks)
+    if pending:
+        await asyncio.gather(*pending)

@@ -295,6 +295,35 @@ class ConversationBook:
         self._store.save(session)
         return title_set
 
+    async def retitle(self, conversation_id: str, title: str, *, replacing: str) -> bool:
+        """Swap ``replacing`` for *title* on a conversation. Returns whether it wrote.
+
+        The write for a generated title (``core/titles.py``), which lands a moment after the
+        placeholder ``persist`` derived. Both guards are load-bearing, and each covers a race that
+        the seconds-long model call makes ordinary rather than theoretical:
+
+        ``replacing`` is the title this call was built to replace, so whatever is in that slot now
+        wins instead. Nothing renames a conversation today, so the case that actually happens is the
+        deleted one, and that one is a silent resurrection without this: ``store.get`` answers a
+        missing key with a fresh empty ``Session``, so a blind write would re-create the row the
+        delete removed, holding a title and nothing else. It is also the guard already standing
+        wherever a rename lands later.
+
+        Held under this conversation's own turn slot, like :meth:`delete` and for the same bounded
+        reason (see ``core/turn_gate.py``): the store saves whole sessions, so a read-modify-write
+        racing the next turn's ``persist`` would revert that turn's messages. Being one
+        ``gate.turn`` makes this bound by invariant 1 in ``core/turns.py``, so the caller must not
+        already hold a turn: the title task runs outside the turn that spawned it, which is what
+        makes this safe *and* what makes it wait for that turn to finish.
+        """
+        async with self._gate.turn(conversation_id):
+            session = self._store.get(conversation_id)
+            if session.metadata.get("title") != replacing:
+                return False
+            session.metadata["title"] = title
+            self._store.save(session)
+            return True
+
     def record_workflow_metadata(self, result, conversation_id: str) -> None:
         """Record a workflow turn's sub-agent cards and verbose trace under the turn's user-message
         index, so reload replays them. No-op when the turn did not commit (e.g. a rejected plan)."""

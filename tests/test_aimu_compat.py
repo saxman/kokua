@@ -49,8 +49,8 @@ def test_a_missing_aimu_is_reported_as_such(monkeypatch):
 
 def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
     """The floor moves with the capabilities Kokua uses, so the previous release must fail."""
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.22.1")
-    with pytest.raises(AimuVersionError, match="0.22.1"):
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.23.0")
+    with pytest.raises(AimuVersionError, match="0.23.0"):
         require_aimu()
 
 
@@ -117,12 +117,13 @@ def test_the_probe_checks_the_spawn_factory_carries_an_events_parameter():
 
 
 def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
-    """A keyword argument is one of the three shapes, and the one in force today.
+    """A keyword argument is one of the three shapes, and is the one in force today (0.25.0's `events`).
 
     Exercised here against a stand-in rather than the live surface, because the point is the *negative*:
     where a capability is a constructor parameter, a name lookup passes over an older signature that has
-    the class and not the argument. ``SkillManager(include=...)`` was this shape for 0.14.0 and
-    ``SkillAgent(script_env=...)`` for 0.20.0, so the double keeps its historical name.
+    the class and not the argument. ``SkillManager(include=...)`` was this shape for 0.14.0,
+    ``SkillAgent(script_env=...)`` for 0.20.0, and ``WebChannel(stream_thinking=...)`` for 0.23.0, so the
+    quadruple keeps its historical name.
     """
 
     class SkillManagerWithoutInclude:

@@ -12,6 +12,11 @@ from typing import Optional
 from kokua import images
 
 
+# How much title a sidebar has room for: the placeholder is truncated to it and a generated title
+# (``core/titles.py``, which imports it) is bounded by it, so the two cannot disagree.
+TITLE_MAX = 40
+
+
 def message_text(content) -> str:
     """Plain text of a message's content (a string, or the text blocks of a multimodal list)."""
     if isinstance(content, str):
@@ -21,14 +26,29 @@ def message_text(content) -> str:
     return ""
 
 
-def derive_title(messages: list[dict]) -> Optional[str]:
-    """A conversation title from the first user message (stripped, truncated), or None."""
+def first_user_text(messages: list[dict]) -> Optional[str]:
+    """The text of the message that opened the conversation, or None if it had none.
+
+    Split out from :func:`derive_title` rather than inlined there because the two callers want
+    different amounts of it: the placeholder is a truncation of this, while the generated title
+    (``core/titles.py``) is written from the whole message.
+    """
     for message in messages:
         if message.get("role") == "user":
             text = message_text(message.get("content")).strip()
             if text:
-                return text[:40]
+                return text
     return None
+
+
+def derive_title(messages: list[dict]) -> Optional[str]:
+    """A conversation title from the first user message (stripped, truncated), or None.
+
+    The immediate placeholder, shown while ``core/titles.py`` writes the real one, and the fallback
+    that stands if that call fails.
+    """
+    text = first_user_text(messages)
+    return text[:TITLE_MAX] if text else None
 
 
 def resolve_user_index(messages: list[dict], base_len: int) -> int:

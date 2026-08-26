@@ -2,9 +2,10 @@
 
 The `test_every_core_runtime_setting_*` tests are the enforcement mechanism for the table's promise:
 adding a core runtime setting is one CORE_RUNTIME_SETTINGS entry, one AssistantConfig field, and one
-web-panel input. They fail loudly if an entry is added without its counterparts. They pass vacuously
-today, since CORE_RUNTIME_SETTINGS is empty -- which is why the core half of the mechanism is exercised
-through `_CORE_DOUBLE` below instead of through a shipped entry.
+documented key in config.example.toml. They fail loudly if an entry is added without its counterparts,
+and the shipped `[assistant].generate_titles` is what they run against. `_CORE_DOUBLE` below stays for
+the cases that need a core entry the test can *break* on purpose (a duplicate, a wrong type), which a
+shipped one cannot be used for.
 """
 
 from __future__ import annotations

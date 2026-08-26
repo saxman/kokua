@@ -34,6 +34,11 @@ concurrent_tools = true
 # Max per-conversation agents kept live in memory; an evicted one rebuilds from persisted state.
 agent_cache_cap = 8
 
+# Have the model write each new conversation's title from the message that opened it, on the model that
+# conversation runs on. Applies immediately (no restart), and update_config may change it. false leaves
+# the title as that message truncated, which is also the fallback whenever the call fails.
+generate_titles = true
+
 # Generation parameters for every agent, per-key overridable by [agents.<name>.generation]. Restart to
 # apply, and keep this sub-table LAST in [assistant] (a plain key after the header would join it).
 # ONLY the keys you set are sent: this tier sits above the model card's tuned profile, so each one set
@@ -59,7 +64,7 @@ agent_cache_cap = 8
 # prompt that never comes is not something you notice. Only what exists at startup can be listed, so a
 # tool the assistant brings in later with add_mcp_server, or one only compose_subagent would build from a
 # toolset no agent names, has to be reachable from an [agents.*] table first. Locked by default.
-confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update_config"]
+confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "run_command", "update_config"]
 
 # Which config keys update_config refuses, so only a hand-edit here changes them. A pattern is
 # "section.key" for one key, "section.*" for a section and every table under it, or "*" for all of
@@ -70,7 +75,14 @@ confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "update
 # key is always locked, whatever the list says, so the assistant cannot unlock itself in one call;
 # everything else below is yours to remove. Removing "agents.*" really does let the assistant
 # rewrite any agent's tools list, and so widen its own reach, on the next restart. Restart to apply.
-locked_config_keys = ["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*"]
+locked_config_keys = [
+    "security.*",
+    "email.to",
+    "paths.data_dir",
+    "agents.*",
+    "scheduling.task.*",
+    "compute.command_env_passthrough",
+]
 
 # Every agent, declared whole, and locked by default (see [security].locked_config_keys below). An
 # agent's `tools` list IS its capability: nothing is added in code, and nothing is implicit, including
@@ -248,3 +260,17 @@ level = "INFO"
 # with `contents: write`, scoped to this repository alone), never this file. Restart to apply.
 # repo = "you/kokua-backup"
 # branch = "main"
+
+[compute]
+# Declared by the `compute` toolset: an agent's `tools` must list "compute" to get calculate,
+# execute_python, and run_command. Both execution tools run as this process's user, so both are in
+# [security].confirm_tools above; neither offers containment, and run_command offers one step less of
+# it, since a shell string reaches a credential in a file with no code to read first. run_command also
+# carries no memory cap, unlike execute_python's 512 MB limit: that cap would break compilers and test
+# suites, and a shell child's own cap would need preexec_fn, which is neither portable nor thread-safe.
+# A command's child sees a small environment allowlist with no API keys in it, which is what stops
+# `run_command("env")` handing the model your credentials, and which also makes gh, ssh, and git push
+# over ssh fail. Name the variables you want admitted, comma separated, to grant one of those back. A
+# list would be the natural shape and is not available: a toolset setting is a string, an int, or a
+# bool. Restart to apply.
+# command_env_passthrough = "SSH_AUTH_SOCK, GH_TOKEN"

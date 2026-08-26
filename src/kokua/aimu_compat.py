@@ -92,10 +92,29 @@ everything this signature check asks, so a recursive delegation could still go u
 without this module raising anything.
 
 The capability was first published as part of a 0.24.0, but that version number collided: AIMU's own
-``main`` branch released a different 0.24.0 first, one carrying an unrelated ``run_command`` tool and
-none of this capability. The branch that added ``events`` rebased past that release and renumbered to
-0.25.0, so an installed 0.24.0 (the real one) fails this probe correctly, exactly as an old checkout
-should, and is not itself a bug in the probe.
+``main`` branch released a different 0.24.0 first, carrying ``make_command_tool`` (the factory behind
+``[compute] command_env_passthrough``) and ``run_command``'s membership in ``builtin.compute``, the
+shell tool the ``compute`` toolset now exposes -- none of which is the ``events`` capability. The branch
+that added ``events`` rebased past that release and renumbered to 0.25.0, so an installed 0.24.0 (the
+real, released one) fails this probe correctly, exactly as an old checkout should, and is not itself a
+bug in it.
+
+AIMU 0.24.0 was this probe's surface for the interval it was current on that other branch alone, before
+the two merged onto 0.25.0. ``make_command_tool`` was the easy shape for the second time running: the
+capability and its handle are the same object, so a name lookup asked precisely the question that
+mattered, and the stricter check available there was declined on purpose. A signature check for
+``env_passthrough`` would have inspected ``probed.__init__``, right for a class and wrong for a plain
+function, so taking it would have taught this probe a fourth shape and dated the checkout no better than
+the name did, since the factory and its only parameter shipped in one commit. That release also carried
+the reverse of the usual problem: two capabilities Kokua depends on, where the better handle belongs to
+the earlier of them. ``make_command_tool`` arrived in the commit that added the tool; ``run_command``'s
+membership in ``builtin.compute``, the widening the ``compute`` toolset actually relies on, arrived in
+the next one, so a sibling parked between those two commits would have passed that probe and still
+handed the ``compute`` toolset no shell tool. Closing that window would have taken a membership check
+over a list of *callables*, matching on ``__name__``, a fourth shape a fifteen-minute window did not
+earn. AIMU 0.24.0 was the surface until 0.25.0's ``events`` took its place in the merged floor;
+``make_command_tool`` and ``run_command`` are now the version floor's job like every other capability
+older than the current probe.
 """
 
 from __future__ import annotations
@@ -117,7 +136,9 @@ MINIMUM_AIMU = (0, 25, 0)
 # checkout for delegation cost to reach a turn's record. What this deliberately misses: a checkout
 # carrying the parameter but not the recursive passthrough (a spawned worker's own spawn tool
 # forwarding `events` to *its* children) would still pass, so a worker that spawns its own worker
-# could go uncounted without this probe raising anything.
+# could go uncounted without this probe raising anything. `make_command_tool` (name lookup, in
+# `aimu.tools.builtin`) was this probe's surface for the interval 0.24.0 was current on its own branch;
+# `events` is newer, and the older capability is the version floor's job now, like everything before it.
 _PROBE_MODULE = "aimu.aio.tools.builtin"
 _PROBE_SYMBOL = "make_async_subagent_tool"
 _PROBE_PARAMETER: Optional[str] = "events"
