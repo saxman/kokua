@@ -246,7 +246,10 @@ def test_conversation_to_frames_interleaves_subagent_after_user():
     messages = [{"role": "user", "content": "do X"}, {"role": "assistant", "content": "done"}]
     subagent = {"0": [{"role": "Plan reviewer", "status": "rejected", "issues": ["x"], "round": 0}]}
     items = conversation_to_frames(messages, subagent=subagent)
-    assert items[0] == {"type": "user", "text": "do X"}
+    # This test is about the subagent card landing right after the user bubble, not about the
+    # bubble's own shape, so it checks type and text rather than the whole dict (which now also
+    # carries a message_index this test has no stake in).
+    assert items[0]["type"] == "user" and items[0]["text"] == "do X"
     assert items[1]["type"] == "subagent" and items[1]["status"] == "rejected"
     assert items[2]["type"] == "message"
 
@@ -299,7 +302,7 @@ def test_conversation_to_frames_replays_verbose_trace_not_committed_answer():
     }
     items = conversation_to_frames(messages, trace=trace)
     assert items == [
-        {"type": "user", "text": "do X"},
+        {"type": "user", "text": "do X", "message_index": 0},
         {"type": "phase", "label": "Planner", "detail": "drafting a plan"},
         {"type": "reasoning", "text": "THE PLAN"},
         {"type": "phase", "label": "Plan reviewer", "detail": "round 1"},
@@ -665,8 +668,10 @@ _CONVERSATION = [
 
 def test_conversation_to_frames_full_replay():
     items = conversation_to_frames(_CONVERSATION)
+    # message_index is 1, not 0: _CONVERSATION's leading system message shifts the user message
+    # one position later, which is exactly the off-by-one the stamping has to get right.
     assert items == [
-        {"type": "user", "text": "what's 2+2?"},
+        {"type": "user", "text": "what's 2+2?", "message_index": 1},
         {"type": "thinking", "text": "adding the numbers"},
         {"type": "message", "text": "4", "proactive": False},
         {"type": "tool", "name": "calc", "arguments": {"x": 2}, "response": "4"},
@@ -740,7 +745,11 @@ def test_conversation_to_frames_matches_results_to_calls_by_id_not_position():
 
 def test_conversation_to_frames_extracts_text_from_content_blocks():
     messages = [{"role": "user", "content": [{"type": "text", "text": "hi"}, {"type": "image", "url": "x"}]}]
-    assert conversation_to_frames(messages) == [{"type": "user", "text": "hi"}]
+    # This is about text extraction from a content-block list, not the item's full shape, so it
+    # checks the type and the extracted text rather than pinning message_index too.
+    items = conversation_to_frames(messages)
+    assert len(items) == 1
+    assert items[0]["type"] == "user" and items[0]["text"] == "hi"
 
 
 def test_conversation_to_frames_empty():
@@ -768,7 +777,10 @@ async def test_web_channel_send_history_emits_single_frame():
     await channel.send_history(_CONVERSATION)
     assert len(ws.frames) == 1
     assert ws.frames[0]["type"] == "history"
-    assert {"type": "user", "text": "what's 2+2?"} in ws.frames[0]["items"]
+    # This test is about the whole history landing in one frame, not the user item's exact shape,
+    # so it checks for the bubble's type and text rather than a full dict (which now also carries
+    # a message_index this test has no stake in).
+    assert any(item.get("type") == "user" and item.get("text") == "what's 2+2?" for item in ws.frames[0]["items"])
 
 
 async def test_web_channel_send_history_empty_sends_empty_frame():

@@ -5,10 +5,11 @@ This is the artifact you keep: what was said, what was reasoned, what was called
 back, and the model, effort, tokens, and timing behind each turn, in a file you can diff against
 another run or paste into a review.
 
-The reader is a person, so every choice here resolves toward readability. Two rules are
-correctness rather than taste, and both are about not claiming more than was recorded: a figure
-nobody reported prints as "not reported" and never as zero, and a payload that was cut says so.
-The third, fence escalation, is in ``_fenced``.
+The reader is a person, so every choice here resolves toward readability. One rule is correctness
+rather than taste: nothing recorded is invented, so a turn's model or effort is left out entirely
+when it was never recorded, rather than shown as a blank or a made-up default. Tool payload
+rendering, with its own truncation and fence handling for arbitrary output, belongs to a later
+part of this export and is not implemented here.
 
 Pure: it takes a ``Session`` and returns a string. Both front ends and the CLI call it, which is
 why it lives here rather than under ``channels/`` or ``frontends/``, and why it imports neither.

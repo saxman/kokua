@@ -97,7 +97,9 @@ def test_expand_missing_file_left_as_reference(tmp_path):
 def test_conversation_to_frames_emits_user_image_item():
     messages = [_image_message("/images/abc.png")]
     items = conversation_to_frames(messages)
-    assert {"type": "user", "text": "look"} in items
+    # A bubble carrying the message's text, regardless of the message_index it is also stamped with,
+    # which is not what this test is about.
+    assert any(item["type"] == "user" and item["text"] == "look" for item in items)
     assert {"type": "image", "url": "/images/abc.png", "from": "user"} in items
 
 
