@@ -29,7 +29,7 @@ classifiers = [
 # floor for a sibling checkout. This pin is what ships in the wheel and what a PyPI install resolves;
 # [tool.uv.sources] below separately redirects development installs to the sibling checkout.
 dependencies = [
-    "aimu[ollama,openai_compat,memory]>=0.25.0",
+    "aimu[anthropic,ollama,openai_compat,memory]>=0.25.0",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
     # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
     "tomlkit>=0.13",
