@@ -119,6 +119,31 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _serve(app, port: int, started: list) -> str:
+    """Run `app` under uvicorn in a thread and return its base URL, appending it to `started`.
+
+    Shared by both server fixtures below, which differ only in who chooses the port: the reconnect
+    tests need the same port twice, since the page under test holds a URL and a server on a fresh
+    port is a different server as far as the browser is concerned.
+    """
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 10
+    while not server.started and time.time() < deadline:
+        time.sleep(0.05)
+    assert server.started, "uvicorn server did not start in time"
+    started.append((server, thread))
+    return f"http://127.0.0.1:{port}"
+
+
+def _stop(running: list) -> None:
+    for server, thread in running:
+        server.should_exit = True
+        thread.join(timeout=10)
+    running.clear()
+
+
 @pytest.fixture
 def live_server():
     """Factory: start the real web app (backed by a `_SlowClient`) under uvicorn in a thread.
@@ -157,22 +182,36 @@ def live_server():
                 blank_lead=blank_lead,
             ),
         )
-        port = _free_port()
-        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-        thread = threading.Thread(target=server.run, daemon=True)
-        thread.start()
-        deadline = time.time() + 10
-        while not server.started and time.time() < deadline:
-            time.sleep(0.05)
-        assert server.started, "uvicorn server did not start in time"
-        started.append((server, thread))
-        return f"http://127.0.0.1:{port}"
+        return _serve(app, _free_port(), started)
 
     yield start
 
-    for server, thread in started:
-        server.should_exit = True
-        thread.join(timeout=10)
+    _stop(started)
+
+
+@pytest.fixture
+def restartable_server():
+    """Factory: the same app, on a port fixed for the test, that can be stopped and brought back up.
+
+    Yields `(start, stop)`. Both are idempotent enough for the reconnect tests: `start` brings a server
+    up on the fixed port, `stop` takes down whatever is running on it. `$KOKUA_HOME` is the same temp
+    dir across restarts (conftest), so the second server reads the store the first one wrote, which is
+    what makes a reconnected page's resync meaningful rather than a fresh install's.
+    """
+    port = _free_port()
+    running: list[tuple] = []
+
+    def start() -> str:
+        config = AssistantConfig(agents=example_agents(), entry_agent="assistant")
+        app = build_app(config, client_factory=lambda conversation_id: _SlowClient(0.0))
+        return _serve(app, port, running)
+
+    def stop() -> None:
+        _stop(running)
+
+    yield start, stop
+
+    stop()
 
 
 def _open(page, url: str) -> None:
@@ -1152,4 +1191,58 @@ def test_the_sidebar_export_button_downloads_the_conversation_without_navigating
     assert content.startswith("# ")
     assert "remember this for the export test" in content
     # The WebSocket survived the download: the page is still live, not on a blank error page.
+    expect(page.locator("#conv-list li")).to_have_count(1)
+
+
+def test_the_page_reconnects_after_the_server_restarts(page, restartable_server):
+    """Restarting Kokua under an open browser brings the page back on its own.
+
+    The three things a reconnect has to get right, in order: the page says it is retrying rather than
+    just "disconnected", it comes back live once a server answers again, and it repaints rather than
+    duplicating (the server resyncs on every connection, and a `history` frame replaces the transcript,
+    so the retry notice is gone rather than stacked on top of the old view)."""
+    start, stop = restartable_server
+    _open(page, start())
+    page.fill("#msg", "before the restart")
+    page.click("#send")
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
+
+    stop()
+    expect(page.locator(".bubble.notice", has_text="Reconnecting")).to_be_visible(timeout=10_000)
+    expect(page.locator("#msg")).to_be_disabled()
+
+    start()
+    expect(page.locator("#msg")).to_be_enabled(timeout=30_000)
+    expect(page.locator(".bubble.notice", has_text="Reconnecting")).to_have_count(0)
+    # Resynced from the store the first server wrote, not a blank page.
+    expect(page.locator(".bubble.user", has_text="before the restart")).to_have_count(1)
+    # And live again, not merely repainted.
+    page.fill("#msg", "after the restart")
+    page.click("#send")
+    expect(page.locator(".bubble.user", has_text="after the restart")).to_be_visible()
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_have_count(2, timeout=10_000)
+
+
+def test_a_refused_second_tab_does_not_retry(page, live_server):
+    """A tab the one-connection guard refuses stays refused, and says so.
+
+    This is the case retrying would make worse rather than better: the server is up and answering, so
+    every attempt would be refused again and append the refusal a second time, burying the sentence
+    that explains what happened under repetitions of itself. The page tells a refusal from a server
+    that is not up yet by whether anything arrived before the close."""
+    url = live_server(delay=0.0)
+    _open(page, url)
+
+    second = page.context.new_page()
+    try:
+        second.goto(url)
+        expect(second.locator(".bubble", has_text="busy in another tab")).to_be_visible(timeout=10_000)
+        expect(second.locator(".bubble.notice", has_text="Reload the page")).to_be_visible()
+        second.wait_for_timeout(2_000)  # long enough for several backoff attempts, had it retried
+        expect(second.locator(".bubble", has_text="busy in another tab")).to_have_count(1)
+        expect(second.locator("#msg")).to_be_disabled()
+    finally:
+        second.close()
+
+    # The refused tab left the first one's session alone.
     expect(page.locator("#conv-list li")).to_have_count(1)

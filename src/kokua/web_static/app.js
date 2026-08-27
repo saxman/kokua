@@ -626,7 +626,7 @@ function addBubble(cls, text, ts) {
   return el;
 }
 
-function notice(text) { addBubble("notice", text); }
+function notice(text) { return addBubble("notice", text); }
 
 // A collapsed row's label, in three parts: the kind word, the payload (the call with its condensed
 // arguments), and an optional metric. They are separate spans so the payload is the only part that
@@ -840,7 +840,10 @@ function finalizeStreaming() {
 }
 
 const proto = location.protocol === "https:" ? "wss" : "ws";
-const ws = new WebSocket(`${proto}://${location.host}/ws`);
+// Reassigned by connect() on every reconnect, so the `ws.readyState` guards and `ws.send` calls
+// throughout this file reach the current socket rather than a dead one. Opened at the bottom of the
+// file, once the handlers connect() installs are defined.
+let ws;
 
 // The argument portion of a tool call, as a single line. Used as a foldable tool block's body and
 // (wrapped by toolLine) in the approval prompt.
@@ -935,7 +938,8 @@ function renderPhase(label, detail, ts) {
   return f.outer;
 }
 
-ws.onmessage = (event) => {
+function handleFrame(event) {
+  frameReceived = true;
   const frame = JSON.parse(event.data);
   // Blocks are appended in arrival order (thinking -> tool -> answer, possibly several
   // rounds per turn). A tool call or answer token closes any open thinking block.
@@ -1024,6 +1028,9 @@ ws.onmessage = (event) => {
     a.click();
     a.remove();
   } else if (frame.type === "history") {
+    // Also the marker that the server got past building an assistant for this connection, which is
+    // what tells a later close apart from a refusal that never synced (see connect()).
+    synced = true;
     // Replay a conversation (on connect or after switching), reusing the live renderers.
     log.innerHTML = "";  // replace any current transcript
     subagentCards = {};  // fresh view: drop any live sub-agent card references
@@ -1061,7 +1068,7 @@ ws.onmessage = (event) => {
     }
     autoscroll();
   }
-};
+}
 
 // A gated tool needs confirmation: show the call and Allow/Deny buttons. The reply is a plain
 // "y"/"n" frame, which the server routes to the waiting tool call (same path as typing it).
@@ -1149,13 +1156,59 @@ function renderPlanReview(planText, critique) {
   autoscroll();
 }
 
-ws.onopen = () => { input.disabled = false; sendBtn.disabled = false; input.focus(); };
-ws.onclose = () => {
-  notice("Disconnected.");
-  input.disabled = true; sendBtn.disabled = true;
-  setProcessing(false);
-  setWorking(false);
-};
+// Reconnect after a dropped socket, so restarting Kokua does not leave a page that can only be
+// reloaded. The server resyncs the whole view on every connection (conversations, history, settings,
+// tasks) and the "history" frame replaces the transcript, so a reconnected page repaints rather than
+// duplicating what it already showed. What a reconnect does not restore is a turn that was in flight
+// when the socket dropped: the server builds an assistant per connection, so the page comes back to
+// what was persisted, not to the live stream it was watching.
+const RECONNECT_DELAY_MS = 500;
+const RECONNECT_DELAY_MAX_MS = 10000;
+let reconnectDelay = RECONNECT_DELAY_MS;
+let reconnectNotice = null;
+
+// The two flags below separate the ways a socket can close, because only one of them is worth
+// retrying. A server that is not up yet closes having sent nothing, which is the ordinary restart
+// case. A server that answered and refused us sends one message frame and closes without syncing:
+// the one-connection guard's "busy in another tab", or a config error reported in place of a
+// session. Retrying a refusal would thrash and bury its own message under repetitions of itself, so
+// only a connection that synced, or one that never heard from a server at all, reconnects.
+let synced = false;
+let frameReceived = false;
+
+function connect() {
+  synced = false;
+  frameReceived = false;
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onmessage = handleFrame;
+  ws.onopen = () => {
+    reconnectDelay = RECONNECT_DELAY_MS;
+    if (reconnectNotice) {
+      reconnectNotice.remove();
+      reconnectNotice = null;
+    }
+    input.disabled = false;
+    sendBtn.disabled = false;
+    input.focus();
+  };
+  ws.onclose = () => {
+    input.disabled = true;
+    sendBtn.disabled = true;
+    setProcessing(false);
+    setWorking(false);
+    if (frameReceived && !synced) {
+      notice("Disconnected. Reload the page to reconnect.");
+      return;
+    }
+    // One notice for the whole outage, however many attempts it takes, so a long restart does not
+    // fill the transcript with its own retries.
+    if (!reconnectNotice) reconnectNotice = notice("Disconnected. Reconnecting...");
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_DELAY_MAX_MS);
+  };
+}
+
+connect();
 
 // Grow the box with its content up to a cap, then scroll. A one-line <input> made a multi-line
 // message impossible to type at all.

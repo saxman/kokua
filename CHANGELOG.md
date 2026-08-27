@@ -211,6 +211,20 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.25.0 or newer
     lost it to whatever that section set. `[generation]` gets no special handling on the way out: it is now
     an unrecognized section, so a stale one left in a `config.toml` fails to load the way any unknown key
     does, and deleting it is the fix.
+  - **A dropped socket reconnects on its own.** Restarting Kokua under an open browser used to leave a
+    page that said "Disconnected." and could only be recovered by reloading. The page now retries with
+    backoff (500ms doubling to a 10s ceiling, indefinitely) and shows one notice for the whole outage
+    rather than one per attempt. Almost none of the work is on the client: the server already resyncs its
+    whole view on every connection (conversations, history, settings, tasks) and the `history` frame
+    replaces the transcript, so a reconnected page repaints rather than appending a second copy of what it
+    already showed. What a reconnect does not restore is a turn that was in flight when the socket
+    dropped, since the front end builds an `Assistant` per connection: the page comes back to what was
+    persisted, not to the stream it was watching. Two closes are not retried, and the page tells them
+    apart from a restart by whether anything arrived before the close: a server that answered and
+    *refused* sends one message and closes without syncing (the one-connection guard's "busy in another
+    tab", or a config error reported in place of a session), and retrying that would thrash a server that
+    is working while burying its explanation under repetitions of itself, so a refused page says to reload
+    and stops. Nothing having arrived at all is the ordinary restart case, and does retry.
   - Reloading the page replays the prior conversation, reasoning and tool calls included. What was
     streamed live is what is replayed: nothing in the core decides which frames are worth sending, so a
     front end that wants to fold or hide a block does that with the block in hand.

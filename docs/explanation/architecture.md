@@ -799,6 +799,31 @@ in both directions: a disconnect ends the reader, and an unexpected error ends t
 the reader with it, since a reader left running would queue frames into a drain nobody reads, which is the
 same wedge with the halves swapped.
 
+### Reconnecting after a dropped socket
+
+The page opens its socket through a `connect()` function that reassigns the `ws` binding on every
+attempt, so restarting Kokua under an open browser does not leave a page whose only recovery is a reload.
+`ws.onclose` retries with backoff, 500ms doubling to a 10s ceiling and then retrying indefinitely, and
+shows one notice for the whole outage rather than one per attempt.
+
+Almost none of the work is on the client, because the server was already written for this: it resyncs its
+entire view on every connection (`_sync_view` sends the conversation list and the active conversation's
+history, followed by the settings and the tasks), and the page's `history` handler clears the transcript
+before replaying it. So a reconnected page repaints rather than appending a second copy of what it already
+showed, and the retry notice goes out with the rest of the old log.
+
+What a reconnect does *not* restore is a turn that was in flight when the socket dropped. `build_app`
+constructs an `Assistant` per connection and `serve_connection` ties its serve loop to that connection's
+lifetime, so the page comes back to what the turn persisted, not to the stream it was watching.
+
+Two of the ways a socket can close are not worth retrying, and the page tells them apart from a restart by
+whether anything arrived before the close. A server that is not up yet closes having sent nothing, which
+is the ordinary restart case and is exactly what the backoff is for. A server that answered and *refused*
+sends one message frame and closes without ever syncing: the one-connection guard's "busy in another tab",
+or a config error reported in place of a session. Retrying a refusal would thrash a server that is up and
+working, and every attempt would append the refusal again, burying the sentence that explains it under
+repetitions of itself. So a refused page says to reload, and stops.
+
 ### Streaming the answer
 
 `token` frames accumulate into `streamingText`, which is the source of truth; the bubble's DOM is a
