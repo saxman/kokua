@@ -62,3 +62,21 @@ def test_skills_builds_against_a_none_agent_without_complaining(tmp_path):
     names = {fn.__name__ for fn in SKILLS.build(_ctx(tmp_path, agent=None))}
 
     assert names == {"author_skill", "add_skill_script"}
+
+
+def test_documents_guidance_names_the_tools_that_discover_user_supplied_files():
+    """The regression this guards: the guidance used to name only `save_document` and
+    `search_documents`, framing the store as write-then-search -- documents get in because the model
+    put them there. But `documents_path` is a real directory the user can drop files into, so a
+    prompt that never mentions `list_documents` gives the model no reason to look, and it reports an
+    empty store while the files sit on disk."""
+    guidance = DOCUMENTS.guidance
+
+    assert "list_documents" in guidance
+    assert "read_document" in guidance
+
+
+def test_documents_guidance_says_documents_must_be_text():
+    """A PDF in the directory is skipped by the store, so the model has to know to ask for Markdown
+    rather than report the document missing."""
+    assert "text" in DOCUMENTS.guidance.lower()
