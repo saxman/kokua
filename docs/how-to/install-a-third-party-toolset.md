@@ -38,18 +38,37 @@ is the one module in it that does.
 ## Install the package
 
 If you are developing jobme alongside your Kokua checkout, install it as an editable sibling from
-inside Kokua's own checkout:
+inside Kokua's own checkout. There are two ways to do it, and the tradeoff between them is worth
+knowing before you pick one:
+
+```bash
+cd kokua
+uv add --editable ../jobme
+```
+
+`uv add` (recommended) edits this checkout's `pyproject.toml` to record jobme as one of its
+dependencies, so a later `git pull` in Kokua can conflict with that edit. What it buys you is
+durability: `uv sync` performs an exact sync (`uv help sync`) that removes any installed package
+not declared as a dependency, and `uv sync` is the very first command in Kokua's own setup and what
+you run after every pull. Without a declared dependency, the next plain `uv sync` silently
+uninstalls jobme again, and Kokua's next start fails with `agent 'assistant' declares unknown
+toolset 'jobme'`, an error that says nothing about the sync that caused it. This does not make
+Kokua-the-project depend on jobme in any deeper sense: the plugin still arrives purely through the
+entry point described above, so "no code change on Kokua's side" stays true of the code; it is only
+this checkout's dependency list that changed.
+
+The alternative writes nothing to `pyproject.toml` at all:
 
 ```bash
 cd kokua
 uv pip install --editable ../jobme
 ```
 
-`uv pip install` puts the package into Kokua's environment and stops there: it writes nothing to
-`pyproject.toml`, which is what "no code change on Kokua's side" means in practice, not just for the
-entry-point mechanism above but for the install step too. If you would rather have jobme recorded as
-a dependency of your own checkout, `uv add --editable ../jobme` does that, but it edits
-`pyproject.toml` to do it, so a later `git pull` in Kokua can conflict with your edit.
+`uv pip install` puts the package into Kokua's environment and stops there, which is attractive if
+you would rather not touch `pyproject.toml`. The cost is that jobme then exists only in the
+environment, not in anything `uv sync` reads, so the very next plain `uv sync` removes it. If you
+use this form, either reinstall after every sync or run `uv sync --inexact`, which keeps packages
+that are not declared as project dependencies.
 
 Once it is published, an ordinary install is enough instead:
 
