@@ -22,6 +22,9 @@ would hand a worker a fresh composition budget.
 
 - [Set up a toolset](set-up-toolsets.md): the one namespace and what is in it, declaring an agent's
   `tools` and `delegates_to`, and how to write a toolset plugin of your own.
+- [Install a third-party toolset](install-a-third-party-toolset.md): the installer's side of that same
+  seam, for a toolset someone else already wrote: installing the package, declaring it, giving it its own
+  config section, and gating its expensive tool, with jobme as the worked example.
 - [Add a skill](add-skills.md): the `SKILL.md` format, the one directory Kokua scans, and the three ways
   a skill gets there (by hand, `author_skill`, `add_skill_script`).
 - [Add an MCP service](add-mcp-services.md): `[[mcp.server]]` and the runtime `add_mcp_server` tool,

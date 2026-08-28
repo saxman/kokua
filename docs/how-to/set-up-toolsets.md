@@ -337,6 +337,9 @@ plugin path is the broken one.
 
 ## See also
 
+- [Install a third-party toolset](install-a-third-party-toolset.md): the other side of this page, for a
+  toolset someone else already wrote: installing the package, declaring it, configuring it, and gating
+  its expensive tools, with jobme as the worked example.
 - [Add an MCP service](add-mcp-services.md): a server is a toolset too, named in the same list.
 - [Add a skill](add-skills.md): the one toolset only the entry agent can hold.
 - [Architecture](../explanation/architecture.md#how-an-agents-tools-resolve): how a declaration becomes

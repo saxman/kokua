@@ -1114,6 +1114,11 @@ notice on startup.
   [add an MCP service](docs/how-to/add-mcp-services.md). All three converge on the same rule: a capability
   is declared, never defaulted, and nothing reaches an agent until an `[agents.*]` table names it,
   composing a worker for one task included, since that takes declaring `capabilities`.
+- **A how-to for installing a third-party toolset**,
+  [docs/how-to/install-a-third-party-toolset.md](docs/how-to/install-a-third-party-toolset.md), walks the
+  plugin seam from the outside: installing the package, declaring it on an agent, giving it its own
+  config section, and gating its expensive tool, with [jobme](https://github.com/saxman/jobme) as the
+  worked example throughout.
 - **A mock-only default test suite.** No model, no network, no keys. This is why the model client is
   injectable and the builders are free functions. Client-side page JS is
   covered by an opt-in Playwright suite (`pytest -m e2e`) driving the real `index.html` in headless
