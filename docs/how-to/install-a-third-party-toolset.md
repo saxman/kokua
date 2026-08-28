@@ -37,13 +37,19 @@ is the one module in it that does.
 
 ## Install the package
 
-If you are developing jobme alongside your Kokua checkout, add it as an editable sibling from inside
-Kokua's own checkout:
+If you are developing jobme alongside your Kokua checkout, install it as an editable sibling from
+inside Kokua's own checkout:
 
 ```bash
 cd kokua
-uv add --editable ../jobme
+uv pip install --editable ../jobme
 ```
+
+`uv pip install` puts the package into Kokua's environment and stops there: it writes nothing to
+`pyproject.toml`, which is what "no code change on Kokua's side" means in practice, not just for the
+entry-point mechanism above but for the install step too. If you would rather have jobme recorded as
+a dependency of your own checkout, `uv add --editable ../jobme` does that, but it edits
+`pyproject.toml` to do it, so a later `git pull` in Kokua can conflict with your edit.
 
 Once it is published, an ordinary install is enough instead:
 
