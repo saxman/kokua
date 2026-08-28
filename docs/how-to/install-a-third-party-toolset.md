@@ -57,6 +57,17 @@ Kokua-the-project depend on jobme in any deeper sense: the plugin still arrives 
 entry point described above, so "no code change on Kokua's side" stays true of the code; it is only
 this checkout's dependency list that changed.
 
+`uv add --editable ../jobme` writes one more thing alongside that dependency line: a
+`[tool.uv.sources]` path entry pointing at `../jobme`. That collides with this repo's own primary
+install command, `uv sync --all-extras --no-sources` (see the top-level README): `--no-sources`
+exists to make AIMU resolve from PyPI instead of the sibling `../aimu` checkout most contributors
+don't have, and it does that by ignoring the entire `[tool.uv.sources]` table, jobme's new entry
+included. Run that sync after adding jobme and the path source Kokua needs to find it by is gone,
+so jobme resolves from PyPI instead, where it does not exist, and the sync fails outright. Once
+jobme is added, sync this checkout with plain `uv sync --all-extras` instead. And because `uv add`
+rewrites `uv.lock` as well as `pyproject.toml`, a later `git pull` here can conflict on two files
+rather than one.
+
 The alternative writes nothing to `pyproject.toml` at all:
 
 ```bash
