@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.25.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -1011,7 +1011,7 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.25.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.27.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -1024,15 +1024,32 @@ notice on startup.
   the default flip Kokua relies on for reasoning and tool calls to reach a front end at all. A plain
   name lookup on `aimu.tools.builtin.make_command_tool`, the factory behind `[compute]
   command_env_passthrough` where the capability and its handle are the same object, was the surface
-  until 0.25.0, when it gave way to a signature check again: today it is
-  `make_async_subagent_tool(events=...)`, the parameter that lets a spawned sub-agent's model turns
-  reach the sink the
-  delegating turn opened. It covers one surface at a time by design; every earlier release's
-  capabilities are the floor's job.
+  until 0.25.0, when it gave way to a signature check again: `make_async_subagent_tool(events=...)`,
+  the parameter that lets a spawned sub-agent's model turns reach the sink the delegating turn opened.
+  Today it is a plain name lookup once more, on `aimu.aio.ModelRefusalError`. That is also the first
+  floor whose reason and whose probe are different capabilities: the floor moved to 0.27.0 for
+  *0.26.0*'s fix to AIMU's forced wrap-up (it no longer appends the wrap-up prompt on top of an
+  un-dispatched tool call, which Anthropic rejected outright and which made search-heavy sub-agents
+  fail rather than answer), and that fix has no handle a probe could honestly grip -- a private method
+  on a private class is exactly what a later refactor renames, and a probe pointed at one becomes a
+  wall in front of a newer, working AIMU. It covers one surface at a time by design; every earlier
+  release's capabilities are the floor's job, and `tests/test_aimu_compat.py` pins the floor against
+  `pyproject.toml`'s specifier so the two halves of that one decision cannot drift.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.
   (caused by ... Connection refused)"). Reactive and proactive turns both surface the detail.
+- **A refused request reads as refused, not as a failure.** A model's safety classifiers declining a
+  request is not a broken thing to go looking for, so it does not share the generic failure wording.
+  Anthropic returns a refusal as HTTP 200 with `stop_reason: "refusal"` and no content, which AIMU
+  raises as `ModelRefusalError` (without that, an agent loop cannot tell it from a degenerate turn and
+  the continuation nudge burns the run's iterations getting refused again). `core/turns.py` branches on
+  it at all three of the sites that already special-cased an unreachable server: the interactive turn,
+  the scheduled task's report, and the reason recorded on the run itself. The message leads with the
+  provider's own classifier category, since that is the part that tells a user which rephrasing might
+  work, and both the category and its explanation are routinely absent, so neither reaches the text as
+  a literal "None". Logged at `INFO`, not with a stack trace: the model was reached and answered in the
+  time it took, so there is no fault to file against Kokua.
 - **Model resolution failures surface cleanly.** With no `model` set, AIMU resolves
   `AIMU_LANGUAGE_MODEL`, else the first already-running local model (Ollama, then a local
   OpenAI-compatible server), and never a cloud model. When nothing resolves, or the model string is

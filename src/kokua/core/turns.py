@@ -124,7 +124,7 @@ from dataclasses import dataclass
 from typing import Optional, Union
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
-from aimu.aio import ModelConnectionError, RunHandle
+from aimu.aio import ModelConnectionError, ModelRefusalError, RunHandle
 from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import Session
 
@@ -179,6 +179,21 @@ def _holds_no_report(session: Session) -> bool:
     empty transcript says the same thing on its own.
     """
     return bool(session.metadata.get("failure")) or not session.messages
+
+
+def _describe_refusal(exc: ModelRefusalError, subject: str) -> str:
+    """The fragment every refusal message is built from: "declined <subject> (<category>): <why>".
+
+    Not in ``core/errors.py`` with ``describe_error``, which is deliberately provider-agnostic
+    (it inspects only the exception chain, never a library's types) and would stop being so the
+    moment it read the two attributes only AIMU's refusal carries. ``category`` is the provider's
+    own classifier label and leads, because it is the part that tells a user which rephrasing
+    might work; both it and ``explanation`` are routinely absent, so neither may reach the text
+    as a literal "None".
+    """
+    label = f" ({exc.category})" if exc.category else ""
+    detail = f": {exc.explanation}" if exc.explanation else "."
+    return f"declined {subject}{label}{detail}"
 
 
 class TurnRunner:
@@ -314,6 +329,16 @@ class TurnRunner:
                     await self._ui.send(
                         f"The request couldn't reach the model server: {describe_error(exc)}", reply_to=msg
                     )
+                except ModelRefusalError as exc:
+                    # before the send: invariant 5
+                    self._record_provenance(
+                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                    )
+                    # info, not exception: the model was reached and answered in the time it took, so
+                    # there is no fault here and a stack trace would file one against Kokua.
+                    logger.info("turn %s declined by the model after %.1fs", tid, time.monotonic() - started)
+                    failure_reason = _describe_refusal(exc, "this request")
+                    await self._ui.send(f"The model {failure_reason}", reply_to=msg)
                 except Exception as exc:
                     # before the send: invariant 5
                     self._record_provenance(
@@ -484,6 +509,9 @@ class TurnRunner:
         except ModelConnectionError as exc:  # invariant 6
             logger.exception("proactive turn connection error")
             report = f"A scheduled task couldn't reach the model server: {describe_error(exc)}"
+        except ModelRefusalError as exc:  # invariant 6
+            logger.info("proactive turn declined by the model")
+            report = f"The model {_describe_refusal(exc, 'a scheduled task')}"
         except Exception as exc:  # invariant 6
             logger.exception("proactive turn error")
             report = f"A scheduled task failed: {describe_error(exc)}"
@@ -660,6 +688,8 @@ class TurnRunner:
                 stopped, failure = True, "stopped"
             except ModelConnectionError as exc:
                 error, failure = exc, f"couldn't reach the model server: {describe_error(exc)}"
+            except ModelRefusalError as exc:
+                error, failure = exc, _describe_refusal(exc, "this request")
             except Exception as exc:
                 error, failure = exc, f"failed: {describe_error(exc)}"
             for message in agent.model_client.messages[start:]:

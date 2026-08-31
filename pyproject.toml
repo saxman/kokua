@@ -18,18 +18,20 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# 0.25.0 is the oldest AIMU carrying everything Kokua needs. It carries two contributions: the
-# `events` parameter on `make_async_subagent_tool` / `make_subagent_tool`, forwarded to a spawned
-# sub-agent so its model turns reach the caller's cost sink, and (published one release earlier as
-# 0.24.0, then rebased onto and renumbered past a different, released 0.24.0) `builtin.make_command_tool`,
-# the factory the `compute` toolset calls so `[compute] command_env_passthrough` can decide what a
-# command's child sees in the environment, plus `run_command`'s membership in `builtin.compute`, which
-# is what makes the shell tool reachable at all and which nothing importable can detect. Every earlier
-# release in the floor's history is listed in `kokua.aimu_compat`, which is also what enforces this
-# floor for a sibling checkout. This pin is what ships in the wheel and what a PyPI install resolves;
+# 0.27.0 is the oldest AIMU carrying everything Kokua needs. Two releases contribute to it. 0.26.0 is
+# why the floor moved: its tool loop no longer strands an un-dispatched tool call before the forced
+# wrap-up prompt, and without that fix every Anthropic run reaching its round cap mid-tool-call died on
+# a 400 naming the unanswered `tool_use` ids rather than answering -- which made search-heavy sub-agents
+# fail routinely, since they are the runs that spend every round calling tools. 0.27.0 then adds
+# `ModelRefusalError`, which `core/turns.py` catches at three sites so a request the model's classifiers
+# decline reads as declined instead of as a generic failure, and makes every provider report how a turn
+# ended so `TruncatedTurnError` fires outside Ollama for the first time. Every earlier release in the
+# floor's history is listed in `kokua.aimu_compat`, which is also what enforces this floor for a sibling
+# checkout, and `tests/test_aimu_compat.py` pins this specifier against that one so the two halves
+# cannot drift. This pin is what ships in the wheel and what a PyPI install resolves;
 # [tool.uv.sources] below separately redirects development installs to the sibling checkout.
 dependencies = [
-    "aimu[anthropic,ollama,openai_compat,memory]>=0.25.0",
+    "aimu[anthropic,ollama,openai_compat,memory]>=0.27.0",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
     # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
     "tomlkit>=0.13",

@@ -45,7 +45,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.25.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.27.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -54,7 +54,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.25.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.27.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -110,27 +110,51 @@ Consequences for working in this repo:
   *default value*, not the parameter; the name stands in for it because the rename and the flip were one
   change, so a checkout carrying the new name carries the new default. The default is directly inspectable,
   unusually, and the parameter check is still preferred: it dates the checkout to the same release without
-  teaching the probe a fourth shape for one case. AIMU 0.25.0 is the current floor, and moves the probe
+  teaching the probe a fourth shape for one case. AIMU 0.25.0 moved the probe
   onto `make_async_subagent_tool`'s new `events` parameter, the handle that lets a spawned sub-agent's
   model turns reach the sink the delegating turn opened; a fresh-client critic
   (`workflows.critics.reviewer_agent`) had the identical gap for the identical reason. (This capability
   was first published as 0.24.0, but that number collided with a different 0.24.0 AIMU's own `main`
   released first, carrying an unrelated `run_command` tool and none of this capability; the branch
-  that added `events` rebased past it and renumbered to 0.25.0, so the real, released 0.24.0 fails this
-  probe correctly rather than being a gap in it.) A name lookup on
-  the module would not catch either absence, because `make_async_subagent_tool` itself predates 0.25.0
-  and imports fine either way; only its parameters changed, so a signature check is what the shape
-  demands, the fourth time this probe has taken it. Unlike `script_env` and `include`, which carried
-  settings *to* an existing capability, `events` *is* the capability: nothing else has to be true of a
-  checkout once that one argument exists. What it leaves uncovered is one level down from the
-  parameter's own presence: a checkout carrying `events` but not the recursive passthrough (a spawned
-  worker forwarding its own `events` on to a grandchild it delegates to in turn) still passes, so a
-  worker spawning its own worker could go uncounted without this probe raising anything. The probe
-  therefore covers exactly one surface at a time, in whatever shape that surface has, and it has taken
-  three: a name lookup for a symbol (`resolve_default_text_model`), a *signature* check for a keyword
-  argument no `getattr` would notice (`SkillManager(include=...)` first, `script_env` second,
-  `stream_thinking` third, `events` today), and a membership check for an entry in a published set.
-  What the current surface says nothing about, only the floor covers. If you add
+  that added `events` rebased past it and renumbered to 0.25.0, so the real, released 0.24.0 fails that
+  probe correctly rather than being a gap in it.) A name lookup on the module would not catch either
+  absence, because `make_async_subagent_tool` itself predates 0.25.0 and imports fine either way; only
+  its parameters changed, so a signature check was what the shape demanded, the fourth time this probe
+  has taken it. Unlike `script_env` and `include`, which carried settings *to* an existing capability,
+  `events` *is* the capability: nothing else has to be true of a checkout once that one argument exists.
+  What it left uncovered is one level down from the parameter's own presence: a checkout carrying
+  `events` but not the recursive passthrough (a spawned worker forwarding its own `events` on to a
+  grandchild it delegates to in turn) still passes, so a worker spawning its own worker could go
+  uncounted without the probe raising anything -- the floor's job now that the surface has moved on.
+  **AIMU 0.27.0 is the current floor, and it is the first one whose reason and whose probe are different
+  capabilities from different releases.** Learn that split, because it is the shape of every future case
+  where a bug fix rather than a feature moves the floor. The floor moved for *0.26.0*: AIMU's tool loop
+  no longer strands an un-dispatched tool call before its forced wrap-up. Before that fix, exhausting
+  `max_iterations` on a turn that had requested tools appended the wrap-up's *user* prompt straight on
+  top of the unanswered calls, which Anthropic rejects with ``messages.N: `tool_use` ids were found
+  without `tool_result` blocks immediately after``. Kokua felt it as sub-agents failing instead of
+  answering, search-heavy ones worst, since a run that spends every round calling tools is the one still
+  holding a pending call when the cap lands. That fix offers no handle a probe could honestly grip:
+  `_settle_pending_tools` is a private method on a private class, exactly the internal a later refactor
+  would rename, and gripping it would turn the preflight into a wall in front of a *newer, working* AIMU
+  -- the 0.20.0 trap again. So the probe grips *0.27.0*'s `ModelRefusalError` instead, exported from
+  `aimu.aio`, and that is a plain name lookup for only the second time (`resolve_default_text_model` was
+  the first): the capability *is* the export. Anthropic returns a refusal as HTTP 200 with
+  `stop_reason: "refusal"` and no content, so an AIMU that does not raise for it returns an empty string
+  an agent loop cannot distinguish from a degenerate turn, and the continuation nudge then burns the
+  run's iterations getting refused again; `core/turns.py` branches on the class at three sites so a
+  declined request reads as declined rather than as a generic failure. 0.27.0's other half is the floor's
+  job for 0.26.0's reason: every provider now reports how a turn ended, so `TruncatedTurnError` fires
+  outside Ollama for the first time and `client.last_stop_reason` carries the provider's own word for it,
+  but that is an attribute on a live client rather than a module symbol and Kokua reads it nowhere
+  directly. The probe therefore covers exactly one surface at a time, in whatever shape that surface has,
+  and it has taken three: a name lookup for a symbol (`resolve_default_text_model` first,
+  `ModelRefusalError` today), a *signature* check for a keyword argument no `getattr` would notice
+  (`SkillManager(include=...)` first, `script_env` second, `stream_thinking` third, `events` fourth), and
+  a membership check for an entry in a published set.
+  What the current surface says nothing about, only the floor covers. `tests/test_aimu_compat.py` pins
+  `MINIMUM_AIMU` against `pyproject.toml`'s specifier, since the two are halves of one decision and
+  neither can detect the other drifting. If you add
   a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the `pyproject.toml` floor in the same
   commit, and move the probe to whatever the new surface is. When a release genuinely offers no handle a
   probe can grip, leave the probe where it is and say so in `aimu_compat`'s docstring rather than moving it

@@ -93,27 +93,53 @@ def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
     Pinned because the probe has repeatedly been left behind by a moving floor. The surface today is
-    ``make_async_subagent_tool``'s ``events`` parameter, which is what lets a spawned sub-agent's model
-    turns reach the turn that delegated to it.
+    ``ModelRefusalError``, which ``core/turns.py`` catches so a declined request reads as declined
+    rather than falling into the generic failure branch.
     """
     import importlib
-    import inspect
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
     probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_PARAMETER == "events"
+    assert aimu_compat._PROBE_SYMBOL == "ModelRefusalError"
+    # A plain name lookup: neither of the other two shapes applies, because the capability is the
+    # exported class itself and not a member or an argument of something older.
+    assert aimu_compat._PROBE_PARAMETER is None
+    assert aimu_compat._PROBE_MEMBER is None
 
-    assert "events" in inspect.signature(probe).parameters
 
+def test_the_probe_names_the_class_kokua_actually_catches():
+    """The probe is only honest if the depended-on capability is the thing it looks up.
 
-def test_the_probe_checks_the_spawn_factory_carries_an_events_parameter():
-    """The capability is the parameter itself, which no getattr would notice.
-
-    Without it every export silently omits delegation cost, which is the silent-degradation class this
-    probe exists to catch: nothing raises, and a delegating run simply reads as cheap.
+    ``turns.py`` imports this name from ``aimu.aio`` and branches on it at three sites, so an AIMU
+    without it fails at import rather than degrading -- which is why the floor, not the probe, is what
+    covers everything else in 0.26.0 and 0.27.0.
     """
+    from kokua.core import turns
+
+    assert turns.ModelRefusalError.__name__ == aimu_compat._PROBE_SYMBOL
     require_aimu()  # does not raise against the AIMU this suite runs on
+
+
+def test_the_declared_floor_matches_the_packaged_requirement():
+    """``MINIMUM_AIMU`` and ``pyproject.toml``'s specifier have to agree, or one of them is a lie.
+
+    They are two halves of one decision (CLAUDE.md: raise both in the same commit) and neither can
+    detect the other drifting. The preflight governs a developer's sibling checkout; the specifier
+    governs an installed wheel, where the preflight would pass while pip had been free to resolve
+    something older. Nothing else in the suite would notice.
+    """
+    import tomllib
+    from pathlib import Path
+
+    pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    specifiers = [d for d in pyproject["project"]["dependencies"] if d.replace("-", "_").startswith("aimu")]
+    assert len(specifiers) == 1, f"expected exactly one aimu dependency, found {specifiers}"
+    # Compared on the version bound alone: the extras list beside it is a separate decision that
+    # moves for its own reasons, and pinning the whole string would make this fail on an extra.
+    assert specifiers[0].endswith(f">={AT_FLOOR}"), (
+        f"pyproject declares {specifiers[0]!r} but the preflight floor is {AT_FLOOR}"
+    )
 
 
 def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):

@@ -18,7 +18,7 @@ resolution-markers = [
 
 [[package]]
 name = "aimu"
-version = "0.25.0"
+version = "0.27.0"
 source = { editable = "../aimu" }
 dependencies = [
     { name = "fastmcp" },
@@ -48,7 +48,7 @@ requires-dist = [
     { name = "a2a-sdk", marker = "extra == 'a2a'", specifier = ">=0.3.24,<0.4" },
     { name = "accelerate", marker = "extra == 'hf'" },
     { name = "aimu", extras = ["ollama", "anthropic", "openai-compat", "google", "llamacpp", "hf", "web", "tuning", "evals", "a2a", "memory", "prompts"], marker = "extra == 'all'" },
-    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.50.0" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=1,<2" },
     { name = "bitsandbytes", marker = "extra == 'hf'" },
     { name = "chromadb", marker = "extra == 'memory'" },
     { name = "deepeval", marker = "extra == 'evals'" },

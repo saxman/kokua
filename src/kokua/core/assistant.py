@@ -20,7 +20,7 @@ from dataclasses import replace
 from typing import Callable, Optional
 
 from aimu import aio
-from aimu.aio import Channel, ModelConnectionError, RunHandle, Scheduler
+from aimu.aio import Channel, ModelConnectionError, ModelRefusalError, RunHandle, Scheduler
 from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import Session, TinyDBSessionStore
 
@@ -52,9 +52,10 @@ from kokua.registry.context import LiveState
 
 logger = logging.getLogger(__name__)
 
-# Re-exported so front ends can keep catching `assistant.ModelClientError` (build-time, from build) and
-# `assistant.ModelConnectionError` (runtime server-unreachable, from AIMU).
-__all__ = ["Assistant", "ModelClientError", "ModelConnectionError"]
+# Re-exported so front ends can keep catching `assistant.ModelClientError` (build-time, from build),
+# `assistant.ModelConnectionError` (runtime server-unreachable, from AIMU), and
+# `assistant.ModelRefusalError` (the model was reached and declined, also from AIMU).
+__all__ = ["Assistant", "ModelClientError", "ModelConnectionError", "ModelRefusalError"]
 
 
 class Assistant:

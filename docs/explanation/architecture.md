@@ -179,8 +179,8 @@ directly rather than a `LiveState` field or a threaded parameter, for the same r
 wiring does: `record_event` is a module-level constant with no turn state of its own, so a tool or agent
 built once, at composition time, reports into whichever turn is actually running when an event fires,
 with nothing to plumb back to the caller. `core.agents._spawn_tool` and `make_delegation_tool` pass it as
-`make_async_subagent_tool(events=record_event)` (needs `aimu>=0.25.0`; see
-[The model every agent runs on](#the-model-every-agent-runs-on) for the probe that enforces it), and
+`make_async_subagent_tool(events=record_event)` (needs `aimu>=0.25.0`, below the current floor; see
+[The model every agent runs on](#the-model-every-agent-runs-on) for what the probe checks today), and
 `workflows.critics.reviewer_agent` passes it as both `aio.Agent(events=record_event)` and
 `client.events = record_event`, unconditionally rather than through a parameter a caller could forget
 to pass; `review` and `stream_review` need no change, since both build their agent through
@@ -634,21 +634,41 @@ construction still works and streams neither phase, and since Kokua no longer re
 anywhere there is not even an `AttributeError` to notice, which is the failure mode this preflight
 exists for.
 
-The repository floor is now `aimu>=0.25.0`, for `make_async_subagent_tool`'s new `events` parameter: the
-handle that lets a spawned sub-agent's model turns reach the sink the turn that delegated to it opened
-(see [What a turn cost](#what-a-turn-cost)). A fresh-client critic (`workflows.critics.reviewer_agent`)
-had the identical gap for the identical reason and is wired the same way. The probe moved to a signature
-check on `make_async_subagent_tool` for `events`, the fourth time this probe has taken that shape. Unlike
-`script_env` and `include`, which carried settings *to* an existing capability, `events` *is* the
-capability: a name lookup on the module would not catch its absence, since `make_async_subagent_tool`
-itself predates 0.25.0 and imports fine either way, and nothing else has to be true of a checkout once
-the one argument exists. What this probe still cannot see: whether a spawned worker's own spawn tool
-forwards `events` on to a grandchild it delegates to in turn, so a recursive delegation could go
-uncounted one level down without this module raising anything. The probe covers one surface at a time;
-the version floor is what covers every earlier release's. (The capability first shipped tagged 0.24.0,
-but that number collided with a different, unrelated 0.24.0 that AIMU's own `main` released first; the
-branch carrying `events` rebased past it and renumbered to 0.25.0, so a real, released 0.24.0 correctly
-fails this probe rather than exposing a gap in it.)
+The repository floor is now `aimu>=0.27.0`, and it is the first floor whose *reason* and whose *probe*
+are different capabilities from different releases. That split is worth following, because it is the
+shape of every future case where a bug fix rather than a feature moves the floor.
+
+The floor moved for **0.26.0**: AIMU's tool loop no longer strands an un-dispatched tool call before its
+forced wrap-up. Exhausting `max_iterations` on a turn that had requested tools used to leave those calls
+unanswered and then append the wrap-up's *user* prompt directly on top of them, which Anthropic rejects
+with ``messages.N: `tool_use` ids were found without `tool_result` blocks immediately after``. Kokua felt
+it as sub-agents failing rather than answering, and search-heavy ones most of all, since a run that
+spends every round calling tools is the one still holding a pending call when the cap lands. There is no
+handle on that fix a probe could honestly grip: `_settle_pending_tools` is a private method on a private
+class, exactly the kind of internal a later refactor would rename, and a probe pointed at it would turn
+this preflight into a wall in front of a *newer, working* AIMU. That is the trap the 0.20.0 paragraph
+above describes, so the floor carries this one alone.
+
+The probe therefore grips **0.27.0**'s `ModelRefusalError` instead, a plain name lookup on `aimu.aio` and
+only the second time this probe has had that shape (0.21.0's `resolve_default_text_model` was the first).
+The capability *is* the exported name. Anthropic returns a refusal as HTTP 200 with
+`stop_reason: "refusal"` and no content, so an AIMU that does not raise for it returns an empty string,
+which an agent loop cannot tell from a degenerate turn: the continuation nudge fires and the run spends
+its iterations being refused again. `core/turns.py` branches on the class at three sites so a declined
+request reads as declined rather than as a generic failure, and an AIMU without the name fails at import
+instead of degrading quietly. 0.27.0's other half is the floor's job for the same reason as 0.26.0's:
+every provider now reports how a turn ended, so `TruncatedTurnError` fires outside Ollama for the first
+time and `client.last_stop_reason` carries the provider's own word for it, but that is an attribute on a
+live client rather than a module symbol and Kokua reads it nowhere directly.
+
+`make_async_subagent_tool`'s `events` parameter was the surface while 0.25.0 was the floor, and it is the
+floor's responsibility now, as every capability older than the current probe becomes. What that probe
+could not see, and what the floor now covers: whether a spawned worker's own spawn tool forwards `events`
+on to a grandchild it delegates to in turn, so a recursive delegation could go uncounted one level down.
+The probe covers one surface at a time; the version floor covers every earlier release's. (That
+capability first shipped tagged 0.24.0, but the number collided with a different, unrelated 0.24.0 that
+AIMU's own `main` released first; the branch carrying `events` rebased past it and renumbered to 0.25.0,
+so a real, released 0.24.0 correctly failed that probe rather than exposing a gap in it.)
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
