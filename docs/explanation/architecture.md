@@ -91,7 +91,7 @@ src/kokua/
 
 ## The core
 
-`Assistant` ([core/assistant.py](../../src/kokua/core/assistant.py)) is the composition root and the
+`Assistant` ([core/assistant.py](https://github.com/saxman/kokua/blob/main/src/kokua/core/assistant.py)) is the composition root and the
 serve loop, and little else. It owns:
 
 - **`ConversationBook`** -- the session store, the per-conversation agent cache, and which
@@ -216,7 +216,7 @@ conversation's agent cannot differ from a sibling's by accident, and there is no
   cost something (a handshake, and a held credential), which is the case that lost a signal here; see
   [Add MCP services](../how-to/add-mcp-services.md).
 - **A composed sub-agent is the one exception, and it is entered by declaration.** `compose_subagent`
-  ([toolsets/capabilities.py](../../src/kokua/toolsets/capabilities.py)) resolves a sub-agent's tools from
+  ([toolsets/capabilities.py](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/capabilities.py)) resolves a sub-agent's tools from
   names the model picked out of the registry rather than from a table, and runs one task on it through
   AIMU's subagent machinery instead of `wire_agent`. Only an agent whose own `tools` names `capabilities`
   holds that tool; it may not be handed `capabilities` itself, since how far composition nests is
@@ -438,7 +438,7 @@ Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`
 registered in Kokua's own `pyproject.toml` exactly as a third party would register theirs;
 `plugins.py` discovers them at runtime, and `kokua.plugins` re-exports `Toolset` and `ToolsetContext`
 as the public surface a third party imports. Add a transport or new tools as a plugin, not by editing
-the core -- see [toolsets/image.py](../../src/kokua/toolsets/image.py).
+the core -- see [toolsets/image.py](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py).
 
 A third party's toolset is distinguished from one Kokua ships by exactly one thing: its provider label
 in `--list-toolsets`, which comes from which distribution registered the entry point. Nothing branches on
@@ -447,7 +447,7 @@ to import or to build stops startup naming itself.
 
 A toolset is also how a whole *agent* arrives. Every AIMU `Runner` exposes `.run(task) -> str`, so
 mounting one needs no core surface at all: `build()` returns a callable that runs it.
-[toolsets/aimu_agents.py](../../src/kokua/toolsets/aimu_agents.py) does this for AIMU's three
+[toolsets/aimu_agents.py](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/aimu_agents.py) does this for AIMU's three
 prebuilt orchestrators and is the reference for wiring your own. It builds its agent inside the tool
 call rather than in `build()`, because `build()` runs once per agent and constructing a
 sync `ModelClient` is what loads weights on an in-process provider -- and because a cached

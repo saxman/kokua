@@ -115,7 +115,7 @@ conversation as the conversation would be worse than making you wait.
 
 ## See also
 
-- [`transcript_export.py`](../../src/kokua/transcript_export.py): the renderer this command calls,
+- [`transcript_export.py`](https://github.com/saxman/kokua/blob/main/src/kokua/transcript_export.py): the renderer this command calls,
   pure and dependency-free, so both front ends could call it too.
 - [Architecture](../explanation/architecture.md): where the conversation store and the CLI fit in
   the rest of Kokua.

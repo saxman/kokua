@@ -42,7 +42,7 @@ would hand a worker a fresh composition budget.
 
 - [Configuration reference](../reference/configuration.md): every `config.toml` key, what it accepts,
   which keys apply live, and who may write each one. Its short form is
-  [`config.example.toml`](../../src/kokua/config.example.toml), one line per key, which
+  [`config.example.toml`](https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml), one line per key, which
   `kokua config init` scaffolds for you.
 - [Architecture](../explanation/architecture.md) and
   [design principles](../explanation/design-principles.md) explain *why* the core is shaped this way,

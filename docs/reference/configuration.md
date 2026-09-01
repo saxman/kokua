@@ -1,7 +1,7 @@
 # Configuration reference
 
 Every `config.toml` key Kokua reads, what it accepts, and what it does. This is the long form of
-[`config.example.toml`](../../src/kokua/config.example.toml), which is the same set of keys with a line
+[`config.example.toml`](https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml), which is the same set of keys with a line
 of description each; read that file to see the shape, and this one when a key's behavior is not obvious
 from its name.
 
@@ -846,7 +846,7 @@ kokua --list-toolsets     # every name a tools list may use, grouped by provider
 
 ## See also
 
-- [`config.example.toml`](../../src/kokua/config.example.toml): the same keys, one line each, and what
+- [`config.example.toml`](https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml): the same keys, one line each, and what
   `kokua config init` writes.
 - [Set up a toolset](../how-to/set-up-toolsets.md): declaring `tools` and `delegates_to`, and writing a
   toolset of your own.

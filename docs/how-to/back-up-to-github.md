@@ -16,7 +16,7 @@ of your state, and a task that adds to it unattended.
 ## What is copied, and what is not
 
 The list is an explicit allowlist in
-[`toolsets/github_backup.py`](../../src/kokua/toolsets/github_backup.py), not a walk of the state
+[`toolsets/github_backup.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/github_backup.py), not a walk of the state
 directory. The repository layout mirrors `$KOKUA_HOME`, so restoring is copying the files back with
 nothing to interpret.
 
@@ -312,5 +312,5 @@ Three more things that are working as intended rather than broken:
   always the last step.
 - [Configuration reference](../reference/configuration.md#github_backup): the `[github_backup]` keys, and
   [`[scheduling.task.*]`](../reference/configuration.md#schedulingtaskname) for the task block.
-- [`toolsets/github_backup.py`](../../src/kokua/toolsets/github_backup.py): one module, with the
+- [`toolsets/github_backup.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/github_backup.py): one module, with the
   reasoning behind each refusal above written into its docstrings.

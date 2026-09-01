@@ -233,19 +233,19 @@ Installing it is not enough, for the reason at the top of this guide.
 
 **Every toolset Kokua ships is written exactly this way**, which is the point: the shape above is not a
 simplified illustration, it is what is in the repository. Kokua's own 21 are one file each under
-[`src/kokua/toolsets/`](../../src/kokua/toolsets/), named for the toolset, with one line each in
-[Kokua's own `pyproject.toml`](../../pyproject.toml) in the same `kokua.toolsets` table your package
+[`src/kokua/toolsets/`](https://github.com/saxman/kokua/tree/main/src/kokua/toolsets/), named for the toolset, with one line each in
+[Kokua's own `pyproject.toml`](https://github.com/saxman/kokua/blob/main/pyproject.toml) in the same `kokua.toolsets` table your package
 writes into. So the useful thing to do next is read one:
 
-- [`toolsets/benchmark.py`](../../src/kokua/toolsets/benchmark.py) is the smallest complete one with real
+- [`toolsets/benchmark.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/benchmark.py) is the smallest complete one with real
   work in it: one tool, no arguments, no dependencies beyond what Kokua already has.
-- [`toolsets/image.py`](../../src/kokua/toolsets/image.py) shows a `build` that returns *nothing* when its
+- [`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py) shows a `build` that returns *nothing* when its
   prerequisite is missing, so the model is never offered a tool it cannot satisfy.
-- [`toolsets/github_backup.py`](../../src/kokua/toolsets/github_backup.py) shows a toolset that owns
+- [`toolsets/github_backup.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/github_backup.py) shows a toolset that owns
   `config.toml` settings of its own, via `Setting` declarations in its `[github_backup]` section.
-- [`toolsets/aimu_agents.py`](../../src/kokua/toolsets/aimu_agents.py) shows the same shape carrying a
+- [`toolsets/aimu_agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/aimu_agents.py) shows the same shape carrying a
   whole AIMU agent rather than a plain function.
-- [`toolsets/web.py`](../../src/kokua/toolsets/web.py) is the whole of a wrapper over an existing tool
+- [`toolsets/web.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/web.py) is the whole of a wrapper over an existing tool
   group: a docstring, an import, and a `Toolset`.
 
 If you add one to Kokua itself rather than to your own package, note that
@@ -259,7 +259,7 @@ Five things to know about `build`:
   Shared state belongs on `LiveState` and reaches you through the context, where it is a lazy property
   built at most once (`ctx.state.memory_store`, for one, is opened only because some agent declared the
   toolset that needs it). A toolset that needs its own expensive object should build it inside the
-  tool call, as [`toolsets/aimu_agents.py`](../../src/kokua/toolsets/aimu_agents.py) does and explains.
+  tool call, as [`toolsets/aimu_agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/aimu_agents.py) does and explains.
 - **`ctx.agent` is the live agent, and is `None` for a spawned worker.** A toolset that genuinely needs
   the agent object should be marked `entry_point_only=True`, which makes declaring it on any other agent
   a startup error instead of a `None` at build time. `skills` is the one built-in in that position.
@@ -277,7 +277,7 @@ Five things to know about `build`:
 
 A toolset can also own a whole `[<name>]` section of `config.toml`, by declaring
 `settings=(Setting(key, kind, default, hot=...), ...)` on itself, the way
-[`toolsets/planning.py`](../../src/kokua/toolsets/planning.py) owns `[planning]`. The section is never
+[`toolsets/planning.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/planning.py) owns `[planning]`. The section is never
 named separately: it is always the toolset's own name, so the namespace's existing duplicate-name check
 also keeps two toolsets from claiming one section, and a name that collides with a section Kokua's own
 core already parses (`assistant`, `email`, `security`, and the rest) is refused at startup rather than
@@ -303,7 +303,7 @@ it reads `ctx.config.toolset_settings["<name>"]` directly, the same dict a workf
 ### Or carry a workflow instead of tools
 
 Set `workflow=` on your `Toolset` and `build` can return no tools at all: the toolset exists solely to
-grant a turn strategy, the way [`toolsets/planning.py`](../../src/kokua/toolsets/planning.py) does for
+grant a turn strategy, the way [`toolsets/planning.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/planning.py) does for
 `/plan`. A workflow's `build` returns an `aimu.aio.AsyncRunner`. **Base tier** is any `AsyncRunner`, so
 AIMU's own `aimu.aio.workflows` (`Chain`, `Parallel`, `Router`, `EvaluatorOptimizer`,
 `PlanExecuteEvaluator`) work with just the declaration above and no adapter -- Kokua streams `run()`
@@ -314,24 +314,24 @@ phases and reviewer cards and save a clean turn.
 Three things to know before choosing a tier. A base-tier turn is **not persisted** when the runner is
 self-contained: it appends nothing to the agent's own transcript, so the exchange is gone after a
 reload (a runner that closes over `ctx.agent` and calls it directly is the exception -- see
-`_drive_base_tier` in [`core/turns.py`](../../src/kokua/core/turns.py)). Reaching the model as a
+`_drive_base_tier` in [`core/turns.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py)). Reaching the model as a
 callable tool via `AsyncRunner.as_tool()` needs your runner to actually *inherit* `aio.AsyncRunner`, not
 merely match its shape -- `as_tool()` is a concrete method the base class provides, not a name Kokua
 looks up. And `WorkflowContext.settings` is attribute access over the carrying toolset's own `[<name>]`
 section -- see [own a config section](#own-a-config-section) above for how to declare what is in it. See
-[`workflows/protocol.py`](../../src/kokua/workflows/protocol.py) for the full contract.
+[`workflows/protocol.py`](https://github.com/saxman/kokua/blob/main/src/kokua/workflows/protocol.py) for the full contract.
 
 Kokua's own three toolsets register exactly this way in its
-[`pyproject.toml`](../../pyproject.toml). If the built-in path and the plugin path ever diverge, the
+[`pyproject.toml`](https://github.com/saxman/kokua/blob/main/pyproject.toml). If the built-in path and the plugin path ever diverge, the
 plugin path is the broken one.
 
-- [`toolsets/image.py`](../../src/kokua/toolsets/image.py) is the minimal template, and also shows a
+- [`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py) is the minimal template, and also shows a
   `build` that returns no tools when its prerequisite is absent, so the model never sees a tool it cannot
   satisfy.
-- [`skills/dice-roller/`](../../skills/dice-roller/) is the equivalent template for a skill, which is the
+- [`skills/dice-roller/`](https://github.com/saxman/kokua/tree/main/skills/dice-roller/) is the equivalent template for a skill, which is the
   lighter path when your capability does not need live process state. Kokua's own `markdown-to-pdf` and
   `email-report` ship that way. See [add skills](add-skills.md).
-- [`toolsets/aimu_agents.py`](../../src/kokua/toolsets/aimu_agents.py) carries a whole AIMU agent instead
+- [`toolsets/aimu_agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/aimu_agents.py) carries a whole AIMU agent instead
   of a plain function: any `Runner` exposes `.run(task) -> str`, so a toolset is the entire bridge and
   the core learns nothing new.
 

@@ -56,7 +56,7 @@ set `[paths] data_dir`).
 
 This is worth stating plainly because AIMU's `SkillManager` defaults to scanning four search paths
 (`.agents/skills/`, `.claude/skills/`, and their `~` equivalents). Kokua passes `skill_dirs` explicitly
-([`registry/context.py`](../../src/kokua/registry/context.py)), so those defaults **do not apply here**. A
+([`registry/context.py`](https://github.com/saxman/kokua/blob/main/src/kokua/registry/context.py)), so those defaults **do not apply here**. A
 skill in `~/.claude/skills/` is invisible to Kokua. This follows from the principle that all state lives
 under one directory you own; nothing is read from your working directory.
 

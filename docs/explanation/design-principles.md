@@ -41,11 +41,11 @@ This is also what keeps the core readable. The runtime a newcomer has to hold in
 assistant, the turn runner, and one channel contract; everything about terminals, sockets, and
 browsers sits outside it.
 
-*How this cashes out:* `Assistant` takes a `Channel`, and [frontends/cli.py](../../src/kokua/frontends/cli.py)
-and [frontends/web.py](../../src/kokua/frontends/web.py) share it unchanged.
-[`ChannelUI`](../../src/kokua/channels/ui.py) probes each optional frame once at construction and
+*How this cashes out:* `Assistant` takes a `Channel`, and [frontends/cli.py](https://github.com/saxman/kokua/blob/main/src/kokua/frontends/cli.py)
+and [frontends/web.py](https://github.com/saxman/kokua/blob/main/src/kokua/frontends/web.py) share it unchanged.
+[`ChannelUI`](https://github.com/saxman/kokua/blob/main/src/kokua/channels/ui.py) probes each optional frame once at construction and
 resolves it to exactly one documented fallback, so no caller asks `getattr(channel, "send_x", None)`
-for itself. [`channels/protocol.py`](../../src/kokua/channels/protocol.py) declares the rich surface
+for itself. [`channels/protocol.py`](https://github.com/saxman/kokua/blob/main/src/kokua/channels/protocol.py) declares the rich surface
 for documentation and typing, and nothing does `isinstance` against it. There is no
 `isinstance(channel, WebChannel)` anywhere in `core/` or `workflows/`. Where a capability changes what
 the core *does* rather than how it renders, it is a named boolean -- `supports_conversations`,
@@ -60,13 +60,13 @@ a built-in toolset worth reading as a template: the code you study is the code y
 
 *How this cashes out:* `pyproject.toml`'s `kokua.frontends` and `kokua.toolsets` groups list
 `kokua.frontends.web:FRONTEND` and `kokua.toolsets.image:TOOLSET` in the same table a third party's
-entry would go in. [`plugins.py`](../../src/kokua/plugins.py) is the only loader, and it treats
+entry would go in. [`plugins.py`](https://github.com/saxman/kokua/blob/main/src/kokua/plugins.py) is the only loader, and it treats
 every registration alike: a toolset that fails to import, or whose `build()` raises, takes startup down
 naming itself, whoever wrote it. Kokua ships no third-party code, so it carries no special handling for
 code it does not ship, and the symmetry above is what makes that defensible rather than harsh. `plugins` imports the
 built-in front ends lazily, and `kokua/__init__.py` exposes `Assistant` through PEP 562, so
 `import kokua` never pulls in `aimu.aio` or starlette for a caller that only wanted to list plugins.
-[`toolsets/image.py`](../../src/kokua/toolsets/image.py) exists as the template.
+[`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py) exists as the template.
 
 This reaches Kokua's *own* capabilities, not just third-party ones, and it reaches all of them: every
 toolset Kokua ships is one file under `toolsets/`, named for the toolset it declares, registered in the
@@ -94,13 +94,13 @@ tool an agent did not name, and no flag can disagree with a declaration.**
 than kept alongside the `memory` and `documents` toolsets, because a second switch for one capability
 means one of the two is lying. `time` is a toolset every agent that wants a clock declares, where it
 used to be added to every agent in code. The shared state a toolset draws on is a lazy property on
-[`LiveState`](../../src/kokua/registry/context.py), so the memory and document stores are opened because
+[`LiveState`](https://github.com/saxman/kokua/blob/main/src/kokua/registry/context.py), so the memory and document stores are opened because
 some agent declared the toolset that needs them, and not otherwise. An unknown name raises rather than being
-dropped ([`registry/registry.py`](../../src/kokua/registry/registry.py)'s `select`), since a dropped name
+dropped ([`registry/registry.py`](https://github.com/saxman/kokua/blob/main/src/kokua/registry/registry.py)'s `select`), since a dropped name
 is a declaration the code silently overruled.
 
 The one exception is a *composed* sub-agent. `compose_subagent`
-([`toolsets/capabilities.py`](../../src/kokua/toolsets/capabilities.py)) draws from the whole registry
+([`toolsets/capabilities.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/capabilities.py)) draws from the whole registry
 rather than from a table, which is a code path granting a capability no `[agents.*]` table declared. It is
 an exception at one level and not at the next: only an agent whose own table names `capabilities` holds the
 tool at all, so the exception is still entered by declaration. What the rule protects is a *persistent*
@@ -135,7 +135,7 @@ writes. No parallel store, no process-only overrides, no settings that exist in 
 else. One file is also what makes a running system's whole configuration legible at once: read
 `config.toml` and there is nothing else to know.
 
-*How this cashes out:* [`config/store.py`](../../src/kokua/config/store.py) does comment-preserving
+*How this cashes out:* [`config/store.py`](https://github.com/saxman/kokua/blob/main/src/kokua/config/store.py) does comment-preserving
 `tomlkit` writes; two writers (`add_mcp_server` and the assistant's own `update_config` tool) land in
 that one file. A `runtime-settings.json` store used to exist and was
 retired in favour of the file itself. `[security].locked_config_keys` is a user-set list of patterns
@@ -157,7 +157,7 @@ running scheduler firing (or not firing) the old schedule. The parent `[scheduli
 ordinary and hot-appliable; only the per-task tables route through the scheduling tools instead.
 
 One of Kokua's own runtime-mutable settings is **one entry** in
-[`config/table.py`](../../src/kokua/config/table.py)'s `CORE_RUNTIME_SETTINGS`; a toolset's is one
+[`config/table.py`](https://github.com/saxman/kokua/blob/main/src/kokua/config/table.py)'s `CORE_RUNTIME_SETTINGS`; a toolset's is one
 `Setting` on the toolset itself, in its own `[<name>]` section. `SettingsTable`, built at startup from
 both, is what drives the TOML schema, the incoming-payload sanitizer, the hot-apply set, the live-apply
 loop, and the persist path at once -- and `tests/config/test_table.py` fails if a
@@ -183,7 +183,7 @@ makes an agent's entire state inspectable with `ls`: the conversations it has ha
 remembers, the skills it wrote for itself, the images it made. Nothing the assistant knows is hidden
 in a store you cannot open.
 
-*How this cashes out:* [`config/paths.py`](../../src/kokua/config/paths.py) holds exactly three
+*How this cashes out:* [`config/paths.py`](https://github.com/saxman/kokua/blob/main/src/kokua/config/paths.py) holds exactly three
 locations -- the root, `data/`, and `config.toml` -- because those are the only ones that must resolve
 *before* the settings file can be read. Every leaf below `data/` is a derived property on
 `AssistantConfig` (`sessions_path`, `skills_dir`, `memory_path`, `images_path`, `logs_path`, ...), so
@@ -205,16 +205,16 @@ it prevents. One process is also what makes a single turn followable end to end:
 can attach a debugger to, rather than a request landing in whichever worker happened to pick it up.
 The invariants block is a teaching artifact as much as a safety one.
 
-*How this cashes out:* [`core/turns.py`](../../src/kokua/core/turns.py) opens with a
+*How this cashes out:* [`core/turns.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py) opens with a
 `## Concurrency invariants` block -- seven rules, each stating what breaks without it, including a
-deadlock that a regression test still guards. [`TurnGate`](../../src/kokua/core/turn_gate.py) is a
+deadlock that a regression test still guards. [`TurnGate`](https://github.com/saxman/kokua/blob/main/src/kokua/core/turn_gate.py) is a
 documented writer-preferring readers-writer gate: turns read, a settings change writes, and which side an
 operation belongs on follows from its reach rather than from whether it mutates (a conversation delete
 mutates and still reads, taking only the deleted conversation's slot).
-[`AgentRegistry`](../../src/kokua/core/agent_registry.py) gives each conversation its own agent and
+[`AgentRegistry`](https://github.com/saxman/kokua/blob/main/src/kokua/core/agent_registry.py) gives each conversation its own agent and
 model client, with LRU eviction and a pin held for the duration of any in-flight turn. A background
 or scheduled turn auto-denies a gated tool because nobody is watching it. Every human decision is a
-lock-guarded single slot ([`core/interaction.py`](../../src/kokua/core/interaction.py)), so concurrent
+lock-guarded single slot ([`core/interaction.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py)), so concurrent
 turns cannot clobber each other's prompt. The web front end refuses a second connection.
 `config/store.py` states last-writer-wins rather than adding file locking.
 
@@ -245,14 +245,14 @@ states that consequence plainly rather than preventing it, because a control you
 yours. The one exception is the key holding that list, locked whatever the list says, since a policy the
 assistant can rewrite for itself is not a policy.
 
-*How this cashes out:* [`config/store.py`](../../src/kokua/config/store.py)'s `locked_by` matches a
+*How this cashes out:* [`config/store.py`](https://github.com/saxman/kokua/blob/main/src/kokua/config/store.py)'s `locked_by` matches a
 write against the user's own patterns, and `LOCK_AXIOM` beside it is the single unconditional lock.
-[`core/interaction.py`](../../src/kokua/core/interaction.py)'s `HumanGate.approve` is a bare name match
+[`core/interaction.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py)'s `HumanGate.approve` is a bare name match
 against `confirm_tools`, which is what gates a worker's call identically to the entry agent's, and a
 proactive turn auto-denies rather than running a gated tool unattended.
-[`core/agents.py`](../../src/kokua/core/agents.py)'s `validate_confirm_tools` and
-[`config/file.py`](../../src/kokua/config/file.py)'s lock-pattern checks are the two startup errors
-above. [`SECURITY.md`](../../SECURITY.md) names which barrier a vulnerability report is about, and which
+[`core/agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py)'s `validate_confirm_tools` and
+[`config/file.py`](https://github.com/saxman/kokua/blob/main/src/kokua/config/file.py)'s lock-pattern checks are the two startup errors
+above. [`SECURITY.md`](https://github.com/saxman/kokua/blob/main/SECURITY.md) names which barrier a vulnerability report is about, and which
 behavior is the program working as documented.
 
 ## What follows from these principles
@@ -309,7 +309,7 @@ If you cannot tell which principle applies, the principles are not doing their j
 
 **"Failures reach the user, not just the log."** This is a goal, not a description: today a bad model
 string or a malformed config can still surface as a stack trace or a silent failure rather than a
-message in the chat. It is on the [backlog](../../TODO.md) rather than in the code, which is why it is
+message in the chat. It is on the [backlog](https://github.com/saxman/kokua/blob/main/TODO.md) rather than in the code, which is why it is
 here and not above: six honest principles beat seven with one aspirational. It matters more than a
 polish item under the vision at the top of this page, since a failure you cannot see is a failure you
 cannot learn from. When it lands, it becomes the seventh.
@@ -317,6 +317,6 @@ cannot learn from. When it lands, it becomes the seventh.
 ## See also
 
 - [Architecture](architecture.md): the shape that falls out of these principles.
-- [CONTRIBUTING.md](../../CONTRIBUTING.md): the mechanics.
+- [CONTRIBUTING.md](https://github.com/saxman/kokua/blob/main/CONTRIBUTING.md): the mechanics.
 - [AIMU's design principles](https://saxman.info/aimu/explanation/design-principles/): the
   library-level six that Kokua inherits rather than restates.
