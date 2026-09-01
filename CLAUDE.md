@@ -18,7 +18,9 @@ Three consequences for work in this repository:
 
 - **Docs are part of the change, not a follow-up.** A behavior change that lands without its
   explanation is unfinished. `README.md`, `CHANGELOG.md`, and the relevant page under `docs/` go in the
-  same commit as the code.
+  same commit as the code. A new page under `docs/` also needs a `nav` entry in `mkdocs.yml`, and any
+  link out of `docs/` must be an absolute `https://github.com/saxman/kokua/blob/main/...` URL, both
+  enforced by the strict build and `tests/test_docs.py`.
 - **Between two working designs, take the one a newcomer follows faster.** An abstraction that saves
   lines and costs a reader a jump is a bad trade here even when it is the tidier code.
 - **Growth has to teach something.** A change that enlarges what a newcomer must hold in their head
@@ -32,6 +34,8 @@ uv run pytest -q                         # full test suite (mock-only: no model,
 uv run pytest tests/frontends/test_web.py -q             # one module (tests/ mirrors src/kokua/)
 uv run pytest -m e2e                      # opt-in browser UI tests (needs `playwright install chromium`)
 uv run ruff check . && uv run ruff format --check .      # lint (format with `ruff format .`)
+uv run mkdocs serve                       # preview the docs site (http://127.0.0.1:8000)
+uv run mkdocs build --strict              # what CI builds; broken link or off-nav page fails
 uv run kokua --frontend web              # run the web UI (or `kokua-web`); `kokua` alone is the CLI
 uv run kokua config init                 # scaffold $KOKUA_HOME/config.toml from the documented example
 uv run kokua skills list                 # skills bundled in ./skills (outside the package, not in the wheel)

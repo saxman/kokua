@@ -1136,6 +1136,11 @@ notice on startup.
   plugin seam from the outside: installing the package, declaring it on an agent, giving it its own
   config section, and gating its expensive tool, with [jobme](https://github.com/saxman/jobme) as the
   worked example throughout.
+- **Documentation site** at [saxman.info/kokua](https://saxman.info/kokua/), built from `docs/` with
+  mkdocs-material and published by `.github/workflows/docs.yml` on every push to main. The build is
+  strict: a broken internal link, or a page missing from `mkdocs.yml`'s `nav`, fails CI.
+  `tests/test_docs.py` covers what a site build cannot, checking that every link out of `docs/` names a
+  path that exists.
 - **A mock-only default test suite.** No model, no network, no keys. This is why the model client is
   injectable and the builders are free functions. Client-side page JS is
   covered by an opt-in Playwright suite (`pytest -m e2e`) driving the real `index.html` in headless

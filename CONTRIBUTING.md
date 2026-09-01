@@ -45,6 +45,23 @@ uv run pytest -q
 Line length is 120 (`ruff` is configured in `pyproject.toml`). Tests are mock-only and require no model,
 network, or API keys.
 
+## Build the docs locally
+
+The site at [saxman.info/kokua](https://saxman.info/kokua/) is built from `docs/` by
+`.github/workflows/docs.yml` on every push to main. To see a change before pushing:
+
+```bash
+uv sync --all-extras
+uv run mkdocs serve          # http://127.0.0.1:8000, rebuilds on save
+uv run mkdocs build --strict # what CI runs: a broken link or an off-nav page fails the build
+```
+
+A new page needs an entry in `mkdocs.yml`'s `nav`, or the strict build fails. That is deliberate: a
+page nobody can navigate to is indistinguishable from a page that does not exist. Links out of `docs/`
+must be absolute, in the style of the [`toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py)
+link under Conventions below, which `tests/test_docs.py` enforces along with checking that every such
+path still exists.
+
 ## Design principles
 
 Read [docs/explanation/design-principles.md](https://saxman.info/kokua/explanation/design-principles/) first. It opens
