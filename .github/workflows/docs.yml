@@ -1,0 +1,43 @@
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'src/kokua/**'
+      - 'CHANGELOG.md'
+      - 'CONTRIBUTING.md'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      # AIMU comes from its main branch for the same reason ci.yml does it: the two projects are
+      # developed together. The web extra is here because the API reference page will import the
+      # modules it documents, and kokua.channels.web imports Starlette.
+      - name: Install AIMU from main
+        run: pip install "aimu @ git+https://github.com/saxman/aimu@main"
+      - name: Install Kokua (docs + web)
+        run: pip install -e '.[docs,web]'
+      - name: Build the site
+        run: mkdocs build --strict
+      - name: Publish to GitHub Pages
+        run: |
+          pip install ghp-import
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ghp-import --no-jekyll --force --push --message "Deploy docs" site
