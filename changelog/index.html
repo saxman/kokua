@@ -1,0 +1,2702 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A personal AI assistant built to be understood and extended.">
+      
+      
+      
+        <link rel="canonical" href="https://saxman.info/kokua/changelog/">
+      
+      
+        <link rel="prev" href="../explanation/design-principles/">
+      
+      
+        <link rel="next" href="../contributing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/kokua-favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Changelog - Kokua</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Kokua" class="md-header__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kokua
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../how-to/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  How-to
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../reference/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../explanation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Explanation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Kokua" class="md-nav__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    Kokua
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../how-to/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/set-up-toolsets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set up a toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/install-a-third-party-toolset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install a third-party toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/add-skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a skill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/add-mcp-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add an MCP service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/back-up-to-github/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Back up to GitHub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/export-a-conversation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export a conversation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../explanation/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explanation
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Explanation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../explanation/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../explanation/design-principles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design principles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#010-unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0 (unreleased)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.0 (unreleased)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#package-and-entry-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package and entry points
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversations-and-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversations and turns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#front-ends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Front ends
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agents-and-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agents and tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bundled-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bundled skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toolsets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Toolsets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#proactive-work-scheduled-tasks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proactive work: scheduled tasks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workflows-a-pluggable-turn-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflows: a pluggable turn strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deep-planning-and-adversarial-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deep planning and adversarial review
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Images
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostics-and-error-reporting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostics and error reporting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#internals-and-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Internals and development
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#010-unreleased" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0 (unreleased)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.0 (unreleased)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#package-and-entry-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package and entry points
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversations-and-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversations and turns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#front-ends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Front ends
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agents-and-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agents and tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bundled-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bundled skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#toolsets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Toolsets
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#proactive-work-scheduled-tasks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proactive work: scheduled tasks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workflows-a-pluggable-turn-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflows: a pluggable turn strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deep-planning-and-adversarial-review" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deep planning and adversarial review
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Images
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#diagnostics-and-error-reporting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostics and error reporting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#internals-and-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Internals and development
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<!--
+The canonical source is the repository-root CHANGELOG.md, included here verbatim via
+pymdownx.snippets so there is one file to maintain. Edit /CHANGELOG.md, not this stub.
+-->
+
+<h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
+<h2 id="010-unreleased">0.1.0 (unreleased)<a class="headerlink" href="#010-unreleased" title="Permanent link">&para;</a></h2>
+<p>First release. Kokua starts from AIMU's <code>examples/personal-assistant/</code> and restructures it into an
+installable, modular application: a small transport-agnostic core with capability pushed into plugins.
+Because there is no earlier release, this section describes what 0.1.0 <em>is</em> rather than what changed.
+The pre-release development history is in the git log.</p>
+<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.27.0 or newer. Apache-2.0.</p>
+<h3 id="package-and-entry-points">Package and entry points<a class="headerlink" href="#package-and-entry-points" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>src</code>-layout <code>kokua</code> package with two console scripts: <code>kokua</code> runs the selected front end (default
+  <code>cli</code>), <code>kokua-web</code> is a convenience for <code>kokua --frontend web</code>. Both route through <code>kokua.cli</code>, so
+  both run the AIMU preflight described under <a href="#diagnostics-and-error-reporting">Diagnostics</a>.</li>
+<li><strong>Plugin system</strong> (<code>kokua.plugins</code>). Front ends and toolsets are discovered through the
+  <code>kokua.frontends</code> and <code>kokua.toolsets</code> entry-point groups. The built-in <code>cli</code> / <code>web</code> front ends and
+  the built-in toolsets register exactly as a third party's package would, so if the built-in path
+  and the plugin path ever diverge, the plugin path is the broken one. Inspect with <code>--list-frontends</code>
+  and <code>--list-toolsets</code>. Discovery is unconditional: installing a distribution that registers an
+  entry point is the consent, and there is no switch to withhold it. Nor is any registration treated
+  as untrusted: a toolset that fails to import, or whose <code>build</code> raises, fails startup naming itself,
+  whichever route it arrived by. Kokua ships no third-party code, so it carries no special handling
+  for code it does not ship.</li>
+<li><strong><code>toolsets/</code> holds toolsets and nothing else.</strong> The machinery a toolset is built against (the
+  <code>Toolset</code> and <code>Setting</code> types, name resolution, and the <code>LiveState</code> / <code>ToolsetContext</code> a <code>build</code>
+  draws on) is <code>kokua.registry</code>; assembling every provider into one namespace, validating an agent,
+  and assembling its prompt is <code>kokua.core.agents</code>. So a reader looking for a capability finds a file
+  with its name, and nothing else to sort past.</li>
+<li><strong>No startup warning for a registered name no agent declares.</strong> Telling a name the user provisioned
+  from one that merely ships meant a provenance rule over the whole namespace, and a toolset nobody
+  declares costs nothing to leave unnamed. A configured MCP server does cost something (a handshake,
+  and a held credential), and it is the case that lost a signal here; see
+  <a href="https://saxman.info/kokua/how-to/add-mcp-services/">Add MCP services</a>. The distinct warning for a <code>config.toml</code>
+  section whose owning toolset no agent declares is unaffected.</li>
+<li>The stable public import surface is <code>kokua.plugins</code>, <code>kokua.config</code>, <code>kokua.core</code>,
+  <code>kokua.channels.web</code>, and <code>kokua.images</code>. Everything else is internal and may move.</li>
+</ul>
+<h3 id="conversations-and-turns">Conversations and turns<a class="headerlink" href="#conversations-and-turns" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Per-conversation agents.</strong> Each conversation owns its AIMU <code>SkillAgent</code> and model client, built
+  lazily and held in a bounded LRU registry (<code>agent_cache_cap</code>, default 8). Memory and documents stay
+  shared across conversations.</li>
+<li><strong>Concurrent conversations.</strong> A turn keeps running when you switch away: it streams only into the
+  conversation you are viewing, persists to its own conversation, and posts a completion notification
+  instead of streaming. Switching does not cancel it; only deleting a conversation does, and only its
+  own turn. The invariants that make this safe are documented at the top of <code>core/turns.py</code>.</li>
+<li><strong>Switching into a running turn shows the turn.</strong> A turn's messages are not in the store until it
+  ends, so its output is recorded as it is produced -- the user bubble, reasoning, tool calls with their
+  results, sub-agent cards, images, and the answer so far -- and replayed on switch-in, after which the
+  rest streams into the bubble replay left open. The record is dropped once the turn reaches the store,
+  so nothing is shown twice. Unattended scheduled turns record the same way, so switching into a running
+  task shows the sub-agent work it has done.</li>
+<li><strong>Conversations are titled by the model.</strong> The first user message, truncated, is the title the
+  moment a conversation has one; a background call then asks the model the conversation runs on for a
+  real one (<code>core/titles.py</code>: a fresh context-free client, no tools, no reasoning) and the sidebar
+  updates again when it lands. Best-effort throughout: an endpoint that is down, a model string naming
+  nothing, or an answer that cleans up to nothing all leave the truncated title in place, silently.
+  The write is guarded, so a conversation deleted while the model was writing is not resurrected (and
+  anything that changes the title in the meantime wins), and it takes that conversation's own turn
+  slot, since the store saves whole sessions. Shutdown cancels a title still in flight rather than
+  waiting on an endpoint. Scheduled tasks keep the task name their conversations are minted with.
+  <code>[assistant] generate_titles</code> (default <code>true</code>) turns it off, leaving the truncated title; it is hot,
+  so the change applies to the next conversation with no restart, and it is the one entry in
+  <code>CORE_RUNTIME_SETTINGS</code>, since no capability owns it. Which model writes the title is not
+  configurable: the conversation already answers that.</li>
+<li><strong><code>/stop</code></strong> cancels an in-flight reply and keeps the partial turn so the conversation continues (the
+  web UI has a Stop button for the same). Built on AIMU's <code>aio.RunHandle</code>; reactive turns run as
+  background tasks, so the channel keeps reading mid-turn -- which is also what lets a web approval
+  reply reach the waiting tool call.</li>
+<li><strong>A turn records what it cost.</strong> <code>core/metrics.py</code>'s <code>TurnMetrics</code> accumulates each model call's
+  count, model, seconds, and (when a provider reports them) tokens, stored under
+  <code>session.metadata["usage"][str(user_index)]</code> beside the model and effort already recorded there.
+  The sink (<code>core.metrics.record_event</code>) is assigned to the conversation's client once, durably,
+  rather than being passed to <code>run()</code>; what is turn-scoped is a <code>ContextVar</code> the sink reads at emit
+  time, so the client-wide assignment is inert outside a turn and needs no teardown after one. This is
+  what makes a planned turn count too, since a workflow drives the conversation's own agent. Recorded
+  on every exit branch of a turn: success, cancellation, a connection error, a generic error, with the
+  wall-clock figure measured at the moment of recording, so a turn that raised still reports what it
+  cost up to the point it stopped.</li>
+<li><strong>Delegated and reviewed work counts toward that same total, with one named exception.</strong> A spawned
+  sub-agent and a workflow critic each build their own client, outside the family a turn's own scoped
+  sink reaches, so both were invisible to <code>TurnMetrics</code> and a heavily delegating turn read as cheap.
+  Both now receive <code>core.metrics.record_event</code> explicitly: <code>core/agents.py</code>'s spawn tool passes it as
+  <code>make_async_subagent_tool(events=...)</code>, and <code>workflows/critics.py</code>'s <code>reviewer_agent</code> passes it as
+  both <code>aio.Agent(events=...)</code> and <code>client.events = record_event</code>, since its typed verdict is fetched
+  with a direct <code>client.chat(..., schema=Verdict)</code> call outside any <code>run()</code>, where the agent's own
+  <code>events</code> override does not apply. <code>record_event</code> is a module-level constant, not a <code>LiveState</code> field,
+  since a field would be shared across every conversation's concurrent turns; it reads the turn actually
+  running off a contextvar when an event fires, so a tool or agent built once at composition time
+  reports into whichever turn asked for it. Recorded model calls attribute by the event's <code>agent</code> field,
+  which is what makes <code>TurnMetrics.record</code>'s <code>by_agent</code> breakdown non-empty for a turn that delegated or
+  reviewed. <strong>The verdict call itself stays uncounted regardless</strong>: AIMU's structured (<code>schema=</code>) path
+  emits no turn event on any client, so wiring <code>client.events</code> closes the gap for every other direct
+  client call but not this one. A <code>/plan</code> turn's recorded cost is short by exactly one call per review
+  round, with no qualifier able to say so.</li>
+<li><strong><code>kokua export</code> writes a conversation as Markdown.</strong> <code>transcript_export.render_markdown</code> renders a
+  saved conversation's header, each turn's user message, reasoning, tool calls with their arguments
+  and results, sub-agent cards, and what it cost, into one Markdown document a person can read, diff,
+  or paste into a review. Pure and dependency-free (no <code>channels/</code> or <code>frontends/</code> import), so both
+  front ends and the CLI can call it. Two rules keep it honest: a figure nobody reported prints as "not
+  reported" rather than an invented zero, and a tool payload past
+  <code>DEFAULT_MAX_PAYLOAD_CHARS</code> (4000 characters) is cut with a note saying how much was removed rather
+  than shown as if it were complete (<code>--full</code> lifts the cap). <code>kokua export [id-or-prefix] [-o path|-]
+  [--full]</code> reads the session store directly and writes the file: no <code>Assistant</code>, no model client, no
+  agent, so it works with the model server down. A read that races the daemon's own persist reports the
+  store as busy rather than parsing a torn file. See
+  <a href="https://saxman.info/kokua/how-to/export-a-conversation/">Export a conversation</a>.</li>
+</ul>
+<h3 id="front-ends">Front ends<a class="headerlink" href="#front-ends" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>cli</code></strong>: the terminal, via AIMU's <code>CLIChannel</code>. <code>/attach &lt;path&gt;</code> stages a local image onto the next
+  message; <code>/think &lt;level&gt;</code> sets the reasoning effort for the messages that follow (<code>off</code>, <code>low</code>,
+  <code>medium</code>, <code>high</code>, or <code>default</code>), and a bare <code>/think</code> reports the current one.</li>
+<li><strong><code>web</code></strong> (behind the <code>web</code> extra): a Starlette + uvicorn WebSocket server with a streaming browser
+  UI, bound to <code>127.0.0.1:8000</code> by default. The page is three files: <code>index.html</code> for the markup,
+  <code>app.css</code>, and <code>app.js</code>, served from the same static-asset allowlist as the vendored libraries.</li>
+<li><strong>A flat transcript, not a chat.</strong> One left-aligned column: the user's turn is marked with a <code>&gt;</code>
+    rather than filled, prose takes a 76ch measure, and machine events are dim monochrome one-line rows
+    set apart by a kind word and an indent. Tables and code blocks run wider than the prose measure,
+    since they are scanned rather than read.</li>
+<li><strong>Colour means one thing.</strong> Twelve semantic tokens, of which the warm pair marks only a decision
+    waiting on you: a tool approval or a plan review. Tool calls, sub-agent cards, and proactive
+    messages are not warm. The disclosure triangle is the only glyph on the page; every block names its
+    kind in words.</li>
+<li><strong>Conversations</strong> are listed in a sidebar, auto-titled from the first message, each row showing its
+    relative age, with new / select / delete (deleting the active one switches to the most recently
+    updated remaining conversation). The header strip names the conversation being viewed. The sidebar
+    collapses to an icon rail and drag-resizes between 180 and 480px; the divider is keyboard-operable.
+    Width, collapsed state, and theme are per-browser preferences applied before first paint, so there
+    is no flash on load.</li>
+<li><strong>Each row also carries an export button</strong>, beside delete, that renders the conversation with the
+    same <code>transcript_export.render_markdown</code> the CLI uses and downloads it, without switching the row
+    into view or reloading the page. There is no <code>GET /export/{id}</code> route: the front end builds its
+    <code>Assistant</code> fresh per WebSocket connection, so a plain HTTP handler would have no live session store
+    to read. An <code>"export"</code> control on the same socket every other sidebar action uses does the read and
+    write, and the reply reuses the existing <code>/download/{name}</code> route (already serving generated PDFs)
+    rather than opening a second one. See
+    <a href="https://saxman.info/kokua/how-to/export-a-conversation/#from-the-web-ui">Export a conversation</a>.</li>
+<li><strong>The composer is one bordered box</strong> with a text area that grows to eight rows: Enter sends,
+    Shift+Enter inserts a newline (an IME's Enter does neither). Send is replaced by Stop for the
+    duration of a turn rather than sitting beside a permanently disabled button, and switching
+    conversations mid-turn updates it to match the conversation being viewed.</li>
+<li><strong>A Think picker beside the Plan toggle</strong> sets the reasoning effort for the messages you send after
+    it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
+    <code>input</code> frame field, writes nothing to <code>config.toml</code>, and resets to the configured default on reload.
+    It goes inert while Plan is on, because a planned turn runs its own agents at their declared efforts.</li>
+<li><strong>Replies render as GitHub-flavored markdown while they stream</strong>, via vendored <code>marked</code> +
+    <code>DOMPurify</code> (bundled, served locally, no CDN). The rendered HTML is sanitized, so model and tool
+    output cannot inject scripts or markup, and links open with <code>rel="noopener"</code>. The page reparses the
+    whole accumulated answer on a 50ms timer rather than committing each finished block as it lands,
+    because a newline is not a block boundary in CommonMark: a lone newline continues the paragraph,
+    and a newline inside a fence, list, or table sits inside an open block, so a committed prefix could
+    be wrong in a way no later token could repair. Reparsing converges on the final render by
+    construction. LaTeX math is typeset with vendored KaTeX after sanitization, with <code>trust:false</code> and
+    a <code>maxExpand</code> cap (a malformed expression is left as source text rather than breaking the row), and
+    only once the turn completes: KaTeX is the expensive half of the render and half-typed TeX is noise,
+    so mid-stream the expression stands as the source the model wrote.</li>
+<li><strong>A turn renders in the order it was produced.</strong> An answer the model wrote before calling a tool
+    stays above the card for that call: the block closes the answer bubble, and the tokens that follow
+    open a new one below it. A turn that says something, calls a tool, and then says more therefore
+    reads top to bottom in all three renderings -- live streaming, a background turn's catch-up replay,
+    and a reloaded transcript, where a stored assistant message's prose replays ahead of the
+    <code>tool_calls</code> it carries rather than behind them.</li>
+<li><strong>Auxiliary blocks fold, and the folded line carries the call.</strong> Thinking, tool calls,
+    verbose-trace phases, sub-agent cards, drafted plans, and agent-loop continuation markers render
+    collapsed behind a one-line header: the kind word, then the call with its condensed arguments, then
+    a metric (a result size, a line count, a status). Only the arguments ellipsize, so a row is never
+    taller than one line however long they are, and a turn can be read without opening anything. The
+    full untruncated arguments are inside the fold. Direct messages and the interactive approval and
+    plan-review prompts are unaffected.</li>
+<li><strong>A tool card shows what the call returned</strong>, not just what it was asked to do. The result renders
+    in a nested foldable labeled with its size (<code>output  2,148 chars</code>), filled on first open and
+    clamped at 4000 characters with a <code>show all</code> control. Always plain text, never markdown, because a
+    tool result is untrusted input. An error, an argument-binding failure, and a denied approval are
+    results too and arrive the same way, so there is no separate failure rendering. All four surfaces
+    that render a tool call carry it -- a live card, a background turn's catch-up replay, a sub-agent
+    card's nested calls, and a reloaded transcript -- and replay rejoins a stored call to its result by
+    <code>tool_call_id</code>, since concurrent dispatch appends results in completion order.</li>
+<li><strong>Sub-agent work is visible.</strong> A <code>spawn_subagent</code> call renders as
+    <code>subagent  spawn_subagent(&lt;role&gt;)  &lt;status&gt;</code> over an argument line, then the nested thinking, tool calls,
+    and answer the child produced, each individually foldable and built by the same builders and CSS as
+    their top-level counterparts. The child's text streams in as plain text and renders as markdown when
+    the spawn ends, which is the one place the page still waits for a terminal status to render (the
+    assistant's own reply now renders as it streams). The parent's own duplicate <code>spawn_subagent</code> tool block is suppressed. Recording and
+    display are independent, so a background turn's spawns are recorded even though its frames are
+    muted, and switching in later shows the work.</li>
+<li><strong>Rows carry a localized datetime caption</strong>, revealed on hover (full precision in its tooltip) so
+    the transcript is not dated line by line. On a foldable it rides the always-visible header, so it
+    shows collapsed or expanded. Ephemeral chrome (notices, approval prompts, banners) is not stamped.
+    Messages persisted before timestamps existed render without a caption.</li>
+<li><strong>Agent-loop continuations are distinguished from user input.</strong> The loop injects its own turns as
+    <code>user</code>-role messages; these render as a dim <code>continuation</code> row showing the injected prompt rather
+    than as the user's own turn. A proactive message keeps its uppercase label.</li>
+<li><strong>No settings window.</strong> The page's one settings control is a theme button in the header, cycling
+    auto / light / dark; it is a per-browser <code>localStorage</code> preference applied before first paint and
+    never reaches the server. Everything else runtime-mutable -- the planning toggles, and whatever else
+    a toolset declares hot -- is changed by asking the assistant, whose <code>update_config</code> hot-applies the change
+    for the next turn and persists it to <code>config.toml</code>. That keeps one path for every hot setting,
+    including a third party toolset's, instead of a panel that could only show the ones its markup
+    named. (The <code>settings</code> / <code>get_settings</code> control frames remain part of the web transport's contract
+    for a front end that wants to render them.) The model and the reasoning effort are not
+    runtime-mutable at all: both are read at startup, from <code>[assistant].model</code> / <code>[assistant].thinking</code>
+    or an agent's own <code>[agents.&lt;name&gt;]</code> keys. Change them in <code>config.toml</code> and restart.</li>
+<li><strong>Sampling parameters are AIMU's, not a Kokua setting.</strong> There is no <code>[generation]</code> section and no
+    generation fields anywhere in Kokua's settings. AIMU 0.16.0 resolves generation kwargs through one precedence chain
+    (the client's fallbacks, then the model card's tuned profile, then <code>client.default_generate_kwargs</code>,
+    then the per-call dict), and Kokua writing that third tier from config duplicated the chain while
+    shadowing the card: a model whose card specifies a tuned <code>temperature</code> / <code>top_p</code> / <code>top_k</code> / <code>min_p</code>
+    lost it to whatever that section set. <code>[generation]</code> gets no special handling on the way out: it is now
+    an unrecognized section, so a stale one left in a <code>config.toml</code> fails to load the way any unknown key
+    does, and deleting it is the fix.</li>
+<li><strong>A dropped socket reconnects on its own.</strong> Restarting Kokua under an open browser used to leave a
+    page that said "Disconnected." and could only be recovered by reloading. The page now retries with
+    backoff (500ms doubling to a 10s ceiling, indefinitely) and shows one notice for the whole outage
+    rather than one per attempt. Almost none of the work is on the client: the server already resyncs its
+    whole view on every connection (conversations, history, settings, tasks) and the <code>history</code> frame
+    replaces the transcript, so a reconnected page repaints rather than appending a second copy of what it
+    already showed. What a reconnect does not restore is a turn that was in flight when the socket
+    dropped, since the front end builds an <code>Assistant</code> per connection: the page comes back to what was
+    persisted, not to the stream it was watching. Two closes are not retried, and the page tells them
+    apart from a restart by whether anything arrived before the close: a server that answered and
+    <em>refused</em> sends one message and closes without syncing (the one-connection guard's "busy in another
+    tab", or a config error reported in place of a session), and retrying that would thrash a server that
+    is working while burying its explanation under repetitions of itself, so a refused page says to reload
+    and stops. Nothing having arrived at all is the ordinary restart case, and does retry.</li>
+<li>Reloading the page replays the prior conversation, reasoning and tool calls included. What was
+    streamed live is what is replayed: nothing in the core decides which frames are worth sending, so a
+    front end that wants to fold or hide a block does that with the block in hand.</li>
+<li><strong>A whitespace-only answer segment renders as nothing.</strong> A server that separates reasoning from the
+    answer itself sends the newlines that followed the reasoning as the answer segment's first tokens, so
+    on a turn that reasons and then calls a tool the whole segment can be whitespace. That used to open an
+    empty stamped bubble between the reasoning block and the tool card, reading as a section whose content
+    failed to arrive. Live and on reload, whitespace alone no longer opens a bubble; inside an open one it
+    is still the spacing between words.</li>
+</ul>
+<h3 id="agents-and-tools">Agents and tools<a class="headerlink" href="#agents-and-tools" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>An individual skill is a name in the same namespace as everything else.</strong> A <code>[agents.*]</code> table lists
+  <code>"citation-check"</code> beside <code>"web"</code> and <code>"stocks"</code> without saying which kind each is, and <code>--list-toolsets</code>
+  shows every skill on disk under a <code>skill:</code> group. Two paths deliver one declaration, split on who
+  authors: the <strong>entry agent</strong> stays an AIMU <code>SkillAgent</code>, and its catalogue is scoped with
+  <code>SkillManager(include=...)</code> to the skills it declares; a <strong>worker</strong>, which is a plain agent with no skill
+  machinery, gets a declared skill's script tools and <code>activate_skill</code> through the registry like any other
+  toolset, and the skill's description reaches its prompt as that toolset's guidance. <strong>Declaring the
+  <code>skills</code> authoring toolset opts an agent out of scoping</strong>, because narrowing an author's catalogue would
+  hide the skill it just wrote and make <code>add_skill_script</code>'s "callable in the same turn" promise false. A
+  skill whose name collides with a toolset or an MCP server is a startup error, like any other collision,
+  and a skill on disk that no table names is simply available to an authoring entry agent through its
+  catalogue anyway.</li>
+<li><strong>Every agent is declared whole in <code>config.toml</code>.</strong> One <code>[agents.&lt;name&gt;]</code> table per agent, carrying a
+  <code>description</code> (the label a delegator sees), a <code>system_message</code>, a <code>tools</code> list of toolset names, and a
+  <code>delegates_to</code> list. <code>[assistant].agent</code> names the <strong>entry agent</strong>, the one you talk to and the root of
+  the delegation graph. <code>assistant</code>, <code>researcher</code>, and <code>coder</code> ship as live tables in
+  <code>config.example.toml</code>, which is what <code>kokua config init</code> writes, and are edited, deleted, or added to
+  like any other setting. Nothing about an agent is defaulted in code, so <strong>Kokua refuses to start
+  without a config file, with one that defines no agents, or with one whose <code>[assistant].agent</code> names no
+  table</strong>, naming a remedy that works from that state -- a config file that exists but declares no
+  agents is told to add an <code>[agents.&lt;name&gt;]</code> table by hand or overwrite it with <code>kokua config init
+  --force</code>, since plain <code>kokua config init</code> refuses a file that is already there -- rather than running
+  something that looks alive and cannot work.</li>
+<li><strong>One namespace of named toolsets.</strong> A <em>toolset</em> is one named capability an agent can declare: a name,
+  a description, a <code>build(ctx)</code> returning tool callables, and optional <code>guidance</code>. Every provider lands
+  in one namespace -- AIMU's built-in tool groups plus its two stores and skills, Kokua's own <code>capabilities</code> /
+  <code>config</code> / <code>conversations</code> / <code>mcp</code> / <code>scheduling</code>, each installed plugin toolset, and each configured
+  MCP server by its (now required) <code>name</code> -- so a <code>tools</code> list says <code>"stocks"</code>, never <code>"mcp:stocks"</code>, and a
+  capability can change provider without touching an agent. The cost is paid at startup: two providers
+  claiming one name is a <code>ConfigError</code> naming both. <code>kokua --list-toolsets</code> prints the whole registry
+  grouped by provider, and is the discovery command for the namespace.</li>
+<li><strong>A capability is declared, never defaulted.</strong> There is no code path that adds a tool an agent did not
+  name, and no flag that can disagree with a declaration. Not even the clock: <code>time</code> is a toolset that
+  every agent wanting one declares. The state a toolset draws on is a lazy property on one <code>LiveState</code>, so
+  two agents declaring one toolset share one store rather than opening two, and the memory and document
+  stores are opened because some agent declared them and not otherwise.
+  An unknown name raises rather than being dropped, since a dropped name is a declaration silently
+  overruled. The one exception is a sub-agent composed by <code>compose_subagent</code> (below), and it is entered
+  by declaration too: only an agent whose own table names <code>capabilities</code> can compose one, and what it
+  composes is one task's sub-agent rather than an agent the config describes.</li>
+<li><strong><code>spawn_subagent(agent_type, task)</code></strong> is typed, and a non-empty <code>delegates_to</code> is the whole switch
+  for it: that agent gets a delegate offering exactly the agents it names, each running on its own
+  declared model (or the default) with the tools its own table declares. Delegation nesting is Kokua's rather than AIMU's <code>max_depth</code>,
+  so an agent you delegate to that delegates in turn gets its own menu of its own targets; the graph must
+  be acyclic and a cycle fails startup printing the cycle as a path. Independent spawns in one turn run
+  concurrently (<code>[assistant] concurrent_tools</code>, default on). A worker's gated-tool call is routed to the
+  user for approval and is never run unattended.</li>
+<li><strong>Capability discovery</strong> (<code>capabilities</code> toolset). An agent can read the toolset registry at runtime
+  with <code>list_capabilities</code> and, when no declared sub-agent role fits a task, call <code>compose_subagent</code> to
+  build a sub-agent holding exactly the capabilities that task needs. The composed sub-agent is
+  constructed per call, runs one task, and is discarded; its tools still route through
+  <code>[security].confirm_tools</code>. <code>[capabilities].max_depth</code> (default 3, <code>0</code> off) bounds how far composition
+  nests: at 3 a chain reaches three sub-agents, and the last of them holds neither tool, since a
+  <code>compose_subagent</code> with no way to look up capability names is useless to whatever holds it. A
+  declared role is ranked above composing one in the prompt guidance, since its instructions were
+  written for its job where a composed one's are written in the moment.</li>
+<li><strong>Guidance travels with the capability.</strong> Each toolset carries the prompt text that makes the model use
+  it, appended to any agent holding it, so installing a toolset brings its instructions and removing one
+  takes them away. An agent's system message is its own opener (falling back to
+  <code>[assistant].system_message</code>, then the built-in default), then its toolsets' guidance in declared
+  order, then the delegation instructions when it delegates, and finally a "you are a lean supervisor,
+  you MUST delegate" clause only when every toolset it declared is marked <code>cross_cutting</code> -- something an
+  agent holds to manage itself rather than to do domain work. <code>cross_cutting</code> decides that one sentence
+  and nothing else: it is <strong>not</strong> an authorization boundary, and an agent declaring <code>config</code> really does
+  get <code>update_config</code>. The boundaries are that <code>[agents.*]</code> is locked by default and that <code>confirm_tools</code>
+  gates by tool name whoever calls it.</li>
+<li><strong>The prompt names what cannot be answered from memory.</strong> A model that believes it knows an answer
+  never reaches for a tool, so both halves of the prompt state the trigger as a property of the question
+  (could the answer have moved since training, could the user check it against a source: current events,
+  prices, releases, published figures, who holds a role, what a page says today) rather than as the
+  model's own confidence, which is the signal it is worst at reporting. A delegating agent is told to
+  delegate those "even when you think you know"; the <code>web</code> toolset, the one AIMU group carrying guidance
+  of its own, tells whoever holds the tools to look it up rather than recall it and to say where the
+  answer came from. The two reach different agents: the shipped <code>[agents.assistant]</code> holds no web tools
+  and gets the first, <code>[agents.researcher]</code> does not delegate and gets the second.</li>
+<li><strong><code>--system</code> overrides the entry agent's opener for that run</strong>, winning outright over its declared
+  <code>system_message</code> (and over the <code>[assistant].system_message</code> fallback), since the message a person is
+  talking to is a prompt, not the capability <code>[agents.*]</code> is the single source of. A worker's own
+  declared opener is untouched: the flag only ever reaches the agent the user is talking to.</li>
+<li><strong>The shipped config, not the code, is what makes the assistant lean.</strong> <code>[agents.assistant]</code> declares
+  the cross-cutting toolsets and no domain tools, delegating web, file, and compute work, which keeps the
+  always-on agent's tool context small; give it <code>"compute"</code> and it runs Python itself. The one structural
+  restriction is <code>skills</code>, marked entry-point-only because a spawned worker is a plain AIMU <code>Agent</code>
+  rather than a <code>SkillAgent</code>, so declaring it elsewhere fails startup instead of producing a worker whose
+  skill tools quietly do nothing.</li>
+<li><strong>Startup validates the whole graph before touching anything.</strong> An unknown toolset name (with the
+  valid names listed), a duplicate provider name, a missing or absent entry agent, no agents at all, an
+  unknown delegation target, a delegation cycle, and <code>skills</code> on a non-entry agent each fail before the
+  session store is opened or any MCP server connected, so a bad config leaves nothing written and nothing
+  connected. One agent shape backs this: <code>wire_agent</code> builds any agent from its declaration, selecting
+  its toolsets once and feeding the same list to both its tools and its prompt.</li>
+<li><strong>The assistant can look across your other conversations.</strong> The <code>conversations</code> toolset, three
+  read-only tools:
+  <code>list_conversations</code> (ids, last-active times, message counts, titles), <code>read_conversation</code> (one
+  transcript as plain text), and <code>search_conversations</code> (case-insensitive text across every saved
+  conversation, with snippets). So "what did we decide about the deployment last week?" is answerable,
+  and context from a past thread can be carried into a <code>spawn_subagent</code> task. The shipped config gives it
+  to the entry agent and to no worker, and a test pins that: a worker shares no history and has no
+  conversation identity, so the capability would widen a spawn's blast radius for nothing.</li>
+</ul>
+<p>Reads come from the last persisted snapshot, never a rebuilt agent -- building one to read it would
+  allocate a model client, re-expand every stored image, and evict live agents from the LRU cache, and
+  it would be <em>less</em> correct, since a running turn appends to its message list in place. Two markers
+  keep the snapshot honest instead: a conversation with an in-flight turn is flagged as having unsaved
+  messages, and the conversation you are in says so, since its current turn is not persisted yet and
+  the model already has it in context. A transcript holds only what was said, with reasoning and tool
+  calls left out and each image as <code>[image]</code>, one long message cut on its own so a pasted document
+  cannot swallow a read, and the whole bounded by a <code>max_chars</code> the model can raise; when it does not
+  fit, the <em>oldest</em> messages are dropped behind a count, so a read always ends with the most recent
+  message. Search matches the phrase first and falls back to all-of-these-words within one message,
+  saying which it used.
+- <strong>Agent tools are findable, and are only presentation.</strong> Every module defining an <code>@aimu.tool</code> is a
+  toolset module, so <code>grep -rl '@tool' src/kokua/</code> finds only files under <code>toolsets/</code>. Kokua's own five
+  (<code>capabilities.py</code>, <code>config.py</code>, <code>conversations.py</code>, <code>mcp.py</code>, <code>scheduling.py</code>) each wrap one
+  subsystem (<code>capabilities.py</code> wraps the registry itself) and export the <code>TOOLSET</code> for it, indexed in
+  <code>toolsets/core.py</code>. The subsystem underneath (<code>core/transcripts.py</code>, <code>config/store.py</code>,
+  <code>mcp/servers.py</code>, <code>scheduling/tasks.py</code>) holds only what agents and front ends both need: it returns
+  records and raises typed errors, and formats no sentence. Because about half the 30 tools the shipped
+  entry agent holds come from AIMU and cannot be grepped here at all,
+  <a href="https://saxman.info/kokua/explanation/architecture/#how-an-agents-tools-resolve">docs/explanation/architecture.md</a> carries
+  the full inventory with the factory that builds each and the toolset it is declared as, and
+  <code>tests/core/test_build.py</code> pins it as an <strong>exact set</strong>: adding a tool to the entry agent fails the suite
+  until the table is updated in the same commit, and a plugin toolset leaking onto it fails too, naming the
+  offender.
+- <strong>Skills</strong>: AIMU's skill authoring plus runnable skill scripts, as the <code>skills</code> toolset.
+- <strong>Memory</strong>: a <code>SemanticMemoryStore</code> for facts (<code>memory</code>) and a <code>DocumentStore</code> for documents
+  (<code>documents</code>), shared by every agent that declares them. Concurrent-turn safety lives inside AIMU's
+  stores (a re-entrant per-store lock) rather than a Kokua-side wrapper.</p>
+<h3 id="bundled-skills">Bundled skills<a class="headerlink" href="#bundled-skills" title="Permanent link">&para;</a></h3>
+<p>Kokua ships three Agent Skills in a repository-level <code>skills/</code> directory, deliberately outside the
+package and therefore outside the wheel: these are content, not Python, and keeping them in <code>src/</code> would
+put them back in the source tree. <code>kokua skills list</code> shows what is bundled with each declared
+description; <code>kokua skills install [name...]</code> copies them into the skills folder your config resolves,
+honouring <code>[paths].data_dir</code> and <code>$KOKUA_HOME</code>, and leaves an already-installed skill of the same name
+alone unless you pass <code>--force</code>, so a local edit survives a reinstall. Both commands run before the AIMU
+preflight, since copying files needs no AIMU surface. An installed-from-PyPI Kokua has no copy and the
+command says where to get one.</p>
+<ul>
+<li><strong><code>markdown-to-pdf</code></strong> renders Markdown to a PDF in <code>data/downloads/</code>, which the web front end serves
+  at <code>GET /download/&lt;name&gt;</code>, and reports that link. <strong>This was the <code>pdf</code> toolset.</strong> Its script declares
+  <code>fpdf2</code> and <code>markdown</code> inline with <a href="https://peps.python.org/pep-0723/">PEP 723</a> and <code>uv</code> resolves them
+  per run, so <strong>both left Kokua's dependencies entirely</strong>. Path traversal in the output name is stripped
+  to a bare filename, and fpdf2's Latin-1 core fonts mean smart quotes, dashes and arrows fold to ASCII
+  (lossy, and expected).</li>
+<li><strong><code>email-report</code></strong> mails a Markdown body to you as HTML with a plain-text fallback, optionally
+  attaching a file already in <code>data/downloads/</code> or <code>data/images/</code>. <strong>This was the <code>email</code> toolset</strong>, and
+  it keeps both properties that one had by construction: there is no recipient flag at all, so it can
+  only ever mail the configured address; and every attachment resolves before connecting, so a bad name
+  sends nothing rather than an email the caller believes carried the file. On failure it reports only the
+  exception type, because SMTP errors can echo credentials.</li>
+<li><strong><code>dice-roller</code></strong> rolls standard dice notation and prints JSON. <strong>This was the <code>example</code> toolset</strong>, and
+  it stays the worked example: no dependencies, so no <code>uv run</code> needed, and nothing host-specific to copy
+  around.</li>
+</ul>
+<p>A script cannot discover where Kokua serves downloads from or which address it may mail, so
+<code>LiveState.script_env()</code> passes the downloads and images folders and the <code>[email]</code> settings into each
+script's environment (AIMU 0.14.1 threads them to the subprocess). Deriving them in a script would mean
+re-implementing <code>config/paths.py</code> and drifting from it. <code>KOKUA_EMAIL_PASSWORD</code> is deliberately not
+passed: a subprocess already inherits it, so copying it would duplicate a secret for nothing.
+That map travels by two routes, because a skill script reaches an agent by two. A spawned worker takes
+its skill tools from the registry, where <code>LiveState.skill_tools</code> passes the env to
+<code>build_skills_server</code>. The entry agent is a <code>SkillAgent</code>, which builds its own skills server and so
+cannot be reached that way; <code>wire_agent</code> hands it the same map as <code>SkillAgent(script_env=...)</code>, which
+needs <code>aimu&gt;=0.20.0</code>. A route that misses it raises nothing: the script runs with the settings simply
+absent and reports itself unconfigured, which is why <code>tests/core/test_build.py</code> pins the entry agent's
+copy directly.</p>
+<p>A skill carrying scripts belongs on an agent that also declares <code>fs</code> and <code>compute</code>, since running the
+script is how the skill does its work.</p>
+<h3 id="toolsets">Toolsets<a class="headerlink" href="#toolsets" title="Permanent link">&para;</a></h3>
+<p><strong>All 21 toolsets Kokua ships are one file each under <code>src/kokua/toolsets/</code>, named for the toolset, and
+registered in <code>pyproject.toml</code>'s <code>kokua.toolsets</code> entry-point table</strong> -- the same table a third party's
+package writes into. There is no second route, no index in code, and no directory scan: that table is the
+index. Adding a toolset is a new file and one line, and <code>tests/toolsets/test_registration.py</code> fails until
+both exist and agree, in both directions and on all three names (file stem, entry-point key,
+<code>TOOLSET.name</code>). That last one matters because <code>register</code> keys on <code>TOOLSET.name</code> while the entry key feeds
+only the provenance label, so a mismatch would otherwise register a toolset under a name nobody wrote.</p>
+<p>The directory holds toolsets and nothing else. The machinery is <code>kokua.registry</code>, namespace assembly is
+<code>kokua.core.agents</code>, and <code>toolsets/__init__.py</code> exports nothing (Python needs it for the package to be
+collected into the wheel and importable by name).</p>
+<p><strong><code>mcp-admin</code> is now <code>mcp</code></strong>, since a toolset's file name is its name. A <code>tools</code> list saying <code>"mcp-admin"</code>
+fails startup on the unknown name.</p>
+<p><strong>The <code>compute</code> toolset now carries a shell tool, <code>run_command</code>, alongside <code>calculate</code> and
+<code>execute_python</code>.</strong> It runs a command line through <code>/bin/sh -c</code> and returns the exit code with stdout
+and stderr labelled separately; a nonzero exit comes back as output rather than an error, since <code>pytest</code>
+exits 1 with the answer on stdout. The timeout is per call, defaulting to 30 seconds and clamped to 600.
+The shipped <code>[agents.coder]</code> is the only agent declaring <code>compute</code>, and its <code>system_message</code> already told
+it to run "Python, shell, or calculations," which is true for the first time; the toolset module's
+identical docstring claim was equally aspirational and is now accurate. <strong>It arrives gated</strong>:
+<code>config.example.toml</code> adds <code>run_command</code> next to <code>execute_python</code> in <code>[security].confirm_tools</code>, so a
+command reaches you for approval before it runs, including one a sub-agent asked for, since a worker's
+gated call routes to the parent's gate rather than running unattended. A <code>config.toml</code> scaffolded before
+this release still gates <code>execute_python</code> alone; add <code>run_command</code> to it by hand. <strong>The reviewer does not
+get it.</strong> <code>workflows/critics.py</code> names <code>builtin.calculate</code> individually rather than taking the whole
+<code>compute</code> group, precisely so a future widening of that group cannot reach an agent with nobody to ask
+for approval, and <code>tests/workflows/planning/test_reviewers.py</code> now asserts the absence by name rather
+than relying on a set intersection staying empty. Needs <code>aimu&gt;=0.24.0</code>, which is what moved the floor
+there: <code>builtin.make_command_tool</code> and <code>run_command</code>'s membership in <code>builtin.compute</code> are both new in
+that release, and the startup preflight's capability probe moved to <code>make_command_tool</code>, a plain name
+lookup, since the capability and its handle are the same object.</p>
+<p><strong><code>[compute] command_env_passthrough</code></strong> names, comma separated, which environment variables a
+<code>run_command</code> child may see on top of a fixed allowlist (<code>PATH</code>, <code>HOME</code>, the locale and temp variables,
+plus <code>SHELL</code>, <code>TERM</code>, <code>TZ</code>, <code>USER</code>, <code>LOGNAME</code>). Nothing else reaches the child, API keys included, which
+is what stops <code>run_command("env")</code> lifting a credential into the model's context on a machine whose
+launcher sources a <code>.env</code>; the same default makes <code>gh</code>, <code>ssh</code>, and <code>git push</code> over ssh fail, which is the
+policy working as intended, and naming the variable here is how you grant it back. It is a string rather
+than a list because a toolset setting is a string, an int, or a bool, and it is cold rather than hot
+because the value is baked into the tool's closure when an agent is built; a hot flag doing nothing until
+a restart would be worse than a cold one that says so up front. The key is also locked by default in
+<code>[security].locked_config_keys</code>, added beside <code>email.to</code> rather than matched by an existing pattern,
+since without it the assistant could name one of its own credentials there and read it back out of a
+command's environment. <strong>Neither execution tool is a sandbox, and <code>run_command</code> is one step less of one
+than <code>execute_python</code>:</strong> a shell string reaches a credential sitting in a file with no code for anyone
+to read first, and process signalling is unconfined either way. <code>run_command</code> also carries no memory
+cap, unlike <code>execute_python</code>'s 512 MB address-space limit, since that cap would break compilers and
+test suites and a shell child's own cap would need <code>preexec_fn</code>, which is neither portable nor
+thread-safe. The approval gate is the control.
+<code>tests/toolsets/test_compute.py</code>, <code>tests/core/test_build.py</code>, and <code>tests/workflows/planning/test_reviewers.py</code>
+cover it.</p>
+<p>The four below are Kokua's own standalone capabilities, needing nothing but <code>AssistantConfig</code>. They are
+the shortest worked examples of the shape: one file, one <code>TOOLSET</code>, one entry-point line.</p>
+<ul>
+<li><strong><code>image</code></strong>: <code>generate_image</code>, offered only when <code>AIMU_IMAGE_MODEL</code> is set (e.g. <code>gemini:nano-banana</code>
+  or an <code>hf:&lt;repo&gt;</code> diffusers model).</li>
+<li><strong><code>aimu_agents</code></strong>: mounts AIMU's prebuilt <code>CodeReviewAgent</code>, <code>ResearchReportAgent</code>, and
+  <code>ContentCreationAgent</code> as the tools <code>code_review</code>, <code>research_report</code>, and <code>create_content</code>. It exists
+  mainly as the worked example of wiring an AIMU-built agent into Kokua: every <code>Runner</code> exposes
+  <code>.run(task) -&gt; str</code>, so a toolset is the entire bridge and the core gains no new surface. Each call
+  builds a fresh agent on <code>[assistant].model</code>, the same default an agent that declares no model of its
+  own runs on. The
+  caveats are documented in the module: the prebuilts are synchronous, so a nested run gets no sub-agent
+  card, no <code>/stop</code>, and no approval gate on its workers.</li>
+<li><strong><code>benchmark</code></strong>: one tool, <code>benchmark_model</code>, measures the model the agent holding it runs on and
+  reports time to first token and output speed in tokens per second, as a median and a range over three
+  timed runs. The two metrics are separated because they have different causes (prompt processing and
+  queueing against decoding), and a discarded warmup run is reported on its own line because a first
+  request can carry a cold model load worth many seconds, which would otherwise read as a slow model. It
+  takes no arguments: the model, the sampling parameters, and the reasoning effort all come from
+  <code>config.toml</code>, so there is nothing to redirect and nothing a per-call approval would protect. Token
+  counts come from the provider's own usage report where there is one (Ollama, Anthropic, and the
+  OpenAI-compatible providers all report it even on a streamed call) and from counting stream chunks
+  where there is not, and the report says which, since a chunk is usually a token but nothing guarantees
+  it. It builds its own client rather than borrowing the agent's, which is what keeps it from racing the
+  turn it runs inside for <code>last_usage</code>, and it carries an empty system message so the figure describes
+  the model rather than Kokua's own multi-thousand-token prompt. Any agent may hold it, and what it measures is its own holder: the
+  model comes from <code>ToolsetContext.agent_name</code>, so a worker running on a model of its own is timed on
+  that model, and the report names the agent whose model it timed rather than leaving a reader to assume.
+  Resolution goes through <code>config.model_for</code> rather than the live agent because nothing on a model client
+  retains the string it was built from. An in-process model (<code>hf:</code>, <code>llamacpp:</code>) cannot be benchmarked and the tool says so: a second
+  client over one model would load its weights twice, so AIMU refuses to build one.</li>
+<li><strong><code>github_backup</code></strong>: one tool, <code>backup_kokua_state</code>, mirrors <code>config.toml</code>, <code>sessions.json</code>, the
+  memory store, saved documents, and authored skills into a private GitHub repository as a git commit,
+  pushing from a working tree under <code>data/backup</code>. It takes no arguments, which is what lets it run
+  ungated and therefore from a scheduled task; the repository and branch come from <code>[github_backup]</code> and
+  the token from <code>$GITHUB_BACKUP_TOKEN</code>, which never reaches a command line or <code>.git/config</code>. A public
+  repository is refused, an unchanged state makes no commit, and a diverged remote is reported rather
+  than force-pushed. Three things keep the reported outcome honest across runs: repointing <code>repo</code> at a
+  second repository is refused while <code>data/backup</code> still tracks the first (Kokua will not verify one
+  repository and push to another), a commit an earlier push failed to deliver is pushed rather than
+  reported as an existing backup, and one lock serialises the working tree so two concurrent turns
+  cannot push a half-copied memory store as a success. The toolset offers no tool until <code>repo</code> is set.
+  Logs, downloads, and images are excluded, and an in-tree <code>.gitignore</code> excludes anything further.
+  Restore is manual: see
+  <a href="https://saxman.info/kokua/how-to/back-up-to-github/">Back up to GitHub</a>.</li>
+</ul>
+<p>Nothing a toolset contributes reaches an agent until that agent's <code>tools</code> list names it, and nothing
+warns you about a name no agent named: a toolset that ships and is never declared costs nothing to leave
+alone. The case that does cost something is a configured MCP server, which connects regardless; see
+<a href="https://saxman.info/kokua/how-to/add-mcp-services/">Add MCP services</a>.</p>
+<h3 id="proactive-work-scheduled-tasks">Proactive work: scheduled tasks<a class="headerlink" href="#proactive-work-scheduled-tasks" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Durable, agent-managed tasks that fire an unprompted turn when due, declared as
+  <code>[scheduling.task.&lt;name&gt;]</code> tables in <code>config.toml</code> and re-armed at startup. A task's <strong>name</strong> is its
+  identity: it is required, unique, the table key, and the handle every scheduling tool and the sidebar
+  use in place of an internal id. A table can be hand-written or hand-edited, comments and all, the same
+  way an <code>[[mcp.server]]</code> entry can: the comment lines directly above a task's header are that task's, so
+  they stay put when it is renamed and go with it when it is cancelled, never sliding onto its neighbour.
+  Cancelling and renaming also cover the shapes a hand edit can write and the app never does: a task
+  written as an inline table, and one task whose keys are split across several fragments, both move or
+  go whole rather than in part.
+  A malformed table is rejected at startup, naming the table rather than
+  becoming a task that silently never fires. Schedules are one-shot, interval, daily, or weekly (no cron
+  dependency).</li>
+<li>Managed by the assistant through <code>schedule_task</code>, <code>list_scheduled_tasks</code>, <code>get_scheduled_task</code>,
+  <code>update_scheduled_task</code>, <code>cancel_scheduled_task</code>, <code>disable_scheduled_task</code> / <code>enable_scheduled_task</code>
+  (pause without losing the task), <code>run_scheduled_task</code> (run one now, reproducing a real firing, so
+  a task can be dry-run before it is due), and <code>stop_scheduled_task</code> (end a run that is happening now).
+  <code>[scheduling.task.*]</code> is refused by <code>update_config</code>, even though the assistant writes it: a task
+  write has to be paired with the scheduler (un)arming that accompanies it, which a bare config write
+  would skip, so the scheduling tools are the only path in.</li>
+<li><strong>A fired one-shot is retired in place, not deleted.</strong> Its table stays, with <code>enabled = false</code> and a
+  <code>fired_at</code> stamp, so the run stays on the record and re-running it is a one-character edit.
+  <code>cancel_scheduled_task</code> still removes the table outright.</li>
+<li><strong>A run in flight can be stopped</strong>, from the task row in the web sidebar, by asking in chat, or with
+  <code>/stop</code> on a channel where a firing runs in the conversation being viewed. Stopping ends that run
+  only: the task stays on its schedule and fires again as usual, so a task that should not come back is
+  still a <code>disable</code>. The stopped run keeps whatever it produced in its own conversation, with the stop
+  recorded against that turn the way a failure is (and treated like one by retention, so a stopped run
+  is evicted before a report). A firing is never stopped from inside itself, which would cut its own turn
+  off mid-tool-call. This is also why a firing runs in a child task: cancelling the scheduler's job
+  would have disarmed the schedule as a side effect.</li>
+<li><code>update_scheduled_task</code> edits any subset of a task's fields in place, keeping its <code>created_at</code> and
+  retention cap, and re-deriving the schedule fields you omit, so changing a weekly task's time keeps
+  its day. It re-arms only when the schedule actually changes, so editing a prompt never restarts an
+  interval countdown, and it rejects an invalid schedule, a past one-shot, or a name another task
+  holds without writing anything. <code>new_name</code> renames a task: the rename moves its table in
+  <code>config.toml</code> and re-points the conversations it has already run, so its history follows it under
+  the new name.</li>
+<li><strong>Every firing runs in its own conversation</strong>, stamped with the task's name, and a per-task
+  <code>max_conversations</code> says how many of them survive: <code>1</code> means each run replaces the one before it,
+  <code>0</code> keeps every run forever, and a task that names no cap follows <code>[scheduling]
+  max_task_conversations</code> (default 3), read at fire time so a change reaches the next firing without a
+  restart. Pruning happens after every firing, successful or not, evicting runs that hold no report
+  before ones that do, so a task that keeps failing cannot grow past its cap and a cap of <code>1</code> still
+  keeps the last good report rather than the failure that followed it. Lowering a cap deletes nothing
+  until the task next fires, so an edit is not destructive and a disabled task keeps everything. A run
+  the user already deleted is not an error. A channel with no conversation list (the CLI) has nowhere to
+  put a minted conversation, so there a firing runs in the one being viewed and prunes nothing.</li>
+<li>A failing firing is reported and swallowed rather than propagating into the scheduler, which has no
+  handler of its own. <strong>Its conversation is still persisted as far as the run got</strong> -- at minimum the
+  prompt, since the model client appends the user turn before it sends the request -- with the reason it
+  stopped recorded against that turn and replayed as a notice at the end of it. Without that, a firing
+  that failed left a conversation with nothing in it at all, and the status line explaining why went to
+  whichever conversation the user happened to be viewing.</li>
+<li><strong>A tasks section in the web sidebar</strong>, below the conversation list, showing each task's name,
+  schedule, and next firing, with disable/enable, run-now, and delete per row. A task with a run in
+  flight pulses, keeps its buttons visible rather than waiting to be hovered, and offers Stop in place of
+  run-now; the run's own conversation appears under it as it starts, marked running, rather than only once
+  it has finished. It hides itself entirely
+  when there are no tasks, collapses (remembered per browser), and scrolls independently of the
+  conversation list so neither can crowd the other out. Creating and editing tasks stays in chat, where
+  the model turns a natural-language schedule into a validated one.</li>
+<li>The panel's actions and the agent's tools share one implementation (<code>scheduling.TaskService</code>), so a
+  table write and the scheduler (un)arming that must accompany it can never come apart. They do not
+  share wording: the service returns records, and the panel and the model each phrase their own. The
+  action name arrives from the browser and is allowlisted rather than dispatched on.</li>
+<li><strong>Each task's conversations are nested under it</strong> in that section and left out of the chat list, so
+  the chat list holds only conversations you started. A conversation records the task that minted it
+  (<code>task_id</code> in its metadata, set to the task's name -- its identity -- so a rename re-points every
+  conversation the old name owned, right after the table itself is renamed). Grouping happens on the
+  page, not in the core: nothing is filtered out of <code>ConversationBook.list()</code>, so the agent's
+  conversation tools still see every conversation. A conversation whose task has been deleted falls back
+  into the chat list rather than becoming unreachable. Each nested row carries its own delete, like a
+  chat row: a task that mints a conversation per firing accumulates them here, and the run being viewed
+  is deletable too. Deleting the conversation a <code>target="task"</code> record remembers is safe -- its next
+  firing mints a fresh one rather than failing.</li>
+<li><strong>Breaking, and with no migration.</strong> Scheduled tasks used to persist as JSON records in
+  <code>data/scheduled_tasks.json</code>, keyed by an internal uuid; they now live in <code>config.toml</code> as
+  <code>[scheduling.task.&lt;name&gt;]</code> tables, keyed by name. An existing <code>data/scheduled_tasks.json</code> is ignored
+  and left on disk rather than imported, and a conversation stamped with an old uuid <code>task_id</code> stops
+  grouping under its task, since nothing in <code>config.toml</code> matches that id any more. Re-create any tasks
+  you want to keep, or copy them into <code>config.toml</code> by hand.</li>
+</ul>
+<h3 id="workflows-a-pluggable-turn-strategy">Workflows: a pluggable turn strategy<a class="headerlink" href="#workflows-a-pluggable-turn-strategy" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A <code>Toolset</code> can carry a <code>Workflow</code>, a named turn strategy, instead of (or alongside) tools.</strong>
+  Declaring that toolset in an agent's <code>tools</code> is what gives the agent the workflow's <code>/</code>-command,
+  resolved from the same toolset registry every other capability is -- a turn strategy is granted the
+  same way a tool is, and no code path grants one a config did not declare. Deep planning, described
+  below, is the first workflow and is no longer a hardcoded core feature.</li>
+<li><strong><code>[agents.*].tools</code> must name <code>planning</code> for <code>/plan</code> to exist</strong>, on the web Plan toggle as much as
+  the CLI. An existing <code>config.toml</code> that predates this release and does not list it gets no startup
+  warning, since nothing warns about an undeclared toolset -- but typing <code>/plan</code> still gets an actionable
+  reply rather than
+  the model answering the literal <code>"/plan &lt;task&gt;"</code> text: the serve loop recognizes any command an
+  installed workflow-bearing toolset offers, even one the entry agent didn't declare, and says which
+  toolset to add. The fix is one line: add <code>"planning"</code> to the entry agent's <code>tools</code>.</li>
+<li><strong>A third party ships a workflow exactly the way it ships a toolset</strong>, through the <code>kokua.toolsets</code>
+  entry-point group -- no separate mechanism for a turn strategy versus a tool.</li>
+<li><strong>Two tiers.</strong> A workflow builds an <code>aimu.aio.AsyncRunner</code>, so any of AIMU's own
+  <code>aimu.aio.workflows</code> runners (<code>Chain</code>, <code>Parallel</code>, <code>Router</code>, <code>EvaluatorOptimizer</code>,
+  <code>PlanExecuteEvaluator</code>) works as a base-tier workflow with no adapter: Kokua streams its <code>run()</code>
+  into the reply. <strong>A base-tier turn is not persisted</strong>: the runner appends nothing to the agent's own
+  transcript, so there is no message to anchor the turn to, and the exchange is gone after a reload.
+  That is documented behavior a base-tier workflow author needs to know going in, not a bug to file.
+  The rich tier (a runner that also implements <code>run_turn()</code>) gets the channel, the human-decision
+  slot, and control of the transcript instead, which is what lets deep planning persist a planned turn
+  as a plain user/assistant pair.</li>
+<li><strong>A toolset can own a whole <code>config.toml</code> section.</strong> Declaring <code>settings=(Setting(key, kind,
+  default, hot=...), ...)</code> on a <code>Toolset</code> gives it a <code>[&lt;name&gt;]</code> section -- always named after the
+  toolset itself, so the namespace's existing duplicate-name check also keeps two toolsets from
+  claiming one section, and a name colliding with a section Kokua's own core already parses is refused
+  at startup. <code>hot=True</code> is what lets <code>update_config</code> change a setting live; a cold one is a
+  startup-only key like any other. Deep planning is the first user: <code>toolsets/planning.py</code>
+  declares <code>[planning]</code>'s five keys (<code>plan_review</code>, <code>plan_review_agent</code>, <code>result_review</code>,
+  <code>show_reasoning</code> hot; <code>review_rounds</code> cold), and a workflow reads its own section as attributes
+  through <code>WorkflowContext.settings</code>.</li>
+<li><strong>Breaking for anything importing the old fields.</strong> <code>AssistantConfig.plan_review</code>,
+  <code>plan_review_agent</code>, <code>result_review</code>, <code>review_rounds</code>, and <code>show_reasoning</code> are gone, replaced by
+  <code>config.toolset_settings["planning"][...]</code>. <code>config.toml</code> itself is unchanged -- the <code>[planning]</code>
+  section still parses and still means the same thing, so no user action is needed -- but code that
+  read those attributes directly has to change.</li>
+<li><strong>A contributed setting's wire key is namespaced</strong> (<code>planning.plan_review</code>) to keep two toolsets from
+  colliding in the one flat settings payload; Kokua's own core settings stay bare.</li>
+<li><strong>Startup warns about a configured-but-undeclared toolset.</strong> A <code>config.toml</code> section belonging to a
+  toolset no agent's <code>tools</code> names is now its own warning, distinct from the provisioned-toolset
+  warning below: the section still parses and seeds its declared defaults, but nothing reads them and
+  any command the toolset offers does not exist.</li>
+</ul>
+<h3 id="deep-planning-and-adversarial-review">Deep planning and adversarial review<a class="headerlink" href="#deep-planning-and-adversarial-review" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Planning is per request, not a global mode</strong>: the web UI's Plan toggle beside the message box (a
+  sticky per-request switch), or <code>/plan &lt;task&gt;</code> in either front end. A planned turn first drafts an
+  explicit plan -- which tools, skills, and MCP services to use, what to search for, where to author a
+  skill or connect a server -- and then executes it. Planning is scratch work kept out of the saved
+  conversation, which stores your actual request and the answer.</li>
+<li><strong><code>plan_review</code></strong> pauses a planned turn for Approve / Edit / Reject; off runs the plan autonomously.</li>
+<li><strong>Adversarial plan and result review</strong> (both off by default): an independent, context-free reviewer
+  agent -- a fresh client seeing only the request plus the plan or answer -- critiques the plan and/or
+  the final result. <code>plan_review_agent</code> re-plans on rejection up to <code>review_rounds</code>, surfacing leftover
+  concerns. <code>result_review</code> checks the answer before it is shown and revises on rejection; because a
+  result cannot be vetted and streamed at once, the executor's thinking and tool calls stream live while
+  the final answer is withheld until it passes, then a clean transcript is committed.</li>
+<li><strong>Reviewers are tool-using and grounded.</strong> Each runs a bounded tool-calling assessment over a curated
+  verification toolset and then extracts its typed verdict in a follow-up structured call. The toolset
+  is web lookup, <code>calculate</code>, and the current date and time; it deliberately excludes the user's memory
+  and documents, skill authoring, MCP mutation, and both execution tools, <code>execute_python</code> and
+  <code>run_command</code> -- a reviewer cannot be approval-gated, since an autonomous critic has nobody to ask
+  mid-review, so it is given nothing that would need a gate. Both prompts warn that the reviewer's own
+  knowledge may be stale, that disagreement with memory is not evidence of fabrication, and that a
+  suspected inaccuracy must be verified with
+  tools before flagging. The result reviewer is additionally shown an Evidence section -- the tool
+  results the agent actually retrieved -- so it judges against real sources.</li>
+<li><strong>Verbose trace ("Show all reasoning")</strong>, off by default: turns a planned turn into a labeled, live
+  trace -- planner, each plan reviewer, executor, each result reviewer, and every revision -- showing
+  every intermediate plan and result version. It overrides result review's hide-until-vetted gate; only
+  the final approved answer is committed. The whole raw trace is recorded per turn and replayed on
+  reload, so a reloaded verbose turn shows the same output it did live rather than a summary.</li>
+<li>In non-verbose turns the reviewers appear as their own cards that update in place from
+  "reviewing..." to approved or rejected with the issues, so the otherwise-silent reviewer pauses are
+  visible. Verdicts are recorded per turn and replayed in order on reload.</li>
+</ul>
+<h3 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>config.toml</code> is the single source of settings, and the app writes it</strong> -- there is no parallel
+  store. Layering is built-in defaults &lt; the TOML file &lt; command-line flags. Writes are
+  comment-preserving (via <code>tomlkit</code>, since stdlib <code>tomllib</code> cannot write TOML), so hand-written comments
+  and layout survive an app write; a fresh file is seeded from the shipped example.
+  <code>kokua config init</code> scaffolds <code>$KOKUA_HOME/config.toml</code> from <code>config.example.toml</code>, where every key
+  sits at its built-in default with a line of description. The long form, with what each key accepts,
+  which keys apply live, and who may write each one, is
+  <a href="https://saxman.info/kokua/reference/configuration/">docs/reference/configuration.md</a>. The example file stays short on
+  purpose: <code>read_config</code> hands the assistant the scaffolded file, so its comments occupy the model's
+  context on every configuration question.</li>
+<li><strong>Strict parsing</strong>: an unknown key or non-table section fails fast with a <code>ConfigError</code> naming the
+  key, so typos and removed keys surface immediately instead of being silently ignored.</li>
+<li><strong><code>[agents.*]</code> describes every agent, and replaces the per-role vocabulary this line of development
+  went through.</strong> Nothing has been released, so there is nothing to migrate from, but a config or a
+  script written against an earlier commit of this development line hits the following, and a config key
+  in the left column fails with a message naming its replacement rather than a generic unknown-key error:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Was</th>
+<th>Now</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>the whole <code>[tools]</code> section (<code>groups</code>, and <code>--tools</code> overriding it)</td>
+<td>each agent lists what it holds in <code>[agents.&lt;name&gt;].tools</code></td>
+</tr>
+<tr>
+<td><code>[subagents.roles.&lt;name&gt;]</code></td>
+<td><code>[agents.&lt;name&gt;]</code></td>
+</tr>
+<tr>
+<td>a role's <code>groups</code> / <code>tool_packs</code> / <code>mcp_servers</code></td>
+<td>one flat <code>tools</code> list over the single namespace</td>
+</tr>
+<tr>
+<td><code>[subagents].concurrent</code></td>
+<td><code>[assistant].concurrent_tools</code></td>
+</tr>
+<tr>
+<td><code>[assistant].memory</code> (and <code>--memory</code> / <code>--no-memory</code>)</td>
+<td>declare the <code>memory</code> and <code>documents</code> toolsets on an agent</td>
+</tr>
+<tr>
+<td>an implicit <code>time</code> group on every agent</td>
+<td><code>"time"</code> in the <code>tools</code> list of each agent that wants a clock</td>
+</tr>
+<tr>
+<td>an optional <code>[[mcp.server]].name</code></td>
+<td>required: it is how the server enters the namespace</td>
+</tr>
+</tbody>
+</table>
+<p><code>[assistant].agent</code> is the new key naming the entry agent. The <code>--tools</code>, <code>--memory</code> and <code>--no-memory</code>
+  flags are gone rather than deprecated, since a flag that could contradict a declaration is exactly what
+  the declarative model rules out; argparse rejects them as unrecognized. <code>--list-tool-packs</code> became
+  <code>--list-toolsets</code> and widened: it prints the entire registry grouped by provider, not just the installed
+  plugins, and reads the config file first because the registry depends on it. The plugin contract renamed
+  with the concept: <code>ToolPack</code> is <code>Toolset</code> (with <code>build(ctx)</code> in place of <code>build(config)</code>), the
+  entry-point group <code>kokua.tools</code> is <code>kokua.toolsets</code>, and <code>src/kokua/toolpacks/</code> is <code>src/kokua/toolsets/</code>.
+- <strong>One runtime-settings table.</strong> <code>config/table.py</code>'s <code>SettingsTable</code> -- built at startup from
+  <code>CORE_RUNTIME_SETTINGS</code> plus every installed toolset's own hot <code>Setting</code>s -- is the single
+  declaration of what can change without a restart, driving the TOML schema, the incoming-payload
+  sanitizer, the hot-apply set, the live-apply loop, and the persist path at once. Adding one of
+  Kokua's own is one <code>CORE_RUNTIME_SETTINGS</code> entry; adding a toolset's is one <code>Setting</code> on the toolset
+  and nothing else. Both are enforced by tests. <code>CORE_RUNTIME_SETTINGS</code> ships <strong>empty</strong>: every runtime
+  setting Kokua has turned out to belong to a capability rather than to the core, so every one of them
+  is that capability's own declaration.
+- <strong>The assistant can inspect and repair its own configuration</strong>: <code>read_config</code> / <code>update_config</code>.
+  <code>update_config</code> validates and coerces the value, applies hot-appliable keys immediately and persists
+  only after a successful apply (so a flag that cannot be applied is not saved), and reports "restart
+  required" for everything else. Which of the two happened is in every result, because most of what the
+  assistant is asked to change -- the model and the reasoning effort among them -- is startup-only, and
+  a saved-but-not-yet-applied change reported as done is a change the user thinks they have. A rejected
+  key says where to put it instead: an unknown <code>[section].key</code> names the section that <em>does</em> declare
+  that key (<code>[assistant.generation].thinking</code> is answered with <code>[assistant].thinking</code>) and lists what
+  the section it was given accepts, so the assistant can correct itself from the error alone. An
+  <code>[agents.&lt;name&gt;]</code> table gets both hints as well, read off the one set of entries that serves every
+  agent, and a hint pointing <em>into</em> an agent's table says <code>[agents.&lt;name&gt;]</code> rather than the wildcard the
+  schema is keyed by, because a model follows a hint literally and the wildcard written back would
+  create an agent named <code>*</code>. The tool refuses that section outright as well, along with every other
+  agent name a section header could not carry as written (an empty one, a spaced one): those are quoted
+  on the way into the file, so the table written would not be the section the tool just reported. The
+  rule is TOML's bare-key character set, so <code>report-writer</code> and <code>stock_trader</code> still write. A
+  <code>config.toml</code> that is not valid TOML is answered the same way, as a
+  refusal naming the file and the syntax fault: both parsers the tool sits over (tomlkit for the write
+  itself, <code>tomllib</code> for the re-read an agent write is checked against) raise a <code>ConfigError</code> on a syntax
+  error, so a stray bracket from a hand-edit made while Kokua runs is something the assistant can report
+  rather than an exception out of the tool call. A model
+  string gets a stronger check than the schema's <code>str</code>: <code>[assistant].model</code> is startup-only, so nothing
+  applies it live and a name that does not resolve would be saved and surface as a Kokua that will not
+  start. It is refused at write time by building a throwaway client -- the same call startup makes, so
+  it also catches a provider whose extra is not installed. A
+  list of locked patterns, <code>[security].locked_config_keys</code>, ships covering <code>[security] confirm_tools</code>,
+  <code>[email] to</code>, <code>[paths] data_dir</code>, and the whole <code>[agents.*]</code> section, matched by section prefix since
+  agent names cannot be enumerated ahead of time. Each is refused by the tool by default, and changeable
+  only by hand-editing the list itself: <code>update_config</code> is a tool the assistant holds, so a writable
+  agent table would let it widen its own reach. <code>update_config</code> is also in the default <code>confirm_tools</code>
+  list, so each write it <em>is</em> allowed goes through the approval prompt.
+- The <code>update_config</code> write policy is now yours to set. <code>[security].locked_config_keys</code> holds the
+  patterns the assistant may not write, defaulting to what was previously hardcoded. The key is itself
+  always locked, so the assistant cannot unlock itself in one call. A pattern that could never match
+  anything fails startup rather than reading as a lock you do not have. Two checks decide that: the
+  shape (no dot, whitespace at either end, an empty segment, a <code>*</code> sharing a segment with other
+  characters, or a <code>*</code> anywhere but the last one), and then the vocabulary, read off the sections and
+  keys this install really has, which is what refuses <code>agnets.*</code>, <code>Agents.*</code>, and
+  <code>security.confirm_tool</code>. A name only you can invent is deliberately not checked: <code>agents.&lt;name&gt;</code> and
+  <code>scheduling.task.&lt;name&gt;</code> are sections you create, so locking one before it exists stays legal.
+  Removing <code>agents.*</code> genuinely
+  unlocks agent tables: <code>update_config</code> can now resolve an agent's keys, and dry-runs <code>validate_agents</code>
+  before saving so a write that would break the next startup is refused. That dry run reads the file
+  rather than the running session, the agent tables, the <code>[assistant].agent</code> naming the entry agent, and
+  the <code>[[mcp.server]]</code> entries alike, so two writes that are each fine alone cannot combine into a config
+  the next startup rejects, and a write naming a server <code>add_mcp_server</code> connected this session is
+  accepted rather than refused as an unknown toolset: the entry is already on file, so the next startup
+  registers the name even though the running registry never learned it.
+  <code>read_config</code> opens with the policy in force, and a refusal names the pattern that matched.
+- <strong>A default model, with per-agent overrides.</strong> <code>[assistant].model</code> is the model every agent runs on;
+  an agent that names its own <code>[agents.&lt;name&gt;].model</code> runs on that instead. Resolution is per agent and
+  never inherited down the delegation graph, so a delegator that pins a model does not drag its workers
+  onto it -- a worker declaring nothing runs on the default like any other undeclared agent. A declared
+  model that AIMU cannot resolve fails startup naming the table it came from, rather than surfacing
+  later as a failed spawn. Both are read once, at startup: no live client is ever rebound to another
+  model, which is why the model is not a runtime setting. <code>[assistant].thinking</code> follows the same
+  shape for reasoning effort (below).
+  <code>[assistant].model</code> is optional, and leaving it out is supported rather than merely tolerated: AIMU
+  resolves a default from <code>$AIMU_LANGUAGE_MODEL</code>, or a probe of the local servers when that is unset,
+  which is what lets one <code>config.toml</code> be shared across machines serving different models.
+  <code>AssistantConfig.default_model</code> performs that resolution once per process and <code>model_for</code> falls back
+  to it, so <code>model_for</code> is <strong>total</strong>: it answers with a string whatever the file says, and nothing
+  downstream has to reconstruct the default from somewhere lossier. See the endpoint entry below for
+  what "somewhere lossier" cost.
+- <strong>A default reasoning effort, with per-agent overrides.</strong> <code>[assistant].thinking</code> is the effort every
+  agent runs at; an agent that names its own <code>[agents.&lt;name&gt;].thinking</code> runs at that instead. The values
+  are AIMU's own four: unset sends nothing (each model keeps its own behavior), <code>false</code> asks the model
+  not to reason, <code>true</code> reasons at the model's default effort, and <code>"low"</code> / <code>"medium"</code> / <code>"high"</code> request
+  a level. Startup-only and not a runtime setting, for the same reason the model is. An unrecognized level
+  fails startup naming the table, since AIMU would otherwise raise on it only once a request was built,
+  and <code>"xhigh"</code> is a plausible typo (it is Qwen's own effort ceiling).
+  Resolution tests "is it declared" rather than "is it truthy", which the model can afford and this
+  cannot: <code>thinking = false</code> is a declaration that has to be able to override a <code>"high"</code> default. And
+  unlike the model, the <em>resolved</em> value is written into every sub-agent spec rather than only a declared
+  one -- AIMU falls a missing spec <code>model</code> back to the spawn tool's own, but a missing spec <code>thinking</code> is
+  simply <code>None</code>, so an undeclared worker would skip the default rather than inherit it. The <code>/plan</code>
+  workflow's independent reviewers run at the <code>[assistant]</code> effort too, being no agent's table.
+  Two caveats it is worth knowing: a level is advisory on a model whose card declares no effort-level
+  support (AIMU warns once and reasoning is still on), and <code>false</code> additionally selects a card's
+  instruct-mode sampling profile where it declares one -- only the Qwen 3.5/3.6/3.8 cards today. A
+  generation parameter set below still applies over that profile; it is only a parameter nobody set that
+  the profile switch decides outright.
+  Needs <code>aimu&gt;=0.17.0</code>, which added the <code>agent_types</code> spec key the per-worker half rides on. An AIMU that
+  predates it ignores an unknown spec key silently, so a per-worker effort would simply not apply with
+  nothing raised; that release also closes a spec's keys to a published <code>SUBAGENT_SPEC_KEYS</code>, which is
+  what the startup preflight now probes, since the key itself is a dict entry no probe can see.
+  A turn may also ask for its own effort, which beats both tiers for that one turn: the web composer's
+  Think picker and the CLI's <code>/think</code>. The request rides <code>ChannelMessage.metadata</code>, so it is a property of
+  the message rather than a setting anything stores, and it reaches the entry agent's own run alone: a
+  spawned worker keeps its table's effort, and a workflow turn ignores the request rather than applying it
+  to agents the user did not choose for. What the turn actually ran at is what <code>metadata.thinking</code> records.
+- <strong>A default tier of generation parameters, with per-key overrides.</strong> <code>[assistant.generation]</code> sets
+  <code>temperature</code>, <code>top_p</code>, <code>top_k</code>, <code>min_p</code>, <code>presence_penalty</code>, <code>repetition_penalty</code>, <code>max_tokens</code>, and
+  <code>context_length</code> for every agent; an agent's own <code>[agents.&lt;name&gt;.generation]</code> overrides it <strong>per key</strong>,
+  so naming only <code>temperature</code> still inherits the default's <code>context_length</code> rather than replacing the
+  whole table. <code>AssistantConfig.generation_for(name)</code> is the single resolution, per agent and never
+  inherited down the delegation graph, and it is empty by default -- the normal case, since a key this
+  never sets stays absent from the request and a model card's own tuned sampling profile is what answers
+  instead. The result reaches three places: the entry agent's client (<code>build_model_client</code>), each
+  spawned worker's spec (the <em>resolved</em> value, like <code>thinking</code>, so an undeclared worker still inherits
+  the default rather than skipping it), and the two planning reviewers, which get the <code>[assistant]</code> tier
+  only, being no agent's own table. Startup-only and not a runtime setting, like the model and the effort, and
+  <code>[assistant.generation]</code> is the first dotted sub-table <code>config/file.py</code>'s section loader handles, which
+  is what lets a schema entry per parameter serve it instead of the flat-key loop reading it as one
+  <code>[assistant]</code> key holding a table.
+  Two things worth knowing about the parameters themselves: <code>max_tokens</code> caps <em>generated</em> tokens while
+  <code>context_length</code> sizes the whole window prompt and output share, so a 32768 window with a 4096 cap
+  leaves roughly 28k for the system prompt, the tool block, and history -- and AIMU's own weakest tier
+  sets <code>max_tokens = 1024</code> on Anthropic, the OpenAI-compatible family, and llama.cpp, which is low for a
+  turn carrying tool results. A parameter a backend cannot take is dropped with a warning naming the
+  remedy: Ollama's SDK has no <code>min_p</code>, the Anthropic API has no penalties, and only Ollama's native API
+  sizes the context window per request. That warning is written to the rotating file log
+  (<code>data/logs/kokua.log</code> under your Kokua home) and nowhere else -- not the chat, not the terminal, and
+  not <code>/diag</code>, which reports what you declared rather than what the backend accepted -- so the log is
+  where to look when a parameter you set has no effect.
+  Needs <code>aimu&gt;=0.18.0</code> for the per-agent half, which added the <code>generate_kwargs</code> key to the <code>agent_types</code>
+  spec; an AIMU that predates it ignores the unknown key silently, so 0.18.0 replaces the 0.17.0 floor
+  above rather than sitting alongside it. This is a breaking change.
+  <strong>That AIMU bump also changes how four Ollama models sample, whether or not you set anything here.</strong>
+  It renames the portable <code>repetition_penalty</code> into Ollama's own <code>repeat_penalty</code>, so the
+  <code>repetition_penalty = 1.0</code> that the <code>qwen3.8:27b</code>, <code>qwen3.6:35b</code>, <code>qwen3.6:27b</code>, and <code>qwen3.5:9b</code> cards
+  have always carried now reaches the wire instead of being discarded by the SDK, and Ollama's own server
+  default of 1.1 no longer applies: the repetition penalty is effectively off for those four. It is what
+  each card asks for, but it is a real change in their output. The example config's <code>ollama:qwen3:8b</code> is
+  not one of them -- that card declares no sampling profile at all, so nothing about it changes.
+- <strong><code>/diag</code> names the models, the reasoning effort, and the generation parameters in play</strong>: the entry
+  agent's first, then each agent that declares its own. None is a runtime setting and all are read only
+  at startup, so this is where a running session says what they are. With nothing declared, the model line
+  reports what AIMU resolved onto the live client, and the thinking and generation lines are omitted
+  rather than reading "unset" on every <code>/diag</code>; an agent that overrides the default generation tier shows
+  only the keys it declares, not the merged result, since what a table declares is what a reader checks
+  against the file.
+- <strong>A stored conversation says which model produced its output, and how hard it thought.</strong> Each turn
+  records the model that answered it under <code>metadata.model.&lt;user_index&gt;</code> and its reasoning effort under
+  <code>metadata.thinking.&lt;user_index&gt;</code>, and each sub-agent card carries its own worker's pair, so a
+  conversation that spans a config edit -- or a turn whose workers ran on different models at different
+  efforts -- stays readable from the JSON alone. An effort of <code>None</code> is left out (it is the common case);
+  <code>false</code> is recorded, being a declaration rather than the absence of one. It is metadata, never a message key: AIMU strips only its own
+  inert keys before a request, and Ollama and OpenAI-compatible providers forward anything else
+  verbatim.
+- <strong>Remote and custom model endpoints.</strong> <code>[assistant] model</code> accepts AIMU's extended
+  <code>provider:model_id[@base_url][;flags]</code> form, so Kokua can target a remote OpenAI-compatible server or
+  a model id not in AIMU's catalog, e.g.
+  <code>model = "llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"</code>. A worker's <code>[agents.&lt;name&gt;].model</code> takes
+  the same suffixes, which is worth stating because the two are checked by different code and had drifted:
+  a worker's model was parsed with a resolver reading only <code>provider:model_id</code>, so pinning a worker to the
+  endpoint the assistant itself runs on failed at startup.
+  Needs <code>aimu&gt;=0.20.0</code>, which is what moved the floor there: earlier AIMU resolved a <em>spawned</em> agent's
+  model string with that same narrow resolver, so a documented endpoint on <code>[assistant] model</code> killed
+  every delegation (<code>Provider 'ollama' has no model id 'qwen3.8:27b@http://gpu-box:11434'</code>) while the
+  entry agent ran on it happily, and a fix would still have dropped the endpoint had it only widened the
+  parse: no resolved model enum can carry one, so the sub-agent would have gone on talking to the provider
+  default.
+- <strong>The endpoint reaches every sub-agent, including when the default comes from the environment.</strong> The
+  paragraph above ends on the reason a widened parse would not have been enough, and Kokua had the other
+  half of exactly that bug. With <code>[assistant].model</code> unset and the default arriving through
+  <code>$AIMU_LANGUAGE_MODEL</code> (<code>ollama:qwen3.8:27b@http://gpu-box:11434</code>), five places recovered the default by
+  reading it back off an already-built client, as <code>config.model or agent.model_client.model</code>. A client
+  reports a resolved <code>Model</code> enum, which names a catalogued id and carries nothing else, so the <code>@base_url</code>
+  was gone before any of them saw it: <code>spawn_subagent</code>'s delegate, a nested delegate one level down,
+  <code>compose_subagent</code>, the <code>aimu_agents</code> prebuilt orchestrators, and both <code>/plan</code> reviewers were each built
+  against the <em>provider default</em> while the entry agent talked to the override. Where a local server happened
+  to be running it produced answers from the wrong model with nothing reported anywhere; where none was, it
+  surfaced as <code>All connection attempts failed</code> from a tool call inside a turn that was otherwise working.
+  All five now ask <code>config.default_model</code>, and none of them may consult a live client. Needs <code>aimu&gt;=0.21.0</code>,
+  which exports <code>resolve_default_text_model</code>: AIMU's public default resolver was the enum-returning twin,
+  which by its own docstring cannot represent an endpoint, and the string resolver its documentation told
+  callers to use was importable only from <code>aimu.models._internal</code>.
+  Two things fell out of the fix. <code>build.model_label</code> no longer takes a client, so <code>/diag</code> and the stored
+  per-turn record show <code>ollama:qwen3.8:27b@http://gpu-box:11434</code> rather than <code>OllamaModel.QWEN_3_8_27B</code> --
+  the string you wrote, not the enum it became. And the test suite pins a default of its own
+  (<code>tests/conftest.py</code>'s <code>pin_default_model</code>), because resolving through AIMU reads a <code>.env</code> found by
+  walking up from the working directory and otherwise probes a local server over HTTP; a developer's real
+  <code>~/devel/.env</code> did leak into a run before that fixture existed.
+- <strong>All state under one directory you own</strong>: <code>$KOKUA_HOME</code>, default <code>~/.kokua</code>, replacing the example's
+  reliance on <code>aimu.paths.output</code>. <code>data/</code> holds content only -- conversations, memory, documents,
+  <code>images/</code>, <code>downloads/</code>, <code>logs/</code>. Images and downloads live in their own folders so the binary files
+  never disturb the <code>DocumentStore</code>, which scans the documents folder as text. Scheduled tasks are the
+  one declared exception: they live in <code>config.toml</code> itself, as <code>[scheduling.task.&lt;name&gt;]</code> tables, not
+  under <code>data/</code>.</p>
+<h3 id="mcp">MCP<a class="headerlink" href="#mcp" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Remote MCP servers from a startup <code>--mcp &lt;url&gt;</code> (repeatable) or <code>[[mcp.server]]</code> tables in
+  <code>config.toml</code>, plus <code>add_mcp_server</code> / <code>remove_mcp_server</code> at runtime. Servers connect before the
+  first agent is built so config-declared servers reach the agents that name them, and a runtime add or
+  remove rebuilds each live agent's <code>spawn_subagent</code> so its workers pick the server up or drop it
+  immediately.</li>
+<li><strong>Each configured server is a toolset, named by its <code>name</code>.</strong> <code>name</code> is required: it is how the server
+  enters the one namespace an agent declares against, so a server nothing can name reaches nothing. A
+  runtime <code>add_mcp_server</code>, and the startup <code>--mcp &lt;url&gt;</code> flag, both derive a name from the server's host
+  and disambiguate it (shared logic) against every other name already claimed -- on file for
+  <code>add_mcp_server</code>, across the flag's own URLs for <code>--mcp</code> -- so neither can produce a config, or a set of
+  servers in one run, the registry's collision check would reject. That derived name still reaches no
+  agent until a human puts it in an <code>[agents.*]</code> table, since that section is locked by default: neither
+  can grant itself the capability.</li>
+<li><strong>Per-server bearer tokens via environment variables.</strong> Each <code>[[mcp.server]]</code> takes a required <code>url</code>, a
+  required <code>name</code>, and an optional <code>token_env</code> naming the variable holding that server's token, read
+  at startup so the secret stays out of <code>config.toml</code>. A <code>token_env</code> whose variable is unset logs a
+  warning and connects tokenless rather than aborting startup.</li>
+<li><strong>OAuth</strong>: <code>add_mcp_server</code> starts the OAuth flow for a server that signals its auth requirement with
+  a non-standard response (a 400 plus "missing Authorization header", not only a 401/403). When the flow
+  cannot complete because the server lacks dynamic client registration, it returns an actionable "provide
+  a bearer token and add the server again" message instead of a raw <code>OAuthRegistrationError</code>, and its
+  docstring tells the assistant to relay that, ask for a token, and retry with <code>bearer_token</code>.</li>
+<li><strong>The OAuth callback is placeable</strong> through <code>[mcp].oauth_callback_host</code> / <code>oauth_callback_port</code>.
+  FastMCP's defaults (loopback, a fresh random port per process) assume the browser runs on the machine
+  the client does. When it does not, the provider redirects the approved browser to <em>its own</em> loopback,
+  Kokua's listener never hears it, and the connection fails only when the flow times out minutes later,
+  with nothing anywhere naming the cause. Pinning the port makes an SSH forward possible while keeping
+  the loopback redirect URI that OAuth providers accept; setting the host suits a provider that takes a
+  non-loopback one. Pinning also fixes a single-machine case, since the client registration is cached
+  across restarts while a random port is not, so a re-authorization in a later process could present a
+  redirect URI the provider had on file under the old port. The authorization message now names the
+  callback address it will use, because a redirect landing on the wrong machine is otherwise invisible.</li>
+<li><strong>Boot logs the tools each server contributed, by name.</strong> This is the only record of a remote server's
+  tool list: <code>config.toml</code> does not know it, <code>--list-toolsets</code> runs before any connection so it can only
+  name the server, and <code>add_mcp_server</code> reports tool names on a runtime add but a boot reconnect reported
+  nothing. Without it, an agent that answered from its own knowledge rather than calling a server's tool
+  gave you no way to tell whether the tool it needed was absent or merely unused. A server that connects
+  and contributes nothing is named as such, since it otherwise looks identical to a healthy one.</li>
+<li><strong>The auth-challenge log line says what it is.</strong> Every non-bearer server rediscovers its auth mode
+  through one rejected unauthenticated request on every boot, because no auth mode is persisted (which
+  keeps a stored mode from going stale against a server that changed its mind). That step used to log
+  "requires authorization; starting OAuth flow", which reads like the user is about to be prompted, when
+  a cached token makes it silent -- misleading enough to send a reader hunting a token-persistence bug
+  that was not there. It now reports a rejected unauthenticated request and an attempt with stored
+  credentials. An authorization link still reaches the conversation only when no usable token exists, so
+  the absence of one is the signal that token reuse is working, and a test pins that the challenge path
+  itself posts nothing.</li>
+<li><strong>No startup warning for a registered name no agent declares.</strong> There was one, covering a configured
+  MCP server as well as an installed third-party toolset, and it was dropped: telling a name the user
+  provisioned from one that merely ships needed a provenance rule spanning the whole namespace, and a
+  toolset nobody declares costs nothing to leave unnamed. The MCP case is the one that lost something
+  real, since a configured server connects, spends its token on the handshake, and is then reachable by
+  nobody; <code>docs/how-to/add-mcp-services.md</code> says so plainly and says what to check instead. The distinct
+  warning for a <code>config.toml</code> section whose owning toolset no agent declares is unaffected.</li>
+</ul>
+<h3 id="images">Images<a class="headerlink" href="#images" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Attach images and the assistant reads them (needs a vision-capable model); it can generate them when
+  <code>AIMU_IMAGE_MODEL</code> is set. In the web UI, attach via the composer's paperclip or by pasting, with
+  thumbnails previewed before send and images rendered inline live and on reload; in the CLI, <code>/attach</code>.</li>
+<li>Uploaded and generated images are stored content-addressed under <code>data/images/</code> and served at
+  <code>GET /images/&lt;name&gt;</code>. A conversation keeps only a short <code>/images/&lt;name&gt;</code> reference, so the session
+  store stays small; the bytes are re-inlined as base64 only when a turn is sent to the model, since a
+  localhost URL is not fetchable by the provider.</li>
+</ul>
+<h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
+<p>Kokua can author and run Python and shell scripts as <strong>real subprocesses with your user privileges and
+no sandbox</strong>, and can connect to remote MCP servers and run whatever tools they expose. Real capability
+is the point of a personal assistant, but it means a prompt-injected or mistaken model can run arbitrary
+code on your machine. Run it only with a model, inputs, and MCP servers you trust. The CLI prints a
+notice on startup.</p>
+<ul>
+<li><strong>Security policy.</strong> <code>SECURITY.md</code> states the reporting channel (GitHub private vulnerability
+  reporting), which barriers a report is about (the approval gate, <code>[security] locked_config_keys</code>,
+  agent capability boundaries, the web front end's download and image routes, the <code>[email].to</code>
+  recipient lock, and secret disclosure), and which behavior is the product working as documented (a
+  model you configured running code you approved).</li>
+<li><strong>Tool approval.</strong> Configured risky tools require confirmation before each call -- terminal <code>y/N</code>, web
+  Allow/Deny -- built on AIMU's <code>ToolApproval</code> gate. The default set is <code>add_skill_script</code>,
+  <code>add_mcp_server</code>, <code>execute_python</code>, <code>run_command</code>, and <code>update_config</code>; adjust with <code>[security] confirm_tools</code> or
+  <code>--confirm-tools</code> (empty disables). Proactive and backgrounded turns auto-deny gated tools regardless,
+  so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
+  are currently viewing. The reply is routed through the single channel reader, so it is safe alongside
+  <code>/stop</code>. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
+  cannot overwrite each other.</li>
+<li><strong>A gate that names nothing fails startup.</strong> <code>[security] confirm_tools</code> matches a tool by name, so an
+  entry no configured agent provides gates nothing, and the symptom is a prompt that never comes, which
+  nobody notices. Every unmatched entry is now named at startup with its near misses. The vocabulary is
+  every tool the config builds, not just the entry agent's: <code>execute_python</code> comes from <code>[agents.coder]</code>,
+  and <code>spawn_subagent</code> and a skill's script tools count too. A tool that arrives later (from a runtime
+  <code>add_mcp_server</code>, or built only by <code>compose_subagent</code> out of a toolset no agent names) cannot be listed
+  ahead of time, and the error says so.</li>
+<li><strong>The reviewer toolset needs no gate.</strong> An autonomous critic cannot pause to ask you mid-review, so
+  rather than exempting it from the gate the reviewer is given nothing the gate exists to cover: web
+  lookup, <code>calculate</code>, and the clock. A test pins this against the shipped <code>confirm_tools</code> default, so
+  adding a name there fails the suite until the reviewer's toolset is re-checked.</li>
+<li><strong>Injection crosses conversations.</strong> The assistant can read every saved conversation, and a transcript
+  is untrusted text, so an injection that lands in one conversation can influence what the assistant
+  does in another. The three read tools are ungated by default, since they only read and gating them
+  would make an unattended scheduled run that reads history fail silently; add <code>read_conversation</code> and
+  <code>search_conversations</code> to <code>[security] confirm_tools</code> to change that.</li>
+</ul>
+<h3 id="diagnostics-and-error-reporting">Diagnostics and error reporting<a class="headerlink" href="#diagnostics-and-error-reporting" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>An AIMU too old to run Kokua fails with an instruction, not a traceback.</strong> The <code>aimu&gt;=0.27.0</code>
+  requirement covers a normal install, but a development checkout installs the sibling <code>../aimu</code>
+  editable and that checkout can sit on an older commit. <code>kokua.aimu_compat</code> preflights both the version
+  floor and one capability probe -- the version string of an editable install says what its branch
+  claims, not what its code contains -- and names both fixes: update the sibling, or
+  <code>uv sync --no-sources</code> to take AIMU from PyPI instead. The probe tracks the newest surface Kokua leans
+  on and takes that surface's shape, which is why it has moved several times and has been a
+  set-membership check, a plain name lookup (the <code>resolve_default_text_model</code> export, the shape to hope
+  for: the capability <em>is</em> the exported name), and a signature check -- <code>SkillManager(include=...)</code>, then
+  <code>SkillAgent(script_env=...)</code>, then <code>aio.WebChannel(stream_thinking=...)</code>, the rename that carried
+  the default flip Kokua relies on for reasoning and tool calls to reach a front end at all. A plain
+  name lookup on <code>aimu.tools.builtin.make_command_tool</code>, the factory behind <code>[compute]
+  command_env_passthrough</code> where the capability and its handle are the same object, was the surface
+  until 0.25.0, when it gave way to a signature check again: <code>make_async_subagent_tool(events=...)</code>,
+  the parameter that lets a spawned sub-agent's model turns reach the sink the delegating turn opened.
+  Today it is a plain name lookup once more, on <code>aimu.aio.ModelRefusalError</code>. That is also the first
+  floor whose reason and whose probe are different capabilities: the floor moved to 0.27.0 for
+  <em>0.26.0</em>'s fix to AIMU's forced wrap-up (it no longer appends the wrap-up prompt on top of an
+  un-dispatched tool call, which Anthropic rejected outright and which made search-heavy sub-agents
+  fail rather than answer), and that fix has no handle a probe could honestly grip -- a private method
+  on a private class is exactly what a later refactor renames, and a probe pointed at one becomes a
+  wall in front of a newer, working AIMU. It covers one surface at a time by design; every earlier
+  release's capabilities are the floor's job, and <code>tests/test_aimu_compat.py</code> pins the floor against
+  <code>pyproject.toml</code>'s specifier so the two halves of that one decision cannot drift.</li>
+<li><strong>A failed model request reports its actual cause.</strong> <code>kokua.core.errors.describe_error</code> walks the
+  exception's <code>__cause__</code> chain to the root, so an unreachable local model server is diagnosable from
+  the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.
+  (caused by ... Connection refused)"). Reactive and proactive turns both surface the detail.</li>
+<li><strong>A refused request reads as refused, not as a failure.</strong> A model's safety classifiers declining a
+  request is not a broken thing to go looking for, so it does not share the generic failure wording.
+  Anthropic returns a refusal as HTTP 200 with <code>stop_reason: "refusal"</code> and no content, which AIMU
+  raises as <code>ModelRefusalError</code> (without that, an agent loop cannot tell it from a degenerate turn and
+  the continuation nudge burns the run's iterations getting refused again). <code>core/turns.py</code> branches on
+  it at all three of the sites that already special-cased an unreachable server: the interactive turn,
+  the scheduled task's report, and the reason recorded on the run itself. The message leads with the
+  provider's own classifier category, since that is the part that tells a user which rephrasing might
+  work, and both the category and its explanation are routinely absent, so neither reaches the text as
+  a literal "None". Logged at <code>INFO</code>, not with a stack trace: the model was reached and answered in the
+  time it took, so there is no fault to file against Kokua.</li>
+<li><strong>Model resolution failures surface cleanly.</strong> With no <code>model</code> set, AIMU resolves
+  <code>AIMU_LANGUAGE_MODEL</code>, else the first already-running local model (Ollama, then a local
+  OpenAI-compatible server), and never a cloud model. When nothing resolves, or the model string is
+  invalid, <code>Assistant.create</code> raises a <code>ModelClientError</code> carrying AIMU's actionable message: the CLI
+  prints it and exits non-zero, the web UI shows it in the chat. Because agents are built lazily, the
+  web UI's new / select / delete controls can hit the same error, and report it in the chat rather than
+  tearing down the WebSocket. Any failure between taking the web front end's single-connection guard and
+  finishing with it releases that guard, so a later connection is not wrongly refused as "busy in another
+  tab" -- a diagnosis that would name the one thing that was not wrong.</li>
+<li><strong>An <code>[agents.*]</code> table that no longer resolves stops the web front end at startup.</strong> The web front
+  end builds its assistant per connection, so an unknown toolset name (a toolset renamed, or moved out
+  to a skill that is not installed) used to surface only as a WebSocket that closed: the server came up,
+  served the page, and refused every connection, leaving the browser able to say nothing but
+  "Disconnected." <code>build_app</code> now validates the agent tables while building the app, so <code>kokua
+  --frontend web</code> and <code>kokua-web</code> both print the offending name and exit 2, which is what the CLI front
+  end already did. A <code>ConfigError</code> reaching a connection anyway -- the registry is rebuilt per
+  connection, so a skill deleted from disk under a running server is one -- is shown in the chat, like a
+  model-client failure.</li>
+<li><strong>Hang observability.</strong> <code>/diag</code> reports the in-flight turn, elapsed time, whether the turn gate is
+  held, and dumps a wedged turn's async stack. It is handled in the serve loop without taking the gate,
+  so it answers even when a hung turn holds it. Diagnostic logs go to a rotating
+  <code>data/logs/kokua.log</code> (5 × 2 MB) with turn-lifecycle lines, level set by <code>[logging] level</code>.
+  <code>faulthandler</code> is enabled, so <code>kill -USR1 &lt;pid&gt;</code> dumps all thread stacks.</li>
+<li><strong>A slow control cannot wedge the web UI.</strong> <code>frontends/web.py</code>'s <code>pump</code> is two tasks over one queue:
+  one reads the WebSocket, one applies frames in arrival order. Reading has to continue regardless of how
+  long a control takes, because a disconnect <em>is</em> a read and that reader is the only task positioned to
+  notice one. Applied inline, as they were, a control waiting on the turn gate stopped the reading with
+  it, and the result was worse than slow: the disconnect behind it was never seen, so the
+  single-connection guard was never released, the reload that would have recovered the page was refused
+  as "busy in another tab", and <code>/stop</code> and <code>/diag</code> were unreachable for the same reason, since both
+  arrive through that same loop. Killing the process was the only way out of a UI that had merely been
+  asked to wait. The trigger was a conversation delete during a long turn: <code>ConversationBook.delete</code> took
+  the gate's <em>exclusive</em> hold, which drains every in-flight turn, so deleting one conversation waited out
+  an unrelated conversation's turn. It takes that conversation's own <code>gate.turn</code> instead, bounded by the
+  <code>cancel_turn</code> that precedes it. Whichever half of the pump finishes first ends the connection, in both
+  directions: an error while applying ends the reader too, which would otherwise queue frames into a
+  drain nobody reads.</li>
+</ul>
+<h3 id="known-limitations">Known limitations<a class="headerlink" href="#known-limitations" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A <code>target="task"</code> scheduled conversation grows without bound.</strong> Reusing one conversation across
+  every firing is the intended continuity tradeoff, but each firing replays the full, growing transcript
+  to the model, so a high-frequency or long-lived task means steadily rising token cost and eventually
+  the context window. There is no cap yet.</li>
+<li><strong>A gated tool call inside a sub-agent prompts at the top level</strong>, not inside its card.</li>
+<li><strong>A tool result travels whole and only the DOM clamps it</strong>, so the web <code>history</code> frame grows by every
+  tool result in the conversation and is re-sent on every conversation switch, not only on reload. A
+  conversation with dozens of large results (PDF extractions, email fetches, big MCP responses) makes
+  that frame correspondingly large.</li>
+<li><strong>A message can bind to the wrong conversation if you switch immediately after sending.</strong> A reactive
+  turn binds to a conversation when the serve loop dequeues its message, while the web front end applies
+  new / select / delete in a task of its own, so a control applied in that sub-millisecond window sends
+  the reply to the conversation switched <em>to</em>. Not reachable by hand; surfaced deterministically by the
+  Playwright suite, which waits for the turn to be observably running before switching.</li>
+<li><strong>A slow control still delays the controls behind it, <code>/stop</code> included.</strong> The web front end applies
+  frames in one ordered task, because selecting a conversation and then sending a message has to bind the
+  message to the conversation just selected, and ordering is what buys that. So a control that waits on
+  the turn gate holds up whatever follows it, and <code>/diag</code>'s claim to answer past a held gate does not
+  extend to that case: it arrives behind the control. This is a delay rather than a wedge, though.
+  Reloading the page always works, and the reload tears the blocked handler down with the connection.</li>
+</ul>
+<h3 id="internals-and-development">Internals and development<a class="headerlink" href="#internals-and-development" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>src/kokua/</code> is grouped by subsystem -- <code>core/</code>, <code>config/</code>, <code>workflows/</code>, <code>mcp/</code>, <code>scheduling/</code>,
+  <code>channels/</code>, <code>frontends/</code>, <code>toolsets/</code> -- and <code>tests/</code> mirrors it exactly.</li>
+<li><code>Assistant</code> is a composition root and the serve loop; it delegates to <code>ConversationBook</code> (store +
+  agent cache + active pointer), <code>TurnRunner</code>, <code>HumanGate</code>, <code>SettingsApplier</code>, and <code>ChannelUI</code>.
+  <code>ChannelUI</code> is the one adapter that probes each optional channel capability once and gives every rich
+  frame a documented fallback, so there is no <code>isinstance(channel, WebChannel)</code> in <code>core/</code> or
+  <code>workflows/</code>. <code>channels/protocol.py</code> declares the rich surface for documentation and typing.</li>
+<li><strong>Why Kokua exists</strong>, and the six principles that serve it, are in
+  <a href="https://saxman.info/kokua/explanation/design-principles/">docs/explanation/design-principles.md</a>: the project's purpose
+  is that people can learn how agentic systems work by reading, running, and extending a real one, and
+  each principle carries the code that backs it. The architecture narrative is in
+  <a href="https://saxman.info/kokua/explanation/architecture/">docs/explanation/architecture.md</a>.</li>
+<li>Task-oriented guides for the three ways to add capability are in
+  <a href="https://saxman.info/kokua/how-to/">docs/how-to/</a>: <a href="https://saxman.info/kokua/how-to/set-up-toolsets/">set up a toolset</a> (the namespace,
+  declaring an agent, writing a toolset), <a href="https://saxman.info/kokua/how-to/add-skills/">add a skill</a>, and
+  <a href="https://saxman.info/kokua/how-to/add-mcp-services/">add an MCP service</a>. All three converge on the same rule: a capability
+  is declared, never defaulted, and nothing reaches an agent until an <code>[agents.*]</code> table names it,
+  composing a worker for one task included, since that takes declaring <code>capabilities</code>.</li>
+<li><strong>A how-to for installing a third-party toolset</strong>,
+  <a href="https://saxman.info/kokua/how-to/install-a-third-party-toolset/">docs/how-to/install-a-third-party-toolset.md</a>, walks the
+  plugin seam from the outside: installing the package, declaring it on an agent, giving it its own
+  config section, and gating its expensive tool, with <a href="https://github.com/saxman/jobme">jobme</a> as the
+  worked example throughout.</li>
+<li><strong>Documentation site</strong> at <a href="https://saxman.info/kokua/">saxman.info/kokua</a>, built from <code>docs/</code> with
+  mkdocs-material and published by <code>.github/workflows/docs.yml</code> on every push to main. The build is
+  strict: a broken internal link, or a page missing from <code>mkdocs.yml</code>'s <code>nav</code>, fails CI.
+  <code>tests/test_docs.py</code> covers what a site build cannot, checking that every link out of <code>docs/</code> names a
+  path that exists.</li>
+<li><strong>A mock-only default test suite.</strong> No model, no network, no keys. This is why the model client is
+  injectable and the builders are free functions. Client-side page JS is
+  covered by an opt-in Playwright suite (<code>pytest -m e2e</code>) driving the real <code>index.html</code> in headless
+  Chromium; it skips rather than errors when the browser or the <code>web</code> extra is absent, and it does not
+  gate the default suite.</li>
+<li>CI lints, runs the suite on Python 3.11-3.13, and separately builds the sdist and wheel, checks their
+  metadata, and installs the wheel into a clean environment to run both console scripts -- an editable
+  install imports straight from <code>src/</code>, so it cannot catch a missing package-data entry or a console
+  script pointing at a moved function.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/saxman/kokua" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://saxman.info/aimu/" target="_blank" rel="noopener" title="saxman.info" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6M286.2 444.7a20.4 20.4 0 1 1 0-40.7 20.4 20.4 0 1 1 0 40.7M167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4m-6.6-183.4a20.4 20.4 0 1 1 0 40.8 20.4 20.4 0 1 1 0-40.8"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

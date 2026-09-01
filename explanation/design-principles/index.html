@@ -1,0 +1,1721 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A personal AI assistant built to be understood and extended.">
+      
+      
+      
+        <link rel="canonical" href="https://saxman.info/kokua/explanation/design-principles/">
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../../changelog/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/kokua-favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Design principles - Kokua</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#design-principles" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kokua" class="md-header__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kokua
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Design principles
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../how-to/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  How-to
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Explanation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kokua" class="md-nav__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    Kokua
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../how-to/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-up-toolsets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set up a toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install-a-third-party-toolset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install a third-party toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/add-skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a skill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/add-mcp-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add an MCP service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/back-up-to-github/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Back up to GitHub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-a-conversation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export a conversation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explanation
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Explanation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design principles
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design principles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-kokua-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Kokua exists
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-six-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The six principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-a-small-transport-agnostic-core" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. A small, transport-agnostic core
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-grow-by-plugin-not-by-core-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Grow by plugin, not by core change
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Grow by plugin, not by core change">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#corollary-a-capability-is-declared-never-defaulted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Corollary: a capability is declared, never defaulted
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-configtoml-is-the-single-source-of-settings-and-the-app-writes-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. config.toml is the single source of settings, and the app writes it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-all-state-under-one-directory-the-user-owns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. All state under one directory the user owns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-a-single-user-one-process-with-concurrency-rules-written-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. A single user, one process, with concurrency rules written down
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-security-is-explicit-and-user-controlled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Security is explicit and user controlled
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-follows-from-these-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What follows from these principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-means-for-contributing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this means for contributing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-yet-a-principle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not (yet) a principle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-kokua-exists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Kokua exists
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-six-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The six principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-a-small-transport-agnostic-core" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. A small, transport-agnostic core
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-grow-by-plugin-not-by-core-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Grow by plugin, not by core change
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Grow by plugin, not by core change">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#corollary-a-capability-is-declared-never-defaulted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Corollary: a capability is declared, never defaulted
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-configtoml-is-the-single-source-of-settings-and-the-app-writes-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. config.toml is the single source of settings, and the app writes it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-all-state-under-one-directory-the-user-owns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. All state under one directory the user owns
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-a-single-user-one-process-with-concurrency-rules-written-down" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. A single user, one process, with concurrency rules written down
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-security-is-explicit-and-user-controlled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Security is explicit and user controlled
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-follows-from-these-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What follows from these principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-means-for-contributing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this means for contributing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-yet-a-principle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not (yet) a principle
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="design-principles">Design principles<a class="headerlink" href="#design-principles" title="Permanent link">&para;</a></h1>
+<h2 id="why-kokua-exists">Why Kokua exists<a class="headerlink" href="#why-kokua-exists" title="Permanent link">&para;</a></h2>
+<p>Kokua exists so people can learn how agentic systems work.</p>
+<p>It is a real assistant, not a demo. It authors and runs its own skills, connects to tool services,
+delegates to sub-agents, and schedules its own work, because a toy cannot teach what real work costs.
+It is designed to be understood: the machinery is meant to be followed, not taken on faith.</p>
+<p><strong>Read it.</strong> A core small enough to hold in your head, each module saying why it is shaped as it is.
+<strong>Run it.</strong> Reasoning, tool calls, results, and sub-agent cards are on by default, so you watch the
+loop instead of inferring it. <strong>Extend it.</strong> Capability arrives through the same seam Kokua's own
+capabilities use, so what you read is what you would write.</p>
+<h2 id="the-six-principles">The six principles<a class="headerlink" href="#the-six-principles" title="Permanent link">&para;</a></h2>
+<p>Kokua is an <em>application</em>, not a library. It is built on <a href="https://saxman.info/aimu/">AIMU</a> and
+inherits <a href="https://saxman.info/aimu/explanation/design-principles/">AIMU's six library-level principles</a>
+wholesale: plain Python, plain data, uniform interfaces, progressive disclosure, direct paths, loud
+failures. What follows are the six that are Kokua's own, the ones that decide what belongs in this
+repository at all.</p>
+<p>Each of them serves the vision above: <strong>1 and 2 keep Kokua readable</strong>, <strong>3 and 4 keep it
+observable</strong>, <strong>5 keeps it runnable</strong> by anyone who clones it, and <strong>6 keeps its capability yours to
+bound</strong>. Every
+principle carries a <em>how this cashes out</em> paragraph naming the files that back it, because a
+principle you cannot check against code is a slogan.</p>
+<p>They are ordered from foundation to consequence: read top to bottom and the shape of the app falls
+out.</p>
+<h2 id="1-a-small-transport-agnostic-core">1. A small, transport-agnostic core<a class="headerlink" href="#1-a-small-transport-agnostic-core" title="Permanent link">&para;</a></h2>
+<p>The assistant knows a <code>Channel</code>, not a terminal and not a socket. Every transport-specific behaviour
+lives on the channel or degrades, once and visibly, to plain text. A new front end implements AIMU's
+<code>Channel</code> and works immediately; implementing more of the rich-frame surface makes it nicer, never
+functional-versus-broken.</p>
+<p>This is also what keeps the core readable. The runtime a newcomer has to hold in their head is the
+assistant, the turn runner, and one channel contract; everything about terminals, sockets, and
+browsers sits outside it.</p>
+<p><em>How this cashes out:</em> <code>Assistant</code> takes a <code>Channel</code>, and <a href="https://github.com/saxman/kokua/blob/main/src/kokua/frontends/cli.py">frontends/cli.py</a>
+and <a href="https://github.com/saxman/kokua/blob/main/src/kokua/frontends/web.py">frontends/web.py</a> share it unchanged.
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/channels/ui.py"><code>ChannelUI</code></a> probes each optional frame once at construction and
+resolves it to exactly one documented fallback, so no caller asks <code>getattr(channel, "send_x", None)</code>
+for itself. <a href="https://github.com/saxman/kokua/blob/main/src/kokua/channels/protocol.py"><code>channels/protocol.py</code></a> declares the rich surface
+for documentation and typing, and nothing does <code>isinstance</code> against it. There is no
+<code>isinstance(channel, WebChannel)</code> anywhere in <code>core/</code> or <code>workflows/</code>. Where a capability changes what
+the core <em>does</em> rather than how it renders, it is a named boolean -- <code>supports_conversations</code>,
+<code>supports_phases</code>, <code>supports_streamed_activity</code> -- not an inline <code>getattr</code>.</p>
+<h2 id="2-grow-by-plugin-not-by-core-change">2. Grow by plugin, not by core change<a class="headerlink" href="#2-grow-by-plugin-not-by-core-change" title="Permanent link">&para;</a></h2>
+<p>Capability arrives as an entry-point-registered <code>FrontEnd</code> or <code>Toolset</code>, from any installed package.
+Kokua's own front ends and toolsets register exactly the way a third party's would; if the built-in
+path and the plugin path ever diverge, the plugin path is the broken one. That symmetry is what makes
+a built-in toolset worth reading as a template: the code you study is the code you would write.</p>
+<p><em>How this cashes out:</em> <code>pyproject.toml</code>'s <code>kokua.frontends</code> and <code>kokua.toolsets</code> groups list
+<code>kokua.frontends.web:FRONTEND</code> and <code>kokua.toolsets.image:TOOLSET</code> in the same table a third party's
+entry would go in. <a href="https://github.com/saxman/kokua/blob/main/src/kokua/plugins.py"><code>plugins.py</code></a> is the only loader, and it treats
+every registration alike: a toolset that fails to import, or whose <code>build()</code> raises, takes startup down
+naming itself, whoever wrote it. Kokua ships no third-party code, so it carries no special handling for
+code it does not ship, and the symmetry above is what makes that defensible rather than harsh. <code>plugins</code> imports the
+built-in front ends lazily, and <code>kokua/__init__.py</code> exposes <code>Assistant</code> through PEP 562, so
+<code>import kokua</code> never pulls in <code>aimu.aio</code> or starlette for a caller that only wanted to list plugins.
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py"><code>toolsets/image.py</code></a> exists as the template.</p>
+<p>This reaches Kokua's <em>own</em> capabilities, not just third-party ones, and it reaches all of them: every
+toolset Kokua ships is one file under <code>toolsets/</code>, named for the toolset it declares, registered in the
+same <code>kokua.toolsets</code> entry-point table a third party writes into. Some wrap one of Kokua's own
+subsystems as agent tools (<code>capabilities</code>, <code>config</code>, <code>conversations</code>, <code>mcp</code>, <code>scheduling</code>), some wrap an
+AIMU tool group or store (<code>web</code>, <code>fs</code>, <code>memory</code>, <code>skills</code>, and the rest), one wraps a <code>Workflow</code> instead
+of tools (<code>planning</code>, a named turn strategy an agent earns by declaring the toolset exactly the way it
+earns a tool -- see <a href="../architecture/#workflows">architecture.md</a>), and the rest are capabilities of
+Kokua's own (<code>benchmark</code>, <code>github_backup</code>, <code>image</code>, <code>aimu_agents</code>). Nothing in that list arrives by a
+different route than any other, which is what makes the claim above testable rather than aspirational.
+<code>kokua --list-toolsets</code> prints the namespace grouped by provider, and from the outside the grouping is
+the only way to tell a shipped toolset from a third party's, a configured server, or a skill: an agent's
+<code>tools</code> list names <code>"scheduling"</code>, <code>"image"</code> and a skill's own name identically, so a capability can
+change provider without touching an agent.
+Inside, no asymmetry remains: every toolset keeps the <code>build</code> its author wrote, and one that fails to
+import or to build stops startup naming itself, whoever wrote it. Kokua ships no third-party code, so it
+carries no special handling for code it does not ship.</p>
+<h3 id="corollary-a-capability-is-declared-never-defaulted">Corollary: a capability is declared, never defaulted<a class="headerlink" href="#corollary-a-capability-is-declared-never-defaulted" title="Permanent link">&para;</a></h3>
+<p>An agent's capability is exactly what its <code>[agents.&lt;name&gt;].tools</code> table declares. <strong>No code path adds a
+tool an agent did not name, and no flag can disagree with a declaration.</strong></p>
+<p><em>How this cashes out:</em> <code>[assistant].memory</code> and the <code>--memory</code> / <code>--tools</code> flags were removed rather
+than kept alongside the <code>memory</code> and <code>documents</code> toolsets, because a second switch for one capability
+means one of the two is lying. <code>time</code> is a toolset every agent that wants a clock declares, where it
+used to be added to every agent in code. The shared state a toolset draws on is a lazy property on
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/registry/context.py"><code>LiveState</code></a>, so the memory and document stores are opened because
+some agent declared the toolset that needs them, and not otherwise. An unknown name raises rather than being
+dropped (<a href="https://github.com/saxman/kokua/blob/main/src/kokua/registry/registry.py"><code>registry/registry.py</code></a>'s <code>select</code>), since a dropped name
+is a declaration the code silently overruled.</p>
+<p>The one exception is a <em>composed</em> sub-agent. <code>compose_subagent</code>
+(<a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/capabilities.py"><code>toolsets/capabilities.py</code></a>) draws from the whole registry
+rather than from a table, which is a code path granting a capability no <code>[agents.*]</code> table declared. It is
+an exception at one level and not at the next: only an agent whose own table names <code>capabilities</code> holds the
+tool at all, so the exception is still entered by declaration. What the rule protects is a <em>persistent</em>
+agent's reach, and a sub-agent composed for one task is not an agent the config describes. Its reach is
+constructed per call and dies with the call. The call-time gate does not move either: a composed
+sub-agent's
+<code>execute_python</code> is routed to the user by <code>[security] confirm_tools</code> exactly as a declared worker's is.</p>
+<p><strong><code>cross_cutting</code> is not an authorization boundary,</strong> and reading it as one would be a false security
+conclusion. It decides exactly one sentence of prompt guidance (whether an agent is told it is a lean
+supervisor that must delegate) and nothing else. A worker whose table declares <code>tools = ["config"]</code>
+really does get <code>update_config</code>; a worker declaring <code>compute</code> really does get <code>execute_python</code>. That is
+intentional: filtering a declaration in code is precisely the behavior this design removes. The security
+boundary is elsewhere, and it is two things: <code>[agents.*]</code> is locked by default in
+<code>[security].locked_config_keys</code>, so a human writing the table <em>is</em> the consent under the shipped policy,
+and <code>[security] confirm_tools</code> gates the dangerous calls at call time no matter which agent makes them
+(a worker's gated call is routed to the user for approval, and an unattended turn auto-denies).</p>
+<p><code>update_config</code> refusing to touch <code>[agents.*]</code> by default is not the only thing standing between it and
+being rewritten by the assistant itself: the entry agent's <code>add_skill_script</code> and a <code>compute</code> worker's
+<code>execute_python</code> both have the machine access to overwrite <code>config.toml</code> directly, bypassing
+<code>update_config</code>'s refusal entirely. <code>confirm_tools</code> gating both by default is what makes "locked by
+default" hold in practice rather than only in <code>update_config</code>'s own code, and it is why
+<code>[security] confirm_tools</code> is itself one of the locked-by-default keys. <code>config.example.toml</code> documents
+<code>confirm_tools = []</code> as the way to turn approval off, so this backstop is a default a user can remove,
+not a wall.</p>
+<h2 id="3-configtoml-is-the-single-source-of-settings-and-the-app-writes-it">3. <code>config.toml</code> is the single source of settings, and the app writes it<a class="headerlink" href="#3-configtoml-is-the-single-source-of-settings-and-the-app-writes-it" title="Permanent link">&para;</a></h2>
+<p>One settings file, hand-authorable and app-writable, with its comments preserved across the app's own
+writes. No parallel store, no process-only overrides, no settings that exist in memory and nowhere
+else. One file is also what makes a running system's whole configuration legible at once: read
+<code>config.toml</code> and there is nothing else to know.</p>
+<p><em>How this cashes out:</em> <a href="https://github.com/saxman/kokua/blob/main/src/kokua/config/store.py"><code>config/store.py</code></a> does comment-preserving
+<code>tomlkit</code> writes; two writers (<code>add_mcp_server</code> and the assistant's own <code>update_config</code> tool) land in
+that one file. A <code>runtime-settings.json</code> store used to exist and was
+retired in favour of the file itself. <code>[security].locked_config_keys</code> is a user-set list of patterns
+naming what <code>update_config</code> refuses even behind the approval prompt, and it ships locking four things:
+<code>[security] confirm_tools</code> (the gate itself), <code>[email] to</code> (the locked recipient), <code>[paths] data_dir</code>
+(where all state lives), and the whole <code>[agents.*]</code> section. That last one is matched by section prefix
+rather than by a key entry, since agent names cannot be enumerated ahead of time, and it is locked by
+default for the obvious reason: <code>update_config</code> is a tool the assistant holds, so a writable agent table
+would let the assistant widen its own reach. <code>locked_config_keys</code> itself is the one entry the list can
+never remove; everything else, <code>agents.*</code> included, is a hand-edit away from being unlocked.</p>
+<p><code>config.toml</code> also holds Kokua's declared scheduled tasks, one <code>[scheduling.task.&lt;name&gt;]</code> table per
+task, and <code>[scheduling.task.*]</code> is app-written the same way <code>[[mcp.server]]</code> is: the assistant's own
+scheduling tools write it, so a hand-written or hand-edited task is still just TOML with the app's
+comments preserved. It is locked against <code>update_config</code> too, but for a different reason than
+<code>[agents.*]</code>: not capability but routing. A task write has to be paired with the scheduler (un)arming
+that accompanies it, and a bare <code>update_config</code> write would land the TOML change while leaving the
+running scheduler firing (or not firing) the old schedule. The parent <code>[scheduling]</code> section stays
+ordinary and hot-appliable; only the per-task tables route through the scheduling tools instead.</p>
+<p>One of Kokua's own runtime-mutable settings is <strong>one entry</strong> in
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/config/table.py"><code>config/table.py</code></a>'s <code>CORE_RUNTIME_SETTINGS</code>; a toolset's is one
+<code>Setting</code> on the toolset itself, in its own <code>[&lt;name&gt;]</code> section. <code>SettingsTable</code>, built at startup from
+both, is what drives the TOML schema, the incoming-payload sanitizer, the hot-apply set, the live-apply
+loop, and the persist path at once -- and <code>tests/config/test_table.py</code> fails if a
+<code>CORE_RUNTIME_SETTINGS</code> entry is not also a real config field and documented in <code>config.example.toml</code>
+under its own <code>[section]</code>.</p>
+<p><code>CORE_RUNTIME_SETTINGS</code> holds exactly <strong>one</strong> entry, and the bar it had to clear says what the section
+is for. Nearly every runtime setting Kokua ships belongs to a capability, so nearly every one is that
+capability's own declaration; the entries before this one were the display flags, and what they
+controlled turned out to be a front end's decision rather than a setting at all (see <a href="#1-a-small-transport-agnostic-core">principle
+1</a>). <code>[assistant].generate_titles</code> qualifies because no capability
+owns it: whether a conversation's title is written by the model is read in one place in the core
+(<code>Assistant._spawn_title</code>), and there is no toolset it could be declared on. Two questions gate an
+entry here, and a candidate has to answer both: does the <em>core</em> read it, and does a change to it apply
+without a restart? <code>[assistant].model</code> answers the first and fails the second, which is why it is
+startup-only despite reading like the most obvious setting in the file.</p>
+<h2 id="4-all-state-under-one-directory-the-user-owns">4. All state under one directory the user owns<a class="headerlink" href="#4-all-state-under-one-directory-the-user-owns" title="Permanent link">&para;</a></h2>
+<p><code>$KOKUA_HOME</code> (default <code>~/.kokua</code>): <code>config.toml</code> at the root, content under <code>data/</code>. Nothing is
+written inside the installed package, into a hidden cache, or split across XDG directories. Which
+makes an agent's entire state inspectable with <code>ls</code>: the conversations it has had, the facts it
+remembers, the skills it wrote for itself, the images it made. Nothing the assistant knows is hidden
+in a store you cannot open.</p>
+<p><em>How this cashes out:</em> <a href="https://github.com/saxman/kokua/blob/main/src/kokua/config/paths.py"><code>config/paths.py</code></a> holds exactly three
+locations -- the root, <code>data/</code>, and <code>config.toml</code> -- because those are the only ones that must resolve
+<em>before</em> the settings file can be read. Every leaf below <code>data/</code> is a derived property on
+<code>AssistantConfig</code> (<code>sessions_path</code>, <code>skills_dir</code>, <code>memory_path</code>, <code>images_path</code>, <code>logs_path</code>, ...), so
+a single <code>[paths] data_dir</code> override moves all of them; adding a leaf function to <code>config/paths.py</code> would
+silently bypass that, which is why the module docstring says not to. <code>tests/conftest.py</code> redirecting
+<code>KOKUA_HOME</code> to a temp directory is sufficient isolation for the entire suite.</p>
+<p>Scheduled tasks are the one stated exception to "all state under <code>data/</code>": a <code>[scheduling.task.&lt;name&gt;]</code>
+table lives in <code>config.toml</code> itself, not in <code>data/</code>. A task is a declaration, the same kind of thing an
+<code>[agents.*]</code> table or <code>[[mcp.server]]</code> entry already is, and a user should be able to write and comment
+one the same way -- which content under <code>data/</code> is not meant to be.</p>
+<h2 id="5-a-single-user-one-process-with-concurrency-rules-written-down">5. A single user, one process, with concurrency rules written down<a class="headerlink" href="#5-a-single-user-one-process-with-concurrency-rules-written-down" title="Permanent link">&para;</a></h2>
+<p>One process serving one person is what makes a live scheduler, per-conversation agents, and
+last-writer-wins config writes reasonable. Kokua is not multi-tenant and does not pretend to be. But
+turns <em>are</em> concurrent, and every rule that makes that safe is named, next to the code, with the bug
+it prevents. One process is also what makes a single turn followable end to end: one asyncio loop you
+can attach a debugger to, rather than a request landing in whichever worker happened to pick it up.
+The invariants block is a teaching artifact as much as a safety one.</p>
+<p><em>How this cashes out:</em> <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py"><code>core/turns.py</code></a> opens with a
+<code>## Concurrency invariants</code> block -- seven rules, each stating what breaks without it, including a
+deadlock that a regression test still guards. <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turn_gate.py"><code>TurnGate</code></a> is a
+documented writer-preferring readers-writer gate: turns read, a settings change writes, and which side an
+operation belongs on follows from its reach rather than from whether it mutates (a conversation delete
+mutates and still reads, taking only the deleted conversation's slot).
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/agent_registry.py"><code>AgentRegistry</code></a> gives each conversation its own agent and
+model client, with LRU eviction and a pin held for the duration of any in-flight turn. A background
+or scheduled turn auto-denies a gated tool because nobody is watching it. Every human decision is a
+lock-guarded single slot (<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py"><code>core/interaction.py</code></a>), so concurrent
+turns cannot clobber each other's prompt. The web front end refuses a second connection.
+<code>config/store.py</code> states last-writer-wins rather than adding file locking.</p>
+<h2 id="6-security-is-explicit-and-user-controlled">6. Security is explicit and user controlled<a class="headerlink" href="#6-security-is-explicit-and-user-controlled" title="Permanent link">&para;</a></h2>
+<p>Kokua's capability is real and stays real. It runs code as ordinary subprocesses with your privileges,
+and it calls whatever tools the MCP servers you named expose. Taking that away would make the program
+safe and useless, and a toy cannot teach what real work costs. So safety here is never bought by
+removing capability. It is bought by putting a control beside every dangerous thing, and making that
+control yours: declared where you can see it, bounded by a value you wrote, and loud when it is doing
+nothing. That balance is the principle. Capability is not reduced; control is added next to it.</p>
+<p><strong>A security control is a value in <code>config.toml</code>, never a constant in the source.</strong> Which tools need
+your confirmation before each call is <code>[security] confirm_tools</code>. Which keys the assistant's own
+<code>update_config</code> may not write is <code>[security] locked_config_keys</code>, a list you author. What any agent may
+call at all is that agent's own <code>tools</code> list. Kokua ships a default for each, but a default in a file
+you can read and edit is not the same thing as a rule compiled in.</p>
+<p><strong>A control that would do nothing fails startup.</strong> This is the failure mode a security setting has and
+an ordinary setting does not: silence. A gate naming a tool that does not exist prompts for nothing, and
+a lock pattern matching no real key locks nothing. You notice a prompt you did not expect; nobody
+notices a prompt that never comes. Both are hard startup errors naming the offending entry, because the
+alternative is a user who believes they are covered and is not.</p>
+<p><strong>You may loosen, not only tighten.</strong> <code>locked_config_keys</code> is yours to empty. Strike <code>agents.*</code> from it
+and the assistant really can rewrite its own capability table on the next restart. The documentation
+states that consequence plainly rather than preventing it, because a control you cannot release is not
+yours. The one exception is the key holding that list, locked whatever the list says, since a policy the
+assistant can rewrite for itself is not a policy.</p>
+<p><em>How this cashes out:</em> <a href="https://github.com/saxman/kokua/blob/main/src/kokua/config/store.py"><code>config/store.py</code></a>'s <code>locked_by</code> matches a
+write against the user's own patterns, and <code>LOCK_AXIOM</code> beside it is the single unconditional lock.
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py"><code>core/interaction.py</code></a>'s <code>HumanGate.approve</code> is a bare name match
+against <code>confirm_tools</code>, which is what gates a worker's call identically to the entry agent's, and a
+proactive turn auto-denies rather than running a gated tool unattended.
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py"><code>core/agents.py</code></a>'s <code>validate_confirm_tools</code> and
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/config/file.py"><code>config/file.py</code></a>'s lock-pattern checks are the two startup errors
+above. <a href="https://github.com/saxman/kokua/blob/main/SECURITY.md"><code>SECURITY.md</code></a> names which barrier a vulnerability report is about, and which
+behavior is the program working as documented.</p>
+<h2 id="what-follows-from-these-principles">What follows from these principles<a class="headerlink" href="#what-follows-from-these-principles" title="Permanent link">&para;</a></h2>
+<p>Each one excludes things, and most of what is absent from Kokua is absent for a reason on this list.</p>
+<p><strong>A small, transport-agnostic core</strong> rules out transport branches in the core, and rules out a
+<code>Channel</code> contract that a new front end must implement twelve methods to satisfy. <strong>Grow by plugin</strong>
+rules out a hardcoded tool registry, an <code>if config.enable_x</code> switchboard, and importing a front end's
+dependencies at core-import time. Its corollary, <strong>declared and never defaulted</strong>, additionally rules out
+a tool an agent gets without asking, a flag that grants capability, and a code path that filters a
+declaration it disagrees with; the composed worker qualified under that corollary is the one exception,
+and it is entered by declaration. <strong><code>config.toml</code> as the single source</strong> rules out a second settings
+store and rules out environment variables as a settings mechanism -- the three that exist
+(<code>KOKUA_HOME</code>, <code>KOKUA_CONFIG</code>, <code>KOKUA_EMAIL_PASSWORD</code>) are exactly the ones that <em>cannot</em> live in the
+file: the file's own location, twice, and a secret. <strong>One directory the user owns</strong> rules out writing
+inside the package, XDG-split state, and per-feature configurable paths. <strong>Single user, one process</strong>
+rules out multi-tenant session keying, authentication on the web front end, file locking, and a job
+queue. <strong>Security explicit and user controlled</strong> rules out a security policy hardcoded in the source,
+a control that silently does nothing when it is misspelled, and a privilege tier among agents that the
+config file does not state.</p>
+<p>None of these are missing because they were hard. They are missing because they would make Kokua a
+different kind of program, and most of them would make it a harder one to learn from.</p>
+<h2 id="what-this-means-for-contributing">What this means for contributing<a class="headerlink" href="#what-this-means-for-contributing" title="Permanent link">&para;</a></h2>
+<p>Two questions, in this order. First: does this make Kokua easier to learn from? A capability whose
+behavior can only be discovered by running it, an abstraction that saves lines at the cost of a
+reader's jump, a subsystem that grows what a newcomer must hold in their head without demonstrating
+anything new about agentic systems: each of those fails this question before any principle is
+consulted.</p>
+<p>Second: which principle does it serve? A change that serves none of them is probably a plugin, not a
+core change, and principle 2 exists to make that an easy answer rather than a rejection.</p>
+<p>The harder question is which principle a change <em>violates</em>. Some concrete forms that question takes
+here:</p>
+<ul>
+<li>A new transport is a <code>FrontEnd</code>. A new capability is a <code>Toolset</code>. Neither is a core change, and
+  neither reaches an agent until an <code>[agents.*]</code> table names it.</li>
+<li>A new runtime setting for a <em>toolset</em> is one <code>Setting</code> on the toolset and nothing else. For Kokua's
+  own it is one <code>CORE_RUNTIME_SETTINGS</code> entry and one <code>AssistantConfig</code> field. If either takes more
+  edits than that, the table needs fixing, not working around.</li>
+<li>Anything that writes state derives its path from <code>AssistantConfig</code>, never from a new function in
+  <code>config/paths.py</code>.</li>
+<li>Anything touching turn concurrency updates the invariants block in <code>core/turns.py</code>, in the same
+  commit, with the failure it prevents.</li>
+<li>Anything a test cannot reach without a live model is not finished.</li>
+</ul>
+<p>If you cannot tell which principle applies, the principles are not doing their job; open a discussion.</p>
+<h2 id="not-yet-a-principle">Not (yet) a principle<a class="headerlink" href="#not-yet-a-principle" title="Permanent link">&para;</a></h2>
+<p><strong>"Failures reach the user, not just the log."</strong> This is a goal, not a description: today a bad model
+string or a malformed config can still surface as a stack trace or a silent failure rather than a
+message in the chat. It is on the <a href="https://github.com/saxman/kokua/blob/main/TODO.md">backlog</a> rather than in the code, which is why it is
+here and not above: six honest principles beat seven with one aspirational. It matters more than a
+polish item under the vision at the top of this page, since a failure you cannot see is a failure you
+cannot learn from. When it lands, it becomes the seventh.</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../architecture/">Architecture</a>: the shape that falls out of these principles.</li>
+<li><a href="https://github.com/saxman/kokua/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>: the mechanics.</li>
+<li><a href="https://saxman.info/aimu/explanation/design-principles/">AIMU's design principles</a>: the
+  library-level six that Kokua inherits rather than restates.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/saxman/kokua" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://saxman.info/aimu/" target="_blank" rel="noopener" title="saxman.info" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6M286.2 444.7a20.4 20.4 0 1 1 0-40.7 20.4 20.4 0 1 1 0 40.7M167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4m-6.6-183.4a20.4 20.4 0 1 1 0 40.8 20.4 20.4 0 1 1 0-40.8"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

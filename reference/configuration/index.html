@@ -1,0 +1,3326 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A personal AI assistant built to be understood and extended.">
+      
+      
+      
+        <link rel="canonical" href="https://saxman.info/kokua/reference/configuration/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../../explanation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/kokua-favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Configuration - Kokua</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kokua" class="md-header__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kokua
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../how-to/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  How-to
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../explanation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Explanation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kokua" class="md-nav__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    Kokua
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../how-to/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/set-up-toolsets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set up a toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/install-a-third-party-toolset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install a third-party toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/add-skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a skill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/add-mcp-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add an MCP service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/back-up-to-github/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Back up to GitHub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to/export-a-conversation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export a conversation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-file-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the file lives
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#precedence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Precedence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-happens-when-a-key-is-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens when a key is wrong
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#who-may-change-which-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who may change which key
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#which-keys-apply-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which keys apply live
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#assistant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [assistant]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[assistant]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#thinking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        thinking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#system_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        system_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#concurrent_tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        concurrent_tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent_cache_cap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent_cache_cap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#generate_titles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        generate_titles
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#assistantgeneration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [assistant.generation]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [security]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[security]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#confirm_tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        confirm_tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#locked_config_keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        locked_config_keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentsname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [agents.&lt;name&gt;]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[agents.&lt;name&gt;]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delegates_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        delegates_to
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-thinking-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        model, thinking, generation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcpserver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [[mcp.server]]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[[mcp.server]]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-oauth-callback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The OAuth callback
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [paths]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[paths]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data_dir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        data_dir
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frontend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [frontend]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[frontend]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        name
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#web" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [web]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [logging]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[logging]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        level
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#email" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [email]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scheduling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [scheduling]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[scheduling]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#max_task_conversations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_task_conversations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#schedulingtaskname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [scheduling.task.&lt;name&gt;]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [planning]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capabilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [capabilities]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[capabilities]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#max_depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_depth
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github_backup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [github_backup]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compute" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [compute]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toolset-sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Toolset sections
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-line-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-line flags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../explanation/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explanation
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Explanation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/design-principles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design principles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#contents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-file-lives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the file lives
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#precedence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Precedence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-happens-when-a-key-is-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What happens when a key is wrong
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#who-may-change-which-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who may change which key
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#which-keys-apply-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which keys apply live
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#assistant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [assistant]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[assistant]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#thinking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        thinking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#system_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        system_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#concurrent_tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        concurrent_tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent_cache_cap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent_cache_cap
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#generate_titles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        generate_titles
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#assistantgeneration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [assistant.generation]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [security]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[security]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#confirm_tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        confirm_tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#locked_config_keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        locked_config_keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agentsname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [agents.&lt;name&gt;]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[agents.&lt;name&gt;]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delegates_to" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        delegates_to
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-thinking-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        model, thinking, generation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcpserver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [[mcp.server]]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[[mcp.server]]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-oauth-callback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The OAuth callback
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [paths]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[paths]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data_dir" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        data_dir
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frontend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [frontend]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[frontend]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#name" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        name
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#web" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [web]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [logging]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[logging]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        level
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#email" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [email]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scheduling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [scheduling]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[scheduling]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#max_task_conversations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_task_conversations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#schedulingtaskname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [scheduling.task.&lt;name&gt;]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [planning]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capabilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [capabilities]
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="[capabilities]">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#max_depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_depth
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github_backup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [github_backup]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compute" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [compute]
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toolset-sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Toolset sections
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-line-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-line flags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="configuration-reference">Configuration reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h1>
+<p>Every <code>config.toml</code> key Kokua reads, what it accepts, and what it does. This is the long form of
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml"><code>config.example.toml</code></a>, which is the same set of keys with a line
+of description each; read that file to see the shape, and this one when a key's behavior is not obvious
+from its name.</p>
+<p>Two rules run through the whole file and explain most of what follows:</p>
+<ul>
+<li><strong>A capability is declared, never defaulted.</strong> An agent holds exactly the toolsets its
+  <code>[agents.&lt;name&gt;].tools</code> list names. No code path adds one it did not name, and no flag can disagree
+  with the declaration. See <a href="../../how-to/set-up-toolsets/">set up a toolset</a>.</li>
+<li><strong><code>config.toml</code> is the single source of settings, and the app writes it too.</strong> There is no second
+  store, no dotfile, no database. The assistant's own <code>update_config</code> tool and the runtime
+  <code>add_mcp_server</code> tool write back to this file, preserving your comments, which is why
+  <code>[security].locked_config_keys</code> exists, and why it is the one key that list cannot unlock.</li>
+</ul>
+<h2 id="contents">Contents<a class="headerlink" href="#contents" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="#where-the-file-lives">Where the file lives</a></li>
+<li><a href="#precedence">Precedence</a></li>
+<li><a href="#what-happens-when-a-key-is-wrong">What happens when a key is wrong</a></li>
+<li><a href="#who-may-change-which-key">Who may change which key</a></li>
+<li><a href="#which-keys-apply-live">Which keys apply live</a></li>
+<li>Sections: <a href="#assistant"><code>[assistant]</code></a> · <a href="#assistantgeneration"><code>[assistant.generation]</code></a> ·
+  <a href="#security"><code>[security]</code></a> · <a href="#agentsname"><code>[agents.&lt;name&gt;]</code></a> ·
+  <a href="#mcpserver"><code>[[mcp.server]]</code></a> · <a href="#paths"><code>[paths]</code></a> · <a href="#frontend"><code>[frontend]</code></a> · <a href="#web"><code>[web]</code></a> ·
+  <a href="#logging"><code>[logging]</code></a> · <a href="#email"><code>[email]</code></a> · <a href="#scheduling"><code>[scheduling]</code></a> ·
+  <a href="#schedulingtaskname"><code>[scheduling.task.&lt;name&gt;]</code></a> · <a href="#planning"><code>[planning]</code></a> ·
+  <a href="#capabilities"><code>[capabilities]</code></a> · <a href="#github_backup"><code>[github_backup]</code></a> · <a href="#compute"><code>[compute]</code></a> ·
+  <a href="#toolset-sections">toolset sections in general</a></li>
+<li><a href="#environment-variables">Environment variables</a></li>
+<li><a href="#command-line-flags">Command-line flags</a></li>
+</ul>
+<h2 id="where-the-file-lives">Where the file lives<a class="headerlink" href="#where-the-file-lives" title="Permanent link">&para;</a></h2>
+<p>Kokua reads the first location that is specified, and only that one:</p>
+<ol>
+<li><code>--config PATH</code></li>
+<li><code>$KOKUA_CONFIG</code></li>
+<li><code>$KOKUA_HOME/config.toml</code>, the default, where <code>$KOKUA_HOME</code> itself defaults to <code>~/.kokua</code></li>
+</ol>
+<p>A file missing from the <em>default</em> location is not an error at this stage; a file missing from a location
+you named explicitly is, so a typo in <code>--config</code> fails loudly instead of silently running on defaults.</p>
+<p>Scaffold one with:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kokua<span class="w"> </span>config<span class="w"> </span>init<span class="w">             </span><span class="c1"># writes the documented example to the config location</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kokua<span class="w"> </span>config<span class="w"> </span>init<span class="w"> </span>--force<span class="w">     </span><span class="c1"># overwrite an existing file</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>kokua<span class="w"> </span>config<span class="w"> </span>init<span class="w"> </span>--path<span class="w"> </span>PATH<span class="w"> </span><span class="c1"># write somewhere else</span>
+</span></code></pre></div>
+<p><strong>The file is required</strong>, and Kokua will not start without one. Every individual <em>key</em> has a built-in
+default, so you set only what you want to change, but the <code>[agents.*]</code> tables exist nowhere else and an
+assistant with no agent cannot work. There is no useful "no config" state to fall back to, so startup
+fails with a message pointing at <code>kokua config init</code>.</p>
+<h2 id="precedence">Precedence<a class="headerlink" href="#precedence" title="Permanent link">&para;</a></h2>
+<p>Highest wins:</p>
+<p><strong>command-line flag &gt; <code>config.toml</code> &gt; built-in default</strong></p>
+<p>For the reasoning-effort and generation tiers, AIMU adds precedence <em>below</em> the config file. Resolved
+lowest first: the model client's own fallbacks, then the model card's tuned sampling profile, then what
+Kokua writes from <code>[assistant.generation]</code> and <code>[agents.&lt;name&gt;.generation]</code>, then a per-call override.
+The practical consequence is in <a href="#assistantgeneration"><code>[assistant.generation]</code></a>: a key you set replaces
+the card's recommendation for that one parameter, and a key you leave out keeps the card's value.</p>
+<h2 id="what-happens-when-a-key-is-wrong">What happens when a key is wrong<a class="headerlink" href="#what-happens-when-a-key-is-wrong" title="Permanent link">&para;</a></h2>
+<p>An unknown key, an unknown section, or a wrong-typed value is a <strong>hard startup error</strong> naming the key.
+Kokua does not skip a line it cannot parse. A few keys that existed in earlier layouts are recognized
+specifically so the error can say where they moved to, rather than reporting them as unknown.</p>
+<p><code>update_config</code> runs the same validation before it writes, so the assistant cannot save a value that
+would prevent the next startup. <code>[assistant].model</code> gets one extra check there that the file itself does
+not do: the string must resolve to a client this process could build, because a startup-only key written
+by a tool outlives the conversation that wrote it.</p>
+<h2 id="who-may-change-which-key">Who may change which key<a class="headerlink" href="#who-may-change-which-key" title="Permanent link">&para;</a></h2>
+<p><code>[security].locked_config_keys</code> decides this, and it is yours to set. Kokua ships with:</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[security]</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">locked_config_keys</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="s2">"security.*"</span><span class="p">,</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="s2">"email.to"</span><span class="p">,</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="s2">"paths.data_dir"</span><span class="p">,</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="s2">"agents.*"</span><span class="p">,</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="s2">"scheduling.task.*"</span><span class="p">,</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="s2">"compute.command_env_passthrough"</span><span class="p">,</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="p">]</span>
+</span></code></pre></div>
+<p>A pattern takes one of three forms:</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Matches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>*</code></td>
+<td>every section and key</td>
+</tr>
+<tr>
+<td><code>&lt;section&gt;.*</code></td>
+<td>that section, every section under it, any key</td>
+</tr>
+<tr>
+<td><code>&lt;section&gt;.&lt;key&gt;</code></td>
+<td>exactly that key in exactly that section</td>
+</tr>
+</tbody>
+</table>
+<p>Keys never contain dots and sections do, so the last segment of the third form is always the key. To
+lock one task's contents, write <code>"scheduling.task.morning-brief.*"</code>, not
+<code>"scheduling.task.morning-brief"</code>. Anything that is none of the three forms fails startup naming the
+pattern, and so does a pattern whose shape is right but whose section or key does not exist: <code>agnets.*</code>,
+<code>Agents.*</code>, and <code>security.confirm_tool</code> are all refused. What no check can catch is a name only you
+bring into being. <code>agents.resercher.*</code> and <code>scheduling.task.mornin-brief.*</code> name an agent and a task
+that could be created tomorrow, so there is no closed set to test them against, and each one loads while
+locking nothing. See <a href="#locked_config_keys"><code>locked_config_keys</code></a> for the full list of what is refused.</p>
+<p><strong>One key is always locked:</strong> <code>[security].locked_config_keys</code> itself, whatever the list says, including
+when it is empty. Otherwise an assistant holding <code>update_config</code> would need a single call to disable
+every other lock. Note how narrow that is: only this key, not the <code>[security]</code> section around it. Set
+<code>locked_config_keys = ["email.to"]</code> and <code>[security].confirm_tools</code> becomes writable by the assistant,
+because the shipped <code>security.*</code> pattern was the only thing that was locking it.</p>
+<p>Everything else is yours to remove, and here is what removing each shipped pattern actually permits:</p>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Removing it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>security.*</code></td>
+<td>lets the assistant change <code>confirm_tools</code>, and so remove its own approval gate</td>
+</tr>
+<tr>
+<td><code>email.to</code></td>
+<td>lets the assistant mail someone other than you</td>
+</tr>
+<tr>
+<td><code>paths.data_dir</code></td>
+<td>lets the assistant move its own state out from under you</td>
+</tr>
+<tr>
+<td><code>agents.*</code></td>
+<td>lets the assistant rewrite any agent's <code>tools</code>, <code>model</code>, <code>thinking</code>, <code>system_message</code>, <code>description</code>, and <code>delegates_to</code>, set its <code>[agents.&lt;name&gt;.generation]</code> parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart.</td>
+</tr>
+<tr>
+<td><code>scheduling.task.*</code></td>
+<td>changes the error message only. <code>update_config</code> still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule.</td>
+</tr>
+<tr>
+<td><code>compute.command_env_passthrough</code></td>
+<td>lets the assistant name its own credentials for a <code>run_command</code> child to see; because the key is cold, that exposure is persistent, surviving into every later session rather than one command</td>
+</tr>
+</tbody>
+</table>
+<p>A flat agent key (<code>tools</code>, <code>model</code>, <code>thinking</code>, <code>system_message</code>, <code>description</code>, <code>delegates_to</code>) is
+checked before it is saved by the same <code>validate_agents</code> that runs at startup, so an unknown toolset
+name, an unresolvable model, an unknown delegate, or a delegation cycle is refused at the tool rather
+than breaking your next launch. That check reads <code>config.toml</code> itself, not the copy this session started
+from, and reads both halves of it that startup reads: the agent tables and the <code>[assistant].agent</code>
+naming the entry agent. So two writes that each looked fine alone cannot add up to a file your next
+launch refuses. A <code>[agents.&lt;name&gt;.generation]</code> parameter gets a different check instead:
+the same type-and-range check <code>[assistant.generation]</code> gets, not a <code>validate_agents</code> dry run, since a bad
+<code>temperature</code> cannot break startup the way a bad delegate can. Either way, the write is checked before
+it is saved; neither check tells you the result is one you wanted, only that it starts.</p>
+<p><code>[[mcp.server]]</code> is not in the list and is not writable by <code>update_config</code> either way; it is appended by
+<code>add_mcp_server</code>, which connects the server as well as recording it.</p>
+<h2 id="which-keys-apply-live">Which keys apply live<a class="headerlink" href="#which-keys-apply-live" title="Permanent link">&para;</a></h2>
+<p>A <strong>hot</strong> key takes effect on the next turn, with no restart, and is written back to <code>config.toml</code>
+immediately. Everything else is <strong>startup-only</strong>: change it, then restart.</p>
+<table>
+<thead>
+<tr>
+<th>Hot</th>
+<th>Startup-only</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[assistant].generate_titles</code></td>
+<td>the rest of <code>[assistant]</code>, including <code>[assistant.generation]</code>, and <code>[planning].review_rounds</code></td>
+</tr>
+<tr>
+<td><code>[planning].plan_review</code>, <code>plan_review_agent</code>, <code>result_review</code>, <code>show_reasoning</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>[capabilities].max_depth</code></td>
+<td>all of <code>[agents.*]</code>, <code>[mcp]</code> (including <code>[[mcp.server]]</code>), <code>[security]</code>, <code>[paths]</code>, <code>[frontend]</code>, <code>[web]</code>, <code>[logging]</code>, <code>[email]</code></td>
+</tr>
+<tr>
+<td><code>[scheduling].max_task_conversations</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>The model and the reasoning effort read like runtime settings and are not. Nothing rebinds a live model
+client, and no runtime writer can reach <code>[agents.*]</code>, so a hot <code>[assistant].model</code> could only ever report
+a change it had not made, or disagree with an agent's own declaration. Generation parameters are
+startup-only for a second reason as well: a live control always holds <em>some</em> value, so it would write
+that tier whether or not you asked for anything, shadowing every model card's tuned profile. A key absent
+from the file has to stay absent from the request.</p>
+<p>A toolset declares its own settings and says which of them are hot. See <a href="#toolset-sections">toolset
+sections</a>.</p>
+<hr />
+<h2 id="assistant"><code>[assistant]</code><a class="headerlink" href="#assistant" title="Permanent link">&para;</a></h2>
+<p>Process-wide defaults. Everything here is read at startup, except <code>generate_titles</code>, which is hot.</p>
+<h3 id="model"><code>model</code><a class="headerlink" href="#model" title="Permanent link">&para;</a></h3>
+<p>The default model every agent runs on. An agent that declares its own <code>model</code> runs on that instead.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ollama:qwen3:8b"</span>
+</span></code></pre></div>
+<p>Unset, Kokua resolves <code>$AIMU_LANGUAGE_MODEL</code>, and failing that the first already-running local model it
+finds: a running Ollama server first, then a local OpenAI-compatible server. <strong>A cloud model is never
+auto-selected.</strong> If nothing resolves, startup fails with an actionable message.</p>
+<p>The string has two optional suffixes for servers AIMU does not know about:</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>provider:model</code></td>
+<td>the ordinary case</td>
+</tr>
+<tr>
+<td><code>provider:model@&lt;base_url&gt;</code></td>
+<td>override the endpoint (llama.cpp <code>llama-server</code>, vLLM, LM Studio, SGLang, HF-Serve)</td>
+</tr>
+<tr>
+<td><code>provider:model@&lt;base_url&gt;;&lt;flags&gt;</code></td>
+<td>also declare capabilities for a model id not built into AIMU</td>
+</tr>
+</tbody>
+</table>
+<p><code>&lt;flags&gt;</code> is comma-separated from <code>tools</code>, <code>thinking</code>, <code>vision</code>, <code>audio</code>, <code>structured</code>.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"llamaserver:qwen3-8b.gguf@http://gpu-box:8080/v1"</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"openai-compat:my-model@http://gpu-box:9000/v1;tools,thinking"</span>
+</span></code></pre></div>
+<p>Both suffixes survive the <code>$AIMU_LANGUAGE_MODEL</code> route as well, which is worth stating because it is the
+natural way to share one <code>config.toml</code> across machines that serve different models:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">AIMU_LANGUAGE_MODEL</span><span class="o">=</span><span class="s2">"ollama:qwen3.8:27b@http://gpu-box:11434"</span>
+</span></code></pre></div>
+<p>Whichever route the default arrives by, it is resolved once and every agent gets the same string:
+sub-agents spawned through <code>spawn_subagent</code>, sub-agents built by <code>compose_subagent</code>, the prebuilt
+orchestrators in the <code>aimu_agents</code> toolset, and both <code>/plan</code> reviewers. An endpoint set here reaches all
+of them. (Before Kokua 0.1.0 it did not: with <code>model</code> unset, the endpoint was dropped for everything
+except the entry agent, so a remote default sent every sub-agent to the <em>local</em> server instead. It failed
+loudly only when nothing was listening there.)</p>
+<p>Note this pins the client, not discovery. The probe that picks a default when nothing is set at all
+looks at default endpoints only, so export <code>OLLAMA_HOST</code> as well when a remote server's models should be
+considered there too.</p>
+<h3 id="thinking"><code>thinking</code><a class="headerlink" href="#thinking" title="Permanent link">&para;</a></h3>
+<p>The default reasoning effort every agent runs at. An agent that declares its own <code>thinking</code> runs at that
+instead.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>unset (default)</td>
+<td>send nothing; the model keeps its own behavior</td>
+</tr>
+<tr>
+<td><code>false</code></td>
+<td>do not reason</td>
+</tr>
+<tr>
+<td><code>true</code></td>
+<td>reason, at the model's own default effort</td>
+</tr>
+<tr>
+<td><code>"low"</code>, <code>"medium"</code>, <code>"high"</code></td>
+<td>reason at this effort</td>
+</tr>
+</tbody>
+</table>
+<p>Two caveats. A level is <strong>advisory</strong> on a model whose card does not declare effort-level support: AIMU
+warns once, and reasoning is still on, just not at the level asked for. And <code>false</code> additionally selects
+the model card's instruct-mode sampling profile where the card specifies one (the Qwen 3.5, 3.6, and 3.8
+cards do; most models have a single profile and are unaffected), because a model's thinking-mode and
+non-thinking-mode sampling defaults are usually different.</p>
+<p>An agent's declaration is resolved on "is it unset", not on truthiness, so <code>thinking = false</code> on an agent
+genuinely overrides a <code>"high"</code> default rather than being swallowed by it.</p>
+<p>This key is not the last word: a single turn can ask for its own effort from the web composer's picker
+or the CLI's <code>/think</code>, beating whatever this key and an agent's own declaration resolve to for that turn
+alone. Nothing about the request is stored in <code>config.toml</code>; see
+<a href="../../explanation/architecture/#which-model-an-agent-runs-on-and-how-hard-it-thinks">Architecture</a> for
+the full resolution order.</p>
+<h3 id="system_message"><code>system_message</code><a class="headerlink" href="#system_message" title="Permanent link">&para;</a></h3>
+<p>Fallback opener for any agent that sets no <code>system_message</code> of its own. The <code>--system</code> flag overrides the
+<em>entry</em> agent's opener for one run, and leaves a worker's declared opener alone.</p>
+<h3 id="agent"><code>agent</code><a class="headerlink" href="#agent" title="Permanent link">&para;</a></h3>
+<p>Which <code>[agents.&lt;name&gt;]</code> table is the agent you talk to, and the root of the delegation graph.
+Default <code>"assistant"</code>.</p>
+<h3 id="concurrent_tools"><code>concurrent_tools</code><a class="headerlink" href="#concurrent_tools" title="Permanent link">&para;</a></h3>
+<p>Run independent tool calls in one turn concurrently, so several <code>spawn_subagent</code> calls overlap.
+Default <code>true</code>.</p>
+<h3 id="agent_cache_cap"><code>agent_cache_cap</code><a class="headerlink" href="#agent_cache_cap" title="Permanent link">&para;</a></h3>
+<p>Maximum per-conversation agents kept live in memory. Default <code>8</code>. An evicted agent rebuilds from
+persisted state on next access, so the cap bounds memory, not correctness.</p>
+<h3 id="generate_titles"><code>generate_titles</code><a class="headerlink" href="#generate_titles" title="Permanent link">&para;</a></h3>
+<p>Have the model write each new conversation's title from the message that opened it. Default <code>true</code>.
+<strong>Hot</strong>, and the only hot key in <code>[assistant]</code>: the title is written per conversation, so a change
+applies to the next one with no restart.</p>
+<p>The first message truncated to 40 characters is the title the instant a conversation has one; the
+written title replaces it a moment later, in the background, on the model that conversation runs on
+(no separate model to configure). <code>false</code> stops at the truncation, which is also what stands whenever
+the call fails: an endpoint that is down, or an answer that cleans up to nothing, is silent and leaves
+the placeholder. A conversation a scheduled task minted keeps the task's name either way.</p>
+<h2 id="assistantgeneration"><code>[assistant.generation]</code><a class="headerlink" href="#assistantgeneration" title="Permanent link">&para;</a></h2>
+<p>Sampling and length parameters for every agent, each overridable per key by an agent's own
+<code>[agents.&lt;name&gt;.generation]</code> table. Startup-only.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Range</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>temperature</code></td>
+<td>number</td>
+<td>0.0 to 2.0</td>
+</tr>
+<tr>
+<td><code>top_p</code></td>
+<td>number</td>
+<td>0.0 to 1.0</td>
+</tr>
+<tr>
+<td><code>top_k</code></td>
+<td>integer</td>
+<td>at least 1</td>
+</tr>
+<tr>
+<td><code>min_p</code></td>
+<td>number</td>
+<td>0.0 to 1.0</td>
+</tr>
+<tr>
+<td><code>presence_penalty</code></td>
+<td>number</td>
+<td>-2.0 to 2.0</td>
+</tr>
+<tr>
+<td><code>repetition_penalty</code></td>
+<td>number</td>
+<td>greater than 0.0</td>
+</tr>
+<tr>
+<td><code>max_tokens</code></td>
+<td>integer</td>
+<td>at least 1</td>
+</tr>
+<tr>
+<td><code>context_length</code></td>
+<td>integer</td>
+<td>at least 1</td>
+</tr>
+</tbody>
+</table>
+<p>There is no default for any of them, and that is the design rather than an omission. <strong>Only the keys you
+set are sent.</strong> This tier sits above the model card's own tuned profile in AIMU's precedence chain, so a
+value set here replaces the card's recommendation for that one parameter and leaves the rest of the
+profile in force. Setting nothing keeps the whole profile.</p>
+<p>Three things to know:</p>
+<ul>
+<li><strong>A parameter the backend cannot take is dropped</strong>, with a warning naming where to set it instead
+  (Ollama has no <code>min_p</code>; the Anthropic API has no penalties). A value that works locally therefore does
+  not break a cloud model, it just stops applying. That warning goes only to the rotating log at
+  <code>data/logs/kokua.log</code> under your Kokua home, not to the chat or the terminal, so look there when a
+  parameter you set has no effect.</li>
+<li><strong><code>max_tokens</code> and <code>context_length</code> are different knobs and they interact.</strong> <code>max_tokens</code> caps
+  <em>generated</em> tokens; <code>context_length</code> sizes the whole window, which the prompt and the generated tokens
+  share. With the window at 32768 and the cap at 4096, roughly 28k is left for the system prompt, the
+  tool block, and the conversation. Note also that AIMU's own fallback sets <code>max_tokens = 1024</code> on
+  Anthropic, the OpenAI-compatible family, and llama.cpp, which is low for a turn carrying tool results.</li>
+<li><strong><code>context_length</code> is set per request only on Ollama's native API.</strong> Everywhere else the window is
+  fixed at model load time, at server launch (<code>--ctx-size</code>, <code>--max-model-len</code>), or by the vendor, and the
+  key is dropped with a warning naming that remedy.</li>
+</ul>
+<p>Because this is a TOML sub-table, it must come <strong>last</strong> in <code>[assistant]</code>: any plain <code>[assistant]</code> key
+written after the <code>[assistant.generation]</code> header would belong to the sub-table instead. The same is true
+of an agent's own generation table.</p>
+<h2 id="security"><code>[security]</code><a class="headerlink" href="#security" title="Permanent link">&para;</a></h2>
+<h3 id="confirm_tools"><code>confirm_tools</code><a class="headerlink" href="#confirm_tools" title="Permanent link">&para;</a></h3>
+<p>Tools that require interactive confirmation before each call: a terminal <code>y/N</code>, or Allow/Deny in the web
+UI. These are the tools that run with full machine access.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">confirm_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"add_skill_script"</span><span class="p">,</span><span class="w"> </span><span class="s2">"add_mcp_server"</span><span class="p">,</span><span class="w"> </span><span class="s2">"execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"update_config"</span><span class="p">]</span>
+</span></code></pre></div>
+<p>Set to <code>[]</code> to disable approval entirely. Proactive turns (scheduled tasks, anything the assistant starts
+unprompted) <strong>auto-deny</strong> these regardless of the setting, since there is no one at the keyboard to ask.</p>
+<p><code>update_config</code> is in the default list because it lets the assistant rewrite this file, except for the
+locked keys it can never change. This key is itself locked by default too, for the obvious reason.</p>
+<p>Gating is <strong>by tool name</strong>, so it applies to a worker's call as much as the entry agent's: a worker's
+gated call is routed to you. Note the flip side, which is easy to misread: there is no privilege tier
+among agents. An agent whose table declares <code>config</code> really does get <code>update_config</code>, and one declaring
+<code>compute</code> really does get <code>execute_python</code>. Your hand-edit is the consent, and this list is the gate at
+call time.</p>
+<p><strong>A name no configured agent provides fails startup</strong>, naming every entry that matched nothing and
+suggesting the close names. A gate is a plain name match, so a misspelled entry holds nothing back, and
+the only sign of it is a prompt that never comes, which is not a thing anyone notices:
+<code>confirm_tools = ["execute_pythn"]</code> once loaded clean and then let <code>execute_python</code> run unattended for
+as long as the file stood. The vocabulary is every tool this config builds, which is wider than the
+entry agent's own: <code>execute_python</code> is there because <code>[agents.coder]</code> declares <code>compute</code>, and
+<code>spawn_subagent</code> and a skill's <code>{skill}__{script}</code> tools count as well. An empty list names nothing, so
+there is nothing for the check to refuse.</p>
+<p>The limit is anything that does not exist when startup ends. A tool from an MCP server the assistant
+connects later with <code>add_mcp_server</code> has no name to match yet, and neither does a tool only
+<code>compose_subagent</code> would build, out of a toolset no <code>[agents.*]</code> table names. Listing either one is
+refused, which will look wrong if you were deliberately gating ahead of the connection. To gate an MCP
+tool, give its server a <code>[[mcp.server]]</code> table here and name that server in an agent's <code>tools</code>; to gate
+a tool from a toolset nothing declares, name that toolset in an agent's <code>tools</code>. Both are known from the
+next start.</p>
+<p>Two names worth considering adding, both ungated by default: <code>read_conversation</code> and
+<code>search_conversations</code>. A saved transcript is untrusted text, since a worker may have pasted web content
+into it, so an injection landing in one conversation can influence another. They are ungated by default
+because gating a read would make an unattended scheduled run that reads history fail silently.</p>
+<h3 id="locked_config_keys"><code>locked_config_keys</code><a class="headerlink" href="#locked_config_keys" title="Permanent link">&para;</a></h3>
+<p>A list of patterns naming which keys <code>update_config</code> refuses. Default:
+<code>["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*",
+"compute.command_env_passthrough"]</code>. Startup-only, and
+always locked against <code>update_config</code> regardless of its own value. See
+<a href="#who-may-change-which-key">Who may change which key</a> for the pattern forms and what each shipped
+pattern is holding back. A pattern that could never match anything is a hard startup error rather than a
+line that silently locks nothing, and two checks decide that.</p>
+<p>The first is the pattern's shape: a bare <code>display</code> with no dot, whitespace at either end of the pattern,
+an empty segment (<code>agents.</code>), a <code>*</code> sharing a segment with other characters (<code>agent*.tools</code>), or a <code>*</code>
+anywhere but the last segment (<code>*.*</code>, <code>agents.*.*</code>) all fail. The second is its vocabulary, read off the
+schema this install actually has, so it knows the sections your installed toolsets contribute as well as
+Kokua's own. The first segment must be a real section, which is what refuses <code>agnets.*</code> and, since TOML
+keys are case-sensitive, <code>Agents.*</code>. An exact <code>&lt;section&gt;.&lt;key&gt;</code> in a section whose keys are known must
+name one of them, which is what refuses <code>security.confirm_tool</code> while accepting
+<code>security.confirm_tools</code>.</p>
+<p>Neither check can see a name that does not exist yet, and neither tries to. The <code>[agents.&lt;name&gt;]</code> and
+<code>[scheduling.task.&lt;name&gt;]</code> sections are yours to create, so <code>agents.resercher.*</code> is accepted and locks
+nothing until an agent by that name exists. Locking a section you are about to add is a legitimate thing
+to write; a misspelling of one is indistinguishable from it.</p>
+<h2 id="agentsname"><code>[agents.&lt;name&gt;]</code><a class="headerlink" href="#agentsname" title="Permanent link">&para;</a></h2>
+<p>Every agent, declared whole. The table name is the agent's name: it is what <code>[assistant].agent</code> selects,
+what another agent's <code>delegates_to</code> names, and what <code>spawn_subagent</code> takes as its <code>agent_type</code>.</p>
+<p>A name you write by hand is any TOML key, quoted where it has to be. A name <code>update_config</code> writes is
+narrower, letters, digits, hyphens, and underscores, so the section the tool reports is the section that
+reaches the file: anything else would be quoted on the way in and land under a name you could not name
+again. <code>agents.*</code> is refused for that reason and one more, being the wildcard a lock pattern covers the
+whole section with rather than an agent.</p>
+<p><strong>This whole section is locked by default.</strong> See <a href="#who-may-change-which-key">who may change which key</a>
+for what removing <code>agents.*</code> from <code>[security].locked_config_keys</code> actually permits.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>the label a delegator sees in its worker menu</td>
+</tr>
+<tr>
+<td><code>system_message</code></td>
+<td>string</td>
+<td>this agent's opener; falls back to <code>[assistant].system_message</code></td>
+</tr>
+<tr>
+<td><code>tools</code></td>
+<td>list of strings</td>
+<td><strong>this agent's capability</strong>, named from the one toolset namespace</td>
+</tr>
+<tr>
+<td><code>delegates_to</code></td>
+<td>list of strings</td>
+<td>agent names this agent may spawn as workers</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>string</td>
+<td>overrides <code>[assistant].model</code> for this agent alone</td>
+</tr>
+<tr>
+<td><code>thinking</code></td>
+<td>bool or level</td>
+<td>overrides <code>[assistant].thinking</code> for this agent alone</td>
+</tr>
+<tr>
+<td><code>generation</code></td>
+<td>sub-table</td>
+<td>overrides <code>[assistant.generation]</code>, <strong>per key</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="tools"><code>tools</code><a class="headerlink" href="#tools" title="Permanent link">&para;</a></h3>
+<p>An agent's <code>tools</code> list <em>is</em> its capability. Nothing is added in code, so a toolset you delete from a
+list is gone, and one you add is there on the next start.</p>
+<p>There is one namespace for every capability, so a name may be an AIMU built-in tool group (<code>web</code>, <code>fs</code>,
+<code>compute</code>, <code>time</code>, <code>misc</code>, <code>audio</code>, <code>speech</code>, <code>transcription</code>), one of Kokua's own (<code>memory</code>,
+<code>documents</code>, <code>skills</code>, <code>capabilities</code>, <code>config</code>, <code>conversations</code>, <code>mcp</code>, <code>planning</code>, <code>scheduling</code>),
+an installed plugin toolset (<code>aimu_agents</code>, <code>benchmark</code>, <code>github_backup</code>, <code>image</code>), a skill in your skills folder
+named by its own name, or an MCP server configured under <code>[[mcp.server]]</code>, named by its <code>name</code>. The list
+does not say which kind a name is. Run <code>kokua --list-toolsets</code> for every name this install accepts,
+grouped by what provides it.</p>
+<p>An unknown name is a startup error listing the valid ones, so a typo can never quietly leave an agent
+with a smaller toolset than you wrote. Nothing is implicit, including the clock: <code>time</code> is added to no
+agent in code, which is why every shipped agent lists it. An installed plugin toolset and a configured
+MCP server likewise do nothing until some agent names them, and startup warns about one that nothing
+names.</p>
+<p>The full inventory of what each toolset contains is in <a href="../../how-to/set-up-toolsets/#one-namespace">set up a
+toolset</a>.</p>
+<h3 id="delegates_to"><code>delegates_to</code><a class="headerlink" href="#delegates_to" title="Permanent link">&para;</a></h3>
+<p>A non-empty <code>delegates_to</code> is what makes an agent a delegator. There is no separate switch that could
+disagree with it. The agent gets a <code>spawn_subagent(agent_type, task)</code> tool offering exactly the agents it
+names, each built from its own table. The graph must be acyclic.</p>
+<p>A worker's gated tool calls (see <a href="#security"><code>[security]</code></a>) are routed to you for approval, not run
+unattended.</p>
+<h3 id="model-thinking-generation"><code>model</code>, <code>thinking</code>, <code>generation</code><a class="headerlink" href="#model-thinking-generation" title="Permanent link">&para;</a></h3>
+<p>All three are resolved per agent and <strong>never inherited down the delegation graph</strong>: a delegator that pins
+a big model, reasons hard, or runs cold does not drag its workers along. A worker declaring nothing runs
+on the <code>[assistant]</code> defaults like every other undeclared agent.</p>
+<p>An agent's <code>model</code> is the same string <a href="#model"><code>[assistant].model</code></a> is, suffixes included: a worker can
+be pinned to its own endpoint, or to the same remote server the assistant uses. Worth stating because the
+two are checked by different code (a worker's is parsed at startup, <code>[assistant].model</code> by building a
+throwaway client), so a reader has no way to tell from the code alone that they accept the same thing.</p>
+<p><code>generation</code> merges per key rather than table for table, so an agent that wants only a colder temperature
+keeps the default's context length.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[agents.researcher]</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Research specialist: gather and verify information from the web."</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ollama:qwen3:32b"</span><span class="w">     </span><span class="c1"># this worker alone runs on a bigger model</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">thinking</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"high"</span><span class="w">              </span><span class="c1"># ...and reasons harder than the rest</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"You are a research sub-agent. ..."</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="k">[agents.researcher.generation]</span><span class="w">  </span><span class="c1"># last in the table, like [assistant.generation]</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="n">context_length</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">131072</span>
+</span></code></pre></div>
+<p>A model string AIMU cannot resolve fails startup naming the table it came from.</p>
+<h2 id="mcpserver"><code>[[mcp.server]]</code><a class="headerlink" href="#mcpserver" title="Permanent link">&para;</a></h2>
+<p>Remote MCP servers to connect at startup. An array of tables: one <code>[[mcp.server]]</code> header per server.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Required</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>url</code></td>
+<td>yes</td>
+<td>the server's endpoint</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>yes</td>
+<td>how the server enters the toolset namespace</td>
+</tr>
+<tr>
+<td><code>token_env</code></td>
+<td>no</td>
+<td>environment variable holding a bearer token, read at startup</td>
+</tr>
+</tbody>
+</table>
+<p><code>name</code> is what an agent lists in its <code>tools</code>, so a server no agent can name reaches no agent. Omit
+<code>token_env</code> for an unauthenticated server, or one using the OAuth flow, which triggers automatically on
+an auth challenge. The token stays in the environment, never in this file.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[[mcp.server]]</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://api.githubcopilot.com/mcp/"</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"github"</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"GITHUB_MCP_TOKEN"</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="k">[[mcp.server]]</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://broker.example.com/mcp"</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"stocks"</span>
+</span></code></pre></div>
+<p>Servers added at runtime with the <code>add_mcp_server</code> tool are appended here automatically, with a <code>name</code>
+derived from the host and a numeric suffix if that name is taken, so the file always loads. That name
+reaches no agent until you add it to a <code>tools</code> list <strong>and restart</strong>, since the toolset namespace and the
+agent tables are both read only at startup. See <a href="../../how-to/add-mcp-services/">add an MCP
+service</a>.</p>
+<h3 id="the-oauth-callback">The OAuth callback<a class="headerlink" href="#the-oauth-callback" title="Permanent link">&para;</a></h3>
+<p>Two scalar keys sit in <code>[mcp]</code> itself, alongside the server array. They decide where an OAuth provider
+sends your browser once you approve, which is also where Kokua listens for the code.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>oauth_callback_host</code></td>
+<td><code>"localhost"</code></td>
+<td>host in the registered redirect URI, and the interface the callback server binds</td>
+</tr>
+<tr>
+<td><code>oauth_callback_port</code></td>
+<td>unset (a free port, chosen per process)</td>
+<td>port for both</td>
+</tr>
+</tbody>
+</table>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">[mcp]</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">oauth_callback_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8765</span>
+</span></code></pre></div>
+<p>The defaults assume the browser runs on the same machine as Kokua. If it does not, the provider sends
+your approval to <em>your</em> loopback, Kokua never receives it, and the connection fails only when the flow
+times out. Pin the port and forward it (<code>ssh -L 8765:localhost:8765 kokua-host</code>), or set the host to
+Kokua's own name if your provider accepts a non-loopback redirect URI. Pinning the port also protects a
+re-authorization in a later session, since the client registration is cached across restarts while a
+random port is not. <a href="../../how-to/add-mcp-services/#authorizing-when-kokua-runs-on-another-machine">Add an MCP service</a>
+covers both setups.</p>
+<h2 id="paths"><code>[paths]</code><a class="headerlink" href="#paths" title="Permanent link">&para;</a></h2>
+<h3 id="data_dir"><code>data_dir</code><a class="headerlink" href="#data_dir" title="Permanent link">&para;</a></h3>
+<p>Absolute override for where all transient and user content lives. Default: <code>$KOKUA_HOME/data</code>.
+Locked by default.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">data_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/path/to/kokua-data"</span>
+</span></code></pre></div>
+<p>Every leaf derives from this one setting, so overriding it moves all of them together:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>$KOKUA_HOME/
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>  config.toml
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>  data/                  &lt;- data_dir
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    sessions.json        conversations
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    memory/              the memory store
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    documents/           the document store
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    skills/              installed skills
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    images/              uploaded and generated images, served at /images
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    logs/kokua.log       the rotating diagnostic log
+</span></code></pre></div>
+<p>To move the whole tree including <code>config.toml</code>, set <code>$KOKUA_HOME</code> instead. That one is an environment
+variable rather than a setting because the config file lives inside it, so it has to resolve before the
+file can be read.</p>
+<h2 id="frontend"><code>[frontend]</code><a class="headerlink" href="#frontend" title="Permanent link">&para;</a></h2>
+<h3 id="name"><code>name</code><a class="headerlink" href="#name" title="Permanent link">&para;</a></h3>
+<p>Which front end <code>kokua</code> runs: <code>"cli"</code>, <code>"web"</code>, or any installed plugin. Default <code>"cli"</code>. <code>kokua-web</code> is
+a convenience for <code>--frontend web</code>. List what is installed with <code>kokua --list-frontends</code>.</p>
+<h2 id="web"><code>[web]</code><a class="headerlink" href="#web" title="Permanent link">&para;</a></h2>
+<p>Bind address for the web front end. Ignored by other front ends.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host</code></td>
+<td>string</td>
+<td><code>"127.0.0.1"</code></td>
+</tr>
+<tr>
+<td><code>port</code></td>
+<td>integer</td>
+<td><code>8000</code></td>
+</tr>
+</tbody>
+</table>
+<p>The default binds to loopback only. Kokua is a single-user assistant with no authentication layer of its
+own, so putting it on a routable address exposes an unauthenticated assistant holding your machine's
+tools. Front it with something that authenticates if you need remote access.</p>
+<h2 id="logging"><code>[logging]</code><a class="headerlink" href="#logging" title="Permanent link">&para;</a></h2>
+<h3 id="level"><code>level</code><a class="headerlink" href="#level" title="Permanent link">&para;</a></h3>
+<p>Level for the rotating diagnostic log at <code>&lt;data_dir&gt;/logs/kokua.log</code> (5 files, 2 MB each). One of
+<code>DEBUG</code>, <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>. Default <code>"INFO"</code>.</p>
+<p>The log records the turn lifecycle (submitted, lock acquired, done, error), so a hung turn is visible
+after the fact. It is also where a dropped generation parameter reports itself. For live state, the
+<code>/diag</code> chat command reports turn and lock state and dumps a wedged turn's async stack, and
+<code>kill -USR1 &lt;pid&gt;</code> dumps all thread stacks.</p>
+<h2 id="email"><code>[email]</code><a class="headerlink" href="#email" title="Permanent link">&para;</a></h2>
+<p>Lets the assistant email information to you (digests, summaries, reports) over SMTP, through the
+<code>email-report</code> skill. Install it with <code>kokua skills install email-report</code>, then name it in an agent's
+<code>tools</code> alongside <code>fs</code> and <code>compute</code> so that agent can run its script.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host</code></td>
+<td>string</td>
+<td>unset</td>
+<td>SMTP server</td>
+</tr>
+<tr>
+<td><code>port</code></td>
+<td>integer</td>
+<td><code>587</code></td>
+<td>587 with STARTTLS, or 465 with <code>use_ssl = true</code></td>
+</tr>
+<tr>
+<td><code>username</code></td>
+<td>string</td>
+<td>falls back to <code>from</code>, then <code>to</code></td>
+<td>SMTP login user</td>
+</tr>
+<tr>
+<td><code>from</code></td>
+<td>string</td>
+<td>falls back to <code>to</code></td>
+<td><code>From:</code> header</td>
+</tr>
+<tr>
+<td><code>to</code></td>
+<td>string</td>
+<td>unset</td>
+<td><strong>the only address the assistant can send to</strong>; locked by default</td>
+</tr>
+<tr>
+<td><code>use_ssl</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td><code>false</code> is STARTTLS on connect, <code>true</code> is implicit TLS (SMTP_SSL)</td>
+</tr>
+</tbody>
+</table>
+<p>Leave everything unset to disable email.</p>
+<p>Three properties worth understanding before enabling it:</p>
+<ul>
+<li><strong>The recipient is locked.</strong> Kokua passes these settings to the script's environment and the script has
+  no recipient flag, so it can only ever mail <code>to</code>. That is also why <code>to</code> is locked by default: it is
+  the whole guarantee.</li>
+<li><strong>Sending is ungated.</strong> There is no per-send confirmation, because a scheduled or proactive turn has no
+  one to ask and auto-denies gated tools. The recipient lock is what makes that safe.</li>
+<li><strong>The password is never in this file.</strong> It is read from <code>$KOKUA_EMAIL_PASSWORD</code>, and a <code>password</code> key
+  here is an unknown-key error rather than a working shortcut. For Gmail or Google Workspace, use an App
+  Password. The script sends nothing, and says so, unless <code>host</code> and <code>to</code> are set <em>and</em> that variable is
+  present.</li>
+</ul>
+<h2 id="scheduling"><code>[scheduling]</code><a class="headerlink" href="#scheduling" title="Permanent link">&para;</a></h2>
+<p>This section exists because the <code>scheduling</code> toolset declares it. See <a href="#toolset-sections">toolset
+sections</a>.</p>
+<h3 id="max_task_conversations"><code>max_task_conversations</code><a class="headerlink" href="#max_task_conversations" title="Permanent link">&para;</a></h3>
+<p>How many conversations a scheduled task keeps. Default <code>3</code>. Hot.</p>
+<p>Every firing runs in its own conversation. Once a task has more than this many, its oldest are deleted
+after the next firing succeeds. <code>1</code> means each run replaces the one before it; <code>0</code> keeps every run
+forever. A task can override this for itself through the <code>max_conversations</code> argument of <code>schedule_task</code>,
+and this is what the tasks that do not override it follow.</p>
+<h2 id="schedulingtaskname"><code>[scheduling.task.&lt;name&gt;]</code><a class="headerlink" href="#schedulingtaskname" title="Permanent link">&para;</a></h2>
+<p>Scheduled tasks, one table per task. The table name is the task's identity: it is what the sidebar shows,
+what <code>cancel_scheduled_task</code> takes, and what is stamped on every conversation the task runs in.</p>
+<p><strong>Changed through the scheduling tools or by hand, never by <code>update_config</code>.</strong> See <a href="#who-may-change-which-key">who may change which
+key</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prompt</code></td>
+<td>string</td>
+<td>what the assistant is asked when the task fires</td>
+</tr>
+<tr>
+<td><code>schedule</code></td>
+<td>inline table</td>
+<td>when it fires (below)</td>
+</tr>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td>omit to leave it enabled; written as <code>false</code> when disabled or retired</td>
+</tr>
+<tr>
+<td><code>max_conversations</code></td>
+<td>integer</td>
+<td>omit to follow <code>[scheduling].max_task_conversations</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>schedule</code> is one of:</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"once"</span><span class="p">,</span><span class="w">     </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"2026-08-20T09:00:00"</span><span class="w"> </span><span class="p">}</span><span class="w">   </span><span class="c1"># ISO-8601 local datetime</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"interval"</span><span class="p">,</span><span class="w"> </span><span class="n">seconds</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">3600</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w">    </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"weekly"</span><span class="p">,</span><span class="w">   </span><span class="n">day</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"fri"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"16:00"</span><span class="w"> </span><span class="p">}</span><span class="w">    </span><span class="c1"># mon/tue/wed/thu/fri/sat/sun</span>
+</span></code></pre></div>
+<p>A fired one-shot is <strong>not</strong> deleted. It is left in the file with <code>enabled = false</code> and a <code>fired_at</code>
+stamp, so the run stays on the record and re-running it is a one-character edit.</p>
+<p>A task's turn is proactive, which means gated tools auto-deny inside it. Give a task work its agent can
+finish unattended.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">[scheduling.task.morning-brief]</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">prompt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Summarize my calendar and any unread mail, and flag anything that needs a reply today."</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="n">max_conversations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
+</span></code></pre></div>
+<h2 id="planning"><code>[planning]</code><a class="headerlink" href="#planning" title="Permanent link">&para;</a></h2>
+<p>Deep planning is a toolset: an agent's <code>tools</code> must list <code>planning</code> for the <code>/plan &lt;task&gt;</code> command to
+exist at all. It drafts an explicit plan, naming which tools, skills, and MCP services to use or build,
+before doing the work. Every key here belongs to that toolset and is read only when an agent declares it.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Hot</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plan_review</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>yes</td>
+<td>pause the planned turn for your Approve / Edit / Reject; off runs the plan autonomously</td>
+</tr>
+<tr>
+<td><code>plan_review_agent</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>yes</td>
+<td>an independent, context-free agent critiques the plan, and Kokua re-plans on rejection</td>
+</tr>
+<tr>
+<td><code>result_review</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>yes</td>
+<td>an independent agent checks the final answer before it is shown, and Kokua revises on rejection</td>
+</tr>
+<tr>
+<td><code>review_rounds</code></td>
+<td>integer</td>
+<td><code>2</code></td>
+<td>no</td>
+<td>bounds each replan or revise loop</td>
+</tr>
+<tr>
+<td><code>show_reasoning</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>yes</td>
+<td>stream every LLM call in a planned turn under labeled phase headers</td>
+</tr>
+</tbody>
+</table>
+<p><code>result_review</code> runs the answer non-streamed, since it has to exist in full before it can be checked.
+<code>show_reasoning</code> shows the planner, each reviewer's prose reasoning and verdict, the executor, and every
+revision, including each intermediate version, which overrides <code>result_review</code>'s hide-until-vetted gate.</p>
+<h2 id="capabilities"><code>[capabilities]</code><a class="headerlink" href="#capabilities" title="Permanent link">&para;</a></h2>
+<p>Capability discovery is a toolset: an agent's <code>tools</code> must list <code>capabilities</code> for the agent to see what
+is installed beyond its own tools. It gets two tools. <code>list_capabilities</code> reads the registry, every
+installed capability except this one, which the agent reading it already holds. <code>compose_subagent</code> builds a
+sub-agent holding exactly the capabilities one task needs, and runs it.</p>
+<p>Unlike the sub-agents in <code>[agents.*]</code>, a composed one is not declared anywhere: its capabilities are
+chosen per task from everything installed, except two names it can never be given. <code>skills</code> works only
+on the agent Kokua constructs directly, and <code>capabilities</code> itself would hand it a fresh
+composition budget. It runs on <code>[assistant].model</code> with the <code>[assistant]</code> thinking
+and generation defaults, and its tools still go through <code>[security].confirm_tools</code>, so <code>execute_python</code>
+and <code>add_mcp_server</code> still ask you first. Composing itself is not in the shipped <code>confirm_tools</code>, so it
+does not ask; add <code>compose_subagent</code> there to gate that too.</p>
+<h3 id="max_depth"><code>max_depth</code><a class="headerlink" href="#max_depth" title="Permanent link">&para;</a></h3>
+<p>How far composition may nest. Default <code>3</code>. Hot.</p>
+<p>At <code>3</code> a chain reaches three sub-agents, and the last of them holds neither <code>compose_subagent</code> nor
+<code>list_capabilities</code>, since a <code>compose_subagent</code> with no way to look up capability names is useless to
+whatever holds it. <code>0</code> switches composing off entirely. The cap is read when <code>compose_subagent</code> is called,
+so an <code>update_config</code> change applies to the next composition with no restart, though a chain already
+running keeps the count it started with.</p>
+<h2 id="github_backup"><code>[github_backup]</code><a class="headerlink" href="#github_backup" title="Permanent link">&para;</a></h2>
+<p>Declared by the <code>github_backup</code> toolset: an agent's <code>tools</code> must list <code>github_backup</code> for
+<code>backup_kokua_state</code> to exist. The tool takes no arguments; everything it needs comes from here.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Hot</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>repo</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>no</td>
+<td><code>owner/name</code> of the backup repository. Required: with it blank the toolset offers no tool at all, the same gate the <code>image</code> toolset applies to its model env var</td>
+</tr>
+<tr>
+<td><code>branch</code></td>
+<td>string</td>
+<td><code>"main"</code></td>
+<td>no</td>
+<td>the branch backups are pushed to</td>
+</tr>
+</tbody>
+</table>
+<p>Both keys need a restart to apply. Neither is hot, so an <code>update_config</code> write reaches the file without
+reaching the <code>AssistantConfig</code> the running process holds; <code>repo</code> is additionally read only once, in
+<code>build</code>, when the toolset's tools are assembled for an agent. (<code>branch</code> is read per call, but off that
+same unchanged in-memory copy, which is why it needs the restart too.)</p>
+<p>Changing <code>repo</code> after a backup has run takes one more step: delete the <code>data/backup</code> working tree.
+Its <code>origin</code> is whatever the first run recorded, and Kokua refuses to push to that while checking a
+different repository's privacy, so a repointed key fails with a message naming both until the tree is
+gone. The next backup then clones the new repository from scratch, carrying none of the old
+repository's history with it.</p>
+<p>The push token is <strong>not</strong> a config key. It is read from the <code>GITHUB_BACKUP_TOKEN</code> environment variable,
+fixed rather than named in <code>config.toml</code>, so that repointing <code>repo</code> (which <code>update_config</code> can do unless
+you lock the key yourself with <code>"github_backup.repo"</code> in <a href="#locked_config_keys"><code>locked_config_keys</code></a>, as
+no toolset section is locked by default) can never widen the capability past whatever repository that one
+token already writes. Scope the token, a fine-grained GitHub PAT with <code>contents: write</code>, to the backup
+repository alone.</p>
+<p>The repository must be private. Kokua checks before it ever pushes and refuses to back up into a public
+one. A backup copies <code>config.toml</code>, the memory store, saved documents, authored skills, and the
+conversation transcripts, as a single git commit.</p>
+<h2 id="compute"><code>[compute]</code><a class="headerlink" href="#compute" title="Permanent link">&para;</a></h2>
+<p>Declared by the <code>compute</code> toolset: an agent's <code>tools</code> must list <code>compute</code> to get <code>calculate</code>,
+<code>execute_python</code>, and <code>run_command</code>. The shipped <code>[agents.coder]</code> is the only agent that declares it.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Hot</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>command_env_passthrough</code></td>
+<td>string</td>
+<td><code>""</code></td>
+<td>no</td>
+<td>comma-separated environment variable names a <code>run_command</code> child may see, on top of the allowlist</td>
+</tr>
+</tbody>
+</table>
+<p><code>run_command</code> runs a command line through <code>/bin/sh -c</code> and returns its exit code with stdout and stderr
+labelled separately. A nonzero exit is reported rather than treated as a failure, since <code>pytest</code> exits 1
+with the answer on stdout. The timeout is per call, defaulting to 30 seconds and clamped to 600.
+Combined stdout and stderr are capped at 20,000 bytes; past that, the larger of the two streams is
+trimmed first, so a talkative command loses output before a quiet one does. <code>run_command</code> also takes a
+<code>cwd</code> argument; left unset, it defaults to Kokua's own process working directory, which for a
+launcher-started service is wherever the launcher happened to be, not anything under <code>$KOKUA_HOME</code>.</p>
+<p><strong>The child's environment is an allowlist, and this key is the opt-in half of it.</strong> A command sees
+<code>PATH</code>, <code>HOME</code>, the locale and temp variables, and <code>SHELL</code>, <code>TERM</code>, <code>TZ</code>, <code>USER</code>, <code>LOGNAME</code>. Nothing
+else, API keys included, which is what stops <code>run_command("env")</code> lifting a credential into the model's
+context on a machine whose launcher sources a <code>.env</code>. That default also makes <code>gh</code>, <code>ssh</code>, and
+<code>git push</code> over ssh fail, which is a policy rather than a bug, so naming <code>SSH_AUTH_SOCK</code> or <code>GH_TOKEN</code>
+here is how you grant one back. Whitespace around a name is ignored and empty segments are dropped, so a
+trailing comma is harmless. A name that is unset in Kokua's own environment produces no variable at all
+rather than an empty one.</p>
+<p>Not hot: the value is read when an agent is built, so a change needs a restart. <code>run_command</code> is in the
+shipped <code>[security].confirm_tools</code>, so a command reaches you for approval before it runs, including one
+a sub-agent asked for, since a worker's gated calls route to the parent's gate rather than running
+unattended.</p>
+<p><strong>Neither execution tool is a sandbox.</strong> They buy a hard timeout, crash isolation, and no parent
+environment variables. The process-group kill only fires on timeout or on interruption: a command that
+returns normally is not waited on beyond its own exit, so <code>run_command("./build.sh &gt; log 2&gt;&amp;1 &amp;")</code> can
+report <code>exit 0</code> in milliseconds while the build keeps running untouched, its captured output going to a
+temp directory already deleted by the time you read the answer. <code>run_command</code> also carries no memory
+cap, unlike <code>execute_python</code>'s 512 MB address-space limit: that limit would break compilers and test
+suites, and applying one to a shell child needs <code>preexec_fn</code>, which is neither portable nor safe
+alongside threads. Neither tool confines the filesystem, the network, or process signalling: a command
+runs as you, reads what you can read, and can signal Kokua's own process. The approval gate is the
+control; reach for a container if you need containment.</p>
+<h2 id="toolset-sections">Toolset sections<a class="headerlink" href="#toolset-sections" title="Permanent link">&para;</a></h2>
+<p><code>[scheduling]</code>, <code>[planning]</code>, and <code>[capabilities]</code> are not special cases in the config layer. A section
+named after a toolset is how <em>any</em> toolset ships its settings, including a third party's:</p>
+<ul>
+<li>The section name is always the toolset's own name, so two toolsets cannot claim one section. A toolset
+  named after a section Kokua's core already parses is refused at startup.</li>
+<li>Each key is one <code>Setting</code> declared on the toolset, carrying its type, its default, and whether it is
+  hot. Being flagged hot <em>is</em> what makes it hot; there is no second list.</li>
+<li>Keys are read only when some agent declares the toolset, but they are validated whichever way, so a
+  typo in a section for a toolset no agent holds still fails startup rather than waiting to surprise you.</li>
+<li>A section whose toolset is installed but which <strong>no agent declares</strong> produces a startup warning: its
+  settings are read by nobody, which is otherwise silent until you notice a flag doing nothing. A
+  section no installed toolset owns at all is the ordinary unknown-key error.</li>
+</ul>
+<p>Writing one is covered in <a href="../../how-to/set-up-toolsets/">set up a toolset</a>.</p>
+<h2 id="environment-variables">Environment variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h2>
+<p>Kokua reads these directly; none of them has a <code>config.toml</code> key.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KOKUA_HOME</code></td>
+<td>root for all state. Default <code>~/.kokua</code>. Holds <code>config.toml</code> and <code>data/</code>, so it must resolve before the file is read, which is why it is not a setting</td>
+</tr>
+<tr>
+<td><code>KOKUA_CONFIG</code></td>
+<td>path to the config file, below <code>--config</code> and above the default location</td>
+</tr>
+<tr>
+<td><code>KOKUA_EMAIL_PASSWORD</code></td>
+<td>SMTP password for <a href="#email"><code>[email]</code></a>. Never read from the file</td>
+</tr>
+<tr>
+<td><code>GITHUB_BACKUP_TOKEN</code></td>
+<td>push token for <a href="#github_backup"><code>[github_backup]</code></a>. Fixed here rather than a config key, so a repointed <code>repo</code> can't widen the capability past what the token already writes</td>
+</tr>
+<tr>
+<td><code>AIMU_LANGUAGE_MODEL</code></td>
+<td>the model to use when <code>[assistant].model</code> is unset, before the running-local-server search</td>
+</tr>
+<tr>
+<td><code>AIMU_IMAGE_MODEL</code></td>
+<td>required by the <code>image</code> toolset, which offers no tool at all without it. For example <code>gemini:nano-banana</code>, or a HuggingFace diffusers <code>hf:&lt;repo&gt;</code></td>
+</tr>
+<tr>
+<td><code>AIMU_AUDIO_MODEL</code>, <code>AIMU_SPEECH_MODEL</code>, <code>AIMU_TRANSCRIPTION_MODEL</code></td>
+<td>required by the <code>audio</code>, <code>speech</code>, and <code>transcription</code> built-in groups respectively</td>
+</tr>
+</tbody>
+</table>
+<p>The generative model variables have no default on purpose: the tool raises if the variable is unset,
+rather than downloading weights you did not ask for. Accepted values and formats are in AIMU's <a href="https://saxman.info/aimu/reference/env-vars/">env var
+reference</a>.</p>
+<p>Reading images needs no variable, only a vision-capable model. The assistant reads what you attach
+through the web UI (upload or paste) or the CLI's <code>/attach &lt;path&gt;</code>. Uploaded and generated images are
+stored under <code>data/images</code> and served by the web UI at <code>/images</code>; a conversation keeps only a small
+reference, not inline data.</p>
+<h2 id="command-line-flags">Command-line flags<a class="headerlink" href="#command-line-flags" title="Permanent link">&para;</a></h2>
+<p>Flags override the file for one run and are never written back.</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Overrides</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--config PATH</code></td>
+<td>which file is read</td>
+</tr>
+<tr>
+<td><code>--frontend NAME</code></td>
+<td><code>[frontend].name</code></td>
+</tr>
+<tr>
+<td><code>--model STRING</code></td>
+<td><code>[assistant].model</code></td>
+</tr>
+<tr>
+<td><code>--system TEXT</code></td>
+<td>the entry agent's opener, leaving a worker's alone</td>
+</tr>
+<tr>
+<td><code>--confirm-tools NAMES</code></td>
+<td><code>[security].confirm_tools</code>, comma-separated; empty string disables</td>
+</tr>
+<tr>
+<td><code>--mcp URL</code></td>
+<td>adds a server for this run, unauthenticated or OAuth</td>
+</tr>
+<tr>
+<td><code>--host</code>, <code>--port</code></td>
+<td><code>[web].host</code>, <code>[web].port</code></td>
+</tr>
+</tbody>
+</table>
+<p>Introspection, which exits without running the assistant:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>kokua<span class="w"> </span>--list-frontends<span class="w">    </span><span class="c1"># installed front ends</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>kokua<span class="w"> </span>--list-toolsets<span class="w">     </span><span class="c1"># every name a tools list may use, grouped by provider</span>
+</span></code></pre></div>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml"><code>config.example.toml</code></a>: the same keys, one line each, and what
+  <code>kokua config init</code> writes.</li>
+<li><a href="../../how-to/set-up-toolsets/">Set up a toolset</a>: declaring <code>tools</code> and <code>delegates_to</code>, and writing a
+  toolset of your own.</li>
+<li><a href="../../how-to/add-skills/">Add a skill</a>, <a href="../../how-to/add-mcp-services/">add an MCP service</a>.</li>
+<li><a href="../../explanation/design-principles/">Design principles</a>: why the config layer is shaped this way,
+  particularly "<code>config.toml</code> is the single source of settings" and "a capability is declared, never
+  defaulted".</li>
+<li><a href="../../explanation/architecture/">Architecture</a>: how the file is layered, parsed, and written.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/saxman/kokua" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://saxman.info/aimu/" target="_blank" rel="noopener" title="saxman.info" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6M286.2 444.7a20.4 20.4 0 1 1 0-40.7 20.4 20.4 0 1 1 0 40.7M167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4m-6.6-183.4a20.4 20.4 0 1 1 0 40.8 20.4 20.4 0 1 1 0-40.8"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

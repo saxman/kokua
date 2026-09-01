@@ -1,0 +1,1816 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A personal AI assistant built to be understood and extended.">
+      
+      
+      
+        <link rel="canonical" href="https://saxman.info/kokua/how-to/set-up-toolsets/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../install-a-third-party-toolset/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/kokua-favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Set up a toolset - Kokua</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#set-up-a-toolset" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kokua" class="md-header__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kokua
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Set up a toolset
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  How-to
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../explanation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Explanation
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kokua" class="md-nav__button md-logo" aria-label="Kokua" data-md-component="logo">
+      
+  <img src="../../assets/kokua-mark-mono.svg" alt="logo">
+
+    </a>
+    Kokua
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/saxman/kokua" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    saxman/kokua
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set up a toolset
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Set up a toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-rule-that-decides-everything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The rule that decides everything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-namespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One namespace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declare-an-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declare an agent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Declare an agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#guidance-travels-with-the-capability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guidance travels with the capability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agents-is-locked-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [agents.*] is locked by default
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-mistakes-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where mistakes surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#write-your-own-toolset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write your own toolset
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Write your own toolset">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#own-a-config-section" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Own a config section
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#or-carry-a-workflow-instead-of-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Or carry a workflow instead of tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install-a-third-party-toolset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install a third-party toolset
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a skill
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../add-mcp-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add an MCP service
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../back-up-to-github/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Back up to GitHub
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export-a-conversation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export a conversation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../explanation/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explanation
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Explanation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/design-principles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design principles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-rule-that-decides-everything" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The rule that decides everything
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#one-namespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One namespace
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declare-an-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declare an agent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Declare an agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#guidance-travels-with-the-capability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guidance travels with the capability
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agents-is-locked-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [agents.*] is locked by default
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-mistakes-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where mistakes surface
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#write-your-own-toolset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write your own toolset
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Write your own toolset">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#own-a-config-section" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Own a config section
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#or-carry-a-workflow-instead-of-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Or carry a workflow instead of tools
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="set-up-a-toolset">Set up a toolset<a class="headerlink" href="#set-up-a-toolset" title="Permanent link">&para;</a></h1>
+<p>A <em>toolset</em> is one <strong>named capability</strong> an agent can ask for: a <code>Toolset</code> object carrying a name, a
+description, and a <code>build(ctx)</code> that returns tool callables. Every toolset an install offers, wherever it
+came from, lives in one namespace. An agent's <code>tools</code> list names toolsets from that namespace, and the
+tools the agent can actually call are whatever those toolsets built.</p>
+<p>A toolset can also carry a <code>Workflow</code> instead of, or alongside, its tools: a turn strategy the user
+invokes with a <code>/</code>-command (<code>/plan</code> is the shipped example -- see
+<a href="../../explanation/architecture/#workflows">Architecture</a>). Declaring the toolset is what grants the
+command, exactly as declaring it grants its tools, and only the <strong>entry</strong> agent's declaration counts,
+since a command arrives on the channel and only the entry agent has one. The command word must be a
+single lowercase token with no whitespace, and cannot be <code>stop</code> or <code>diag</code>, which are the assistant's
+own; two toolsets offering the same command is a startup error, not a silent shadowing.</p>
+<p>So there are two jobs here, and this guide covers both: declaring what an agent holds in <code>config.toml</code>,
+and writing a toolset of your own to put something new in the namespace.</p>
+<h2 id="the-rule-that-decides-everything">The rule that decides everything<a class="headerlink" href="#the-rule-that-decides-everything" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>A capability is declared, never defaulted. Nothing reaches an agent until an <code>[agents.&lt;name&gt;]</code> table
+names it in <code>tools</code>.</strong></p>
+</blockquote>
+<p>There is no code path that adds a tool an agent did not name, and no flag that can disagree with a
+declaration. An installed plugin toolset does nothing on its own. A connected MCP server does nothing.
+Neither does the clock: <code>time</code> is a toolset like any other, so an agent that wants to know what day it is
+declares it. Kokua refuses to start with no <code>[agents.*]</code> tables at all, because an agent is the only
+route from a capability to the model.</p>
+<p>One capability reaches past the rule while staying inside it. An agent whose table names <code>capabilities</code>
+can call <code>compose_subagent</code> to build a sub-agent from anything installed except <code>skills</code> (entry-agent
+only) and <code>capabilities</code> itself (which would hand it a fresh composition budget), chosen per
+task rather than declared: the exception is entered by declaration, and what it grants dies with the
+task rather than widening any agent your config describes.</p>
+<h2 id="one-namespace">One namespace<a class="headerlink" href="#one-namespace" title="Permanent link">&para;</a></h2>
+<p>Ask your install what it accepts:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>kokua<span class="w"> </span>--list-toolsets<span class="w">      </span><span class="c1"># every name, grouped by what provides it</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>kokua<span class="w"> </span>--list-frontends<span class="w">     </span><span class="c1"># the other plugin group</span>
+</span></code></pre></div>
+<p><code>--list-toolsets</code> reads your config file, since the registry depends on it (which servers are configured,
+whether plugins are loaded), so run <code>kokua config init</code> first if you have no config yet. The output groups
+names by provider, because a <code>tools</code> list deliberately does not say where a name comes
+from (<code>"stocks"</code>, not <code>"mcp:stocks"</code>), so this command is the one place provenance is visible:</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>What is in it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>built-in toolset</strong></td>
+<td>all 21 <code>Toolset</code>s Kokua's own distribution registers under the <code>kokua.toolsets</code> entry-point group, one file each under <code>src/kokua/toolsets/</code> and named for the toolset. Wrappers over AIMU's tool groups and its two stores (<code>web</code>, <code>fs</code>, <code>compute</code>, <code>time</code>, <code>misc</code>, <code>audio</code>, <code>speech</code>, <code>transcription</code>, <code>memory</code>, <code>documents</code>, <code>skills</code>); one per Kokua subsystem (<code>capabilities</code>, <code>config</code>, <code>conversations</code>, <code>mcp</code>, <code>scheduling</code>); the <code>/plan</code> workflow and nothing else (<code>planning</code>); and Kokua's own standalone capabilities (<code>aimu_agents</code>, <code>benchmark</code>, <code>github_backup</code>, <code>image</code>)</td>
+</tr>
+<tr>
+<td><strong>skill</strong></td>
+<td>one entry per skill in your skills folder, so an individual skill is declarable by name (see <a href="../add-skills/">add skills</a>)</td>
+</tr>
+<tr>
+<td><strong>plugin</strong></td>
+<td>every other <code>Toolset</code> installed under the <code>kokua.toolsets</code> entry-point group -- i.e. one a third party's package registered</td>
+</tr>
+<tr>
+<td><strong>MCP server</strong></td>
+<td>one per <code>[[mcp.server]]</code> table, named by its required <code>name</code></td>
+</tr>
+</tbody>
+</table>
+<p>Because a name carries no provider prefix, a name must be unique: <strong>two providers claiming one name is a
+startup error</strong> that names both sides and their descriptions, rather than one silently shadowing the
+other. That is also why AIMU's own <code>image</code> group is deliberately not registered: Kokua's <code>image</code> plugin
+toolset provides <code>generate_image</code> writing into the servable <code>data/images/</code>, and registering both would
+let deduplication quietly pick one.</p>
+<p>What the AIMU-provided toolsets hold:</p>
+<table>
+<thead>
+<tr>
+<th>Toolset</th>
+<th>Tools</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>web</code></td>
+<td><code>web_search</code>, <code>get_webpage</code>, <code>get_webpage_html</code>, <code>wikipedia</code>, <code>get_weather</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>fs</code></td>
+<td><code>list_directory</code>, <code>read_file</code></td>
+<td><strong>Read-only.</strong> Writing a file needs <code>execute_python</code> or <code>run_command</code>.</td>
+</tr>
+<tr>
+<td><code>compute</code></td>
+<td><code>calculate</code>, <code>execute_python</code>, <code>run_command</code></td>
+<td>both execution tools are approval-gated by default; <code>[compute] command_env_passthrough</code> decides what a command's environment holds</td>
+</tr>
+<tr>
+<td><code>time</code></td>
+<td><code>get_current_date_and_time</code>, <code>convert_time</code></td>
+<td>not implicit; declare it</td>
+</tr>
+<tr>
+<td><code>misc</code></td>
+<td><code>echo</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>memory</code></td>
+<td><code>store_memory</code>, <code>search_memories</code>, <code>list_memories</code></td>
+<td>one store shared by every agent that declares it</td>
+</tr>
+<tr>
+<td><code>documents</code></td>
+<td><code>save_document</code>, <code>read_document</code>, <code>list_documents</code>, <code>search_documents</code></td>
+<td>likewise</td>
+</tr>
+<tr>
+<td><code>skills</code></td>
+<td><code>author_skill</code>, <code>add_skill_script</code></td>
+<td>entry agent only; see <a href="../add-skills/">Add a skill</a></td>
+</tr>
+<tr>
+<td><code>audio</code></td>
+<td><code>generate_audio</code></td>
+<td>needs <code>$AIMU_AUDIO_MODEL</code></td>
+</tr>
+<tr>
+<td><code>speech</code></td>
+<td><code>generate_speech</code></td>
+<td>needs <code>$AIMU_SPEECH_MODEL</code></td>
+</tr>
+<tr>
+<td><code>transcription</code></td>
+<td><code>transcribe_audio</code></td>
+<td>needs <code>$AIMU_TRANSCRIPTION_MODEL</code></td>
+</tr>
+</tbody>
+</table>
+<p>The three generative groups have no default model, so they raise at call time rather than downloading
+weights you did not ask for; see AIMU's
+<a href="https://saxman.info/aimu/reference/env-vars/">environment variables</a> for the accepted values.</p>
+<h2 id="declare-an-agent">Declare an agent<a class="headerlink" href="#declare-an-agent" title="Permanent link">&para;</a></h2>
+<p>Every agent is one <code>[agents.&lt;name&gt;]</code> table, and <code>[assistant].agent</code> says which of them you talk to. Four
+keys, all optional individually; anything else is a startup error naming the key.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[assistant]</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">agent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"assistant"</span><span class="w">          </span><span class="c1"># the entry agent, and the root of the delegation graph</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">[agents.assistant]</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"The assistant the user talks to."</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"You are a personal assistant running on the user's own machine. Be concise and helpful."</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"memory"</span><span class="p">,</span><span class="w"> </span><span class="s2">"documents"</span><span class="p">,</span><span class="w"> </span><span class="s2">"skills"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config"</span><span class="p">,</span><span class="w"> </span><span class="s2">"mcp"</span><span class="p">,</span><span class="w"> </span><span class="s2">"scheduling"</span><span class="p">,</span><span class="w"> </span><span class="s2">"conversations"</span><span class="p">,</span><span class="w"> </span><span class="s2">"planning"</span><span class="p">,</span><span class="w"> </span><span class="s2">"capabilities"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">delegates_to</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"researcher"</span><span class="p">,</span><span class="w"> </span><span class="s2">"report-writer"</span><span class="p">]</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="k">[agents.researcher]</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Research specialist: gather and verify information from the web."</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"""</span><span class="se">\</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="s2">You are a research sub-agent. Investigate the task with web search and page lookups, verify claims </span><span class="se">\</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="s2">against sources rather than memory, and return a concise findings summary that names its sources."""</span>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="k">[agents.report-writer]</span>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Builds and emails PDF reports."</span>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"markdown-to-pdf"</span><span class="p">,</span><span class="w"> </span><span class="s2">"email-report"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span></code></pre></div>
+<ul>
+<li><strong><code>tools</code></strong> is the whole capability declaration, in one flat list over the one namespace. A built-in
+  group, a core capability, a plugin toolset, and an MCP server are all named the same way.</li>
+<li><strong><code>delegates_to</code></strong> is itself the switch: a non-empty list gives that agent a
+  <code>spawn_subagent(agent_type, task)</code> tool offering <strong>exactly</strong> the agents it names, each built from its
+  own table. There is no separate "enable sub-agents" setting to disagree with it. The nesting is
+  Kokua's, not AIMU's: an agent you delegate to that delegates in turn gets its own menu of its own
+  targets, so each level offers only what its table declares. The graph must be acyclic.</li>
+<li><strong><code>description</code></strong> is the label a delegator sees in its worker menu (it becomes the first line of that
+  agent's system message), so write it as the basis on which a worker is chosen.</li>
+<li><strong><code>system_message</code></strong> is the agent's opener. Omit it and the agent falls back to
+  <code>[assistant].system_message</code>, then to the built-in default. For the entry agent only, <code>--system</code>
+  overrides whichever of those it would otherwise use, for that run; it never touches a worker's own
+  declared opener.</li>
+</ul>
+<p>Two agents declaring the same toolset share the state behind it: one memory store, one set of live MCP
+connections, one skill directory. If two toolsets an agent declares contribute the same tool name, the
+one declared <strong>first</strong> wins, so declared order is meaningful.</p>
+<p>Restart Kokua after editing. Agents are read at startup and the new declaration takes effect there.</p>
+<h3 id="guidance-travels-with-the-capability">Guidance travels with the capability<a class="headerlink" href="#guidance-travels-with-the-capability" title="Permanent link">&para;</a></h3>
+<p>A toolset can carry a <code>guidance</code> string, and it is appended to the system message of <strong>any</strong> agent that
+declares that toolset. Declaring <code>memory</code> therefore brings the paragraph that tells the model to call
+<code>store_memory</code> for durable facts; undeclaring it takes that paragraph away. There is no prompt constant
+listing capabilities that has to be kept in step by hand.</p>
+<p>Among AIMU's built-in groups, <code>web</code> is the only one carrying guidance: it tells whoever declares it to
+look an answer up rather than recall it whenever that answer could have moved since training or you
+could check it against a source. <code>fs</code> and <code>compute</code> carry none, because a model reaches for a file or a
+calculation when the task plainly needs one, where a model that believes it already knows a fact never
+reaches for the web at all.</p>
+<p>An agent's full system message is: its own opener, then its toolsets' guidance in declared order, then
+the delegation instructions if <code>delegates_to</code> is non-empty, and finally a "you are a lean supervisor,
+you MUST delegate" clause only when <em>every</em> toolset it declares is marked cross-cutting (something an
+agent holds to manage itself: memory, documents, skills, config, <code>mcp</code>, scheduling,
+conversations, <code>planning</code>, <code>capabilities</code>, the clock). Give that agent one domain toolset and the lean clause disappears, since it
+would then contradict the tools the model can see.</p>
+<p>Note what <code>cross_cutting</code> is <strong>not</strong>: it is not a permission boundary. An agent whose table says
+<code>tools = ["config"]</code> really does get <code>update_config</code>. See
+<a href="../../explanation/design-principles/#corollary-a-capability-is-declared-never-defaulted">design principles</a>
+for why that is the intended shape, and what the actual security boundary is.</p>
+<h3 id="agents-is-locked-by-default"><code>[agents.*]</code> is locked by default<a class="headerlink" href="#agents-is-locked-by-default" title="Permanent link">&para;</a></h3>
+<p>The assistant holds <code>update_config</code>, so a writable agent table would let it widen its own reach.
+<code>[security].locked_config_keys</code> ships locking the whole section by prefix; removing <code>agents.*</code> from
+that list is the hand-edit that hands the assistant its own capability table. Which capability an agent
+gets stays a human decision by default, made in the file. See <a href="../../reference/configuration/#who-may-change-which-key">the configuration
+reference</a> for the full policy.</p>
+<h2 id="where-mistakes-surface">Where mistakes surface<a class="headerlink" href="#where-mistakes-surface" title="Permanent link">&para;</a></h2>
+<p>Every wrong <em>name</em> is now a startup error, and every failing check below runs before Kokua opens the
+session store or connects to anything, so a bad config fails with nothing written and nothing connected:</p>
+<table>
+<thead>
+<tr>
+<th>Mistake</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unknown name in an agent's <code>tools</code></td>
+<td><strong>Startup fails</strong>, naming the agent, the name, and every available toolset.</td>
+</tr>
+<tr>
+<td><code>skills</code> on any agent but the entry agent</td>
+<td><strong>Startup fails.</strong> Spawned workers are plain AIMU agents and cannot host it.</td>
+</tr>
+<tr>
+<td>Unknown key in an <code>[agents.*]</code> table</td>
+<td><strong>Startup fails</strong>, naming the key. Only <code>description</code>, <code>system_message</code>, <code>tools</code>, and <code>delegates_to</code> are accepted.</td>
+</tr>
+<tr>
+<td>An old per-role key (<code>groups</code>, <code>tool_packs</code>, <code>mcp_servers</code>)</td>
+<td><strong>Startup fails</strong>, telling you to list it in <code>tools</code> instead.</td>
+</tr>
+<tr>
+<td><code>[assistant].agent</code> naming no table</td>
+<td><strong>Startup fails</strong>, listing the agents you did configure.</td>
+</tr>
+<tr>
+<td><code>delegates_to</code> naming an unknown agent</td>
+<td><strong>Startup fails</strong>, listing the agents you did configure.</td>
+</tr>
+<tr>
+<td>A delegation cycle</td>
+<td><strong>Startup fails</strong>, printing the cycle as a path.</td>
+</tr>
+<tr>
+<td>No <code>[agents.*]</code> tables at all</td>
+<td><strong>Startup fails</strong>, pointing at <code>config.example.toml</code> to copy from, or <code>kokua config init --force</code> to overwrite this file with it.</td>
+</tr>
+<tr>
+<td>Two providers claiming one toolset name</td>
+<td><strong>Startup fails</strong>, naming both providers and their descriptions.</td>
+</tr>
+<tr>
+<td>A third-party plugin toolset or MCP server no agent names</td>
+<td>Starts fine. One warning line in the log: it reaches no agent. Kokua's own built-in toolsets and your installed skills are exempt: they ship, or sit on disk, regardless of what any agent declares.</td>
+</tr>
+<tr>
+<td>A toolset that fails to import, or whose <code>build</code> raises</td>
+<td><strong>Startup fails</strong>, naming the module. No source is exempt: a build failure is a bug in whoever wrote the toolset, and a log line nobody reads is not how you should find out an agent lost a capability.</td>
+</tr>
+<tr>
+<td>Two declared toolsets sharing a tool name</td>
+<td>The one declared first wins.</td>
+</tr>
+</tbody>
+</table>
+<p>One of those is quiet by design, and it lands in <code>$KOKUA_HOME/data/logs/kokua.log</code>. There is no
+console log handler, so it does not appear in your terminal.</p>
+<p>The most direct check that an agent got what you meant is to ask the assistant to delegate to it and
+report its tools.</p>
+<h2 id="write-your-own-toolset">Write your own toolset<a class="headerlink" href="#write-your-own-toolset" title="Permanent link">&para;</a></h2>
+<p>A toolset is a <code>kokua.plugins.Toolset</code> whose <code>build(ctx)</code> returns
+<a href="https://saxman.info/aimu/how-to/add-custom-tool/"><code>@aimu.tool</code></a> callables. Kokua discovers it through
+the <code>kokua.toolsets</code> entry-point group, so your package needs no change to Kokua's core.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># my_weather_toolset/__init__.py</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">aimu.tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">tool</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">kokua.plugins</span><span class="w"> </span><span class="kn">import</span> <span class="n">Toolset</span><span class="p">,</span> <span class="n">ToolsetContext</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">ctx</span><span class="p">:</span> <span class="n">ToolsetContext</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="sd">"""Return this toolset's tools. `ctx.config` is the resolved AssistantConfig."""</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="nd">@tool</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">current_conditions</span><span class="p">(</span><span class="n">city</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">        </span><span class="sd">"""Report the current weather for a city.</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="sd">        Args:</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="sd">            city: City name, e.g. "Seattle".</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="sd">        """</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>        <span class="k">return</span> <span class="sa">f</span><span class="s2">"It is raining in </span><span class="si">{</span><span class="n">city</span><span class="si">}</span><span class="s2">."</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    <span class="k">return</span> <span class="p">[</span><span class="n">current_conditions</span><span class="p">]</span>
+</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>
+</span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>
+</span><span id="__span-2-22"><a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="n">TOOLSET</span> <span class="o">=</span> <span class="n">Toolset</span><span class="p">(</span>
+</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">"weather"</span><span class="p">,</span>
+</span><span id="__span-2-24"><a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">"Current conditions and forecasts."</span><span class="p">,</span>
+</span><span id="__span-2-25"><a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>    <span class="n">build</span><span class="o">=</span><span class="n">build</span><span class="p">,</span>
+</span><span id="__span-2-26"><a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>    <span class="n">guidance</span><span class="o">=</span><span class="s2">" When the user asks about weather, call `current_conditions` rather than guessing."</span><span class="p">,</span>
+</span><span id="__span-2-27"><a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="p">)</span>
+</span></code></pre></div>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># in your package's pyproject.toml</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">[project.entry-points.</span><span class="s2">"kokua.toolsets"</span><span class="k">]</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">weather</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"my_weather_toolset:TOOLSET"</span>
+</span></code></pre></div>
+<p><code>pip install</code> it, confirm with <code>kokua --list-toolsets</code>, then give an agent <code>tools = ["weather", ...]</code>.
+Installing it is not enough, for the reason at the top of this guide.</p>
+<p><strong>Every toolset Kokua ships is written exactly this way</strong>, which is the point: the shape above is not a
+simplified illustration, it is what is in the repository. Kokua's own 21 are one file each under
+<a href="https://github.com/saxman/kokua/tree/main/src/kokua/toolsets/"><code>src/kokua/toolsets/</code></a>, named for the toolset, with one line each in
+<a href="https://github.com/saxman/kokua/blob/main/pyproject.toml">Kokua's own <code>pyproject.toml</code></a> in the same <code>kokua.toolsets</code> table your package
+writes into. So the useful thing to do next is read one:</p>
+<ul>
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/benchmark.py"><code>toolsets/benchmark.py</code></a> is the smallest complete one with real
+  work in it: one tool, no arguments, no dependencies beyond what Kokua already has.</li>
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py"><code>toolsets/image.py</code></a> shows a <code>build</code> that returns <em>nothing</em> when its
+  prerequisite is missing, so the model is never offered a tool it cannot satisfy.</li>
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/github_backup.py"><code>toolsets/github_backup.py</code></a> shows a toolset that owns
+  <code>config.toml</code> settings of its own, via <code>Setting</code> declarations in its <code>[github_backup]</code> section.</li>
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/aimu_agents.py"><code>toolsets/aimu_agents.py</code></a> shows the same shape carrying a
+  whole AIMU agent rather than a plain function.</li>
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/web.py"><code>toolsets/web.py</code></a> is the whole of a wrapper over an existing tool
+  group: a docstring, an import, and a <code>Toolset</code>.</li>
+</ul>
+<p>If you add one to Kokua itself rather than to your own package, note that
+<code>tests/toolsets/test_registration.py</code> will fail until the file, the entry-point line, and
+<code>TOOLSET.name</code> all agree, which is deliberate: it is what keeps that table honest as the only index.</p>
+<p>Five things to know about <code>build</code>:</p>
+<ul>
+<li><strong>It creates closures, not process state.</strong> <code>build</code> runs once per agent, so anything it constructs is
+  constructed once per agent: two agents declaring your toolset would get two of whatever it opened.
+  Shared state belongs on <code>LiveState</code> and reaches you through the context, where it is a lazy property
+  built at most once (<code>ctx.state.memory_store</code>, for one, is opened only because some agent declared the
+  toolset that needs it). A toolset that needs its own expensive object should build it inside the
+  tool call, as <a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/aimu_agents.py"><code>toolsets/aimu_agents.py</code></a> does and explains.</li>
+<li><strong><code>ctx.agent</code> is the live agent, and is <code>None</code> for a spawned worker.</strong> A toolset that genuinely needs
+  the agent object should be marked <code>entry_point_only=True</code>, which makes declaring it on any other agent
+  a startup error instead of a <code>None</code> at build time. <code>skills</code> is the one built-in in that position.</li>
+<li><strong><code>ctx.agent_name</code> names the agent you are being built for, always.</strong> Unlike the object it is never
+  <code>None</code>, so a toolset can scope itself to its own holder rather than to the session: <code>benchmark</code> reads
+  <code>config.model_for(ctx.agent_name)</code> so a worker declaring it is told about the model it actually runs
+  on. Ask the config, not the agent: a live model client does not retain the model string it was built
+  from.</li>
+<li><strong>Failure is contained, not reported loudly.</strong> An exception from a <em>plugin's</em> <code>build</code> is caught,
+  logged, and the toolset contributes nothing; the assistant still starts. Nothing in the UI says so.</li>
+<li><strong><code>guidance</code> is optional and appended to every agent that declares you</strong>, so write it as instructions
+  that make sense wherever the toolset lands, not as a description of one agent's job.</li>
+</ul>
+<h3 id="own-a-config-section">Own a config section<a class="headerlink" href="#own-a-config-section" title="Permanent link">&para;</a></h3>
+<p>A toolset can also own a whole <code>[&lt;name&gt;]</code> section of <code>config.toml</code>, by declaring
+<code>settings=(Setting(key, kind, default, hot=...), ...)</code> on itself, the way
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/planning.py"><code>toolsets/planning.py</code></a> owns <code>[planning]</code>. The section is never
+named separately: it is always the toolset's own name, so the namespace's existing duplicate-name check
+also keeps two toolsets from claiming one section, and a name that collides with a section Kokua's own
+core already parses (<code>assistant</code>, <code>email</code>, <code>security</code>, and the rest) is refused at startup rather than
+silently taking over the core setting behind it.</p>
+<p><code>hot=True</code> marks a setting the user can change without restarting, and the change reaches whatever reads
+it in the same session. <code>update_config</code> is the one path that does this, and it works off the declared
+table rather than any hand-written markup, so a third party's hot setting is live the moment it is
+declared -- nothing to add to a front end. (The web UI has no settings window; the theme button in its
+header is a per-browser preference, not a <code>RuntimeSetting</code>.) Leave <code>hot</code> off (the default) for a
+value read once, with no live surface to offer it --
+<code>[planning].review_rounds</code> is that case, since a round budget is read once per turn. A <code>Setting</code>'s
+<code>kind</code> must be <code>bool</code>, <code>int</code>, or <code>str</code>; anything else fails at startup, naming the toolset and the
+unsupported type.</p>
+<p>How you read a declared value back depends on what you are writing. A workflow gets
+<code>WorkflowContext.settings</code>, attribute access over its carrying toolset's section
+(<code>ctx.settings.review_rounds</code>), always complete because every declared default is seeded before any
+workflow or toolset runs. A plain toolset's <code>build(ctx)</code> has no view of its own that way -- a
+<code>ToolsetContext</code> is one agent's handle onto the tools it builds, not onto one toolset's settings -- so
+it reads <code>ctx.config.toolset_settings["&lt;name&gt;"]</code> directly, the same dict a workflow's view wraps.</p>
+<h3 id="or-carry-a-workflow-instead-of-tools">Or carry a workflow instead of tools<a class="headerlink" href="#or-carry-a-workflow-instead-of-tools" title="Permanent link">&para;</a></h3>
+<p>Set <code>workflow=</code> on your <code>Toolset</code> and <code>build</code> can return no tools at all: the toolset exists solely to
+grant a turn strategy, the way <a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/planning.py"><code>toolsets/planning.py</code></a> does for
+<code>/plan</code>. A workflow's <code>build</code> returns an <code>aimu.aio.AsyncRunner</code>. <strong>Base tier</strong> is any <code>AsyncRunner</code>, so
+AIMU's own <code>aimu.aio.workflows</code> (<code>Chain</code>, <code>Parallel</code>, <code>Router</code>, <code>EvaluatorOptimizer</code>,
+<code>PlanExecuteEvaluator</code>) work with just the declaration above and no adapter -- Kokua streams <code>run()</code>
+into the reply. <strong>Rich tier</strong> additionally implements <code>run_turn()</code> and is handed the channel, a slot for
+a human decision, and control of the agent's transcript, which is what deep planning needs to show
+phases and reviewer cards and save a clean turn.</p>
+<p>Three things to know before choosing a tier. A base-tier turn is <strong>not persisted</strong> when the runner is
+self-contained: it appends nothing to the agent's own transcript, so the exchange is gone after a
+reload (a runner that closes over <code>ctx.agent</code> and calls it directly is the exception -- see
+<code>_drive_base_tier</code> in <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py"><code>core/turns.py</code></a>). Reaching the model as a
+callable tool via <code>AsyncRunner.as_tool()</code> needs your runner to actually <em>inherit</em> <code>aio.AsyncRunner</code>, not
+merely match its shape -- <code>as_tool()</code> is a concrete method the base class provides, not a name Kokua
+looks up. And <code>WorkflowContext.settings</code> is attribute access over the carrying toolset's own <code>[&lt;name&gt;]</code>
+section -- see <a href="#own-a-config-section">own a config section</a> above for how to declare what is in it. See
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/workflows/protocol.py"><code>workflows/protocol.py</code></a> for the full contract.</p>
+<p>Kokua's own three toolsets register exactly this way in its
+<a href="https://github.com/saxman/kokua/blob/main/pyproject.toml"><code>pyproject.toml</code></a>. If the built-in path and the plugin path ever diverge, the
+plugin path is the broken one.</p>
+<ul>
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py"><code>toolsets/image.py</code></a> is the minimal template, and also shows a
+  <code>build</code> that returns no tools when its prerequisite is absent, so the model never sees a tool it cannot
+  satisfy.</li>
+<li><a href="https://github.com/saxman/kokua/tree/main/skills/dice-roller/"><code>skills/dice-roller/</code></a> is the equivalent template for a skill, which is the
+  lighter path when your capability does not need live process state. Kokua's own <code>markdown-to-pdf</code> and
+  <code>email-report</code> ship that way. See <a href="../add-skills/">add skills</a>.</li>
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/aimu_agents.py"><code>toolsets/aimu_agents.py</code></a> carries a whole AIMU agent instead
+  of a plain function: any <code>Runner</code> exposes <code>.run(task) -&gt; str</code>, so a toolset is the entire bridge and
+  the core learns nothing new.</li>
+</ul>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../install-a-third-party-toolset/">Install a third-party toolset</a>: the other side of this page, for a
+  toolset someone else already wrote: installing the package, declaring it, configuring it, and gating
+  its expensive tools, with jobme as the worked example.</li>
+<li><a href="../add-mcp-services/">Add an MCP service</a>: a server is a toolset too, named in the same list.</li>
+<li><a href="../add-skills/">Add a skill</a>: the one toolset only the entry agent can hold.</li>
+<li><a href="../../explanation/architecture/#how-an-agents-tools-resolve">Architecture</a>: how a declaration becomes
+  tools, and the shipped entry agent's full inventory, pinned by a test.</li>
+<li><a href="../../explanation/design-principles/">Design principles</a>: why capability arrives as a plugin, and why
+  it is declared rather than defaulted.</li>
+<li>AIMU: <a href="https://saxman.info/aimu/how-to/add-custom-tool/">add a custom tool</a> for the <code>@tool</code> decorator
+  rules, and <a href="https://saxman.info/aimu/reference/api/tools/">built-in tools</a> for what each group holds.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/saxman/kokua" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://saxman.info/aimu/" target="_blank" rel="noopener" title="saxman.info" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6M286.2 444.7a20.4 20.4 0 1 1 0-40.7 20.4 20.4 0 1 1 0 40.7M167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4m-6.6-183.4a20.4 20.4 0 1 1 0 40.8 20.4 20.4 0 1 1 0-40.8"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.tabs", "navigation.tabs.sticky", "navigation.top", "navigation.indexes", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
