@@ -1,0 +1,117 @@
+site_name: Kokua
+site_description: A personal AI assistant built to be understood and extended.
+site_url: https://saxman.info/kokua/
+repo_url: https://github.com/saxman/kokua
+repo_name: saxman/kokua
+edit_uri: edit/main/docs/
+
+# This site's claim is that Kokua's machinery can be followed, so a link a reader cannot follow is a
+# defect in the product, not a cosmetic flaw. `strict` turns a broken internal link into a failed
+# build. `omitted_files: warn` does the same for a page missing from the nav below, because a page
+# nobody can navigate to is indistinguishable from a page that does not exist: mkdocs 1.6 only offers
+# warn/info/ignore for this option (no "error" level), but `strict: true` above promotes every warning
+# to a build failure, so the effect is the same hard stop. Links out of docs/ are covered separately,
+# by tests/test_docs.py, which needs no mkdocs installed.
+strict: true
+validation:
+  nav:
+    omitted_files: warn
+
+theme:
+  name: material
+  logo: assets/kokua-mark-mono.svg
+  favicon: assets/kokua-favicon.svg
+  features:
+    - navigation.sections
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.code.annotate
+    - search.highlight
+    - search.suggest
+  palette:
+    # Kokua's mark stands on indigo structure and reaches out in teal (docs/assets/README.md), so the
+    # site takes indigo as primary and teal as accent.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  # base_path is the repository root, which is what lets docs/changelog.md and docs/contributing.md
+  # include the canonical root files instead of duplicating them.
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/saxman/kokua
+    - icon: fontawesome/brands/python
+      link: https://saxman.info/aimu/
+
+# Brainstorming and planning artifacts stay in the repository and out of the site. The brand notes are
+# for someone editing the assets, not for a reader of the docs.
+exclude_docs: |
+  superpowers/
+  assets/README.md
+
+nav:
+  - Home: index.md
+  - How-to:
+      - how-to/index.md
+      - Set up a toolset: how-to/set-up-toolsets.md
+      - Install a third-party toolset: how-to/install-a-third-party-toolset.md
+      - Add a skill: how-to/add-skills.md
+      - Add an MCP service: how-to/add-mcp-services.md
+      - Back up to GitHub: how-to/back-up-to-github.md
+      - Export a conversation: how-to/export-a-conversation.md
+  - Reference:
+      - reference/index.md
+      - Configuration: reference/configuration.md
+  - Explanation:
+      - explanation/index.md
+      - Architecture: explanation/architecture.md
+      - Design principles: explanation/design-principles.md
+  - Changelog: changelog.md
+  - Contributing: contributing.md

@@ -4,7 +4,7 @@ Thanks for your interest. Kokua is a small, hackable personal assistant built on
 [AIMU](https://saxman.info/aimu/), and it exists so people can learn how agentic systems work by
 reading, running, and extending a real one. That goal is what most of the conventions below are
 protecting, so it is worth reading
-[why Kokua exists](docs/explanation/design-principles.md#why-kokua-exists) before your first change:
+[why Kokua exists](https://saxman.info/kokua/explanation/design-principles/#why-kokua-exists) before your first change:
 a contribution that makes the system harder to follow costs more than the capability it adds.
 
 ## Setup
@@ -47,7 +47,7 @@ network, or API keys.
 
 ## Design principles
 
-Read [docs/explanation/design-principles.md](docs/explanation/design-principles.md) first. It opens
+Read [docs/explanation/design-principles.md](https://saxman.info/kokua/explanation/design-principles/) first. It opens
 with why Kokua exists, then the six principles that serve it: 1 and 2 keep Kokua readable, 3 and 4 keep
 it observable, 5 keeps it runnable by anyone who clones it, and 6 keeps its capability yours to bound. A change that serves none of them is
 probably a plugin rather than a core change, and principle 2 exists to make that an easy answer.
@@ -84,7 +84,7 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 - Add a **front end** (a new transport) or a **toolset** (a named capability an agent can declare) as a
   plugin, in its own package or under `src/kokua/frontends` / `src/kokua/toolsets`, registered via the
   `kokua.frontends` / `kokua.toolsets` entry-point groups. See
-  [`src/kokua/toolsets/image.py`](src/kokua/toolsets/image.py) for the template: one tool, and a
+  [`src/kokua/toolsets/image.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py) for the template: one tool, and a
   `build` that returns nothing when its prerequisite is missing. Neither reaches an agent until an
   `[agents.*]` table in `config.toml` names it.
 - A new **runtime setting** for a *toolset* is one `kokua.toolsets.Setting` on the toolset and nothing

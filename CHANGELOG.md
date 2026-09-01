@@ -32,7 +32,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer
   from one that merely ships meant a provenance rule over the whole namespace, and a toolset nobody
   declares costs nothing to leave unnamed. A configured MCP server does cost something (a handshake,
   and a held credential), and it is the case that lost a signal here; see
-  [Add MCP services](docs/how-to/add-mcp-services.md). The distinct warning for a `config.toml`
+  [Add MCP services](https://saxman.info/kokua/how-to/add-mcp-services/). The distinct warning for a `config.toml`
   section whose owning toolset no agent declares is unaffected.
 - The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`,
   `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
@@ -106,7 +106,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer
   [--full]` reads the session store directly and writes the file: no `Assistant`, no model client, no
   agent, so it works with the model server down. A read that races the daemon's own persist reports the
   store as busy rather than parsing a torn file. See
-  [Export a conversation](docs/how-to/export-a-conversation.md).
+  [Export a conversation](https://saxman.info/kokua/how-to/export-a-conversation/).
 
 ### Front ends
 
@@ -137,7 +137,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer
     to read. An `"export"` control on the same socket every other sidebar action uses does the read and
     write, and the reply reuses the existing `/download/{name}` route (already serving generated PDFs)
     rather than opening a second one. See
-    [Export a conversation](docs/how-to/export-a-conversation.md#from-the-web-ui).
+    [Export a conversation](https://saxman.info/kokua/how-to/export-a-conversation/#from-the-web-ui).
   - **The composer is one bordered box** with a text area that grows to eight rows: Enter sends,
     Shift+Enter inserts a newline (an IME's Enter does neither). Send is replaced by Stop for the
     duration of a turn rather than sitting beside a permanently disabled button, and switching
@@ -356,7 +356,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer
   `mcp/servers.py`, `scheduling/tasks.py`) holds only what agents and front ends both need: it returns
   records and raises typed errors, and formats no sentence. Because about half the 30 tools the shipped
   entry agent holds come from AIMU and cannot be grepped here at all,
-  [docs/explanation/architecture.md](docs/explanation/architecture.md#how-an-agents-tools-resolve) carries
+  [docs/explanation/architecture.md](https://saxman.info/kokua/explanation/architecture/#how-an-agents-tools-resolve) carries
   the full inventory with the factory that builds each and the toolset it is declared as, and
   `tests/core/test_build.py` pins it as an **exact set**: adding a tool to the entry agent fails the suite
   until the table is updated in the same commit, and a plugin toolset leaking onto it fails too, naming the
@@ -509,12 +509,12 @@ the shortest worked examples of the shape: one file, one `TOOLSET`, one entry-po
   cannot push a half-copied memory store as a success. The toolset offers no tool until `repo` is set.
   Logs, downloads, and images are excluded, and an in-tree `.gitignore` excludes anything further.
   Restore is manual: see
-  [Back up to GitHub](docs/how-to/back-up-to-github.md).
+  [Back up to GitHub](https://saxman.info/kokua/how-to/back-up-to-github/).
 
 Nothing a toolset contributes reaches an agent until that agent's `tools` list names it, and nothing
 warns you about a name no agent named: a toolset that ships and is never declared costs nothing to leave
 alone. The case that does cost something is a configured MCP server, which connects regardless; see
-[Add MCP services](docs/how-to/add-mcp-services.md).
+[Add MCP services](https://saxman.info/kokua/how-to/add-mcp-services/).
 
 ### Proactive work: scheduled tasks
 
@@ -688,7 +688,7 @@ alone. The case that does cost something is a configured MCP server, which conne
   `kokua config init` scaffolds `$KOKUA_HOME/config.toml` from `config.example.toml`, where every key
   sits at its built-in default with a line of description. The long form, with what each key accepts,
   which keys apply live, and who may write each one, is
-  [docs/reference/configuration.md](docs/reference/configuration.md). The example file stays short on
+  [docs/reference/configuration.md](https://saxman.info/kokua/reference/configuration/). The example file stays short on
   purpose: `read_config` hands the assistant the scaffolded file, so its comments occupy the model's
   context on every configuration question.
 - **Strict parsing**: an unknown key or non-table section fails fast with a `ConfigError` naming the
@@ -1121,18 +1121,18 @@ notice on startup.
   frame a documented fallback, so there is no `isinstance(channel, WebChannel)` in `core/` or
   `workflows/`. `channels/protocol.py` declares the rich surface for documentation and typing.
 - **Why Kokua exists**, and the six principles that serve it, are in
-  [docs/explanation/design-principles.md](docs/explanation/design-principles.md): the project's purpose
+  [docs/explanation/design-principles.md](https://saxman.info/kokua/explanation/design-principles/): the project's purpose
   is that people can learn how agentic systems work by reading, running, and extending a real one, and
   each principle carries the code that backs it. The architecture narrative is in
-  [docs/explanation/architecture.md](docs/explanation/architecture.md).
+  [docs/explanation/architecture.md](https://saxman.info/kokua/explanation/architecture/).
 - Task-oriented guides for the three ways to add capability are in
-  [docs/how-to/](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace,
-  declaring an agent, writing a toolset), [add a skill](docs/how-to/add-skills.md), and
-  [add an MCP service](docs/how-to/add-mcp-services.md). All three converge on the same rule: a capability
+  [docs/how-to/](https://saxman.info/kokua/how-to/): [set up a toolset](https://saxman.info/kokua/how-to/set-up-toolsets/) (the namespace,
+  declaring an agent, writing a toolset), [add a skill](https://saxman.info/kokua/how-to/add-skills/), and
+  [add an MCP service](https://saxman.info/kokua/how-to/add-mcp-services/). All three converge on the same rule: a capability
   is declared, never defaulted, and nothing reaches an agent until an `[agents.*]` table names it,
   composing a worker for one task included, since that takes declaring `capabilities`.
 - **A how-to for installing a third-party toolset**,
-  [docs/how-to/install-a-third-party-toolset.md](docs/how-to/install-a-third-party-toolset.md), walks the
+  [docs/how-to/install-a-third-party-toolset.md](https://saxman.info/kokua/how-to/install-a-third-party-toolset/), walks the
   plugin seam from the outside: installing the package, declaring it on an agent, giving it its own
   config section, and gating its expensive tool, with [jobme](https://github.com/saxman/jobme) as the
   worked example throughout.

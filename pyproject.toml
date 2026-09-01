@@ -56,6 +56,14 @@ dev = [
     # Needs a Chromium: `uv run playwright install chromium`.
     "pytest-playwright",
 ]
+# The documentation site (mkdocs-material, published to https://saxman.info/kokua/ by
+# .github/workflows/docs.yml). mkdocstrings is here for the API reference page, which arrives with the
+# rest of the Reference section; the plugin stays out of mkdocs.yml until there is a page using it.
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+]
 
 [project.urls]
 Homepage = "https://github.com/saxman/kokua"

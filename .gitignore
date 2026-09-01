@@ -12,6 +12,9 @@ dist/
 .coverage
 htmlcov/
 
+# Built documentation site (mkdocs build). Published from CI, never committed.
+site/
+
 # Virtual environments
 .venv/
 venv/
