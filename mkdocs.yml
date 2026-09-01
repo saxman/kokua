@@ -7,15 +7,23 @@ edit_uri: edit/main/docs/
 
 # This site's claim is that Kokua's machinery can be followed, so a link a reader cannot follow is a
 # defect in the product, not a cosmetic flaw. `strict` turns a broken internal link into a failed
-# build. `omitted_files: warn` does the same for a page missing from the nav below, because a page
-# nobody can navigate to is indistinguishable from a page that does not exist: mkdocs 1.6 only offers
-# warn/info/ignore for this option (no "error" level), but `strict: true` above promotes every warning
-# to a build failure, so the effect is the same hard stop. Links out of docs/ are covered separately,
-# by tests/test_docs.py, which needs no mkdocs installed.
+# build, but only for checks mkdocs 1.6 already defaults to `warn`; `omitted_files` (a page missing
+# from the nav below) is one of those, so naming it here is really about promoting it, not creating it.
+# `links.anchors` defaults to `info` instead, a level `strict` does not touch, so a link to a heading
+# that no longer exists (`#why-kokua-exists`, `#how-an-agents-tools-resolve`, and the explanation pages
+# lean on more of these) would build clean without naming it `warn` here too. `absolute_links` and
+# `unrecognized_links` get the same explicit `warn` for the same reason: mkdocs 1.6 only offers
+# warn/info/ignore for any of these (no "error" level), and `strict: true` above is what turns a named
+# `warn` into a hard stop. Links out of docs/ are covered separately, by tests/test_docs.py, which
+# needs no mkdocs installed.
 strict: true
 validation:
   nav:
     omitted_files: warn
+  links:
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn
 
 theme:
   name: material

@@ -6,6 +6,7 @@ on:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+      - 'pyproject.toml'
       - 'src/kokua/**'
       - 'CHANGELOG.md'
       - 'CONTRIBUTING.md'
@@ -37,7 +38,6 @@ jobs:
         run: mkdocs build --strict
       - name: Publish to GitHub Pages
         run: |
-          pip install ghp-import
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           ghp-import --no-jekyll --force --push --message "Deploy docs" site

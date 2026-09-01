@@ -438,7 +438,7 @@ Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`
 registered in Kokua's own `pyproject.toml` exactly as a third party would register theirs;
 `plugins.py` discovers them at runtime, and `kokua.plugins` re-exports `Toolset` and `ToolsetContext`
 as the public surface a third party imports. Add a transport or new tools as a plugin, not by editing
-the core -- see [toolsets/image.py](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py).
+the core; see [toolsets/image.py](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/image.py).
 
 A third party's toolset is distinguished from one Kokua ships by exactly one thing: its provider label
 in `--list-toolsets`, which comes from which distribution registered the entry point. Nothing branches on
