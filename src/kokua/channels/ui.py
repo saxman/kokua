@@ -9,8 +9,10 @@ Four capabilities are exposed as named booleans rather than hidden behind a fall
 are not "call it if present" -- they change what the core *does*:
 
 ``supports_conversations``
-    Whether a scheduled task may run in its own conversation. Without a sidebar the user would have
-    no way to reach it, so such a task runs in the viewed conversation instead.
+    Whether a scheduled task may run in its own conversation. A channel that pushes no conversation
+    list has no way to show one appearing, so such a task runs in the viewed conversation instead.
+    (It used to be that a user could not *reach* one either; the terminal's ``/conversations`` and
+    ``/switch`` ended that, and finishing the job is TODO 12.)
 ``supports_phases``
     Whether a planned turn can show its work as a verbose trace, or must fall back to summary cards.
 ``supports_streamed_activity``

@@ -13,6 +13,7 @@ from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
 
 from kokua.config.file import ConfigError
 from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
+from kokua.core import conversation_commands
 from kokua.core.metrics import record_event
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.registry.context import LiveState, ToolsetContext
@@ -191,8 +192,10 @@ def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
 
 
 # Commands the serve loop owns and a workflow therefore cannot claim. Checked at startup, because a
-# workflow silently shadowed by /stop would look like a workflow that simply never runs.
-RESERVED_COMMANDS = frozenset({"stop", "diag"})
+# workflow silently shadowed by /stop would look like a workflow that simply never runs. The
+# conversation commands are dispatched in the same loop and ahead of the workflow lookup, so they
+# shadow exactly the same way and are read from the module that owns them rather than spelled twice.
+RESERVED_COMMANDS = frozenset({"stop", "diag"}) | conversation_commands.COMMANDS
 
 
 def build_command_map(config: AssistantConfig, registry: ToolsetRegistry) -> dict[str, "Workflow"]:

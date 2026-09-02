@@ -563,12 +563,8 @@ class Assistant:
                 # The conversation commands sit above the pending-answer check for the reason `/stop`
                 # does: someone who types `/new` while a question is on screen is asking to leave that
                 # question behind, and switching abandons it (`HumanGate.abandon_all`) exactly as the
-                # web UI's sidebar does. Being above the workflow lookup too means these three words are
-                # reserved: a toolset shipping a workflow whose command is `new`, `switch`, or
-                # `conversations` would never see it dispatched. Left as a documented shadow rather than
-                # a startup error because the three names Kokua reserves are all it can promise about a
-                # namespace every installed toolset writes into, so the check would refuse an install
-                # over a collision the user could only fix by uninstalling.
+                # web UI's sidebar does. These three words are reserved from a workflow
+                # for the same reason `/stop` is (`core/agents.py`'s `RESERVED_COMMANDS`).
                 if word in conversation_commands.COMMANDS:
                     await self._run_conversation_command(word, argument)
                     continue
@@ -687,7 +683,7 @@ class Assistant:
         (`frontends/web.py`'s `_sync_view`), because a switch the core made is one the front end did not
         initiate. The working indicator is not optional among them: `show_history` clears it as it
         repaints, so leaving it out would have a typed `/switch` into a conversation with a live turn
-        report it as idle.
+        report it as idle. That repaint is also why the notice is sent where it is, in the middle.
         """
         items = self.list_conversations()
         left = next((item for item in items if item["id"] == leaving), None)
@@ -695,9 +691,14 @@ class Assistant:
             headline += conversation_commands.left_running(
                 self._conversation_title(leaving), leaving, muted=self._ui.mutes_background_turns
             )
-        await self._ui.send(headline)
         await self._ui.push_conversations(items)
         await self._ui.show_history(self.history, self.history_metadata)
+        # The notice goes between the two, and the order is load-bearing at both ends. A page replaces
+        # its whole transcript on a history frame, so a notice sent before it is wiped unseen, taking
+        # the auto-deny warning with it; and a page treats an ordinary message as the end of a turn and
+        # clears the working indicator, so the notice has to precede the frame that re-lights it. A
+        # channel that prints as it goes has neither behavior and reads the same in any order.
+        await self._ui.send(headline)
         await self._ui.show_working(self.turn_running(self._active_id))
 
     def _stop_active_turn(self) -> None:

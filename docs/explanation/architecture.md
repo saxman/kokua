@@ -123,9 +123,13 @@ typing `/new` while an approval prompt is on screen leaves that question behind
 a front end did not initiate, the core repaints: `ChannelUI.push_conversations` refreshes a sidebar and
 `ChannelUI.show_history` replaces what a page is displaying, with `ChannelUI.show_working` behind it
 because that repaint clears the page's "a turn is already running here" indicator, all three no-ops on
-a channel that prints as it goes. What the terminal gets instead is a sentence, because muting is the one part of a background turn
-it cannot do: `ChannelUI.mutes_background_turns` is false there, so the reply to `/new` says the turn
-you left keeps printing here and that `/stop` now reaches the conversation you moved to.
+a channel that prints as it goes. The notice itself is sent between the history frame and the working
+one: a page wipes its transcript on the first and treats an ordinary message as the end of a turn, so
+either edge of that gap loses something. What the terminal gets instead is that sentence and nothing
+else, because muting is the one part of a background turn it cannot do:
+`ChannelUI.mutes_background_turns` is false there, so the reply to `/new` says the turn you left keeps
+printing here, that `/stop` now reaches the conversation you moved to, and that a tool call needing
+approval is denied meanwhile.
 The wording of all three replies lives in `core/conversation_commands.py`, for the reason
 `core/diagnostics.py` holds the `/diag` report.
 

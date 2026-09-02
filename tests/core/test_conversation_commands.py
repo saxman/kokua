@@ -162,13 +162,24 @@ class _ViewChannel(_ConvCapturingChannel):
         super().__init__()
         self.histories: list[list[dict]] = []
         self.working: list[bool] = []
+        self.order: list[str] = []
         self.active_conversation_id = None
 
     async def send_history(self, messages, metadata=None):
         self.histories.append(messages)
+        self.order.append("history")
 
     async def send_working(self, active: bool) -> None:
         self.working.append(active)
+        self.order.append("working")
+
+    async def send_conversations(self, items):
+        await super().send_conversations(items)
+        self.order.append("conversations")
+
+    async def send(self, content, *, reply_to=None) -> None:
+        await super().send(content, reply_to=reply_to)
+        self.order.append("message")
 
 
 async def test_a_switch_repaints_a_channel_that_draws_a_whole_conversation(tmp_path):
@@ -182,6 +193,10 @@ async def test_a_switch_repaints_a_channel_that_draws_a_whole_conversation(tmp_p
     marked_active = [item["id"] for item in channel.conversation_pushes[-1] if item["active"]]
     assert marked_active == [assistant._active_id]
     assert channel.working == [False]  # nothing running: the indicator history frames reset stays off
+    # Pinned, because both ends of it are load-bearing on the web page: a history frame replaces the
+    # whole transcript (so a notice sent before it is never seen) and an ordinary message clears the
+    # working indicator (so the notice cannot come after the frame that re-lights it).
+    assert channel.order == ["conversations", "history", "message", "working"]
 
 
 async def test_switching_into_a_running_turn_relights_the_working_indicator(tmp_path):

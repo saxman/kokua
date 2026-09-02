@@ -111,9 +111,10 @@ Every rule here was learned from a bug. Read them before changing anything in th
    which is what keeps a finished turn from ever cancelling a live one.
    The terminal's conversation commands add a second way to lose a firing's stop there, and it is a
    known gap rather than a covered case: ``/switch`` mid-firing points ``/stop`` at the conversation
-   moved to, leaving the firing running and still printing into the one it started in. Both follow from
-   a channel whose ``supports_conversations`` is false sharing the viewed conversation with a scheduled
-   run, which is the flag ``_resolve_target`` reads and the follow-up in TODO 12 is about.
+   moved to, and since nothing is muted on that channel the firing keeps printing wherever the user
+   went rather than into the conversation it started in. Both of these come from one cause, a channel
+   whose ``supports_conversations`` is false sharing the viewed conversation with a scheduled run,
+   which is the flag ``_resolve_target`` reads and the follow-up in TODO 12 is about.
 
    Shutdown is the one reader that must not follow that rule, because it closes the session store.
    Replacing an entry does not end the turn it replaced, so the per-conversation entries are not the

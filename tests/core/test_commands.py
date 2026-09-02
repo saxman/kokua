@@ -12,7 +12,12 @@ from aimu.models import StreamChunk, StreamingContentType
 from kokua.config import AssistantConfig
 from kokua.config.file import ConfigError
 from kokua.core.assistant import Assistant
-from kokua.core.agents import build_command_map, undeclared_workflow_commands, validated_registry
+from kokua.core.agents import (
+    RESERVED_COMMANDS,
+    build_command_map,
+    undeclared_workflow_commands,
+    validated_registry,
+)
 from kokua.registry.registry import Toolset, register
 from kokua.workflows import Workflow
 from tests.channels import FakeChannel, _config, example_agents
@@ -47,6 +52,26 @@ def test_the_shipped_entry_agent_earns_the_plan_command():
     commands = build_command_map(config, validated_registry(config))
 
     assert commands["plan"].usage == "/plan <task>"
+
+
+@pytest.mark.parametrize("command", sorted(RESERVED_COMMANDS))
+def test_a_workflow_claiming_a_serve_loop_command_fails_at_startup(command):
+    """Every word the serve loop dispatches itself, including the three conversation commands.
+
+    A shadowed workflow presents as one that inexplicably never runs, so the collision is refused where
+    it can still name the fix rather than left to be discovered at the prompt.
+    """
+    agents = example_agents()
+    agents["assistant"].tools = ["shadow"]
+    config = AssistantConfig(agents=agents, entry_agent="assistant")
+    registry = _registry(
+        Toolset(name="shadow", description="S.", build=lambda ctx: [], workflow=_workflow("shadow", command))
+    )
+
+    with pytest.raises(ConfigError) as raised:
+        build_command_map(config, registry)
+    assert f"/{command}" in str(raised.value)
+    assert "Rename the workflow's command." in str(raised.value)
 
 
 def test_an_undeclared_workflow_gets_no_command():

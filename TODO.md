@@ -122,7 +122,6 @@ Decide as one change: adopt with an explicit `[tool.ruff.lint] select`, apply th
 commit that does nothing else, and either fix or `noqa`-with-a-reason the judgment calls. Raising the
 pin without that is how a linter upgrade turns into an unreviewed diff across the tree.
 
-
 ## 12. Give a scheduled task its own conversation in the terminal
 `TurnRunner._resolve_target` runs a firing in the *viewed* conversation on any channel whose
 `supports_conversations` is false, which is every channel but the web page. Its original reason was
