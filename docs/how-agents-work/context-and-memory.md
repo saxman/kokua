@@ -89,7 +89,7 @@ and nothing else. Everything else came back through a tool.
 
 Where the fact actually went, in a third run of the same first prompt against a fresh `$KOKUA_HOME`
 (hence the differently spelled `favorite`), followed by a plain shell session against that same
-directory. The bracketed paragraph in the middle is the capture author's annotation, not terminal
+directory. The parenthesised paragraph in the middle is the capture author's annotation, not terminal
 output; everything else is:
 
 ```text

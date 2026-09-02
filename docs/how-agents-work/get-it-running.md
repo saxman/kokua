@@ -54,7 +54,7 @@ back, quoted exactly as the terminal printed it (`qwen3.5:9b` on Ollama, Kokua c
 ```text
 [notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
 > Say hello and tell me in one sentence what you can do.
->
+> 
 [thinking] The user is asking me to say hello and briefly explain what I can do in one sentence. This is a straightforward conversational request that doesn't require any tools - I should just respond directly with a friendly greeting and a concise summary of my capabilities.
 Hello! I'm your personal assistant—I can help you manage tasks, organize information, run code, schedule work, store knowledge, read/write files, search documents and conversations, delegate specialized work to sub-agents, and automate routines with skills and scheduled tasks.
 ```
