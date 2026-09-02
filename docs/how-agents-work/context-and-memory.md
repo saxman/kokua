@@ -45,7 +45,7 @@ on the words the model happens to search with resembling the words it happened t
 
 One session, two conversations. A fact is stored, `/new` starts a conversation with no history at
 all, and the fact comes back. Quoted exactly as the terminal printed it ([`qwen3.5:9b` on
-Ollama](get-it-running.md), Kokua commit `68aee31` plus the change that added `/new`).
+Ollama](get-it-running.md), Kokua commit `934dd02`, the change that added `/new`).
 
 ```text
 [notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
