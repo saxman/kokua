@@ -84,8 +84,8 @@ next block's reasoning ("I already got the answer from the subagent: 1,411,381")
 arrived, not a formatting slip in this page.
 
 `compose_subagent` in round two is itself a whole loop of this shape running inside one tool call, on a
-second agent built for the occasion. *Delegation*, later in this catalogue, is that mechanism; here it
-is just a tool that took a while to return.
+second agent built for the occasion. [Delegation](delegation.md) is that mechanism in full; here it is
+just a tool that took a while to return.
 
 ## In Kokua
 
@@ -189,7 +189,8 @@ gathering hands back the wrap-up call's summary, which is thinner than the answe
 toward, with nothing in the terminal marked as truncated. That edge is real enough to have moved this
 project's AIMU floor: before AIMU 0.26.0, hitting the cap with a call still pending produced a provider
 rejection instead of a wrap-up, and Kokua saw it as sub-agents failing rather than answering. The whole
-story is in [the architecture doc](../explanation/architecture.md).
+story is in [the architecture doc's account of the AIMU version
+floor](../explanation/architecture.md#generation-parameters).
 
 **Knowing what it actually cost.** Kokua accumulates each turn's model calls, seconds, and tokens into a
 record stored with the conversation
@@ -200,6 +201,8 @@ and Kokua counts them for you rather than asking you to estimate.
 ## Go deeper
 
 - [Tool calling](tool-calling.md): what one of those `[tool]` lines actually is, and who runs it.
+- [Delegation](delegation.md): what the `compose_subagent` call in round two started, and why a subtask
+  gets a loop and a context of its own rather than more rounds of this one.
 - [Architecture: the core](../explanation/architecture.md#the-core), for how `Assistant`, `TurnRunner`,
   and `ConversationBook` divide this work, and
   [What a turn cost](../explanation/architecture.md#what-a-turn-cost) for the metrics record.

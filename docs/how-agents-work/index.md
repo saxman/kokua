@@ -27,7 +27,7 @@ the choices it did about them.
 
 The mechanism pages land one at a time rather than all at once, so this list says plainly which of the
 thirteen planned pages exist today. Six of them, all listed above. The remaining seven, in the order a
-newcomer would want them:
+newcomer would want them, under the titles they will land with:
 
 1. Agents and workflows
 2. Humans in the loop
@@ -36,3 +36,23 @@ newcomer would want them:
 5. Reaching outside
 6. State you can read
 7. When it goes wrong
+
+Those titles are settled rather than provisional, because the written pages already name some of them in
+prose, and a page that arrives under a different name leaves those mentions pointing at nothing.
+
+## Writing a page for this catalogue
+
+Three conventions hold thirteen pages together, and two of them are checked by `tests/test_docs.py`
+rather than left to each author's memory.
+
+- **A page that exists is a link; a page that does not is italics.** Write
+  `[Delegation](delegation.md)` for one you can open and *Watching the loop* for one that is still on
+  the list above, so a reader can tell the two apart without clicking. When your page lands, grep the
+  catalogue for its italicised title and turn every one into a link, including the ones in a "Go
+  deeper" list.
+- **List your page above.** Every file in this directory has to appear in this index, and the test
+  suite fails by name until it does. It needs an entry in `mkdocs.yml`'s `nav` too, or the strict build
+  fails.
+- **Keep the five sections, in order.** The idea, Watch it, In Kokua, What it costs, Go deeper, under a
+  title and a one-sentence claim in bold. That shape is what makes the catalogue skimmable, and it is
+  also enforced.

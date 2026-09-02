@@ -86,7 +86,7 @@ returns a role.
 **And the answer came back with nothing behind it but the model's own training.** The three sentences
 are correct, and it is worth saying so plainly: a tool call really is invoking a function from an
 available toolset, and weather checks and Wikipedia lookups really are examples of one. The worker held
-`web`, `misc`, and `time` and used none of them. It was handed eleven words of task and no context at
+`web`, `misc`, and `time` and used none of them. It was handed nine words of task and no context at
 all, and it answered from the only thing it had, which for this question was enough.
 
 Now notice what the caller could tell about that, which is nothing. `Here's the summary from the

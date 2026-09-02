@@ -26,8 +26,8 @@ right answer is to tell the model so rather than to crash.
 Then the result goes back as a *message*. This is the part that is easy to miss: a tool result is not a
 return value handed to the model, because there is nothing to hand it to. It is another entry in the
 conversation, in a role reserved for tool output, which the model reads on the next round exactly the
-way it reads everything else. Tool output is therefore just more text in the context window, and it
-competes for space with everything else there.
+way it reads everything else. Tool output is therefore just more text in the [context
+window](context-and-memory.md#the-idea), and it competes for space with everything else there.
 
 Which is why a failing tool should usually return its error to the model rather than raise. If the
 tool raises and the exception escapes the loop, the turn is over and the user gets a stack trace. If
@@ -178,11 +178,12 @@ updated too.
 has when it decides whether your tool is the right one, so an inaccurate description produces an agent
 that calls the wrong tool, or calls the right one with the wrong argument, and there is no exception and
 no failing test. It surfaces as the model seeming stupid. The Tokyo transcript is the benign
-case: the description was accurate, and what came back was usable on the first try. The bad case, seen
-while capturing for these pages: asked to roll dice, the model inventoried
-its tools, concluded from their descriptions that none of them could do it, and asked the user how to
-proceed rather than reaching for the Python interpreter it was holding the whole time. Nothing errored.
-The tools were simply not described in a way that connected to the request.
+case: the description was accurate, the model committed to `"Asia/Tokyo"` before the request went out,
+and what came back was usable on the first try. All that bought it was one sentence in an `Args:`
+block. The `generate_image` docstring above is the other kind, and is worth rereading with this
+in mind: it is well-formed, it is plausible, and it describes a state the model can never be in.
+Nothing errors when a model believes it. The only symptom either way is a choice the model made, which
+you notice only if you are reading the reasoning that led to it.
 
 **Every schema is re-sent every round.** The tool descriptions ride along with the conversation on each
 model call, so a large tool list is a permanent tax on the context window and on every round of every

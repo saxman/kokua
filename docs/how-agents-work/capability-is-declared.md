@@ -17,7 +17,8 @@ nobody wrote down what the set is.
 
 There is a second cost, less alarming and more constant. Every tool an agent holds is described to the
 model on every round of every turn ([Tool calling](tool-calling.md)), so an unused capability is paid
-for on each call and makes the model's choice harder rather than easier. Reach and cost push the same
+for on each call out of the same [context window](context-and-memory.md#the-idea) the conversation is
+competing for, and it makes the model's choice harder rather than easier. Reach and cost push the same
 way.
 
 The alternative is to declare. An agent's capability is a list a person wrote, and installing something
@@ -236,7 +237,7 @@ toolset, pinned as such by that same test file.
 
 ## What it costs
 
-**The forgotten declaration.** You `pip install` a toolset, `kokua --list-toolsets` shows it, you ask
+**The forgotten declaration.** You `uv add` a toolset, `kokua --list-toolsets` shows it, you ask
 the assistant to use it, and it says it cannot. Nothing errored. This silence is deliberate: Kokua used
 to warn at startup about a provisioned toolset no agent named, and the warning was removed, because
 telling a toolset somebody installed on purpose from one that merely ships would take a provenance rule

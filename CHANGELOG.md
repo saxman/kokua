@@ -1148,7 +1148,9 @@ notice on startup.
   [section index](https://saxman.info/kokua/how-agents-work/) names the rest.
   `tests/test_docs.py::test_catalogue_pages_follow_the_template` holds every mechanism page to the same
   five `##` sections in the same order, so a page that drops or reorders one fails the suite instead of
-  drifting unnoticed.
+  drifting unnoticed, and `test_every_catalogue_page_is_listed_in_the_index` holds the section index to
+  the directory it indexes in both directions, since that index is the one file all thirteen pages have
+  to touch.
 - **Documentation site** at [saxman.info/kokua](https://saxman.info/kokua/), built from `docs/` with
   mkdocs-material and published by `.github/workflows/docs.yml` on every push to main. The build is
   strict: a broken internal link, or a page missing from `mkdocs.yml`'s `nav`, fails CI.

@@ -46,8 +46,10 @@ changing it.
 kokua
 ```
 
-starts the assistant in the terminal. Say hello to it, and this is what came back, quoted exactly as
-the terminal printed it:
+starts the assistant in the terminal. The agent that answers you there is the **entry agent**: the one
+agent a person talks to directly, as opposed to the short-lived workers it can spawn for a subtask, and
+the agent every tool count in this catalogue is counted for. Say hello to it, and this is what came
+back, quoted exactly as the terminal printed it (`qwen3.5:9b` on Ollama, Kokua commit `34831a1`):
 
 ```text
 [notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.

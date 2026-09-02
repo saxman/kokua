@@ -111,7 +111,7 @@ $ find "$KOKUA_HOME/data/memory" -maxdepth 2
 
 $ cat "$KOKUA_HOME/data/memory/chroma.sqlite3"
 SQLite format 3
-(binary; not readable with cat -- this is a Chroma vector store, not a plain text file: one
+(binary; not readable with cat: this is a Chroma vector store, not a plain text file. It is one
 SQLite database of metadata plus an HNSW index directory of raw float vectors, per collection.
 The store_memory call above created the numbered directory and wrote a new row for the fact.)
 

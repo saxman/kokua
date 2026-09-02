@@ -33,6 +33,13 @@ without anyone noticing, because a page missing or reordering a section still re
 its own; only a sweep across every page catches the drift, which is why
 `test_catalogue_pages_follow_the_template` checks it mechanically instead of trusting each new author
 to have matched the last page they read.
+
+A fifth check holds that catalogue's index to the directory it indexes, in both directions. The index
+is the one file every one of the thirteen pages has to touch, so it is the file most likely to go
+stale, and an unlisted page is invisible: `mkdocs.yml`'s nav would still surface it in the sidebar, so
+nothing else notices, while the section's own table of contents quietly stops being a table of
+contents. The reverse, an index entry naming a page that was renamed away, is caught by
+`mkdocs build --strict` as well, but only where mkdocs is installed, and this check costs nothing.
 """
 
 import re
@@ -52,9 +59,16 @@ TEMPLATE_HEADINGS = ["## The idea", "## Watch it", "## In Kokua", "## What it co
 NON_MECHANISM_PAGES = {"index.md", "get-it-running.md"}
 MECHANISM_PAGES = sorted(p for p in CATALOGUE_DIR.glob("*.md") if p.name not in NON_MECHANISM_PAGES)
 
-# Root files included verbatim into published pages: their repository and site links reach the site
-# too, even though the files themselves live outside docs_dir.
-ROOT_PAGES = [REPO_ROOT / "CHANGELOG.md", REPO_ROOT / "CONTRIBUTING.md"]
+# Root files whose links are held to the same standard as a page's, for two different reasons.
+# CHANGELOG.md and CONTRIBUTING.md are included verbatim into published pages, so their repository and
+# site links reach the site even though the files themselves live outside docs_dir. README.md is not
+# published, but it is the repository's front door and links *into* the site, so renaming a page
+# 404s a README link with nothing else to catch it.
+ROOT_PAGES = [REPO_ROOT / "CHANGELOG.md", REPO_ROOT / "CONTRIBUTING.md", REPO_ROOT / "README.md"]
+
+CATALOGUE_INDEX = CATALOGUE_DIR / "index.md"
+# A link to a sibling page of the catalogue, as the index writes them: bare filename, no directory.
+CATALOGUE_LINK = re.compile(r"\]\(([a-z0-9-]+\.md)\)")
 
 REPO_LINK = re.compile(r"https://github\.com/saxman/kokua/(?:blob|tree)/main/([^)\s#]+)")
 ESCAPING_LINK = re.compile(r"\]\(\.\./\.\./[^)]+\)")
@@ -153,3 +167,25 @@ def test_catalogue_pages_follow_the_template():
             violations.append(f"{rel}: missing the bold one-sentence claim above '## The idea'")
 
     assert not violations, "catalogue pages diverging from the mechanism-page template:\n" + "\n".join(violations)
+
+
+def _indexed_catalogue_pages() -> set[str]:
+    """The pages the catalogue index lists, read from its "## Pages" section alone.
+
+    Scoping to that one section is what makes the check mean what it says: the index also links a
+    page or two from its prose (the note on conventions names one as an example), and a mention there
+    is not the listing a reader navigates by.
+    """
+    text = CATALOGUE_INDEX.read_text()
+    after_heading = text.split("## Pages", 1)[-1]
+    return set(CATALOGUE_LINK.findall(after_heading.split("\n## ", 1)[0]))
+
+
+def test_every_catalogue_page_is_listed_in_the_index():
+    """The catalogue index has to name every page in its directory, and no page that is gone."""
+    listed = _indexed_catalogue_pages()
+    on_disk = {page.name for page in CATALOGUE_DIR.glob("*.md")} - {"index.md"}
+
+    problems = [f"{name} exists but is not listed in the index" for name in sorted(on_disk - listed)]
+    problems += [f"{name} is listed in the index but does not exist" for name in sorted(listed - on_disk)]
+    assert not problems, "docs/how-agents-work/index.md and the pages beside it disagree:\n" + "\n".join(problems)
