@@ -57,8 +57,9 @@ def build(config: AssistantConfig) -> list:
     def generate_image(prompt: str):
         """Generate an image from a text prompt; the image is shown to the user and saved.
 
-        Requires an image model configured via the AIMU_IMAGE_MODEL environment variable; without one this
-        tool reports that generation is unavailable.
+        This tool is offered only when AIMU_IMAGE_MODEL is configured, so seeing it means one is set.
+        If the model it names still fails to load, this reports generation as unavailable instead of
+        raising.
 
         Args:
             prompt: A description of the desired image.
@@ -67,7 +68,7 @@ def build(config: AssistantConfig) -> list:
         try:
             client = _client()
         except Exception as exc:
-            return f"Image generation is unavailable: {exc}. Set the AIMU_IMAGE_MODEL environment variable."
+            return f"Image generation is unavailable: {exc}. Check the AIMU_IMAGE_MODEL environment variable."
 
         # Streaming generator: yield IMAGE_GENERATING chunks (denoising progress flows to the UI live), then
         # return the saved reference. output_dir directs the final file into the servable images folder.

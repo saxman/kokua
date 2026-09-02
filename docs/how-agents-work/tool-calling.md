@@ -99,8 +99,9 @@ tool and the declaration that offers it, trimmed here to those two things:
     def generate_image(prompt: str):
         """Generate an image from a text prompt; the image is shown to the user and saved.
 
-        Requires an image model configured via the AIMU_IMAGE_MODEL environment variable; without one this
-        tool reports that generation is unavailable.
+        This tool is offered only when AIMU_IMAGE_MODEL is configured, so seeing it means one is set.
+        If the model it names still fails to load, this reports generation as unavailable instead of
+        raising.
 
         Args:
             prompt: A description of the desired image.
@@ -125,14 +126,17 @@ question in front of it. The `return` is a string because the result is going in
 message, so it is written to be read: it tells the model the image was already shown, which stops it
 from trying to show it again.
 
-That excerpt also contains a broken promise, which is worth pointing at on a page arguing that a
-docstring is one. The second paragraph tells the model that without `AIMU_IMAGE_MODEL` the tool
-"reports that generation is unavailable". It never does. `build()` returns an empty list when that
-variable is unset, so the tool is not in the model's list at all and there is nothing there to report
-anything. The runtime path that does return that sentence fires only when the variable *is* set and the
-client still cannot be built, where the remedy it goes on to name is already done. No test catches this,
-because nothing mechanical can: the sentence is well-formed, accurate-sounding, and describes a state
-the model can never be in.
+The second paragraph is worth reading twice on a page arguing that a docstring is a promise, because an
+earlier version of it broke one. That version told the model that without `AIMU_IMAGE_MODEL` the tool
+"reports that generation is unavailable". It never did: `build()` returns an empty list when that
+variable is unset, so the tool is not in the model's list at all, and there is nothing there to report
+anything. The sentence that does return "unavailable" fires only when the variable *is* set and the
+client still cannot be built, the opposite condition from the one the docstring named. No test caught
+it, because nothing mechanical can: the sentence was well-formed, accurate-sounding, and described a
+state the model could never be in. The version above fixes it by naming the two conditions separately,
+one per sentence: the tool's presence already implies the variable is set, and "unavailable" is confined
+to the one path that can actually produce it. That is still a promise made in prose to a reader who
+cannot check it against the code; this one just happens to hold.
 
 The parsing is [AIMU's `@tool` decorator](https://saxman.info/aimu/how-to/add-custom-tool/), which
 inspects the signature and the Google-style docstring at import time and attaches the resulting schema
@@ -180,10 +184,10 @@ that calls the wrong tool, or calls the right one with the wrong argument, and t
 no failing test. It surfaces as the model seeming stupid. The Tokyo transcript is the benign
 case: the description was accurate, the model committed to `"Asia/Tokyo"` before the request went out,
 and what came back was usable on the first try. All that bought it was one sentence in an `Args:`
-block. The `generate_image` docstring above is the other kind, and is worth rereading with this
-in mind: it is well-formed, it is plausible, and it describes a state the model can never be in.
-Nothing errors when a model believes it. The only symptom either way is a choice the model made, which
-you notice only if you are reading the reasoning that led to it.
+block. The `generate_image` docstring's earlier version was the other kind: well-formed,
+plausible, and describing a state the model could never be in. Nothing would have errored had a model
+believed it. The only symptom either way is a choice the model made, which you notice only if you are
+reading the reasoning that led to it.
 
 **Every schema is re-sent every round.** The tool descriptions ride along with the conversation on each
 model call, so a large tool list is a permanent tax on the context window and on every round of every
