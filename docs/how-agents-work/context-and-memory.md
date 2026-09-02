@@ -43,53 +43,49 @@ on the words the model happens to search with resembling the words it happened t
 
 ## Watch it
 
-Two runs. In the first, a fact is stored. In the second, a different conversation with no history at
-all recalls it. Quoted exactly as the terminal printed them ([`qwen3.5:9b` on
-Ollama](get-it-running.md), Kokua commit `34831a1`).
+One session, two conversations. A fact is stored, `/new` starts a conversation with no history at
+all, and the fact comes back. Quoted exactly as the terminal printed it ([`qwen3.5:9b` on
+Ollama](get-it-running.md), Kokua commit `934dd02`, the change that added `/new`).
 
 ```text
 [notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
 > Remember that my favourite colour is teal.
 > 
-[thinking] The user is sharing a personal preference - their favorite colour is teal. This is something worth remembering in memory for later retrieval when it might be helpful. I should call store_memory to save this fact.
-[tool] store_memory(content="User's favourite colour is teal.")
-
-[thinking] I've stored that information about the user's favorite color being teal.The user asked me to remember their favourite colour is teal, and I've successfully stored that information in memory. The task is complete - I should confirm this to the user.
-I've remembered that your favourite colour is teal.
-```
-
-**Between the two runs, plainly.** This is not a sequence you can type. Kokua's terminal front end has
-no `/new` command: starting a fresh conversation is an action in the web UI's sidebar, and a `/new`
-typed at the prompt is sent to the model as an ordinary chat message in the same conversation.
-Restarting the process does not help either, because Kokua adopts the most recently updated
-conversation on launch and resumes it. So the capture was made by running two separate `kokua`
-processes and moving `$KOKUA_HOME/data/sessions.json` aside in between, leaving
-`$KOKUA_HOME/data/memory` untouched. The second process found no conversation to adopt and started
-genuinely empty.
-
-That intervention is not a workaround around the mechanism. It *is* the mechanism, in the crudest
-possible form: the conversation and the fact store are different files with different lifetimes, and
-deleting one leaves the other standing.
-
-```text
-[notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
+[thinking] The user wants me to remember that their favorite color is teal. This is a durable fact about them that I should store in memory using the store_memory function.
+[tool] store_memory(content='My favourite colour is teal.')
+Got it! Teal is your favorite colour. 😊
+/new
+Started a new conversation (46a088). It is empty: nothing earlier is in view.
 > What is my favourite colour?
 > 
-[thinking] The user is asking about their favourite colour. This would be personal information that should be stored in memory if they've shared it before, or I should search my memories to see if it's been mentioned. Let me search for this information first.
+[thinking] The user is asking about their favourite colour. I should check if this information has been stored in memory before, as that would be the most reliable source for personal preferences like this.
+
+Let me search my memories to see if there's any information about their favourite colour.
 [tool] search_memories(query='favourite colour', n_results=5)
 
-[thinking] The memory shows that the user's favourite colour is teal.
+[thinking] Your favorite colour is **teal**.The user asked about their favourite colour, and I found it in memory. My search returned that their favourite colour is teal. Now I can provide the final answer directly without needing any more tools.
 Your favourite colour is teal.
 ```
 
-The second run's reasoning is the evidence that this is real rather than a transcript trick. The model
+**What `/new` does, plainly.** It mints an empty session, points the active conversation at it, and
+builds that conversation its own agent: a fresh model client whose message list starts at zero. The
+first conversation is untouched and still there (`/conversations` lists it, `/switch <id>` goes back).
+What is emphatically *not* touched is `$KOKUA_HOME/data/memory`, and that gap is the whole point. The
+second turn's context is one user message. The teal is somewhere else.
+
+That separation is not staging arranged for the demonstration. It *is* the mechanism, in the crudest
+possible form: the conversation and the fact store are different files with different lifetimes, and
+starting a new conversation leaves the other standing.
+
+The second turn's reasoning is the evidence that this is real rather than a transcript trick. The model
 does not answer from what it can see; it says it should check, calls `search_memories(query='favourite
 colour', n_results=5)`, and reads the answer out of the result. Its context contained one user message
 and nothing else. Everything else came back through a tool.
 
-Where the fact actually went, in a third run of the same first prompt against a fresh `$KOKUA_HOME`
-(hence the differently spelled `favorite`), followed by a plain shell session against that same
-directory. The parenthesised paragraph in the middle is the capture author's annotation, not terminal
+Where the fact actually went, in a further run of the same first prompt against a fresh `$KOKUA_HOME`,
+followed by a plain shell session against that same directory. The stored sentence reads differently
+from the one above because the model writes it afresh each time, which is itself the judgment this page
+describes. The parenthesised paragraph in the middle is the capture author's annotation, not terminal
 output; everything else is:
 
 ```text
@@ -229,7 +225,7 @@ how a turn ended, so a truncation raises outside Ollama for the first time rathe
 plausible-looking short answer.
 
 **The store has its own failure, and it is quieter.** `search_memories` is a similarity search over
-stored strings. "What is my favourite colour" found "User's favourite colour is teal" because the words
+stored strings. "What is my favourite colour" found "My favourite colour is teal." because the words
 line up; "what should I paint the shed" has no such guarantee. A miss and a fact that was never stored
 produce the same output, `No relevant memories found.`, so you cannot tell from the answer which one
 happened. And storing is a judgment the model makes: it decided the colour was durable, and it decides

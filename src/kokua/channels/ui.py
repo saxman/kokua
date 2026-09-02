@@ -5,16 +5,21 @@ frame in :class:`kokua.channels.protocol.RichChannel` has exactly one documented
 plain ``send()`` line, or a no-op), decided once at construction rather than at each of the seventeen
 call sites that used to ask ``getattr(channel, "send_x", None)`` for themselves.
 
-Three capabilities are exposed as named booleans rather than hidden behind a fallback, because they
+Four capabilities are exposed as named booleans rather than hidden behind a fallback, because they
 are not "call it if present" -- they change what the core *does*:
 
 ``supports_conversations``
-    Whether a scheduled task may run in its own conversation. Without a sidebar the user would have
-    no way to reach it, so such a task runs in the viewed conversation instead.
+    Whether a scheduled task may run in its own conversation. A channel that pushes no conversation
+    list has no way to show one appearing, so such a task runs in the viewed conversation instead.
+    (It used to be that a user could not *reach* one either; the terminal's ``/conversations`` and
+    ``/switch`` ended that, and finishing the job is TODO 12.)
 ``supports_phases``
     Whether a planned turn can show its work as a verbose trace, or must fall back to summary cards.
 ``supports_streamed_activity``
     Whether an intermediate agent call can stream live, or must run non-streaming.
+``mutes_background_turns``
+    Whether a turn on a conversation other than the one in view is silenced. What a conversation
+    command says became of the turn you just switched away from depends on it.
 """
 
 from __future__ import annotations
@@ -46,6 +51,8 @@ class ChannelUI:
         self._stream_activity = getattr(channel, "stream_activity", None)
         self._begin_catch_up = getattr(channel, "begin_catch_up", None)
         self._end_catch_up = getattr(channel, "end_catch_up", None)
+        self._history = getattr(channel, "send_history", None)
+        self._working = getattr(channel, "send_working", None)
 
     @property
     def channel(self) -> Channel:
@@ -66,6 +73,17 @@ class ChannelUI:
     def supports_streamed_activity(self) -> bool:
         return self._stream_activity is not None
 
+    @property
+    def mutes_background_turns(self) -> bool:
+        """Whether this channel silences a turn running on a conversation other than the viewed one.
+
+        True for a channel that tracks the viewed conversation, which is the same attribute
+        :meth:`set_active_conversation` mirrors onto. A channel without it (the terminal) prints every
+        turn's output wherever the user has since moved, so a switch away from a running turn has a
+        consequence worth saying out loud.
+        """
+        return hasattr(self._channel, "active_conversation_id")
+
     # --- the base contract ---------------------------------------------------------------------
 
     async def send(
@@ -85,6 +103,28 @@ class ChannelUI:
         """Refresh the conversation list. Silently skipped by a channel with no sidebar."""
         if self._conversations is not None:
             await self._conversations(items)
+
+    async def show_history(self, messages: list[dict], metadata: Optional[dict] = None) -> None:
+        """Replace what the channel is displaying with one whole conversation.
+
+        Sent when the *core* changes the viewed conversation (a ``/switch`` or ``/new`` typed at any
+        front end), which is the case a front end driving its own sidebar cannot repaint for itself. A
+        channel that prints as it goes has no view to replace and offers no such frame, so this is a
+        no-op there and the terminal simply carries on below what it already printed.
+        """
+        if self._history is not None:
+            await self._history(messages, metadata)
+
+    async def show_working(self, active: bool) -> None:
+        """Say whether the conversation now in view has a turn already running behind it.
+
+        Paired with :meth:`show_history`, which resets the indicator as it repaints: without this
+        call right behind it, a switch into a conversation with a live turn leaves the page looking
+        idle until that turn's next frame lands. A channel that draws no such indicator has nothing
+        to reset either, so the pair is a no-op together.
+        """
+        if self._working is not None:
+            await self._working(active)
 
     async def notify(self, text: str) -> None:
         """Report a background turn's completion. Skipped by a channel that cannot background a turn."""
@@ -169,7 +209,7 @@ class ChannelUI:
     def set_active_conversation(self, conversation_id: str) -> None:
         """Mirror the viewed conversation onto a channel that tracks one, so its muting of background
         frames and the core's background-completion notification agree on what is in view."""
-        if hasattr(self._channel, "active_conversation_id"):
+        if self.mutes_background_turns:
             self._channel.active_conversation_id = conversation_id
 
     def begin_catch_up(self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None) -> None:

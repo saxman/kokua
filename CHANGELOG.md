@@ -39,6 +39,24 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer
 
 ### Conversations and turns
 
+- **Conversation commands at the prompt: `/new`, `/conversations`, `/switch <id>`.** The terminal used
+  to have no way to start a conversation or reach one it was not already in, which made every earlier
+  conversation unreachable from the CLI and left restarting the process resuming the most recent one.
+  The three commands are dispatched in `Assistant._serve_channel` beside `/stop` and `/diag`, not in
+  `channels/cli.py`, and call the same `new_conversation` / `select_conversation` the web UI's sidebar
+  buttons do, so every channel carrying typed text has them and there is one meaning of a switch. A
+  conversation is named by the leading fragment of its id that `/conversations` prints, the same
+  fragment `kokua export` accepts; an ambiguous one is refused with the full ids to choose between,
+  rather than opening the wrong conversation. Deleting, renaming, and pinning stay web-only: none is
+  needed to keep a terminal user from being stuck. Switching still never cancels a running turn, and
+  since the terminal cannot mute one the way the page does, the reply says so and says that `/stop`
+  now reaches the conversation you moved to. A switch made by the core repaints a front end that draws
+  a whole conversation at once, through the new `ChannelUI.show_history` and `ChannelUI.show_working`,
+  so the commands work typed into the web composer too. Those two frames and the notice between them
+  are ordered on purpose: a page replaces its whole transcript on a history frame and treats an
+  ordinary message as the end of a turn, so a notice on either side of that gap is lost or leaves a
+  live turn reading as idle. The three words are reserved from a workflow's command at startup, exactly
+  as `/stop` and `/diag` already were.
 - **Per-conversation agents.** Each conversation owns its AIMU `SkillAgent` and model client, built
   lazily and held in a bounded LRU registry (`agent_cache_cap`, default 8). Memory and documents stay
   shared across conversations.
