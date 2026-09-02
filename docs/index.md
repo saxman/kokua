@@ -62,6 +62,9 @@ you would write. Start with [set up a toolset](how-to/set-up-toolsets.md).
 
 ## Where to go
 
+- **[How agents work](how-agents-work/index.md)**: new to agentic systems? Start here. A catalogue of
+  the mechanisms one is made of, each shown happening in a real run against Kokua before the code
+  behind it.
 - **[How-to guides](how-to/index.md)**: task-oriented recipes for giving Kokua new capability.
 - **[Reference](reference/index.md)**: every `config.toml` key, exhaustively.
 - **[Explanation](explanation/index.md)**: the architecture, and the six principles that decide what

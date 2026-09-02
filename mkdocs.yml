@@ -106,6 +106,9 @@ exclude_docs: |
 
 nav:
   - Home: index.md
+  - How agents work:
+      - how-agents-work/index.md
+      - Get it running: how-agents-work/get-it-running.md
   - How-to:
       - how-to/index.md
       - Set up a toolset: how-to/set-up-toolsets.md
