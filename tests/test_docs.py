@@ -24,6 +24,15 @@ repository root are not part of `docs_dir`, but both are included verbatim into 
 repository link or a site link inside either one reaches the site too and is held to the same
 resolves-or-fails standard. Neither file is held to the escaping-link check: both legitimately use
 plain repository-relative links today (`docs/how-to/...`, not `../../docs/how-to/...`).
+
+A fourth check holds the "How agents work" catalogue to its own template. Thirteen pages, written by
+different hands across three passes, are a catalogue rather than thirteen unrelated essays only if a
+reader can predict a page's shape before opening it: where the transcript is, where the cost section
+is, where to read next. That promise is cheap to keep while a page is being drafted and easy to lose
+without anyone noticing, because a page missing or reordering a section still reads fine standing on
+its own; only a sweep across every page catches the drift, which is why
+`test_catalogue_pages_follow_the_template` checks it mechanically instead of trusting each new author
+to have matched the last page they read.
 """
 
 import re
@@ -34,6 +43,14 @@ DOCS_DIR = REPO_ROOT / "docs"
 
 # Brainstorming and planning artifacts are gitignored and unpublished, so they are not held to this.
 PUBLISHED_PAGES = sorted(p for p in DOCS_DIR.rglob("*.md") if "superpowers" not in p.parts)
+
+CATALOGUE_DIR = DOCS_DIR / "how-agents-work"
+TEMPLATE_HEADINGS = ["## The idea", "## Watch it", "## In Kokua", "## What it costs", "## Go deeper"]
+# get-it-running.md is setup, not a mechanism, and index.md is the section's table of contents; neither
+# opens on a claim about how an agent works, so neither owes the reader the mechanism-page shape. A
+# future page that is also not about a mechanism belongs in this set for the same reason.
+NON_MECHANISM_PAGES = {"index.md", "get-it-running.md"}
+MECHANISM_PAGES = sorted(p for p in CATALOGUE_DIR.glob("*.md") if p.name not in NON_MECHANISM_PAGES)
 
 # Root files included verbatim into published pages: their repository and site links reach the site
 # too, even though the files themselves live outside docs_dir.
@@ -87,3 +104,52 @@ def test_site_links_resolve():
             if not _site_slug_resolves(slug):
                 broken.append(f"{page.relative_to(REPO_ROOT)} -> https://saxman.info/kokua/{slug}")
     assert not broken, "links to the published site naming a page that does not exist:\n" + "\n".join(broken)
+
+
+def _template_heading_violation(headings: list[str]) -> str | None:
+    """Say what is wrong between a page's `##` headings and the template, or None if it matches.
+
+    The three ways a page can drift are distinct enough to name separately: a section left out, a
+    section that doesn't belong, or the five sections present but reordered. Naming which one gives
+    the six-months-later author something to fix rather than a raw list to diff by hand.
+    """
+    if headings == TEMPLATE_HEADINGS:
+        return None
+    seen = set()
+    for heading in headings:
+        if heading in TEMPLATE_HEADINGS and heading in seen:
+            return f"{heading!r} appears more than once"
+        seen.add(heading)
+    missing = [heading for heading in TEMPLATE_HEADINGS if heading not in headings]
+    if missing:
+        return f"missing {missing[0]!r}"
+    extra = [heading for heading in headings if heading not in TEMPLATE_HEADINGS]
+    if extra:
+        return f"has {extra[0]!r}, which isn't part of the template"
+    return f"headings out of order: found {headings}, expected {TEMPLATE_HEADINGS}"
+
+
+def test_catalogue_pages_follow_the_template():
+    """Every mechanism page must open on its claim and carry the same five sections in order.
+
+    A catalogue page is trustworthy skimming material only if its shape doesn't vary: a reader who
+    has learned that "What it costs" comes before "Go deeper" on one page should not have to re-learn
+    it on the next. The one-sentence claim in bold, directly under the title, is part of that same
+    promise: it's the page's answer before the reader commits to the section that argues for it.
+    """
+    violations = []
+    for page in MECHANISM_PAGES:
+        text = page.read_text()
+        rel = page.relative_to(REPO_ROOT)
+
+        headings = [line.strip() for line in text.splitlines() if line.startswith("## ")]
+        problem = _template_heading_violation(headings)
+        if problem:
+            violations.append(f"{rel}: {problem}")
+
+        paragraphs = text.split("\n\n", 2)
+        claim = paragraphs[1] if len(paragraphs) > 2 else ""
+        if not (claim.startswith("**") and claim.rstrip().endswith("**")):
+            violations.append(f"{rel}: missing the bold one-sentence claim above '## The idea'")
+
+    assert not violations, "catalogue pages diverging from the mechanism-page template:\n" + "\n".join(violations)

@@ -1136,6 +1136,19 @@ notice on startup.
   plugin seam from the outside: installing the package, declaring it on an agent, giving it its own
   config section, and gating its expensive tool, with [jobme](https://github.com/saxman/jobme) as the
   worked example throughout.
+- **A "How agents work" catalogue** teaches the mechanisms an agentic system is made of: each page
+  explains one in general terms first, then a transcript captured from a real run against Kokua, then
+  the code that produced it. Six of the section's thirteen planned pages exist:
+  [Get it running](https://saxman.info/kokua/how-agents-work/get-it-running/),
+  [The turn loop](https://saxman.info/kokua/how-agents-work/the-turn-loop/),
+  [Tool calling](https://saxman.info/kokua/how-agents-work/tool-calling/),
+  [Capability is declared](https://saxman.info/kokua/how-agents-work/capability-is-declared/),
+  [Context and memory](https://saxman.info/kokua/how-agents-work/context-and-memory/), and
+  [Delegation](https://saxman.info/kokua/how-agents-work/delegation/); the
+  [section index](https://saxman.info/kokua/how-agents-work/) names the rest.
+  `tests/test_docs.py::test_catalogue_pages_follow_the_template` holds every mechanism page to the same
+  five `##` sections in the same order, so a page that drops or reorders one fails the suite instead of
+  drifting unnoticed.
 - **Documentation site** at [saxman.info/kokua](https://saxman.info/kokua/), built from `docs/` with
   mkdocs-material and published by `.github/workflows/docs.yml` on every push to main. The build is
   strict: a broken internal link, or a page missing from `mkdocs.yml`'s `nav`, fails CI.

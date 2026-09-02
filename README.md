@@ -271,6 +271,10 @@ The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core
 
 ### Kokua
 
+- 🧭 [How agents work](https://saxman.info/kokua/how-agents-work/): the mechanisms an agentic system is
+  made of, each shown happening in a real captured run against Kokua before the code that did it: the
+  turn loop, tool calling, why capability is declared rather than defaulted, context and memory across
+  calls, and delegating a subtask to a sub-agent.
 - 🌐 [Documentation site](https://saxman.info/kokua/): everything below, searchable and cross-linked.
 - 📘 [How-to guides](docs/how-to/index.md): [set up a toolset](docs/how-to/set-up-toolsets.md) (the namespace, declaring an agent, writing a toolset) · [add a skill](docs/how-to/add-skills.md) · [add an MCP service](docs/how-to/add-mcp-services.md) · [back up to GitHub](docs/how-to/back-up-to-github.md) · [export a conversation](docs/how-to/export-a-conversation.md).
 - 💡 [Design principles](docs/explanation/design-principles.md): why Kokua exists, and the six principles that serve it, each with the code that backs it and the patterns it excludes.
