@@ -122,3 +122,18 @@ Decide as one change: adopt with an explicit `[tool.ruff.lint] select`, apply th
 commit that does nothing else, and either fix or `noqa`-with-a-reason the judgment calls. Raising the
 pin without that is how a linter upgrade turns into an unreviewed diff across the tree.
 
+
+## 12. Give a scheduled task its own conversation in the terminal
+`TurnRunner._resolve_target` runs a firing in the *viewed* conversation on any channel whose
+`supports_conversations` is false, which is every channel but the web page. Its original reason was
+that a terminal user could not reach a conversation they could not see; `/conversations` and `/switch`
+ended that, so the flag is now stricter than it needs to be and a scheduled run still lands in
+whatever the user is reading.
+
+Flipping it is more than the flag. A firing minted into its own conversation has to be announced (the
+terminal has no sidebar to notice it appear), `/stop` reaches only the viewed conversation so a firing
+elsewhere becomes unstoppable from the prompt, and nothing mutes a background turn's frames on a
+channel that prints as it goes, so the run would print into the reader's conversation regardless of
+which one owns it. Decide those three together, or leave the fallback and the flag honest about why.
+Related: a `/switch` during a firing already points `/stop` at the wrong conversation, noted under
+invariant 7 in `core/turns.py`.

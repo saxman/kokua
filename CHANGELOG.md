@@ -51,8 +51,10 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer
   needed to keep a terminal user from being stuck. Switching still never cancels a running turn, and
   since the terminal cannot mute one the way the page does, the reply says so and says that `/stop`
   now reaches the conversation you moved to. A switch made by the core repaints a front end that draws
-  a whole conversation at once, through the new `ChannelUI.show_history`, so the commands work typed
-  into the web composer too.
+  a whole conversation at once, through the new `ChannelUI.show_history` and `ChannelUI.show_working`,
+  so the commands work typed into the web composer too: the history frame resets the page's working
+  indicator as it repaints, so the pair has to travel together or a switch into a live turn would
+  report it idle.
 - **Per-conversation agents.** Each conversation owns its AIMU `SkillAgent` and model client, built
   lazily and held in a bounded LRU registry (`agent_cache_cap`, default 8). Memory and documents stay
   shared across conversations.

@@ -9,6 +9,7 @@ import pytest
 from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import Session
 
+from kokua.core import conversation_commands
 from kokua.core.assistant import Assistant
 from kokua.core.build import ModelClientError
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
@@ -154,16 +155,23 @@ async def test_switching_away_leaves_a_running_turn_running(tmp_path):
     assert any(m.get("content") == "long task" for m in assistant._store.get(first).messages)
 
 
+class _ViewChannel(_ConvCapturingChannel):
+    """A channel with a whole-conversation view to repaint, like the web page's."""
+
+    def __init__(self):
+        super().__init__()
+        self.histories: list[list[dict]] = []
+        self.working: list[bool] = []
+        self.active_conversation_id = None
+
+    async def send_history(self, messages, metadata=None):
+        self.histories.append(messages)
+
+    async def send_working(self, active: bool) -> None:
+        self.working.append(active)
+
+
 async def test_a_switch_repaints_a_channel_that_draws_a_whole_conversation(tmp_path):
-    class _ViewChannel(_ConvCapturingChannel):
-        def __init__(self):
-            super().__init__()
-            self.histories: list[list[dict]] = []
-            self.active_conversation_id = None
-
-        async def send_history(self, messages, metadata=None):
-            self.histories.append(messages)
-
     channel = _ViewChannel()
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
     channel._inbound = ["/new"]
@@ -173,6 +181,44 @@ async def test_a_switch_repaints_a_channel_that_draws_a_whole_conversation(tmp_p
     assert channel.histories == [[]]  # the new, empty conversation
     marked_active = [item["id"] for item in channel.conversation_pushes[-1] if item["active"]]
     assert marked_active == [assistant._active_id]
+    assert channel.working == [False]  # nothing running: the indicator history frames reset stays off
+
+
+async def test_switching_into_a_running_turn_relights_the_working_indicator(tmp_path):
+    """`show_history` clears the indicator as it repaints, so the switch has to answer for it."""
+    started = asyncio.Event()
+
+    class _Channel(_ViewChannel):
+        """Starts a turn, leaves it for a new conversation, then goes back to it."""
+
+        switch_target = ""  # only knowable once the assistant has adopted its first conversation
+
+        async def receive(self):
+            yield ChannelMessage(text="long task", channel="fake")
+            await started.wait()
+            yield ChannelMessage(text="/new", channel="fake")
+            yield ChannelMessage(text=f"/switch {self.switch_target}", channel="fake")
+
+    client = BlockingModelClient("finished")
+    channel = _Channel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    running_id = assistant._active_id
+    channel.switch_target = running_id[:6]
+
+    async def watch():
+        await client.started.wait()
+        started.set()
+
+    try:
+        await asyncio.gather(_serve(assistant), watch())
+
+        assert assistant._active_id == running_id
+        assert channel.working[-1] is True  # the turn it switched back into is still in flight
+    finally:
+        client.release.set()
+        info = assistant._tracker.get(running_id)
+        if info is not None:
+            await asyncio.gather(info.handle.task, return_exceptions=True)
 
 
 async def test_a_failure_to_build_the_new_agent_is_reported_not_raised(tmp_path):
@@ -214,3 +260,56 @@ async def test_the_commands_never_reach_the_model(tmp_path, command):
     await _serve(assistant)
 
     assert "a reply nobody asked for" not in _transcript(channel)
+
+
+async def test_new_abandons_a_waiting_approval_rather_than_leaving_it_hanging(tmp_path):
+    """Leaving a conversation answers the question it was asking, the way the sidebar's New does.
+
+    Without it the tool call's waiter would never be resolved: the turn it belongs to keeps running in
+    the background, where nothing will prompt for it again.
+    """
+    from kokua.channels.web import streaming_conversation
+
+    channel = FakeChannel(["/new"])
+    assistant = await Assistant.create(
+        _config(tmp_path, confirm_tools=["add_skill_script"]), channel, client=MockAsyncModelClient([])
+    )
+    token = streaming_conversation.set(assistant._active_id)
+    try:
+        asking = asyncio.create_task(assistant._approve("add_skill_script", {"skill_name": "x"}))
+        await asyncio.sleep(0)  # let it register as pending before the loop reads "/new"
+        assert assistant._human.approval.pending
+
+        await _serve(assistant)
+
+        # Checked before the await, so a branch that forgot to abandon fails here rather than hanging
+        # this test on a future nothing will ever resolve.
+        assert not assistant._human.approval.pending
+        assert await asking is False  # denied, not left waiting
+    finally:
+        asking.cancel()
+        streaming_conversation.reset(token)
+
+
+async def test_switch_to_the_conversation_already_in_view_says_so(tmp_path):
+    channel = FakeChannel([])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    here = assistant._active_id
+    channel._inbound = [f"/switch {here[:6]}"]
+
+    await _serve(assistant)
+
+    assert assistant._active_id == here
+    assert "Already in" in _transcript(channel)
+
+
+def test_the_left_running_notice_reads_differently_on_a_channel_that_mutes():
+    """The one sentence that differs between front ends, and the two consequences that do not."""
+    muting = conversation_commands.left_running("Trip planning", "a" * 32, muted=True)
+    printing = conversation_commands.left_running("Trip planning", "a" * 32, muted=False)
+
+    assert "no longer draws here" in muting
+    assert "still prints here" in printing
+    for notice in (muting, printing):
+        assert "/switch aaaaaa" in notice  # how to get back to the turn you left
+        assert "denied" in notice  # its gated tool calls auto-deny while nobody is watching

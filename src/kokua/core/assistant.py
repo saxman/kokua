@@ -63,11 +63,10 @@ def _slash_command(raw: str) -> tuple[str, str]:
     """Read a typed message as (command word, everything after it), both empty when it is not a command.
 
     One split serves every command the serve loop dispatches, rather than each re-slicing `raw` by
-    `len(word)`: that
-    used to assume exactly one character (the slash) precedes the word, but split() (unlike
-    partition(" ")) also skips any whitespace *before* the word, so a length-based slice undercounted
-    whenever a user typed more than one space after the slash, e.g. "/  plan hello" ran the workflow on
-    "an hello".
+    `len(word)`: that used to assume exactly one character (the slash) precedes the word, but split()
+    (unlike partition(" ")) also skips any whitespace *before* the word, so a length-based slice
+    undercounted whenever a user typed more than one space after the slash, e.g. "/  plan hello" ran
+    the workflow on "an hello".
     """
     stripped = raw.strip()
     if not stripped.startswith("/"):
@@ -564,7 +563,12 @@ class Assistant:
                 # The conversation commands sit above the pending-answer check for the reason `/stop`
                 # does: someone who types `/new` while a question is on screen is asking to leave that
                 # question behind, and switching abandons it (`HumanGate.abandon_all`) exactly as the
-                # web UI's sidebar does.
+                # web UI's sidebar does. Being above the workflow lookup too means these three words are
+                # reserved: a toolset shipping a workflow whose command is `new`, `switch`, or
+                # `conversations` would never see it dispatched. Left as a documented shadow rather than
+                # a startup error because the three names Kokua reserves are all it can promise about a
+                # namespace every installed toolset writes into, so the check would refuse an install
+                # over a collision the user could only fix by uninstalling.
                 if word in conversation_commands.COMMANDS:
                     await self._run_conversation_command(word, argument)
                     continue
@@ -679,10 +683,11 @@ class Assistant:
         One list read serves all three: the notice needs to know whether the conversation being left
         has a turn in flight, and the sidebar needs the same list with its active marker moved.
 
-        The two frames are what the *core* owes a front end whose view it just moved, not a copy of
-        everything a front end does for itself on a switch: the web page also lights its working
-        indicator when it switches into a conversation with a turn in flight, and after a typed command
-        it learns that from the running marker on the list pushed here instead.
+        The three frames mirror what a front end sends itself when its own controls move the view
+        (`frontends/web.py`'s `_sync_view`), because a switch the core made is one the front end did not
+        initiate. The working indicator is not optional among them: `show_history` clears it as it
+        repaints, so leaving it out would have a typed `/switch` into a conversation with a live turn
+        report it as idle.
         """
         items = self.list_conversations()
         left = next((item for item in items if item["id"] == leaving), None)
@@ -693,6 +698,7 @@ class Assistant:
         await self._ui.send(headline)
         await self._ui.push_conversations(items)
         await self._ui.show_history(self.history, self.history_metadata)
+        await self._ui.show_working(self.turn_running(self._active_id))
 
     def _stop_active_turn(self) -> None:
         """Cancel the viewed conversation's tracked turn (if any); the /stop branch's helper."""

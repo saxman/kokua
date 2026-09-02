@@ -50,6 +50,7 @@ class ChannelUI:
         self._begin_catch_up = getattr(channel, "begin_catch_up", None)
         self._end_catch_up = getattr(channel, "end_catch_up", None)
         self._history = getattr(channel, "send_history", None)
+        self._working = getattr(channel, "send_working", None)
 
     @property
     def channel(self) -> Channel:
@@ -111,6 +112,17 @@ class ChannelUI:
         """
         if self._history is not None:
             await self._history(messages, metadata)
+
+    async def show_working(self, active: bool) -> None:
+        """Say whether the conversation now in view has a turn already running behind it.
+
+        Paired with :meth:`show_history`, which resets the indicator as it repaints: without this
+        call right behind it, a switch into a conversation with a live turn leaves the page looking
+        idle until that turn's next frame lands. A channel that draws no such indicator has nothing
+        to reset either, so the pair is a no-op together.
+        """
+        if self._working is not None:
+            await self._working(active)
 
     async def notify(self, text: str) -> None:
         """Report a background turn's completion. Skipped by a channel that cannot background a turn."""

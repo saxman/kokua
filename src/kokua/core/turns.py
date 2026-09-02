@@ -27,8 +27,14 @@ Every rule here was learned from a bug. Read them before changing anything in th
 
 3. **``streaming_conversation`` is set for every turn, unconditionally.** Two readers depend on it:
    the web channel mutes frames from a turn that isn't the conversation being viewed, and the
-   approval gate auto-denies a gated tool whose turn isn't being watched. Even the CLI channel needs
-   it set, so that its single conversation reads as foreground rather than as a background turn.
+   approval gate auto-denies a gated tool whose turn isn't being watched. Every channel needs it
+   set, the terminal included, so that a turn on the conversation in view reads as foreground rather
+   than as a background turn. Note what the terminal's conversation commands (``/new``, ``/switch``)
+   made reachable there: a CLI turn the user switched away from now auto-denies a gated tool exactly as
+   a web one does, since ``HumanGate.approve`` compares the turn's conversation against the viewed one
+   and no longer against the only one there was. The first reader behaves differently between the two,
+   and that asymmetry is deliberate: the terminal has no second place to put a background turn's frames,
+   so it keeps printing them where the user now is, which is what the command's own reply says.
    ``subagent_events`` is installed the same way, for the same reason on the recording side: it must
    be set before a turn's first ``await`` and reset only in the ``finally`` alongside
    ``streaming_conversation``, or a spawn racing the set/reset window would report into a stale list
@@ -103,6 +109,11 @@ Every rule here was learned from a bug. Read them before changing anything in th
    takes the gate, so a message sent during a firing replaces the firing's entry, and the stop that
    message queued behind is the one a stop then reaches. Both follow from one entry per conversation,
    which is what keeps a finished turn from ever cancelling a live one.
+   The terminal's conversation commands add a second way to lose a firing's stop there, and it is a
+   known gap rather than a covered case: ``/switch`` mid-firing points ``/stop`` at the conversation
+   moved to, leaving the firing running and still printing into the one it started in. Both follow from
+   a channel whose ``supports_conversations`` is false sharing the viewed conversation with a scheduled
+   run, which is the flag ``_resolve_target`` reads and the follow-up in TODO 12 is about.
 
    Shutdown is the one reader that must not follow that rule, because it closes the session store.
    Replacing an entry does not end the turn it replaced, so the per-conversation entries are not the
@@ -564,8 +575,13 @@ class TurnRunner:
     ) -> ProactiveTarget:
         """Mint the conversation this firing runs in, or fall back to the viewed one.
 
-        The fallback is for a channel with no conversation list: the user would have no way to reach a
-        conversation they cannot see.
+        The fallback is for a channel that pushes no conversation list. That used to mean the terminal
+        could not reach a conversation it was not already in; ``/conversations`` and ``/switch`` ended
+        that, so the fallback now rests on the narrower fact that such a channel announces a new
+        conversation with nothing but a sentence, and a firing given its own would print into whatever
+        the user is reading anyway. Flipping the flag is real work rather than a one-line change (``/stop``
+        reaches only the viewed conversation, and a firing's frames are not muted there), and it is
+        deliberate follow-up: see TODO 12.
         """
         if not self._ui.supports_conversations:
             return ProactiveTarget(conversation_id=self._book.active_id, echo_reply=True, task_id=task_id)

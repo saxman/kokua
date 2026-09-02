@@ -77,11 +77,15 @@ def already_here(title: str, conversation_id: str) -> str:
 def left_running(title: str, conversation_id: str, *, muted: bool) -> str:
     """Appended when the conversation just left still has a turn in flight.
 
-    Worth a sentence because two things change silently at that moment: the turn keeps running and
+    Worth a sentence because three things change silently at that moment: the turn keeps running and
     persists to the conversation it started in (switching never cancels one), and ``/stop`` now reaches
     the conversation in view instead of that one. ``muted`` is what the channel does with the turn's
     output, which differs between front ends: a channel that tracks the viewed conversation stops
     drawing it, and one that does not (the terminal) keeps printing it here.
+
+    The third consequence is the one a user cannot undo, so it is stated rather than left to be
+    discovered: a backgrounded turn's gated tool calls auto-deny, because ``HumanGate.approve`` will not
+    prompt for a turn nobody is watching (see invariant 3 in ``core/turns.py``).
     """
     fate = (
         "its output no longer draws here"
@@ -91,5 +95,6 @@ def left_running(title: str, conversation_id: str, *, muted: bool) -> str:
     return (
         f" A turn is still running in {title!r} ({short_id(conversation_id)}): it keeps going "
         f"and saves there, and {fate}. /stop now reaches this conversation, so stopping that one means "
-        f"/switch {short_id(conversation_id)} first."
+        f"/switch {short_id(conversation_id)} first, and until you do, a tool call it makes that needs "
+        f"your approval is denied rather than asked about."
     )

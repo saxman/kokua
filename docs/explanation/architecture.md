@@ -121,8 +121,9 @@ means. Two consequences follow from putting them here. They sit *above* the pend
 typing `/new` while an approval prompt is on screen leaves that question behind
 (`HumanGate.abandon_all`) exactly as clicking New does. And because a switch made by the core is one
 a front end did not initiate, the core repaints: `ChannelUI.push_conversations` refreshes a sidebar and
-`ChannelUI.show_history` replaces what a page is displaying, both no-ops on a channel that prints as it
-goes. What the terminal gets instead is a sentence, because muting is the one part of a background turn
+`ChannelUI.show_history` replaces what a page is displaying, with `ChannelUI.show_working` behind it
+because that repaint clears the page's "a turn is already running here" indicator, all three no-ops on
+a channel that prints as it goes. What the terminal gets instead is a sentence, because muting is the one part of a background turn
 it cannot do: `ChannelUI.mutes_background_turns` is false there, so the reply to `/new` says the turn
 you left keeps printing here and that `/stop` now reaches the conversation you moved to.
 The wording of all three replies lives in `core/conversation_commands.py`, for the reason
