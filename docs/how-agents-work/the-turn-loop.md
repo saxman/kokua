@@ -24,10 +24,10 @@ indefinitely, or return a reply that neither answers nor asks for anything. None
 from a single round. They are patterns, and by the time the pattern is clear you have already paid for
 it.
 
-That is why every serious implementation imposes a cap, and why the cap counts model calls rather than
-seconds. A loop like this is never hung: it is making progress it cannot use, as fast as the hardware
-allows. A timeout would cut off a slow, honest, four-round answer and let a fast, useless one run
-longer.
+That is why the caller imposes a cap of its own, and why the cap is usually a count of model calls
+rather than a clock. A loop like this is never hung: it is making progress it cannot use, as fast as
+the hardware allows. A timeout would cut off a slow, honest, four-round answer and let a fast,
+useless one run longer.
 
 The subtle part is what happens when the cap is hit, because "stop and return nothing" converts a slow
 answer into no answer at all, which is the worse of the two failures. The better move is to make one
@@ -42,8 +42,8 @@ do with them. That is [Tool calling](tool-calling.md).
 
 ## Watch it
 
-One question, asked at the terminal, that took three rounds of the loop to answer. Quoted exactly as it
-was printed ([`qwen3.5:9b` on Ollama](get-it-running.md), Kokua commit `34831a1`):
+One question, asked at the terminal, that took three visible rounds of the loop to answer. Quoted
+exactly as it was printed ([`qwen3.5:9b` on Ollama](get-it-running.md), Kokua commit `34831a1`):
 
 ```text
 [notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
@@ -62,6 +62,8 @@ The product of 4817 × 293 is **1,411,381**.
 ```
 
 There are three `[thinking]` blocks, and that is the count that matters: each one begins a model call.
+Three is a floor rather than an exact total, since a call that emitted neither reasoning nor a tool
+request would leave no trace here at all.
 
 1. **Round one.** The model is handed the question and the list of tools it holds. It reasons about
    which of them could do arithmetic, decides it cannot tell from the list alone, and asks for
@@ -150,26 +152,31 @@ one as a background task and immediately goes back to reading input:
 
 That single line is what makes `/stop` possible. The channel is still reading while the loop runs, so
 `/stop` is read, matched, and turned into `handle.cancel()` on a turn that is mid-round, which is
-[AIMU's `RunHandle`](https://saxman.info/aimu/how-to/cancel-a-run/) doing the work. Invariant 5 then
-requires that the cancelled turn still record and persist what it produced before it stopped, in every
-branch, so stopping a turn costs you the rest of the answer and not the part you already read.
+[AIMU's `RunHandle`](https://saxman.info/aimu/how-to/cancel-a-run/) doing the work. What you already
+read is not lost when that lands: the agent snapshots the partial turn in a `finally` of its own, and
+`turns.py`'s cancelled branch persists that snapshot before returning, so stopping a turn costs you the
+rest of the answer and not the part that had already arrived. (Invariant 5, which the same branch also
+obeys, is about a different thing: recording the turn's sub-agent events *before* the "(stopped)"
+notice, since a second cancellation racing that send would propagate straight past a record placed
+after it.)
 
 ## What it costs
 
 **Rounds, not words.** Every round is a full request carrying the entire conversation so far: the system
 message, every previous message, every tool result, and the schema of every tool the agent holds. The
 turn above sent three of those and got back one sentence. Doubling the length of an answer is close to
-free; adding one more round is not. This is the single biggest reason an agent feels expensive next to a
+free; adding one more round is not. It is why the same question costs more of an agent than of a
 chatbot, and it is also why the [next page's](tool-calling.md) point about tool schemas matters: they
 are re-sent every round too.
 
 **The degenerate turn.** The named failure is a model that keeps calling tools without converging.
 Kokua does not implement the defence itself; AIMU's `Agent` does, in three graded steps. A turn that
-comes back with neither content nor a tool call gets one continuation nudge rather than being treated as
-an answer. Exhausting the cap with a tool call still pending triggers a single forced wrap-up call with
-tools disabled, which is the "answer from what you have" move described above, and it is deliberately
-not counted against the cap. If even the wrap-up produces nothing, AIMU raises `DegenerateTurnError`
-instead of returning an empty string, so the failure reaches you as a failure.
+comes back with neither content nor a tool call gets a continuation nudge rather than being treated
+as an answer, and gets one for each such turn, bounded by the same cap. Exhausting the cap with a
+tool call still pending triggers a single forced wrap-up call with tools disabled, which is the
+"answer from what you have" move described above, and it is deliberately not counted against the
+cap. If even the wrap-up produces nothing, AIMU raises `DegenerateTurnError` instead of returning an
+empty string, so the failure reaches you as a failure.
 
 **The cap you are running.** AIMU's default is ten model calls per turn, and Kokua does not override it
 for the entry agent, so ten is what the transcript above was running under (it used three). The one

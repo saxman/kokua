@@ -67,11 +67,14 @@ one. `get_current_date_and_time(timezone='Asia/Tokyo')` is a rendering, not a wi
 emitted a name and an arguments object, and the terminal channel formats it as a call for you to read.
 No time has been looked up at this point.
 
-Notice what the reasoning above it settles first. The model does not decide "Tokyo"; it decides
-`"Asia/Tokyo"`, and it says so explicitly: `Tokyo's IANA timezone name is "Asia/Tokyo"`. That is the
-schema doing its job. The parameter's description, written in the tool's docstring, asks for an IANA
-name and offers `"Asia/Tokyo"` as its example, and the model is reading that description as it forms the
-argument. Change that one line of prose and you change what arrives here.
+Notice what the reasoning above it settles before the request goes out. The model is not asking for
+"the time in Tokyo". It is filling in a parameter called `timezone`, and it commits to a value for it,
+`"Asia/Tokyo"`, saying so explicitly: `Tokyo's IANA timezone name is "Asia/Tokyo"`. That parameter
+exists, with that name and that type, only because the tool's signature and docstring said so. A model
+cannot supply an argument the schema does not offer, and this transcript is where you can watch that
+constraint doing its work. Whether the docstring's own `"Asia/Tokyo"` example is *why* it chose the IANA spelling
+over the city name is not something one transcript can tell you: that is a spelling a model may well
+reach for unprompted.
 
 **The dispatch** is invisible in this transcript, and that is not a gap in the capture. The terminal
 prints tool requests and never tool results. Between the two `[thinking]` blocks, code outside the model
@@ -122,6 +125,15 @@ question in front of it. The `return` is a string because the result is going in
 message, so it is written to be read: it tells the model the image was already shown, which stops it
 from trying to show it again.
 
+That excerpt also contains a broken promise, which is worth pointing at on a page arguing that a
+docstring is one. The second paragraph tells the model that without `AIMU_IMAGE_MODEL` the tool
+"reports that generation is unavailable". It never does. `build()` returns an empty list when that
+variable is unset, so the tool is not in the model's list at all and there is nothing there to report
+anything. The runtime path that does return that sentence fires only when the variable *is* set and the
+client still cannot be built, where the remedy it goes on to name is already done. No test catches this,
+because nothing mechanical can: the sentence is well-formed, accurate-sounding, and describes a state
+the model can never be in.
+
 The parsing is [AIMU's `@tool` decorator](https://saxman.info/aimu/how-to/add-custom-tool/), which
 inspects the signature and the Google-style docstring at import time and attaches the resulting schema
 to the function. Nothing in Kokua writes a schema by hand.
@@ -130,15 +142,19 @@ to the function. Nothing in Kokua writes a schema by hand.
 [`registry/registry.py`](https://github.com/saxman/kokua/blob/main/src/kokua/registry/registry.py) keeps
 one flat namespace of named capabilities; `build_tools` concatenates the functions from the toolsets an
 agent declared, and `select` raises on a name no toolset provides rather than quietly handing the agent
-a shorter list. So a tool exists for a given agent only because a table in `config.toml` named the
-toolset it lives in, which is *Capability is declared*, later in this catalogue.
+a shorter list. So a tool exists for a given agent because a table in `config.toml` named the toolset
+it lives in. Two of the entry agent's own tools arrive by another route, and both are named out loud
+rather than glossed: `spawn_subagent` is earned by a non-empty `delegates_to` rather than by any
+toolset, and `activate_skill` plus one tool per installed skill script are injected by AIMU's
+`SkillAgent` whether the table asked for them or not. [Capability is
+declared](capability-is-declared.md) is that rule, and those exceptions, in full.
 
 One thing the transcript above makes unavoidable: `get_current_date_and_time` is not in this repository.
 It is AIMU's. Kokua's entire [`time`
 toolset](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/time.py) is one `Toolset`
 declaration handing AIMU's clock group a name an agent can put in its `tools` list, and it defines no
-tool of its own. The docstring the model was reading when it chose `"Asia/Tokyo"` lives in
-`aimu.tools.builtin`:
+tool of its own. The docstring behind that `timezone` parameter, the one that produced the schema the
+model filled in, lives in `aimu.tools.builtin`:
 
 ```python
     """Returns the current date and time, with its UTC offset and timezone.
@@ -149,8 +165,9 @@ tool of its own. The docstring the model was reading when it chose `"Asia/Tokyo"
     """
 ```
 
-That is the general case, not an exception: roughly half the tools the shipped assistant holds come from
-AIMU rather than from Kokua. [How an agent's tools
+That is the general case, not an exception. Twelve of the 31 tools the shipped assistant holds are
+AIMU's rather than Kokua's, more than a third, and more once skills are installed, since AIMU injects a
+tool per skill script on top of that set. [How an agent's tools
 resolve](../explanation/architecture.md#how-an-agents-tools-resolve) carries the full inventory, and a
 test pins it as an exact set, so adding a tool to a declared toolset fails the suite until that table is
 updated too.
@@ -160,9 +177,9 @@ updated too.
 **A vague docstring is a bug, and it does not look like one.** The docstring is the only thing the model
 has when it decides whether your tool is the right one, so an inaccurate description produces an agent
 that calls the wrong tool, or calls the right one with the wrong argument, and there is no exception and
-no failing test. It surfaces as the model seeming stupid. The Tokyo transcript is the good case, where
-one example in a parameter description is visibly the reason the model produced an IANA name instead of
-a city. The bad case, seen while capturing for these pages: asked to roll dice, the model inventoried
+no failing test. It surfaces as the model seeming stupid. The Tokyo transcript is the benign
+case: the description was accurate, and what came back was usable on the first try. The bad case, seen
+while capturing for these pages: asked to roll dice, the model inventoried
 its tools, concluded from their descriptions that none of them could do it, and asked the user how to
 proceed rather than reaching for the Python interpreter it was holding the whole time. Nothing errored.
 The tools were simply not described in a way that connected to the request.
@@ -194,7 +211,7 @@ mechanism in full.
 - [Set up a toolset](../how-to/set-up-toolsets.md): writing one of these, end to end, including the
   `pyproject.toml` entry that registers it.
 - [How an agent's tools resolve](../explanation/architecture.md#how-an-agents-tools-resolve): the full
-  inventory of what the shipped assistant holds, and which half of it comes from AIMU.
+  inventory of what the shipped assistant holds, and which twelve of the thirty-one come from AIMU.
 - AIMU: [Add a custom tool](https://saxman.info/aimu/how-to/add-custom-tool/) for the `@tool` decorator,
   [the tools API reference](https://saxman.info/aimu/reference/api/tools/) for what the decorator
   supports, and [Use MCP tools](https://saxman.info/aimu/how-to/use-mcp-tools/) for tools that live in

@@ -334,8 +334,9 @@ unconfigured, which is what `email-report` did on the entry agent until the seco
 
 All 31 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
 `config.example.toml` declares, not a fixed list: a different `tools` line produces a different set.
-Roughly half come from AIMU and so are not greppable in this repository, which is why this table exists
-rather than a naming convention alone:
+Twelve of the 31 come from AIMU, more than a third, and so are not greppable in this repository (more
+once skills are installed, since AIMU injects a tool per skill script on top of this set), which is why
+this table exists rather than a naming convention alone:
 
 | Tools | Built by | Declared as |
 |---|---|---|
