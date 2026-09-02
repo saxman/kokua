@@ -1480,75 +1480,73 @@ something is worth keeping, prompted by an instruction in its system message. "R
 therefore a request, not a command. And the retrieval is usually a similarity search, so recall depends
 on the words the model happens to search with resembling the words it happened to store.</p>
 <h2 id="watch-it">Watch it<a class="headerlink" href="#watch-it" title="Permanent link">&para;</a></h2>
-<p>Two runs. In the first, a fact is stored. In the second, a different conversation with no history at
-all recalls it. Quoted exactly as the terminal printed them (<a href="../get-it-running/"><code>qwen3.5:9b</code> on
-Ollama</a>, Kokua commit <code>34831a1</code>).</p>
+<p>One session, two conversations. A fact is stored, <code>/new</code> starts a conversation with no history at
+all, and the fact comes back. Quoted exactly as the terminal printed it (<a href="../get-it-running/"><code>qwen3.5:9b</code> on
+Ollama</a>, Kokua commit <code>934dd02</code>, the change that added <code>/new</code>).</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>[notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>&gt; Remember that my favourite colour is teal.
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>&gt; 
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>[thinking] The user is sharing a personal preference - their favorite colour is teal. This is something worth remembering in memory for later retrieval when it might be helpful. I should call store_memory to save this fact.
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>[tool] store_memory(content="User's favourite colour is teal.")
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>[thinking] I've stored that information about the user's favorite color being teal.The user asked me to remember their favourite colour is teal, and I've successfully stored that information in memory. The task is complete - I should confirm this to the user.
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>I've remembered that your favourite colour is teal.
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>[thinking] The user wants me to remember that their favorite color is teal. This is a durable fact about them that I should store in memory using the store_memory function.
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>[tool] store_memory(content='My favourite colour is teal.')
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>Got it! Teal is your favorite colour. 😊
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>/new
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>Started a new conversation (46a088). It is empty: nothing earlier is in view.
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>&gt; What is my favourite colour?
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>&gt; 
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>[thinking] The user is asking about their favourite colour. I should check if this information has been stored in memory before, as that would be the most reliable source for personal preferences like this.
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>Let me search my memories to see if there's any information about their favourite colour.
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>[tool] search_memories(query='favourite colour', n_results=5)
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>[thinking] Your favorite colour is **teal**.The user asked about their favourite colour, and I found it in memory. My search returned that their favourite colour is teal. Now I can provide the final answer directly without needing any more tools.
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>Your favourite colour is teal.
 </span></code></pre></div>
-<p><strong>Between the two runs, plainly.</strong> This is not a sequence you can type. Kokua's terminal front end has
-no <code>/new</code> command: starting a fresh conversation is an action in the web UI's sidebar, and a <code>/new</code>
-typed at the prompt is sent to the model as an ordinary chat message in the same conversation.
-Restarting the process does not help either, because Kokua adopts the most recently updated
-conversation on launch and resumes it. So the capture was made by running two separate <code>kokua</code>
-processes and moving <code>$KOKUA_HOME/data/sessions.json</code> aside in between, leaving
-<code>$KOKUA_HOME/data/memory</code> untouched. The second process found no conversation to adopt and started
-genuinely empty.</p>
-<p>That intervention is not a workaround around the mechanism. It <em>is</em> the mechanism, in the crudest
+<p><strong>What <code>/new</code> does, plainly.</strong> It mints an empty session, points the active conversation at it, and
+builds that conversation its own agent: a fresh model client whose message list starts at zero. The
+first conversation is untouched and still there (<code>/conversations</code> lists it, <code>/switch &lt;id&gt;</code> goes back).
+What is emphatically <em>not</em> touched is <code>$KOKUA_HOME/data/memory</code>, and that gap is the whole point. The
+second turn's context is one user message. The teal is somewhere else.</p>
+<p>That separation is not staging arranged for the demonstration. It <em>is</em> the mechanism, in the crudest
 possible form: the conversation and the fact store are different files with different lifetimes, and
-deleting one leaves the other standing.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>&gt; What is my favourite colour?
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>&gt; 
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>[thinking] The user is asking about their favourite colour. This would be personal information that should be stored in memory if they've shared it before, or I should search my memories to see if it's been mentioned. Let me search for this information first.
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>[tool] search_memories(query='favourite colour', n_results=5)
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>[thinking] The memory shows that the user's favourite colour is teal.
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>Your favourite colour is teal.
-</span></code></pre></div>
-<p>The second run's reasoning is the evidence that this is real rather than a transcript trick. The model
+starting a new conversation leaves the other standing.</p>
+<p>The second turn's reasoning is the evidence that this is real rather than a transcript trick. The model
 does not answer from what it can see; it says it should check, calls <code>search_memories(query='favourite
 colour', n_results=5)</code>, and reads the answer out of the result. Its context contained one user message
 and nothing else. Everything else came back through a tool.</p>
-<p>Where the fact actually went, in a third run of the same first prompt against a fresh <code>$KOKUA_HOME</code>
-(hence the differently spelled <code>favorite</code>), followed by a plain shell session against that same
-directory. The parenthesised paragraph in the middle is the capture author's annotation, not terminal
+<p>Where the fact actually went, in a further run of the same first prompt against a fresh <code>$KOKUA_HOME</code>,
+followed by a plain shell session against that same directory. The stored sentence reads differently
+from the one above because the model writes it afresh each time, which is itself the judgment this page
+describes. The parenthesised paragraph in the middle is the capture author's annotation, not terminal
 output; everything else is:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>[notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>&gt; Remember that my favourite colour is teal.
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>&gt;
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>[thinking] The user wants me to remember that their favorite color is teal. This is a personal preference worth remembering using store_memory.
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>[tool] store_memory(content="User's favorite colour is teal.")
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>Got it! I've remembered that your favourite colour is teal. 🟦
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>$ find "$KOKUA_HOME/data/memory" -maxdepth 2
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>/tmp/kokua-docs-home/data/memory
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>/tmp/kokua-docs-home/data/memory/chroma.sqlite3
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b/data_level0.bin
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b/length.bin
-</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b/link_lists.bin
-</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b/header.bin
-</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>
-</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>$ cat "$KOKUA_HOME/data/memory/chroma.sqlite3"
-</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>SQLite format 3
-</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>(binary; not readable with cat: this is a Chroma vector store, not a plain text file. It is one
-</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>SQLite database of metadata plus an HNSW index directory of raw float vectors, per collection.
-</span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>The store_memory call above created the numbered directory and wrote a new row for the fact.)
-</span><span id="__span-2-22"><a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>
-</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>$ sqlite3 "$KOKUA_HOME/data/memory/chroma.sqlite3" \
-</span><span id="__span-2-24"><a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    "SELECT * FROM embedding_metadata WHERE string_value LIKE '%teal%';"
-</span><span id="__span-2-25"><a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>1|chroma:document|User's favorite colour is teal.|||
-</span><span id="__span-2-26"><a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>
-</span><span id="__span-2-27"><a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>$ sqlite3 "$KOKUA_HOME/data/memory/chroma.sqlite3" \
-</span><span id="__span-2-28"><a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>    "SELECT * FROM embedding_fulltext_search_content;"
-</span><span id="__span-2-29"><a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>1|User's favorite colour is teal.
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>&gt; Remember that my favourite colour is teal.
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>&gt;
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>[thinking] The user wants me to remember that their favorite color is teal. This is a personal preference worth remembering using store_memory.
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>[tool] store_memory(content="User's favorite colour is teal.")
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>Got it! I've remembered that your favourite colour is teal. 🟦
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>$ find "$KOKUA_HOME/data/memory" -maxdepth 2
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>/tmp/kokua-docs-home/data/memory
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>/tmp/kokua-docs-home/data/memory/chroma.sqlite3
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b/data_level0.bin
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b/length.bin
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b/link_lists.bin
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>/tmp/kokua-docs-home/data/memory/3402d950-ecf0-466c-9dea-6241cc59388b/header.bin
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>$ cat "$KOKUA_HOME/data/memory/chroma.sqlite3"
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>SQLite format 3
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>(binary; not readable with cat: this is a Chroma vector store, not a plain text file. It is one
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>SQLite database of metadata plus an HNSW index directory of raw float vectors, per collection.
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>The store_memory call above created the numbered directory and wrote a new row for the fact.)
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>$ sqlite3 "$KOKUA_HOME/data/memory/chroma.sqlite3" \
+</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>    "SELECT * FROM embedding_metadata WHERE string_value LIKE '%teal%';"
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>1|chroma:document|User's favorite colour is teal.|||
+</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>
+</span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>$ sqlite3 "$KOKUA_HOME/data/memory/chroma.sqlite3" \
+</span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>    "SELECT * FROM embedding_fulltext_search_content;"
+</span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>1|User's favorite colour is teal.
 </span></code></pre></div>
 <p><code>cat</code> fails because the fact is not in a text file. <code>$KOKUA_HOME/data/memory</code> is a Chroma vector store:
 one SQLite database holding the text and its metadata, plus a directory per collection of raw
@@ -1559,17 +1557,17 @@ model wrote it.</p>
 <p><strong>The conversation.</strong> Each conversation owns its own agent and its own model client, and the client
 holds the message list. Persisting a conversation is a snapshot of exactly that list, in
 <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/conversations.py"><code>core/conversations.py</code></a>:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>        <span class="n">session</span><span class="o">.</span><span class="n">messages</span> <span class="o">=</span> <span class="n">compact_message_images</span><span class="p">(</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>            <span class="p">[</span><span class="nb">dict</span><span class="p">(</span><span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">agent</span><span class="o">.</span><span class="n">model_client</span><span class="o">.</span><span class="n">messages</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">images_path</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>        <span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>        <span class="n">session</span><span class="o">.</span><span class="n">messages</span> <span class="o">=</span> <span class="n">compact_message_images</span><span class="p">(</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>            <span class="p">[</span><span class="nb">dict</span><span class="p">(</span><span class="n">message</span><span class="p">)</span> <span class="k">for</span> <span class="n">message</span> <span class="ow">in</span> <span class="n">agent</span><span class="o">.</span><span class="n">model_client</span><span class="o">.</span><span class="n">messages</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">images_path</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        <span class="p">)</span>
 </span></code></pre></div>
 <p>And rebuilding one, in
 <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/build.py"><code>core/build.py</code></a>, is the same move
 in reverse:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>        <span class="n">agent</span> <span class="o">=</span> <span class="n">wire_agent</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">entry_agent</span><span class="p">,</span> <span class="n">client</span><span class="o">=</span><span class="n">client_factory</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">))</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>        <span class="n">session</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">)</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        <span class="k">if</span> <span class="n">session</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">session</span><span class="o">.</span><span class="n">messages</span><span class="p">:</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>            <span class="n">agent</span><span class="o">.</span><span class="n">restore</span><span class="p">(</span><span class="n">expand_message_images</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">messages</span><span class="p">,</span> <span class="n">images_path</span><span class="p">))</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>        <span class="n">agent</span> <span class="o">=</span> <span class="n">wire_agent</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">entry_agent</span><span class="p">,</span> <span class="n">client</span><span class="o">=</span><span class="n">client_factory</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">))</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>        <span class="n">session</span> <span class="o">=</span> <span class="n">store</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">)</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>        <span class="k">if</span> <span class="n">session</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">session</span><span class="o">.</span><span class="n">messages</span><span class="p">:</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>            <span class="n">agent</span><span class="o">.</span><span class="n">restore</span><span class="p">(</span><span class="n">expand_message_images</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">messages</span><span class="p">,</span> <span class="n">images_path</span><span class="p">))</span>
 </span></code></pre></div>
 <p>That is the claim at the top of this page as running code. The agent cache evicts least-recently-used,
 and a restart discards everything in memory, so an agent you come back to is routinely a <em>fresh</em> client
@@ -1583,13 +1581,13 @@ restore, because a localhost URL is not something the provider can fetch. What t
 assembled for each request, never simply recalled.</p>
 <p><strong>The stores.</strong> Memory and documents are two toolsets that define no tools of their own. Each names an
 AIMU store and binds it to the one instance this process opened:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">TOOLSET</span> <span class="o">=</span> <span class="n">Toolset</span><span class="p">(</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">"memory"</span><span class="p">,</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">"Facts about the user, remembered across conversations."</span><span class="p">,</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">build</span><span class="o">=</span><span class="k">lambda</span> <span class="n">ctx</span><span class="p">:</span> <span class="n">make_memory_tools</span><span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">memory_store</span><span class="p">),</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">guidance</span><span class="o">=</span><span class="n">GUIDANCE</span><span class="p">,</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">cross_cutting</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">TOOLSET</span> <span class="o">=</span> <span class="n">Toolset</span><span class="p">(</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">"memory"</span><span class="p">,</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">"Facts about the user, remembered across conversations."</span><span class="p">,</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">build</span><span class="o">=</span><span class="k">lambda</span> <span class="n">ctx</span><span class="p">:</span> <span class="n">make_memory_tools</span><span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">state</span><span class="o">.</span><span class="n">memory_store</span><span class="p">),</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">guidance</span><span class="o">=</span><span class="n">GUIDANCE</span><span class="p">,</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">cross_cutting</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">)</span>
 </span></code></pre></div>
 <p>Three things travel with that declaration.
 <a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/memory.py"><code>toolsets/memory.py</code></a>'s
@@ -1635,7 +1633,7 @@ written. That last one only became visible everywhere recently: AIMU 0.27.0 made
 how a turn ended, so a truncation raises outside Ollama for the first time rather than returning a
 plausible-looking short answer.</p>
 <p><strong>The store has its own failure, and it is quieter.</strong> <code>search_memories</code> is a similarity search over
-stored strings. "What is my favourite colour" found "User's favourite colour is teal" because the words
+stored strings. "What is my favourite colour" found "My favourite colour is teal." because the words
 line up; "what should I paint the shed" has no such guarantee. A miss and a fact that was never stored
 produce the same output, <code>No relevant memories found.</code>, so you cannot tell from the answer which one
 happened. And storing is a judgment the model makes: it decided the colour was durable, and it decides

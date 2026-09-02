@@ -1759,6 +1759,24 @@ The pre-release development history is in the git log.</p>
 </ul>
 <h3 id="conversations-and-turns">Conversations and turns<a class="headerlink" href="#conversations-and-turns" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Conversation commands at the prompt: <code>/new</code>, <code>/conversations</code>, <code>/switch &lt;id&gt;</code>.</strong> The terminal used
+  to have no way to start a conversation or reach one it was not already in, which made every earlier
+  conversation unreachable from the CLI and left restarting the process resuming the most recent one.
+  The three commands are dispatched in <code>Assistant._serve_channel</code> beside <code>/stop</code> and <code>/diag</code>, not in
+  <code>channels/cli.py</code>, and call the same <code>new_conversation</code> / <code>select_conversation</code> the web UI's sidebar
+  buttons do, so every channel carrying typed text has them and there is one meaning of a switch. A
+  conversation is named by the leading fragment of its id that <code>/conversations</code> prints, the same
+  fragment <code>kokua export</code> accepts; an ambiguous one is refused with the full ids to choose between,
+  rather than opening the wrong conversation. Deleting, renaming, and pinning stay web-only: none is
+  needed to keep a terminal user from being stuck. Switching still never cancels a running turn, and
+  since the terminal cannot mute one the way the page does, the reply says so and says that <code>/stop</code>
+  now reaches the conversation you moved to. A switch made by the core repaints a front end that draws
+  a whole conversation at once, through the new <code>ChannelUI.show_history</code> and <code>ChannelUI.show_working</code>,
+  so the commands work typed into the web composer too. Those two frames and the notice between them
+  are ordered on purpose: a page replaces its whole transcript on a history frame and treats an
+  ordinary message as the end of a turn, so a notice on either side of that gap is lost or leaves a
+  live turn reading as idle. The three words are reserved from a workflow's command at startup, exactly
+  as <code>/stop</code> and <code>/diag</code> already were.</li>
 <li><strong>Per-conversation agents.</strong> Each conversation owns its AIMU <code>SkillAgent</code> and model client, built
   lazily and held in a bounded LRU registry (<code>agent_cache_cap</code>, default 8). Memory and documents stay
   shared across conversations.</li>
