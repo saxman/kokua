@@ -37,7 +37,7 @@ it cannot do the thing you installed last week. That failure looks like a bad mo
 missing line of configuration, which is why a system that declares capability needs a command that
 prints what is installed, separately from what is held.
 
-One last thing, and it is the part most write-ups skip. No real system's rule is absolute. The honest
+No real system's rule is absolute. The honest
 move is to name the exceptions out loud rather than to state the rule and quietly break it, and a
 defensible exception is one bounded in time, or one entered through the rule itself.
 
@@ -149,8 +149,9 @@ between them sounds like.
 The rule is written down, in exactly these words:
 [a capability is declared, never
 defaulted](../explanation/design-principles.md#corollary-a-capability-is-declared-never-defaulted). An
-agent's capability is what its `[agents.<name>].tools` table declares; no code path adds a tool the
-agent did not name, and no flag can disagree with a declaration.
+agent's capability is what its `[agents.<name>]` table declares: the `tools` list, plus the
+`spawn_subagent` that a non-empty `delegates_to` earns. No code path adds a capability no key in that
+table asked for, and no flag can disagree with a declaration.
 
 The table is one block in
 [`config.example.toml`](https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml), and
@@ -158,6 +159,7 @@ the transcript above is that block's behavior:
 
 ```toml
 [agents.assistant]
+...
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark"]
@@ -204,7 +206,16 @@ Its sibling asserts the other direction, and a third asserts that the entry-poin
 and `TOOLSET.name` all agree, since `register` keys on the last of those while the key feeds only a
 provenance label. A mismatch would otherwise register a real toolset under a name nobody wrote.
 
-**Two documented exceptions, named rather than glossed.**
+**Three documented exceptions, named rather than glossed.**
+
+*`delegates_to` grants a tool the `tools` list does not name.* A non-empty `delegates_to` earns the
+agent `spawn_subagent(agent_type, task)` over exactly the agents it names, built by
+`make_delegation_tool` in
+[`core/agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py). This is the
+mildest of the three, because it is still a declaration and only a different key: the assistant in the
+block above holds `spawn_subagent` because of its last line, not because of the line before it. It is
+listed here anyway, since a reader counting tools from the `tools` list alone will come up one short,
+and [Delegation](delegation.md) shows the tool being used by an agent whose `tools` never mentions it.
 
 *A composed sub-agent draws from the whole registry.* `compose_subagent`
 ([`toolsets/capabilities.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/capabilities.py))
@@ -246,8 +257,8 @@ notices a prompt that never comes. The quiet failure is confined to exactly one 
 never named.
 
 **The tax you keep paying.** The declared list is not free either. The shipped entry agent's eleven
-toolsets resolve to 31 tools, and every one of their descriptions is re-sent on every round of every
-turn. Declaring a capability you never use costs context on each call, which is the argument
+toolsets resolve to thirty tools, plus the `spawn_subagent` its `delegates_to` earns, and all 31
+descriptions are re-sent on every round of every turn. Declaring a capability you never use costs context on each call, which is the argument
 [Context and memory](context-and-memory.md) picks up.
 
 ## Go deeper

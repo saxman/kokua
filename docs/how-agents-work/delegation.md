@@ -83,13 +83,19 @@ like it could be handled by either sub-agent`. Neither role fits a request to su
 there is no "none of these" option, so it picked one and justified it afterwards. A role menu always
 returns a role.
 
-**And the answer that came back is the failure this page is about.** Read it again. A tool call
-`involves sending parameters such as location names, URLs, or search queries to execute functions like
-weather checks, web searches, or Wikipedia lookups`. That is generic training-data knowledge about
-assistants in general. The worker held `web`, `misc`, and `time`, knew nothing about Kokua, and was
-given eleven words of task with no context, so it answered from the only thing it had. The result is
-fluent, plausible, and about nothing in particular. The caller then relayed it verbatim, prefaced with
-`Here's the summary from the sub-agent:`, having no way to check it.
+**And the answer came back with nothing behind it but the model's own training.** The three sentences
+are correct, and it is worth saying so plainly: a tool call really is invoking a function from an
+available toolset, and weather checks and Wikipedia lookups really are examples of one. The worker held
+`web`, `misc`, and `time` and used none of them. It was handed eleven words of task and no context at
+all, and it answered from the only thing it had, which for this question was enough.
+
+Now notice what the caller could tell about that, which is nothing. `Here's the summary from the
+sub-agent:` relays a string. Nothing in what came back says whether anything was looked up, whether a
+tool ran, or what the answer rests on. This run is harmless because a question about a general concept
+needs no grounding, so a model answering from training data is exactly right. The interface does not
+know that. Ask a worker what a page says today, or what a file on this machine contains, and a model
+with no context still returns three fluent sentences in the same register, and the relay looks
+identical from here.
 
 It is also a task that never needed a sub-agent. A three-sentence summary is the case where the round
 trip costs more than the answer, and both of that trip's ends are visible above.
@@ -168,12 +174,14 @@ can never collide with an agent name, and every per-agent setting it asks for an
 
 ## What it costs
 
-**A vague delegation returns confident nonsense,** and the transcript above is the specimen. The worker
-cannot see what the caller knows, so everything the caller failed to write into the task string is
-absent, and a model with an under-specified task does not stop and ask. It answers from general
-knowledge in the register you requested. Three sentences, well formed, about nothing on this machine.
-The delegating model then has no basis for doubt and relays it. Where this matters, the fix is not to
-trust the relay harder but to add an independent check: Kokua's plan workflow uses a separate reviewer
+**A vague delegation buys a confident answer, grounded or not.** The worker cannot see what the caller
+knows, so anything the caller failed to write into the task string is simply absent, and a model handed
+an under-specified task does not stop and ask. It answers in the register you requested, from whatever
+it has. When what it has is enough, as in the transcript above, the answer is right and the shortfall
+costs nothing. When it is not, the reply does not change shape: same length, same fluency, same absence
+of hedging, and the delegating model has no basis for doubt, so it relays. The failure mode's defining
+property is that its good case and its bad case are indistinguishable at the interface, which is why
+the fix is not to trust the relay harder but to add an independent check: Kokua's plan workflow uses a separate reviewer
 agent ([`workflows/critics.py`](https://github.com/saxman/kokua/blob/main/src/kokua/workflows/critics.py))
 rather than asking the delegator to grade what came back.
 

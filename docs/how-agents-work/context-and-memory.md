@@ -89,7 +89,8 @@ and nothing else. Everything else came back through a tool.
 
 Where the fact actually went, in a third run of the same first prompt against a fresh `$KOKUA_HOME`
 (hence the differently spelled `favorite`), followed by a plain shell session against that same
-directory:
+directory. The bracketed paragraph in the middle is the capture author's annotation, not terminal
+output; everything else is:
 
 ```text
 [notice] This assistant can author and run Python/shell scripts with full access to this machine (no sandbox), and can connect to remote MCP servers and run whatever tools they expose. Only use it with a model, inputs, and MCP servers you trust.
