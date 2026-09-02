@@ -71,4 +71,5 @@ catalogue, opens that directory up; for now it is enough to know the assistant y
 to show you that is not sitting in a file on your own disk.
 
 That `[thinking]` block is your first look at the mechanism the next page in this catalogue takes
-apart: the turn loop. See the [section index](index.md) for what has landed so far.
+apart: [the turn loop](the-turn-loop.md). See the [section index](index.md) for what has landed so
+far.

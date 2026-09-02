@@ -109,6 +109,8 @@ nav:
   - How agents work:
       - how-agents-work/index.md
       - Get it running: how-agents-work/get-it-running.md
+      - The turn loop: how-agents-work/the-turn-loop.md
+      - Tool calling: how-agents-work/tool-calling.md
   - How-to:
       - how-to/index.md
       - Set up a toolset: how-to/set-up-toolsets.md

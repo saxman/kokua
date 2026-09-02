@@ -15,20 +15,22 @@ the choices it did about them.
 
 - [Get it running](get-it-running.md): from nothing to a running assistant you can watch. Read this
   first, whatever order you take the rest in.
+- [The turn loop](the-turn-loop.md): one turn is not one model call. What keeps it going, and what
+  stops it.
+- [Tool calling](tool-calling.md): the model emits a request; your code decides whether and how to run
+  it.
 
 The mechanism pages land one at a time rather than all at once, so this list says plainly which of the
-thirteen planned pages exist today. None yet: this is the first page in the section. Still to come, in
-the order a newcomer would want them:
+thirteen planned pages exist today. Two so far, both above. Still to come, in the order a newcomer
+would want them:
 
-1. The turn loop
-2. Tool calling
-3. Capability is declared
-4. Context and memory
-5. Delegation
-6. Agents and workflows
-7. Humans in the loop
-8. Watching the loop
-9. Proactive work
-10. Reaching outside
-11. State you can read
-12. When it goes wrong
+1. Capability is declared
+2. Context and memory
+3. Delegation
+4. Agents and workflows
+5. Humans in the loop
+6. Watching the loop
+7. Proactive work
+8. Reaching outside
+9. State you can read
+10. When it goes wrong
