@@ -111,6 +111,9 @@ nav:
       - Get it running: how-agents-work/get-it-running.md
       - The turn loop: how-agents-work/the-turn-loop.md
       - Tool calling: how-agents-work/tool-calling.md
+      - Capability is declared: how-agents-work/capability-is-declared.md
+      - Context and memory: how-agents-work/context-and-memory.md
+      - Delegation: how-agents-work/delegation.md
   - How-to:
       - how-to/index.md
       - Set up a toolset: how-to/set-up-toolsets.md

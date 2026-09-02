@@ -19,18 +19,20 @@ the choices it did about them.
   stops it.
 - [Tool calling](tool-calling.md): the model emits a request; your code decides whether and how to run
   it.
+- [Capability is declared](capability-is-declared.md): an agent holds what someone wrote down, and
+  nothing a code path decided to grant it.
+- [Context and memory](context-and-memory.md): the model remembers nothing, so everything it appears to
+  remember was sent again.
+- [Delegation](delegation.md): spending context on a subtask without spending the caller's.
 
 The mechanism pages land one at a time rather than all at once, so this list says plainly which of the
-thirteen planned pages exist today. Two so far, both above. Still to come, in the order a newcomer
+thirteen planned pages exist today. Five so far, all above. Still to come, in the order a newcomer
 would want them:
 
-1. Capability is declared
-2. Context and memory
-3. Delegation
-4. Agents and workflows
-5. Humans in the loop
-6. Watching the loop
-7. Proactive work
-8. Reaching outside
-9. State you can read
-10. When it goes wrong
+1. Agents and workflows
+2. Humans in the loop
+3. Watching the loop
+4. Proactive work
+5. Reaching outside
+6. State you can read
+7. When it goes wrong
