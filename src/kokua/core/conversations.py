@@ -29,9 +29,18 @@ from kokua.core.turn_gate import TurnGate
 # prefix hit is not a coincidence among 32-hex ids.
 ID_PREFIX_MIN = 6
 
+# What a conversation with no title yet is called wherever one is named to a user, so the sidebar and
+# the /switch reply cannot drift apart on it.
+UNTITLED = "New conversation"
+
 
 def _now() -> str:
     return datetime.now().isoformat()
+
+
+def _fragment(conversation_id: str) -> str:
+    """The comparable form of a typed id. A user copying one out of a listing often brings quotes."""
+    return (conversation_id or "").strip().strip("'\"`")
 
 
 def _merge_subagent_events(session: Session, user_index: int, events: list[dict]) -> None:
@@ -203,7 +212,7 @@ class ConversationBook:
         return [
             {
                 "id": session.key,
-                "title": session.metadata.get("title") or "New conversation",
+                "title": session.metadata.get("title") or UNTITLED,
                 "updated_at": session.metadata.get("updated_at", ""),
                 "active": session.key == self._active_id,
                 "task_id": session.metadata.get("task_id"),
@@ -414,7 +423,7 @@ class ConversationBook:
         Reads only the store, never ``agent_for``: resolving must stay cheap and side-effect-free, and
         building an agent is neither (see ``toolsets/conversations.py`` for the full reasoning).
         """
-        wanted = (conversation_id or "").strip().strip("'\"`")
+        wanted = _fragment(conversation_id)
         if not wanted:
             return None
         if self.exists(wanted):
@@ -423,6 +432,18 @@ class ConversationBook:
             return None
         matches = [session for session in self.sessions() if session.key.startswith(wanted)]
         return matches[0] if len(matches) == 1 else None
+
+    def matching_ids(self, fragment: str) -> list[str]:
+        """Every conversation id starting with *fragment*, for a caller explaining a ``resolve`` refusal.
+
+        Reads the fragment exactly as ``resolve`` does, so the explanation always describes the question
+        that was actually asked, and applies no length floor: the point is to report what a fragment
+        ``resolve`` already rejected does match.
+        """
+        wanted = _fragment(fragment)
+        if not wanted:
+            return []
+        return [session.key for session in self.sessions() if session.key.startswith(wanted)]
 
     def save(self, session: Session) -> None:
         self._store.save(session)

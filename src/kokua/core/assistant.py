@@ -36,7 +36,8 @@ from kokua.core.build import (
     model_label,
 )
 from kokua.config import AssistantConfig
-from kokua.core.conversations import ConversationBook
+from kokua.core import conversation_commands
+from kokua.core.conversations import UNTITLED, ConversationBook
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
 from kokua.core.messages import first_user_text
@@ -56,6 +57,25 @@ logger = logging.getLogger(__name__)
 # `assistant.ModelConnectionError` (runtime server-unreachable, from AIMU), and
 # `assistant.ModelRefusalError` (the model was reached and declined, also from AIMU).
 __all__ = ["Assistant", "ModelClientError", "ModelConnectionError", "ModelRefusalError"]
+
+
+def _slash_command(raw: str) -> tuple[str, str]:
+    """Read a typed message as (command word, everything after it), both empty when it is not a command.
+
+    One split serves every command the serve loop dispatches, rather than each re-slicing `raw` by
+    `len(word)`: that
+    used to assume exactly one character (the slash) precedes the word, but split() (unlike
+    partition(" ")) also skips any whitespace *before* the word, so a length-based slice undercounted
+    whenever a user typed more than one space after the slash, e.g. "/  plan hello" ran the workflow on
+    "an hello".
+    """
+    stripped = raw.strip()
+    if not stripped.startswith("/"):
+        return "", ""
+    parts = stripped[1:].split(maxsplit=1)
+    if not parts:
+        return "", ""
+    return parts[0].lower(), parts[1].strip() if len(parts) > 1 else ""
 
 
 class Assistant:
@@ -540,6 +560,14 @@ class Assistant:
                 if text == "/diag":
                     await self._ui.send(self._diag_report())
                     continue
+                word, argument = _slash_command(raw)
+                # The conversation commands sit above the pending-answer check for the reason `/stop`
+                # does: someone who types `/new` while a question is on screen is asking to leave that
+                # question behind, and switching abandons it (`HumanGate.abandon_all`) exactly as the
+                # web UI's sidebar does.
+                if word in conversation_commands.COMMANDS:
+                    await self._run_conversation_command(word, argument)
+                    continue
                 # While an approval or a workflow decision is outstanding, the next message is its
                 # answer, not a new turn. (A `/stop` above still takes priority, cancelling the waiting
                 # turn.)
@@ -550,17 +578,10 @@ class Assistant:
                 # plain turn. Which commands exist follows from what the entry agent declares, so a
                 # capability the config did not grant has no command here.
                 workflow = None
-                if text.startswith("/"):
-                    # word and rest come from one split, not from re-slicing raw by len(word): that
-                    # used to assume exactly one character (the slash) precedes the word, but split()
-                    # (unlike partition(" ")) also skips any whitespace *before* the word, so a length-
-                    # based slice undercounted whenever a user typed more than one space after the
-                    # slash -- e.g. "/  plan hello" ran the workflow on "an hello".
-                    parts = raw.strip()[1:].split(maxsplit=1)
-                    word = parts[0].lower() if parts else ""
+                if word:
                     candidate = self._workflows.get(word)
                     if candidate is not None:
-                        task = parts[1].strip() if len(parts) > 1 else ""
+                        task = argument
                         if not task:
                             await self._ui.send(f"Usage: {candidate.usage}")
                             continue
@@ -597,6 +618,81 @@ class Assistant:
                 handle.task.add_done_callback(lambda _t, cid=conversation_id, h=handle: self._tracker.remove_if(cid, h))
         finally:
             self._scheduler.stop()  # channel closed -> stop the scheduler so run() returns
+
+    async def _run_conversation_command(self, word: str, argument: str) -> None:
+        """Run `/new`, `/conversations`, or `/switch`, and report what happened on the channel.
+
+        Here rather than in `channels/cli.py` because a conversation is a core concept and a channel
+        has no route to the book that owns one; the terminal is only where the missing command was
+        noticed. Every channel carrying typed text therefore gets all three, and one that draws a whole
+        conversation at a time is repainted through `ChannelUI.show_history` so a command typed at its
+        composer leaves it showing what the core switched to.
+
+        Nothing here cancels a turn. Switching backgrounds one instead (see `ConversationBook.create`
+        and `select`), which is what `_report_switch` explains when the conversation being left has one
+        still running.
+        """
+        if word == conversation_commands.LIST:
+            await self._ui.send(conversation_commands.conversation_list(self.list_conversations()))
+            return
+
+        leaving = self._active_id
+        if word == conversation_commands.NEW:
+            # A build failure is caught rather than allowed out: this runs on the task reading the
+            # channel, so an escaping error would end the serve loop and take the session with it. The
+            # active pointer has already reverted by then (`ConversationBook._activate`).
+            try:
+                await self.new_conversation()
+            except ModelClientError:
+                logger.warning("Could not build the agent for a new conversation", exc_info=True)
+                await self._ui.send("Sorry, that conversation could not be created.")
+                return
+            await self._report_switch(conversation_commands.started_new(self._active_id), leaving)
+            return
+
+        if not argument:
+            await self._ui.send(conversation_commands.SWITCH_USAGE)
+            return
+        session = self._book.resolve(argument)
+        if session is None:
+            await self._ui.send(conversation_commands.no_such_conversation(argument, self._book.matching_ids(argument)))
+            return
+        title = self._conversation_title(session.key)
+        if session.key == leaving:
+            await self._ui.send(conversation_commands.already_here(title, session.key))
+            return
+        try:
+            await self.select_conversation(session.key)
+        except ModelClientError:
+            logger.warning("Could not build the agent for a conversation switch", exc_info=True)
+            await self._ui.send("Sorry, that conversation could not be opened.")
+            return
+        await self._report_switch(conversation_commands.switched(title, session.key), leaving)
+
+    def _conversation_title(self, conversation_id: str) -> str:
+        """A conversation's title as a user sees it, placeholder included."""
+        return self._book.get(conversation_id).metadata.get("title") or UNTITLED
+
+    async def _report_switch(self, headline: str, leaving: str) -> None:
+        """Announce a conversation change, say what became of any turn left running, and repaint.
+
+        One list read serves all three: the notice needs to know whether the conversation being left
+        has a turn in flight, and the sidebar needs the same list with its active marker moved.
+
+        The two frames are what the *core* owes a front end whose view it just moved, not a copy of
+        everything a front end does for itself on a switch: the web page also lights its working
+        indicator when it switches into a conversation with a turn in flight, and after a typed command
+        it learns that from the running marker on the list pushed here instead.
+        """
+        items = self.list_conversations()
+        left = next((item for item in items if item["id"] == leaving), None)
+        if left is not None and left["running"]:
+            headline += conversation_commands.left_running(
+                self._conversation_title(leaving), leaving, muted=self._ui.mutes_background_turns
+            )
+        await self._ui.send(headline)
+        await self._ui.push_conversations(items)
+        await self._ui.show_history(self.history, self.history_metadata)
 
     def _stop_active_turn(self) -> None:
         """Cancel the viewed conversation's tracked turn (if any); the /stop branch's helper."""

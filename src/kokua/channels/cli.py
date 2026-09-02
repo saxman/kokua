@@ -1,5 +1,11 @@
 """Kokua's terminal channel: AIMU's ``CLIChannel`` plus the two commands a terminal needs of its own.
 
+Only two, and that is the point of the boundary. ``/stop``, ``/diag``, and the conversation commands
+(``/new``, ``/conversations``, ``/switch``) are typed here but handled in ``Assistant._serve_channel``,
+because what they act on is core state a channel has no route to. What is left for this module is the
+pair that is genuinely about the terminal: making up for what it cannot draw, and offering by typing
+what the web composer offers as a control.
+
 The terminal can't render images, so ``/attach <path>`` stages a local image file onto the next message
 (``ChannelMessage.images``), which the model then reads. Generated images are reported by the assistant as
 an ``/images/<name>`` reference into ``images_path``; the file lives under ``$KOKUA_HOME/data/images``.

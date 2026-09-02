@@ -39,9 +39,11 @@ src/kokua/
     turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
     interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
     settings_runtime.py  SettingsApplier: read, apply live, persist
-    commands: /stop and /diag are parsed inline in assistant._serve_channel; a workflow's own
-              command (e.g. /plan) dispatches through self._workflows, built from the toolset registry
+    commands: /stop, /diag, and the three conversation commands are parsed inline in
+              assistant._serve_channel; a workflow's own command (e.g. /plan) dispatches through
+              self._workflows, built from the toolset registry
     diagnostics.py       the /diag report
+    conversation_commands.py  what /new, /conversations, and /switch print
     build.py             free functions that assemble a model client and wire one declared agent
     agents.py            assembles the registry from every provider; resolves, validates, and
                          prompts one declared agent, and builds its delegation tool
@@ -109,6 +111,22 @@ what lets a web approval reply be routed back to the waiting tool call. Switchin
 **not** cancel a running turn: each conversation owns its own agent and client, so a backgrounded turn
 persists to its own conversation, streams muted, and posts a notification when it finishes. Only
 `delete_conversation` cancels, and only the deleted conversation's own turn.
+
+The three conversation commands (`/new`, `/conversations`, `/switch <id>`) are dispatched in that same
+loop, beside `/stop` and `/diag`, and go through the same `new_conversation` / `select_conversation`
+the web UI's sidebar buttons call. They are core commands rather than terminal ones on purpose: a
+conversation is a core concept, a channel has no route to the book that owns one, and the alternative
+would have been a second implementation living in `channels/cli.py` with its own idea of what a switch
+means. Two consequences follow from putting them here. They sit *above* the pending-answer check, so
+typing `/new` while an approval prompt is on screen leaves that question behind
+(`HumanGate.abandon_all`) exactly as clicking New does. And because a switch made by the core is one
+a front end did not initiate, the core repaints: `ChannelUI.push_conversations` refreshes a sidebar and
+`ChannelUI.show_history` replaces what a page is displaying, both no-ops on a channel that prints as it
+goes. What the terminal gets instead is a sentence, because muting is the one part of a background turn
+it cannot do: `ChannelUI.mutes_background_turns` is false there, so the reply to `/new` says the turn
+you left keeps printing here and that `/stop` now reaches the conversation you moved to.
+The wording of all three replies lives in `core/conversation_commands.py`, for the reason
+`core/diagnostics.py` holds the `/diag` report.
 
 A turn's spawned sub-agents surface the same way. `core/subagents.py`'s `SubagentReporter` implements
 AIMU's `SubagentObserver` protocol; `Assistant` owns one instance per connection (`Assistant.create`
