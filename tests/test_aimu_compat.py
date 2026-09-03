@@ -76,6 +76,31 @@ def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
         require_aimu()
 
 
+def test_a_probe_that_checks_an_enum_member_still_works(monkeypatch):
+    """Two container shapes reach the same check. A frozenset answers ``in`` by value; an enum class
+    answers it by value too on 3.12 and raises TypeError on 3.11, so the check reads ``__members__``
+    when it is there and the container itself when it is not.
+    """
+    from enum import Enum
+
+    class _OldPhases(str, Enum):
+        THINKING = "thinking"
+
+    monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
+    monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "StreamingContentType")
+    monkeypatch.setattr(aimu_compat, "_PROBE_MEMBER", "CONTINUING")
+    monkeypatch.setattr(
+        aimu_compat.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(
+            __file__="/somewhere/aimu/models/_base/shared.py",
+            StreamingContentType=_OldPhases,
+        ),
+    )
+    with pytest.raises(AimuVersionError, match="CONTINUING"):
+        require_aimu()
+
+
 def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch):
     """An editable checkout's version says what its branch claims, not what its code contains, so a
     sibling on an older branch can report the floor while missing the surface behind it."""
@@ -92,32 +117,40 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    Pinned because the probe has repeatedly been left behind by a moving floor. The surface today is
-    ``ModelRefusalError``, which ``core/turns.py`` catches so a declined request reads as declined
-    rather than falling into the generic failure branch.
+    The surface today is ``StreamingContentType.CONTINUING``, the phase AIMU 0.29.0 yields before an
+    injected round. An older AIMU never yields it, so Kokua's branches on it are dead code and the loop
+    stops being watchable in a front end whose whole claim is that it is watched.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
     probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_SYMBOL == "ModelRefusalError"
-    # A plain name lookup: neither of the other two shapes applies, because the capability is the
-    # exported class itself and not a member or an argument of something older.
+    assert aimu_compat._PROBE_SYMBOL == "StreamingContentType"
+    # A membership check, because the capability is one member of an enum that is itself old: the type
+    # has existed since long before this floor, so only its contents date a checkout.
+    assert aimu_compat._PROBE_MEMBER == "CONTINUING"
     assert aimu_compat._PROBE_PARAMETER is None
-    assert aimu_compat._PROBE_MEMBER is None
 
 
-def test_the_probe_names_the_class_kokua_actually_catches():
+def test_the_probe_names_the_phase_kokua_actually_branches_on():
     """The probe is only honest if the depended-on capability is the thing it looks up.
 
-    ``turns.py`` imports this name from ``aimu.aio`` and branches on it at three sites, so an AIMU
-    without it fails at import rather than degrading -- which is why the floor, not the probe, is what
-    covers everything else in 0.26.0 and 0.27.0.
+    Both producers branch on this member by name, so a checkout without it degrades in silence: the
+    channel and the reporter simply never report a boundary, and nothing raises anywhere. Asserted
+    against the source rather than by calling either one, because what the probe stands in for is that
+    these two modules name the member at all.
     """
-    from kokua.core import turns
+    from pathlib import Path
 
-    assert turns.ModelRefusalError.__name__ == aimu_compat._PROBE_SYMBOL
+    from aimu.models import StreamingContentType
+
+    from kokua.channels import web
+    from kokua.core import subagents
+
+    assert hasattr(StreamingContentType, aimu_compat._PROBE_MEMBER)
+    for module in (web, subagents):
+        assert f"StreamingContentType.{aimu_compat._PROBE_MEMBER}" in Path(module.__file__).read_text()
     require_aimu()  # does not raise against the AIMU this suite runs on
 
 

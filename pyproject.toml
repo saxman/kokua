@@ -18,20 +18,16 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# 0.27.0 is the oldest AIMU carrying everything Kokua needs. Two releases contribute to it. 0.26.0 is
-# why the floor moved: its tool loop no longer strands an un-dispatched tool call before the forced
-# wrap-up prompt, and without that fix every Anthropic run reaching its round cap mid-tool-call died on
-# a 400 naming the unanswered `tool_use` ids rather than answering -- which made search-heavy sub-agents
-# fail routinely, since they are the runs that spend every round calling tools. 0.27.0 then adds
-# `ModelRefusalError`, which `core/turns.py` catches at three sites so a request the model's classifiers
-# decline reads as declined instead of as a generic failure, and makes every provider report how a turn
-# ended so `TruncatedTurnError` fires outside Ollama for the first time. Every earlier release in the
-# floor's history is listed in `kokua.aimu_compat`, which is also what enforces this floor for a sibling
+# 0.29.0 is the oldest AIMU carrying everything Kokua needs. Its own contribution is
+# `StreamingContentType.CONTINUING`, the phase a driver yields to mark the boundary before a round the
+# loop itself injected (a nudge, a wrap-up); without it `channels/web.py` and `core/subagents.py` never
+# see the boundary, so neither reports it and nothing raises. Every earlier release in the floor's
+# history is listed in `kokua.aimu_compat`, which is also what enforces this floor for a sibling
 # checkout, and `tests/test_aimu_compat.py` pins this specifier against that one so the two halves
 # cannot drift. This pin is what ships in the wheel and what a PyPI install resolves;
 # [tool.uv.sources] below separately redirects development installs to the sibling checkout.
 dependencies = [
-    "aimu[anthropic,ollama,openai_compat,memory]>=0.27.0",
+    "aimu[anthropic,ollama,openai_compat,memory]>=0.29.0",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
     # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
     "tomlkit>=0.13",

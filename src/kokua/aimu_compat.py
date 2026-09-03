@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.27.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.29.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -78,11 +78,17 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.27.0 is the current surface, and it is a plain name lookup: ``ModelRefusalError``, exported from
-``aimu.aio`` alongside ``ModelConnectionError``. The second time this module has had that shape (0.21.0's
-``resolve_default_text_model`` was the first) and for the same reason: the capability *is* the exported
-name, so a name lookup asks exactly the question that matters, and nothing else has to be true of a
-checkout once the class is importable. Anthropic returns a refusal as HTTP 200 with
+AIMU 0.29.0 is the current surface: a membership check on ``StreamingContentType.CONTINUING``, the
+phase a streamed driver yields before a round the loop itself injected rather than one the model asked
+for. The argument for that shape, and what it does and does not cover, lives in the comment above the
+``_PROBE_*`` constants below rather than here, so it is stated once instead of two places that can drift
+apart.
+
+AIMU 0.27.0 was the surface until 0.29.0, and it was a plain name lookup: ``ModelRefusalError``, exported
+from ``aimu.aio`` alongside ``ModelConnectionError``. The second time this module had that shape (0.21.0's
+``resolve_default_text_model`` was the first) and for the same reason: the capability was the exported
+name, so a name lookup asked exactly the question that mattered, and nothing else had to be true of a
+checkout once the class was importable. Anthropic returns a refusal as HTTP 200 with
 ``stop_reason: "refusal"`` and no content block, so an AIMU that does not raise for it hands back an
 empty string, which inside an agent loop is indistinguishable from a degenerate turn: the continuation
 nudge fires and the run spends its iterations being refused again. ``core/turns.py`` branches on this
@@ -153,38 +159,42 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 27, 0)
+MINIMUM_AIMU = (0, 29, 0)
 
-# The newest AIMU surface Kokua depends on is `ModelRefusalError`, the typed error AIMU raises when a
-# model's safety classifiers decline a request. A plain name lookup, the second time this probe has
-# taken that shape (0.21.0's `resolve_default_text_model` was the first), and for the same reason: the
-# capability *is* the exported name, so a name lookup asks exactly the question that matters. Anthropic
-# returns a refusal as HTTP 200 with `stop_reason: "refusal"` and no content, so an AIMU that does not
-# raise for it hands back an empty string; `core/turns.py` branches on this class at three sites so a
-# declined request reads as declined instead of falling into the generic failure branch, and an AIMU
-# without the name fails at import rather than degrading quietly.
+# The newest AIMU surface Kokua depends on is `StreamingContentType.CONTINUING`, the phase a streamed
+# driver yields to mark the boundary before a round the loop itself injected (a continuation nudge, a
+# forced wrap-up) rather than one the model asked for. This floor moved *for* that same phase, which
+# makes it unlike 0.27.0's: there, the floor moved for 0.26.0's tool-loop fix while the probe gripped
+# `ModelRefusalError`, a different capability from a different release. Here the reason for the floor
+# and the capability the probe grips are the same one.
 #
-# Worth noticing, because it is new: for the first time the capability that *forced* this floor up and
-# the capability the probe *grips* are different, from different releases. The floor moved for 0.26.0's
-# forced-wrap-up fix -- the loop no longer strands an un-dispatched tool call before its wrap-up prompt,
-# without which every Anthropic run that hit its round cap mid-search died on a 400 naming the
-# unanswered `tool_use` ids instead of answering. That fix has no handle worth gripping:
-# `_settle_pending_tools` is a private method on a private class, exactly the kind of internal a later
-# honest refactor would rename, which would turn this preflight into a wall in front of a *newer,
-# working* AIMU (the trap 0.20.0 documents). So it is the floor's job, like the other capabilities no
-# name lookup could ever have asked about. 0.27.0's other half is in the same position: every provider
-# now reports how a turn ended, so `TruncatedTurnError` actually fires and `client.last_stop_reason`
-# carries the provider's own word for it, where before only Ollama set the flag and the check silently
-# no-opped everywhere else. `last_stop_reason` is an attribute on a live client, not a module symbol,
-# and Kokua reads it nowhere directly -- the floor covers it.
+# The shape is a membership check on an enum class, the third shape this probe has taken and the second
+# time membership answered the question (0.18.0's `SUBAGENT_SPEC_KEYS` was the first). `StreamingContentType`
+# itself predates this floor by a long way, so its mere presence proves nothing; only whether it carries
+# this particular member dates a checkout, the same argument `SUBAGENT_SPEC_KEYS` made one container kind
+# over. It still needed the detour below rather than a bare `in`: a frozenset answers `in` by value
+# directly, while an enum class answers it by value too on Python 3.12 and raises `TypeError` for a plain
+# string on 3.11, which Kokua still supports, and the capability here is a member's *name*, not its
+# value.
 #
-# `make_async_subagent_tool(events=...)` was this probe's surface while 0.25.0 was the floor, and
-# `make_command_tool` (a name lookup) before that; both are the floor's responsibility now, as
-# everything this probe has ever pointed at eventually becomes.
-_PROBE_MODULE = "aimu.aio"
-_PROBE_SYMBOL = "ModelRefusalError"
+# It is a genuine silent-degradation case, the kind this module exists to catch. Kokua constructs
+# nothing differently against an older AIMU: `channels/web.py` and `core/subagents.py` simply never see
+# the phase, so no boundary is ever reported anywhere and nothing raises.
+#
+# What this probe cannot see, and what the floor covers alone: whether *both* streamed drivers emit the
+# chunk, and whether *both* injection kinds (a continuation nudge and a forced wrap-up) do. A checkout
+# carrying the member but wired to only one driver, or emitting it for only one injection kind, still
+# passes this probe, the same kind of gap `events`' recursive passthrough left one level down for its
+# own capability.
+#
+# `make_async_subagent_tool(events=...)` was this probe's surface while 0.25.0 was the floor,
+# `make_command_tool` (a name lookup) before that, and `ModelRefusalError` (a name lookup) while 0.27.0
+# was the floor; all three are the floor's responsibility now, as everything this probe has ever pointed
+# at eventually becomes.
+_PROBE_MODULE = "aimu.models"
+_PROBE_SYMBOL = "StreamingContentType"
 _PROBE_PARAMETER: Optional[str] = None
-_PROBE_MEMBER: Optional[str] = None
+_PROBE_MEMBER: Optional[str] = "CONTINUING"
 
 
 class AimuVersionError(RuntimeError):
@@ -242,7 +252,11 @@ def require_aimu() -> None:
                 f"so it predates that release"
             )
         )
-    if _PROBE_MEMBER is not None and _PROBE_MEMBER not in probed:
+    # `in` reads a frozenset directly and an enum class by name through `__members__`. The fallback is
+    # the container itself, so the set shape is unchanged; the detour matters because `in` on an enum
+    # compares *values* on Python 3.12 and raises TypeError on 3.11, and the capability here is a
+    # member's name.
+    if _PROBE_MEMBER is not None and _PROBE_MEMBER not in getattr(probed, "__members__", probed):
         raise AimuVersionError(
             _message(
                 f"the AIMU at {where} reports version {installed} but its {_PROBE_SYMBOL} has no "
