@@ -1466,6 +1466,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#saying-a-turn-is-under-way" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saying a turn is under way
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#the-tasks-section-and-the-settings-frames-behind-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1905,6 +1916,17 @@
     <span class="md-ellipsis">
       
         Streaming the answer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#saying-a-turn-is-under-way" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saying a turn is under way
       
     </span>
   </a>
@@ -2625,8 +2647,8 @@ the flip shipped together, so the new name dates a checkout past both. Against a
 construction still works and streams neither phase, and since Kokua no longer reads <code>self.show_thinking</code>
 anywhere there is not even an <code>AttributeError</code> to notice, which is the failure mode this preflight
 exists for.</p>
-<p>The repository floor is now <code>aimu&gt;=0.27.0</code>, and it is the first floor whose <em>reason</em> and whose <em>probe</em>
-are different capabilities from different releases. That split is worth following, because it is the
+<p>The floor was <code>aimu&gt;=0.27.0</code> until 0.28.0, and it was the first floor whose <em>reason</em> and whose <em>probe</em>
+were different capabilities from different releases. That split is worth following, because it is the
 shape of every future case where a bug fix rather than a feature moves the floor.</p>
 <p>The floor moved for <strong>0.26.0</strong>: AIMU's tool loop no longer strands an un-dispatched tool call before its
 forced wrap-up. Exhausting <code>max_iterations</code> on a turn that had requested tools used to leave those calls
@@ -2638,9 +2660,9 @@ handle on that fix a probe could honestly grip: <code>_settle_pending_tools</cod
 class, exactly the kind of internal a later refactor would rename, and a probe pointed at it would turn
 this preflight into a wall in front of a <em>newer, working</em> AIMU. That is the trap the 0.20.0 paragraph
 above describes, so the floor carries this one alone.</p>
-<p>The probe therefore grips <strong>0.27.0</strong>'s <code>ModelRefusalError</code> instead, a plain name lookup on <code>aimu.aio</code> and
-only the second time this probe has had that shape (0.21.0's <code>resolve_default_text_model</code> was the first).
-The capability <em>is</em> the exported name. Anthropic returns a refusal as HTTP 200 with
+<p>The probe therefore gripped <strong>0.27.0</strong>'s <code>ModelRefusalError</code> instead, a plain name lookup on <code>aimu.aio</code>
+and only the second time this probe had had that shape (0.21.0's <code>resolve_default_text_model</code> was the
+first). The capability <em>is</em> the exported name. Anthropic returns a refusal as HTTP 200 with
 <code>stop_reason: "refusal"</code> and no content, so an AIMU that does not raise for it returns an empty string,
 which an agent loop cannot tell from a degenerate turn: the continuation nudge fires and the run spends
 its iterations being refused again. <code>core/turns.py</code> branches on the class at three sites so a declined
@@ -2657,6 +2679,34 @@ The probe covers one surface at a time; the version floor covers every earlier r
 capability first shipped tagged 0.24.0, but the number collided with a different, unrelated 0.24.0 that
 AIMU's own <code>main</code> released first; the branch carrying <code>events</code> rebased past it and renumbered to 0.25.0,
 so a real, released 0.24.0 correctly failed that probe rather than exposing a gap in it.)</p>
+<p>The floor is now <code>aimu&gt;=0.28.0</code>, and unlike 0.27.0 it is a floor whose <em>reason</em> and whose <em>probe</em> are the
+same capability again. It moved for AIMU's <code>CONTINUING</code> chunk, the phase a streamed driver yields for a
+round the loop injected itself (a continuation nudge, or the forced wrap-up at the round cap) rather than
+one the model asked for. No other seam could carry it: Kokua constructs nothing differently against an
+older AIMU, so <code>channels/web.py</code> and <code>core/subagents.py</code> simply never see the phase, and nothing raises,
+which is the silent-degradation shape this preflight exists to catch.</p>
+<p>The probe is a membership check on <code>StreamingContentType.CONTINUING</code>, the third shape it has taken and
+the second time membership has answered (0.18.0's <code>SUBAGENT_SPEC_KEYS</code> was the first). <code>StreamingContentType</code>
+itself predates this floor by a long way, so its mere presence proves nothing; only whether it carries
+this member dates a checkout, the same argument <code>SUBAGENT_SPEC_KEYS</code> made one container kind over. It
+reads <code>__members__</code> rather than testing membership directly, because <code>in</code> on an enum compares <em>values</em> on
+Python 3.12 and raises <code>TypeError</code> for a plain string on 3.11, which Kokua still supports, and the
+capability here is a member's <em>name</em>, not its value.</p>
+<p>What the probe leaves to the floor: whether both streamed drivers emit the chunk, and whether both
+injection kinds (a continuation nudge and a forced wrap-up) do. A checkout carrying the member but wired
+to only one driver, or emitting it for only one injection kind, still passes, the same shape of gap
+0.25.0's <code>events</code> parameter left one level down, where only the first hop being wired was everything that
+probe could ask.</p>
+<p>0.28.0 brought a second capability Kokua depends on, and it is worth reading for what a probe <em>cannot</em>
+claim. The <code>"max_iterations"</code> entry AIMU added to <code>SUBAGENT_SPEC_KEYS</code> is the spec key <code>core/agents.py</code>
+writes for an agent declaring its own tool-loop cap; without it a per-agent cap has nowhere to go, since
+AIMU's own cap was one value shared by a whole spawn tool. That set is <em>closed</em> and validated at
+factory-call time, which for Kokua is <code>wire_agent</code> building a conversation's agent, so an AIMU predating
+0.28.0 raises <code>ValueError</code> naming the key at startup already: no silence to convert into noise, and no
+mid-session failure to pull forward. A probe there would buy the wording rather than the timing, which is
+why the one slot goes to the phase above, which has no such escape hatch, and this key is left to the
+floor. The global tier needed none of it: the factory argument behind <code>[assistant].max_iterations</code> has
+existed since 0.12.0.</p>
 <p>Two application facts worth knowing beyond the parameters themselves. <code>max_tokens</code> and <code>context_length</code>
 are different knobs that share one window: <code>max_tokens</code> caps <em>generated</em> tokens, <code>context_length</code> sizes
 the whole window the prompt and the output share, so <code>context_length = 32768</code> with <code>max_tokens = 4096</code>
@@ -2835,6 +2885,38 @@ mid-stream an expression stands as the source the model wrote. And <code>finaliz
 pending timer before it stamps the bubble: a tick landing after the stamp would reset <code>innerHTML</code> and
 drop the caption. The <code>history</code> replay path cancels it too, since it drops the bubble reference the
 tick would have written into.</p>
+<h3 id="saying-a-turn-is-under-way">Saying a turn is under way<a class="headerlink" href="#saying-a-turn-is-under-way" title="Permanent link">&para;</a></h3>
+<p>A sent message used to leave the transcript unchanged until the first frame of the reply landed.
+<code>.working-inline</code> fills that gap: a dim row at the foot of the log carrying a spinner and the turn's
+elapsed seconds, indented into the same column as the thinking and tool rows it sits beneath.</p>
+<p><strong>The row is pinned for the turn's whole life, and that was measured rather than assumed.</strong> The first
+version cleared it on the first thing that rendered, on the reasoning that content should replace it.
+Instrumenting the page (a <code>MutationObserver</code> on <code>#log</code> against a tap on every inbound frame) showed the
+row living for 23 milliseconds on a local endpoint, whose first token arrives about that fast. The
+question the row answers is "is a turn running", and that stays true until the turn ends, so that is its
+life. Its elapsed count is the turn's age, not the age of the current lull, which is what makes it
+readable as "this is slow" rather than "this just started".</p>
+<p>Three details are load-bearing:</p>
+<ul>
+<li><strong>Every renderer goes through <code>appendToLog</code>,</strong> which inserts a top-level block <em>before</em> the row
+  rather than appending after it. That is the whole of the pinning: the row stays last without anything
+  ever moving it. The alternative, re-appending the row after each render, does the same work with a
+  reflow and a flicker per block.</li>
+<li><strong><code>lastContentElement()</code> looks past the row.</strong> A <code>token</code> frame decides whether to close the open
+  bubble by asking whether anything has landed since the last one, and it reads the log's last element
+  to find out. With the row pinned, that element is <em>always</em> the indicator, so the unguarded check
+  would close the bubble on every token and render the answer one bubble per token.</li>
+<li><strong>The row is created and destroyed, not shown and hidden.</strong> A permanently present element would be
+  the log's last child even when idle, so both points above would need a second condition; and the
+  ticker interval that drives the spinner has to stop when the turn does, which destruction handles for
+  free.</li>
+</ul>
+<p><code>ChannelUI.show_working</code> carries a duration and not a flag: <code>None</code> means nothing is running, and a
+number is how long the turn has already been going, from <code>Assistant.turn_elapsed</code>. That is what lets a
+switch into a background turn count on from its real age instead of restarting at zero, and it makes
+"idle, and it has been running twelve seconds" unsayable rather than merely wrong. The <code>working</code> frame
+on the wire keeps a boolean, because that is what the page branches on, with <code>elapsed</code> riding along
+only when there is a turn to time.</p>
 <h3 id="the-tasks-section-and-the-settings-frames-behind-it">The tasks section, and the settings frames behind it<a class="headerlink" href="#the-tasks-section-and-the-settings-frames-behind-it" title="Permanent link">&para;</a></h3>
 <p>Two page surfaces are pure front-end concerns and deliberately absent from <code>RichChannel</code>: the
 scheduled-tasks section (<code>tasks</code> / <code>get_tasks</code> / <code>task</code>) and the settings frames
@@ -2963,6 +3045,14 @@ rest of the old turn's tokens to the conversation the user had just moved to, si
 conversation changes <em>during</em> the send that is being gated. And gating purely on the contextvar would
 drop a background turn's sidebar refresh, because <code>TurnRunner._persist</code> pushes the conversation list from
 inside that turn's own task.</p>
+<p>A loop marker's meaning narrowed with AIMU 0.28.0's <code>CONTINUING</code> chunk: it now names an injected round
+specifically, one the loop inserted on its own (a continuation nudge after an empty turn, or the forced
+wrap-up at the round cap), and <code>reason</code> on the frame (<code>"continuation"</code> or <code>"final_answer"</code>) says which.
+Before it, <code>stream_activity</code> guessed the boundary from a rise in <code>StreamChunk.iteration</code>, which labelled
+the cap with the nudge's own wording and could draw a marker after an ordinary tool round too, since the
+counter rises there as well and no reload ever reproduced it. A marker now means exactly one thing, live
+and on reload alike, and <code>SubagentReporter.chunk</code> reads the identical chunk to draw the same boundary
+inside a sub-agent card.</p>
 <p>Whitespace alone does not open an answer bubble. A server that separates reasoning from the answer
 itself (mlx-lm, llama-server, vLLM) sends the newlines that followed the reasoning as the answer
 segment's first tokens, so on a turn that reasons and then calls a tool the whole segment can be

@@ -1504,7 +1504,7 @@ picked up live:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/saxman/aimu<span class="w">    </span><span class="c1"># sibling of kokua/</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras<span class="w">                        </span><span class="c1"># installs ../aimu editable</span>
 </span></code></pre></div>
-<p>A path source is installed without being checked against the <code>aimu&gt;=0.27.0</code> specifier, so a sibling on
+<p>A path source is installed without being checked against the <code>aimu&gt;=0.28.0</code> specifier, so a sibling on
 an older branch is the failure mode to expect. Startup's preflight (<code>kokua.aimu_compat</code>) catches it and
 names the fix rather than failing on an import.</p>
 <p>Without <code>uv</code>:</p>

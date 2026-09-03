@@ -1231,6 +1231,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#max_iterations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_iterations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#generate_titles" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1331,10 +1342,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#model-thinking-generation" class="md-nav__link">
+  <a href="#model-thinking-generation-max_iterations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        model, thinking, generation
+        model, thinking, generation, max_iterations
       
     </span>
   </a>
@@ -1999,6 +2010,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#max_iterations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        max_iterations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#generate_titles" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2099,10 +2121,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#model-thinking-generation" class="md-nav__link">
+  <a href="#model-thinking-generation-max_iterations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        model, thinking, generation
+        model, thinking, generation, max_iterations
       
     </span>
   </a>
@@ -2549,7 +2571,7 @@ because the shipped <code>security.*</code> pattern was the only thing that was 
 </tr>
 <tr>
 <td><code>agents.*</code></td>
-<td>lets the assistant rewrite any agent's <code>tools</code>, <code>model</code>, <code>thinking</code>, <code>system_message</code>, <code>description</code>, and <code>delegates_to</code>, set its <code>[agents.&lt;name&gt;.generation]</code> parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart.</td>
+<td>lets the assistant rewrite any agent's <code>tools</code>, <code>model</code>, <code>thinking</code>, <code>max_iterations</code>, <code>system_message</code>, <code>description</code>, and <code>delegates_to</code>, set its <code>[agents.&lt;name&gt;.generation]</code> parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart.</td>
 </tr>
 <tr>
 <td><code>scheduling.task.*</code></td>
@@ -2569,8 +2591,16 @@ from, and reads both halves of it that startup reads: the agent tables and the <
 naming the entry agent. So two writes that each looked fine alone cannot add up to a file your next
 launch refuses. A <code>[agents.&lt;name&gt;.generation]</code> parameter gets a different check instead:
 the same type-and-range check <code>[assistant.generation]</code> gets, not a <code>validate_agents</code> dry run, since a bad
-<code>temperature</code> cannot break startup the way a bad delegate can. Either way, the write is checked before
-it is saved; neither check tells you the result is one you wanted, only that it starts.</p>
+<code>temperature</code> cannot break startup the way a bad delegate can. An agent's <code>max_iterations</code> is the
+exception: the <code>agents.*</code> write path checks it the same way it checks a flat key, by dry-running
+<code>validate_agents</code>, and that dry run does not repeat the range check parse time applies. So a <code>0</code> or a
+negative value passes the tool and is only refused at the next startup, when <code>config/file.py</code> parses it,
+and reaching that write at all means <code>agents.*</code> has already been removed from <code>locked_config_keys</code>,
+since the table is locked by default. Every other way in, the write is checked before it is saved; no
+check tells you the result is one you wanted, only that it starts.</p>
+<p><code>[assistant].max_iterations</code> is not locked, so the assistant can raise or lower its own tool-loop cap
+there. That is deliberate, for the reason <code>[assistant].model</code> is unlocked: the key is startup-only, so
+no write escalates the session doing the writing, and what it moves is cost rather than reach.</p>
 <p><code>[[mcp.server]]</code> is not in the list and is not writable by <code>update_config</code> either way; it is appended by
 <code>add_mcp_server</code>, which connects the server as well as recording it.</p>
 <h2 id="which-keys-apply-live">Which keys apply live<a class="headerlink" href="#which-keys-apply-live" title="Permanent link">&para;</a></h2>
@@ -2602,9 +2632,10 @@ immediately. Everything else is <strong>startup-only</strong>: change it, then r
 </tr>
 </tbody>
 </table>
-<p>The model and the reasoning effort read like runtime settings and are not. Nothing rebinds a live model
-client, and no runtime writer can reach <code>[agents.*]</code>, so a hot <code>[assistant].model</code> could only ever report
-a change it had not made, or disagree with an agent's own declaration. Generation parameters are
+<p>The model, the reasoning effort, and the tool-loop cap read like runtime settings and are not. Nothing
+rebinds a live model client, nothing re-caps a live agent's loop, and no runtime writer can reach
+<code>[agents.*]</code>, so a hot <code>[assistant].model</code> or <code>[assistant].max_iterations</code> could only ever report a
+change it had not made, or disagree with an agent's own declaration. Generation parameters are
 startup-only for a second reason as well: a live control always holds <em>some</em> value, so it would write
 that tier whether or not you asked for anything, shadowing every model card's tuned profile. A key absent
 from the file has to stay absent from the request.</p>
@@ -2713,6 +2744,27 @@ Default <code>true</code>.</p>
 <h3 id="agent_cache_cap"><code>agent_cache_cap</code><a class="headerlink" href="#agent_cache_cap" title="Permanent link">&para;</a></h3>
 <p>Maximum per-conversation agents kept live in memory. Default <code>8</code>. An evicted agent rebuilds from
 persisted state on next access, so the cap bounds memory, not correctness.</p>
+<h3 id="max_iterations"><code>max_iterations</code><a class="headerlink" href="#max_iterations" title="Permanent link">&para;</a></h3>
+<p>The tool-loop cap every agent runs under unless its own <code>[agents.&lt;name&gt;].max_iterations</code> overrides it:
+the most model calls one turn may make before AIMU stops the loop. Default <code>10</code>, which is also AIMU's
+own default, so leaving this unset changes nothing.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[assistant]</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">max_iterations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span>
+</span></code></pre></div>
+<p>The count is model calls, not tool calls: the initial turn, plus every tool-follow-up turn, plus any
+continuation nudge the loop injects after an empty turn. The one call it does not count is the forced
+wrap-up, which runs <em>after</em> the cap is reached with tools disabled, so an agent that hits the cap still
+gets to answer from what it gathered. That is why hitting the cap is not an error and nothing in the
+transcript is marked truncated: you get a thinner answer, not a failure. <a href="../../how-agents-work/the-turn-loop/">The turn
+loop</a> shows what that looks like in a real run.</p>
+<p>Must be an integer of 1 or more. A <code>0</code> would be a loop that makes no model call at all, so it is a
+startup error rather than a silently useless setting.</p>
+<p>Raise it for work that legitimately needs more rounds, which in practice means search: a worker that
+spends every round calling tools is the one still mid-investigation when the cap lands. Prefer raising it
+on the one agent that needs it, via the per-agent key below, over raising it here for everyone, since
+every agent's worst-case turn cost scales with this number.</p>
+<p>This key is not locked, so the assistant can change it too: see <a href="#who-may-change-which-key">who may change which
+key</a>.</p>
 <h3 id="generate_titles"><code>generate_titles</code><a class="headerlink" href="#generate_titles" title="Permanent link">&para;</a></h3>
 <p>Have the model write each new conversation's title from the message that opened it. Default <code>true</code>.
 <strong>Hot</strong>, and the only hot key in <code>[assistant]</code>: the title is written per conversation, so a change
@@ -2803,7 +2855,7 @@ of an agent's own generation table.</p>
 <h3 id="confirm_tools"><code>confirm_tools</code><a class="headerlink" href="#confirm_tools" title="Permanent link">&para;</a></h3>
 <p>Tools that require interactive confirmation before each call: a terminal <code>y/N</code>, or Allow/Deny in the web
 UI. These are the tools that run with full machine access.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">confirm_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"add_skill_script"</span><span class="p">,</span><span class="w"> </span><span class="s2">"add_mcp_server"</span><span class="p">,</span><span class="w"> </span><span class="s2">"execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"update_config"</span><span class="p">]</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">confirm_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"add_skill_script"</span><span class="p">,</span><span class="w"> </span><span class="s2">"add_mcp_server"</span><span class="p">,</span><span class="w"> </span><span class="s2">"execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"update_config"</span><span class="p">]</span>
 </span></code></pre></div>
 <p>Set to <code>[]</code> to disable approval entirely. Proactive turns (scheduled tasks, anything the assistant starts
 unprompted) <strong>auto-deny</strong> these regardless of the setting, since there is no one at the keyboard to ask.</p>
@@ -2907,6 +2959,11 @@ for what removing <code>agents.*</code> from <code>[security].locked_config_keys
 <td>sub-table</td>
 <td>overrides <code>[assistant.generation]</code>, <strong>per key</strong></td>
 </tr>
+<tr>
+<td><code>max_iterations</code></td>
+<td>integer &gt;= 1</td>
+<td>overrides <code>[assistant].max_iterations</code> for this agent alone</td>
+</tr>
 </tbody>
 </table>
 <h3 id="tools"><code>tools</code><a class="headerlink" href="#tools" title="Permanent link">&para;</a></h3>
@@ -2932,28 +2989,37 @@ disagree with it. The agent gets a <code>spawn_subagent(agent_type, task)</code>
 names, each built from its own table. The graph must be acyclic.</p>
 <p>A worker's gated tool calls (see <a href="#security"><code>[security]</code></a>) are routed to you for approval, not run
 unattended.</p>
-<h3 id="model-thinking-generation"><code>model</code>, <code>thinking</code>, <code>generation</code><a class="headerlink" href="#model-thinking-generation" title="Permanent link">&para;</a></h3>
-<p>All three are resolved per agent and <strong>never inherited down the delegation graph</strong>: a delegator that pins
-a big model, reasons hard, or runs cold does not drag its workers along. A worker declaring nothing runs
-on the <code>[assistant]</code> defaults like every other undeclared agent.</p>
+<h3 id="model-thinking-generation-max_iterations"><code>model</code>, <code>thinking</code>, <code>generation</code>, <code>max_iterations</code><a class="headerlink" href="#model-thinking-generation-max_iterations" title="Permanent link">&para;</a></h3>
+<p>All four are resolved per agent and <strong>never inherited down the delegation graph</strong>: a delegator that pins
+a big model, reasons hard, runs cold, or loops longer does not drag its workers along. A worker declaring
+nothing runs on the <code>[assistant]</code> defaults like every other undeclared agent.</p>
 <p>An agent's <code>model</code> is the same string <a href="#model"><code>[assistant].model</code></a> is, suffixes included: a worker can
 be pinned to its own endpoint, or to the same remote server the assistant uses. Worth stating because the
 two are checked by different code (a worker's is parsed at startup, <code>[assistant].model</code> by building a
 throwaway client), so a reader has no way to tell from the code alone that they accept the same thing.</p>
 <p><code>generation</code> merges per key rather than table for table, so an agent that wants only a colder temperature
 keeps the default's context length.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[agents.researcher]</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Research specialist: gather and verify information from the web."</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ollama:qwen3:32b"</span><span class="w">     </span><span class="c1"># this worker alone runs on a bigger model</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">thinking</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"high"</span><span class="w">              </span><span class="c1"># ...and reasons harder than the rest</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"You are a research sub-agent. ..."</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="k">[agents.researcher.generation]</span><span class="w">  </span><span class="c1"># last in the table, like [assistant.generation]</span>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="n">context_length</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">131072</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[agents.researcher]</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Research specialist: gather and verify information from the web."</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ollama:qwen3:32b"</span><span class="w">     </span><span class="c1"># this worker alone runs on a bigger model</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">thinking</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"high"</span><span class="w">              </span><span class="c1"># ...and reasons harder than the rest</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"You are a research sub-agent. ..."</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="k">[agents.researcher.generation]</span><span class="w">  </span><span class="c1"># last in the table, like [assistant.generation]</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="n">context_length</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">131072</span>
 </span></code></pre></div>
 <p>A model string AIMU cannot resolve fails startup naming the table it came from.</p>
+<p><code>max_iterations</code> follows that rule too, and it is worth spelling out. An assistant that declares
+<code>max_iterations = 40</code> does not hand 40 to the workers it delegates to; each of them gets its own
+declaration if it has one, and <code>[assistant].max_iterations</code> otherwise. So raising a delegator's cap
+buys the delegator more rounds of <em>delegating</em>, not more rounds inside each worker. To give a worker a
+longer leash, declare it on that worker.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">[agents.researcher]</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">max_iterations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">25</span><span class="w">    </span><span class="c1"># a search-heavy worker: every round spends a tool call</span>
+</span></code></pre></div>
 <h2 id="mcpserver"><code>[[mcp.server]]</code><a class="headerlink" href="#mcpserver" title="Permanent link">&para;</a></h2>
 <p>Remote MCP servers to connect at startup. An array of tables: one <code>[[mcp.server]]</code> header per server.</p>
 <table>
@@ -2985,14 +3051,14 @@ keeps the default's context length.</p>
 <p><code>name</code> is what an agent lists in its <code>tools</code>, so a server no agent can name reaches no agent. Omit
 <code>token_env</code> for an unauthenticated server, or one using the OAuth flow, which triggers automatically on
 an auth challenge. The token stays in the environment, never in this file.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[[mcp.server]]</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://api.githubcopilot.com/mcp/"</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"github"</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"GITHUB_MCP_TOKEN"</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="k">[[mcp.server]]</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://broker.example.com/mcp"</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"stocks"</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">[[mcp.server]]</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://api.githubcopilot.com/mcp/"</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"github"</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"GITHUB_MCP_TOKEN"</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">[[mcp.server]]</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://broker.example.com/mcp"</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"stocks"</span>
 </span></code></pre></div>
 <p>Servers added at runtime with the <code>add_mcp_server</code> tool are appended here automatically, with a <code>name</code>
 derived from the host and a numeric suffix if that name is taken, so the file always loads. That name
@@ -3023,8 +3089,8 @@ sends your browser once you approve, which is also where Kokua listens for the c
 </tr>
 </tbody>
 </table>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">[mcp]</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">oauth_callback_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8765</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[mcp]</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">oauth_callback_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8765</span>
 </span></code></pre></div>
 <p>The defaults assume the browser runs on the same machine as Kokua. If it does not, the provider sends
 your approval to <em>your</em> loopback, Kokua never receives it, and the connection fails only when the flow
@@ -3037,19 +3103,19 @@ covers both setups.</p>
 <h3 id="data_dir"><code>data_dir</code><a class="headerlink" href="#data_dir" title="Permanent link">&para;</a></h3>
 <p>Absolute override for where all transient and user content lives. Default: <code>$KOKUA_HOME/data</code>.
 Locked by default.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">data_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/path/to/kokua-data"</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">data_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/path/to/kokua-data"</span>
 </span></code></pre></div>
 <p>Every leaf derives from this one setting, so overriding it moves all of them together:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>$KOKUA_HOME/
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>  config.toml
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>  data/                  &lt;- data_dir
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    sessions.json        conversations
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    memory/              the memory store
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    documents/           the document store
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    skills/              installed skills
-</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    images/              uploaded and generated images, served at /images
-</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
-</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    logs/kokua.log       the rotating diagnostic log
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>$KOKUA_HOME/
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>  config.toml
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>  data/                  &lt;- data_dir
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    sessions.json        conversations
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    memory/              the memory store
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    documents/           the document store
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    skills/              installed skills
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    images/              uploaded and generated images, served at /images
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    logs/kokua.log       the rotating diagnostic log
 </span></code></pre></div>
 <p>To move the whole tree including <code>config.toml</code>, set <code>$KOKUA_HOME</code> instead. That one is an environment
 variable rather than a setting because the config file lives inside it, so it has to resolve before the
@@ -3203,20 +3269,20 @@ key</a>.</p>
 </tbody>
 </table>
 <p><code>schedule</code> is one of:</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"once"</span><span class="p">,</span><span class="w">     </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"2026-08-20T09:00:00"</span><span class="w"> </span><span class="p">}</span><span class="w">   </span><span class="c1"># ISO-8601 local datetime</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"interval"</span><span class="p">,</span><span class="w"> </span><span class="n">seconds</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">3600</span><span class="w"> </span><span class="p">}</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w">    </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"weekly"</span><span class="p">,</span><span class="w">   </span><span class="n">day</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"fri"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"16:00"</span><span class="w"> </span><span class="p">}</span><span class="w">    </span><span class="c1"># mon/tue/wed/thu/fri/sat/sun</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"once"</span><span class="p">,</span><span class="w">     </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"2026-08-20T09:00:00"</span><span class="w"> </span><span class="p">}</span><span class="w">   </span><span class="c1"># ISO-8601 local datetime</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"interval"</span><span class="p">,</span><span class="w"> </span><span class="n">seconds</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">3600</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w">    </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"weekly"</span><span class="p">,</span><span class="w">   </span><span class="n">day</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"fri"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"16:00"</span><span class="w"> </span><span class="p">}</span><span class="w">    </span><span class="c1"># mon/tue/wed/thu/fri/sat/sun</span>
 </span></code></pre></div>
 <p>A fired one-shot is <strong>not</strong> deleted. It is left in the file with <code>enabled = false</code> and a <code>fired_at</code>
 stamp, so the run stays on the record and re-running it is a one-character edit.</p>
 <p>A task's turn is proactive, which means gated tools auto-deny inside it. Give a task work its agent can
 finish unattended.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">[scheduling.task.morning-brief]</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">prompt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Summarize my calendar and any unread mail, and flag anything that needs a reply today."</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="n">max_conversations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">[scheduling.task.morning-brief]</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">prompt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Summarize my calendar and any unread mail, and flag anything that needs a reply today."</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">max_conversations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
 </span></code></pre></div>
 <h2 id="planning"><code>[planning]</code><a class="headerlink" href="#planning" title="Permanent link">&para;</a></h2>
 <p>Deep planning is a toolset: an agent's <code>tools</code> must list <code>planning</code> for the <code>/plan &lt;task&gt;</code> command to
@@ -3495,8 +3561,8 @@ reference, not inline data.</p>
 </tbody>
 </table>
 <p>Introspection, which exits without running the assistant:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>kokua<span class="w"> </span>--list-frontends<span class="w">    </span><span class="c1"># installed front ends</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>kokua<span class="w"> </span>--list-toolsets<span class="w">     </span><span class="c1"># every name a tools list may use, grouped by provider</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>kokua<span class="w"> </span>--list-frontends<span class="w">    </span><span class="c1"># installed front ends</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>kokua<span class="w"> </span>--list-toolsets<span class="w">     </span><span class="c1"># every name a tools list may use, grouped by provider</span>
 </span></code></pre></div>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>

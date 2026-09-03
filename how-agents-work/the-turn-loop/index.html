@@ -1593,18 +1593,34 @@ tool call still pending triggers a single forced wrap-up call with tools disable
 "answer from what you have" move described above, and it is deliberately not counted against the
 cap. If even the wrap-up produces nothing, AIMU raises <code>DegenerateTurnError</code> instead of returning an
 empty string, so the failure reaches you as a failure.</p>
-<p><strong>The cap you are running.</strong> AIMU's default is ten model calls per turn, and Kokua does not override it
-for the entry agent, so ten is what the transcript above was running under (it used three). The one
-place Kokua sets it deliberately is the plan workflow's independent reviewer,
-<a href="https://github.com/saxman/kokua/blob/main/src/kokua/workflows/critics.py"><code>workflows/critics.py</code></a>, at
+<p><strong>The cap you are running.</strong> AIMU's default is ten model calls per turn, and Kokua's own default matches
+it, so ten is what the transcript above was running under (it used three). You can change that:
+<code>[assistant].max_iterations</code> sets what every agent runs under, and <code>[agents.&lt;name&gt;].max_iterations</code>
+overrides it for one agent, which is usually what you want (see
+<a href="../../reference/configuration/#max_iterations">configuration</a>). A cap is resolved per agent and never
+inherited down the delegation graph, so raising the assistant's buys it more rounds of <em>delegating</em>, not
+more rounds inside each worker. The one cap that is not a config key is the plan workflow's independent
+reviewer, fixed at
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/workflows/critics.py"><code>workflows/critics.py</code></a>'s
 <code>max_iterations=6</code> to bound what verification can spend.</p>
 <p><strong>What hitting it feels like.</strong> Not an error. A search-heavy sub-agent that spends all ten rounds
 gathering hands back the wrap-up call's summary, which is thinner than the answer it was building
-toward, with nothing in the terminal marked as truncated. That edge is real enough to have moved this
-project's AIMU floor: before AIMU 0.26.0, hitting the cap with a call still pending produced a provider
-rejection instead of a wrap-up, and Kokua saw it as sub-agents failing rather than answering. The whole
-story is in <a href="../../explanation/architecture/#generation-parameters">the architecture doc's account of the AIMU version
-floor</a>.</p>
+toward. That seam is marked now, though where it shows up depends on whose round it was. When the
+<em>entry</em> agent's own turn hits the cap, its chunks go to the channel directly, and AIMU's own
+<code>CLIChannel</code> prints the injected round (<code>[continuing: final_answer] &lt;prompt&gt;</code>), which Kokua's terminal
+channel inherits with no code of its own. A <em>worker's</em> rounds never reach that method: they arrive as
+<code>subagent</code> card entries by way of <code>ChannelUI.show_subagent</code>, and the terminal offers no frame for those,
+so the call is a documented no-op there. A worker's boundary is drawn in the web UI's sub-agent card
+instead, carrying which injection it was and the exact words the worker was given (see
+<a href="../delegation/">Delegation</a>). Either way the record says why the answer is thinner rather than reading
+as one that simply ran short.
+That edge is real enough to have moved this project's AIMU floor: before AIMU 0.26.0, hitting the cap
+with a call still pending produced a provider rejection instead of a wrap-up, and Kokua saw it as
+sub-agents failing rather than answering. The whole story is in <a href="../../explanation/architecture/#generation-parameters">the architecture doc's account of the
+AIMU version floor</a>.</p>
+<p>So when a sub-agent's answer reads thinner than the work it clearly did, the cap is the first thing to
+check, and the fix is to raise it on that worker rather than on everyone: every agent's worst-case turn
+cost scales with its own cap, and a search-heavy researcher is usually the only one that needs more.</p>
 <p><strong>Knowing what it actually cost.</strong> Kokua accumulates each turn's model calls, seconds, and tokens into a
 record stored with the conversation
 (<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/metrics.py"><code>core/metrics.py</code></a>), described in

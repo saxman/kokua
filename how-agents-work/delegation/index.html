@@ -1506,7 +1506,12 @@ none of them are in this transcript. That is what isolation looks like from outs
 work, rendered as a tool call.</p>
 <p>Kokua <em>does</em> have a richer rendering, and the terminal is not it. A sub-agent card, which opens when
 the worker starts and fills in with its reasoning, its tool calls, and its answer, is a frame the web UI
-draws. <code>ChannelUI.show_subagent</code> degrades to nothing where cards are not rendered, which is
+draws. It also fills in with the boundary where the loop restarted the worker on its own rather than the
+worker's own model turn asking to continue: a nudge after an empty turn, or the forced wrap-up at the
+round cap, each entry carrying which one it was (<code>reason</code>, <code>"continuation"</code> or <code>"final_answer"</code>) and the
+exact words the worker was given (<code>text</code>), so a thinner answer near the cap reads as an explained outcome
+rather than a mystery.
+<code>ChannelUI.show_subagent</code> degrades to nothing where cards are not rendered, which is
 <a href="../../explanation/design-principles/#1-a-small-transport-agnostic-core">principle 1</a> working as
 designed and is also why this page cannot show you one from a CLI capture.</p>
 <p><strong>The choice was made from one line of prose per role.</strong> The model's reasoning lists what it can
