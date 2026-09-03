@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -832,6 +832,30 @@ alone. The case that does cost something is a configured MCP server, which conne
   the message rather than a setting anything stores, and it reaches the entry agent's own run alone: a
   spawned worker keeps its table's effort, and a workflow turn ignores the request rather than applying it
   to agents the user did not choose for. What the turn actually ran at is what `metadata.thinking` records.
+- **A default tool-loop cap, with per-agent overrides.** `[assistant].max_iterations` is the most model
+  calls any agent's turn may make; an agent that names its own `[agents.<name>].max_iterations` runs
+  under that instead. Both default to 10, which is also AIMU's own default. The count is model calls
+  rather than tool calls: the initial turn, every tool-follow-up turn, and any continuation nudge all
+  count against it, and AIMU's forced wrap-up (one call with tools disabled, run after the cap so the
+  agent still answers from what it has gathered) does not. That is why hitting the cap reads as a thinner
+  answer rather than a truncation error, and it is exactly the case a dial was wanted for: a search-heavy
+  worker is what feels it, since a run spending every round on tool calls is the one still
+  mid-investigation when the cap lands.
+  Resolved per agent and never inherited down the delegation graph, like `model` and `thinking`: raising
+  a delegator's cap buys it more rounds of delegating, not more rounds inside each worker it spawns. Both
+  spawn tools and `compose_subagent`'s are built with the global default rather than the delegator's
+  resolved cap, which is what makes that hold rather than merely describes it.
+  Rejected at parse time at both tiers unless it is an integer of 1 or more: `0` is a loop that makes no
+  model call at all, and `bool` is an `int` subclass, so an unguarded `max_iterations = true` would have
+  been read as a cap of 1 rather than rejected. Startup-only and not a runtime setting, for the same
+  reason `[assistant].model` is: nothing re-caps a live agent's loop.
+  Needs `aimu>=0.28.0`, which added the `"max_iterations"` sub-agent spec key the per-agent tier is
+  written into. Unlike earlier spec keys, an older AIMU does not swallow this one in silence: its key set
+  was already closed, so a checkout that predates 0.28.0 raises naming the key the first time an agent
+  delegates, rather than at startup. The floor moves that failure earlier, to a message with the fix
+  before a session is underway. See
+  [the configuration reference](https://saxman.info/kokua/reference/configuration/#max_iterations) and
+  [the turn loop](https://saxman.info/kokua/how-agents-work/the-turn-loop/).
 - **A default tier of generation parameters, with per-key overrides.** `[assistant.generation]` sets
   `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`, `repetition_penalty`, `max_tokens`, and
   `context_length` for every agent; an agent's own `[agents.<name>.generation]` overrides it **per key**,
