@@ -92,33 +92,45 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    Pinned because the probe has repeatedly been left behind by a moving floor. The surface today is
-    ``ModelRefusalError``, which ``core/turns.py`` catches so a declined request reads as declined
-    rather than falling into the generic failure branch.
+    Pinned because the probe has repeatedly been left behind by a moving floor. The surface today is the
+    ``"max_iterations"`` entry in ``SUBAGENT_SPEC_KEYS``, the spec key an agent's own cap is written into.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
     probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_SYMBOL == "ModelRefusalError"
-    # A plain name lookup: neither of the other two shapes applies, because the capability is the
-    # exported class itself and not a member or an argument of something older.
+    assert aimu_compat._PROBE_SYMBOL == "SUBAGENT_SPEC_KEYS"
+    # A membership check, the second time this probe has taken that shape. The set has existed since
+    # 0.17.0, so its presence dates nothing and only its contents do.
+    assert aimu_compat._PROBE_MEMBER == "max_iterations"
     assert aimu_compat._PROBE_PARAMETER is None
-    assert aimu_compat._PROBE_MEMBER is None
 
 
-def test_the_probe_names_the_class_kokua_actually_catches():
+def test_the_probe_names_the_spec_key_kokua_actually_writes():
     """The probe is only honest if the depended-on capability is the thing it looks up.
 
-    ``turns.py`` imports this name from ``aimu.aio`` and branches on it at three sites, so an AIMU
-    without it fails at import rather than degrading -- which is why the floor, not the probe, is what
-    covers everything else in 0.26.0 and 0.27.0.
+    ``core/agents.py`` writes this key into an ``agent_types`` spec for any agent declaring its own cap,
+    and AIMU's key set is closed, so an AIMU without the entry raises ``ValueError`` at the first
+    delegation. What the probe buys is therefore *timing*, not noise: a mid-session failure becomes a
+    startup message naming the fix. Narrower than the surfaces before it, and worth saying so.
     """
-    from kokua.core import turns
+    from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
 
-    assert turns.ModelRefusalError.__name__ == aimu_compat._PROBE_SYMBOL
+    assert aimu_compat._PROBE_MEMBER in SUBAGENT_SPEC_KEYS
     require_aimu()  # does not raise against the AIMU this suite runs on
+
+
+def test_the_default_cap_matches_aimus_own():
+    """``AssistantConfig.max_iterations`` restates AIMU's ``Agent`` default so four construction sites can
+    pass it unconditionally. Two halves of one decision, and nothing else in the suite would notice them
+    drifting: if AIMU raises its default, Kokua would quietly pin the old number for every agent.
+    """
+    from aimu import aio
+
+    from kokua.config.schema import AssistantConfig
+
+    assert AssistantConfig().max_iterations == aio.Agent.max_iterations
 
 
 def test_the_declared_floor_matches_the_packaged_requirement():

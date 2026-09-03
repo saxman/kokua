@@ -658,7 +658,7 @@ construction still works and streams neither phase, and since Kokua no longer re
 anywhere there is not even an `AttributeError` to notice, which is the failure mode this preflight
 exists for.
 
-The repository floor is now `aimu>=0.27.0`, and it is the first floor whose *reason* and whose *probe*
+The floor was `aimu>=0.27.0` until 0.28.0, and it is the first floor whose *reason* and whose *probe*
 are different capabilities from different releases. That split is worth following, because it is the
 shape of every future case where a bug fix rather than a feature moves the floor.
 
@@ -693,6 +693,22 @@ The probe covers one surface at a time; the version floor covers every earlier r
 capability first shipped tagged 0.24.0, but the number collided with a different, unrelated 0.24.0 that
 AIMU's own `main` released first; the branch carrying `events` rebased past it and renumbered to 0.25.0,
 so a real, released 0.24.0 correctly failed that probe rather than exposing a gap in it.)
+
+The floor moved again for **0.28.0**, and this is the case worth reading for what a probe *cannot* claim
+as much as for what it can. The capability is the `"max_iterations"` entry AIMU added to
+`SUBAGENT_SPEC_KEYS`, the spec key `core/agents.py` writes for an agent declaring its own tool-loop cap;
+without it, a per-agent cap has nowhere to go, since AIMU's own cap was one value shared by a whole spawn
+tool. The probe is a membership check on that same set, the second time after `generate_kwargs` and for
+the identical reason: the set itself shipped in 0.17.0, so its presence proves nothing and only its
+contents date a checkout. What is different here is that the set is now *closed* -- an AIMU predating
+0.28.0 raises `ValueError` on the unrecognized key rather than ignoring it, so unlike `stream_thinking` or
+`script_env` there is no silence for this probe to convert into noise. The capability fails loudly with or
+without it. What the probe buys instead is *timing*: a `ValueError` thrown at the first delegation,
+possibly deep into a session, becomes a startup message naming the fix instead. A real gain, and a
+narrower one than its predecessors could claim, which is worth saying plainly rather than dressing it up
+as one of them. The tool-level `max_iterations` argument on both spawn factories is old and unprobed, so
+the global-default half of the same feature stays the floor's job, as every capability older than the
+current probe eventually becomes.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes

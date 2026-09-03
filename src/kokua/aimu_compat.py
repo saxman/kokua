@@ -78,16 +78,18 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.27.0 is the current surface, and it is a plain name lookup: ``ModelRefusalError``, exported from
-``aimu.aio`` alongside ``ModelConnectionError``. The second time this module has had that shape (0.21.0's
-``resolve_default_text_model`` was the first) and for the same reason: the capability *is* the exported
-name, so a name lookup asks exactly the question that matters, and nothing else has to be true of a
-checkout once the class is importable. Anthropic returns a refusal as HTTP 200 with
-``stop_reason: "refusal"`` and no content block, so an AIMU that does not raise for it hands back an
-empty string, which inside an agent loop is indistinguishable from a degenerate turn: the continuation
-nudge fires and the run spends its iterations being refused again. ``core/turns.py`` branches on this
-class at three sites so a declined request reads as declined rather than as a generic failure, and an
-AIMU without the name fails at import instead of degrading in silence.
+AIMU 0.28.0 is the current surface, and it is a membership check for the second time (0.17.0's
+``SUBAGENT_SPEC_KEYS`` gaining ``"generate_kwargs"`` was the first): the ``"max_iterations"`` entry in
+that same closed set, which ``core/agents.py`` writes for an agent declaring its own tool-loop cap. The
+set has existed since 0.17.0, so only its contents date a checkout.
+
+This one is worth reading for what a probe *cannot* claim as much as for what it can. Because the key set
+is closed, an AIMU predating 0.28.0 raises ``ValueError`` on the unknown key rather than ignoring it, so
+unlike ``stream_thinking`` or ``script_env`` there is no silence to convert into noise. What moves is the
+*timing*: a failure at the first delegation, possibly a long way into a session, becomes a startup message
+naming the fix. Narrower than its predecessors, and stated as such rather than dressed up as one of them.
+The global-default half of the same feature (the tool-level ``max_iterations`` argument, old on both spawn
+factories) is not probed at all and is the floor's job.
 
 This floor is the first where the capability that *forced* it up and the capability the probe *grips*
 are different, from different releases, and the split is worth understanding because it is the shape of
@@ -153,38 +155,33 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 27, 0)
+MINIMUM_AIMU = (0, 28, 0)
 
-# The newest AIMU surface Kokua depends on is `ModelRefusalError`, the typed error AIMU raises when a
-# model's safety classifiers decline a request. A plain name lookup, the second time this probe has
-# taken that shape (0.21.0's `resolve_default_text_model` was the first), and for the same reason: the
-# capability *is* the exported name, so a name lookup asks exactly the question that matters. Anthropic
-# returns a refusal as HTTP 200 with `stop_reason: "refusal"` and no content, so an AIMU that does not
-# raise for it hands back an empty string; `core/turns.py` branches on this class at three sites so a
-# declined request reads as declined instead of falling into the generic failure branch, and an AIMU
-# without the name fails at import rather than degrading quietly.
+# The newest AIMU surface Kokua depends on is the `"max_iterations"` entry in `SUBAGENT_SPEC_KEYS`, the
+# spec key `core/agents.py` writes for an agent declaring its own tool-loop cap. A membership check, the
+# second time this probe has taken that shape (`generate_kwargs` was the first) and for the identical
+# reason: the set itself shipped back in 0.17.0, so its presence proves nothing about a checkout and only
+# its contents date one.
 #
-# Worth noticing, because it is new: for the first time the capability that *forced* this floor up and
-# the capability the probe *grips* are different, from different releases. The floor moved for 0.26.0's
-# forced-wrap-up fix -- the loop no longer strands an un-dispatched tool call before its wrap-up prompt,
-# without which every Anthropic run that hit its round cap mid-search died on a 400 naming the
-# unanswered `tool_use` ids instead of answering. That fix has no handle worth gripping:
-# `_settle_pending_tools` is a private method on a private class, exactly the kind of internal a later
-# honest refactor would rename, which would turn this preflight into a wall in front of a *newer,
-# working* AIMU (the trap 0.20.0 documents). So it is the floor's job, like the other capabilities no
-# name lookup could ever have asked about. 0.27.0's other half is in the same position: every provider
-# now reports how a turn ended, so `TruncatedTurnError` actually fires and `client.last_stop_reason`
-# carries the provider's own word for it, where before only Ollama set the flag and the check silently
-# no-opped everywhere else. `last_stop_reason` is an attribute on a live client, not a module symbol,
-# and Kokua reads it nowhere directly -- the floor covers it.
+# What this probe buys is different from the several before it, and worth stating plainly rather than
+# borrowing their language. AIMU's key set is *closed*: `_validate_subagent_config` raises on an
+# unrecognized key rather than ignoring it. So an AIMU predating 0.28.0 does not degrade in silence here
+# the way an AIMU without `stream_thinking` or `script_env` did; it raises `ValueError` naming the key.
+# The capability fails loudly with or without this probe. What the probe converts is *when*: a
+# `ValueError` thrown the first time something delegates, which can be a long way into a session,
+# becomes a startup message carrying the fix. A real gain, and a narrower one than its predecessors.
 #
-# `make_async_subagent_tool(events=...)` was this probe's surface while 0.25.0 was the floor, and
-# `make_command_tool` (a name lookup) before that; both are the floor's responsibility now, as
-# everything this probe has ever pointed at eventually becomes.
-_PROBE_MODULE = "aimu.aio"
-_PROBE_SYMBOL = "ModelRefusalError"
+# What it leaves to the floor: the tool-level `max_iterations` parameter on both spawn factories is old,
+# predating 0.28.0, so nothing about the *global default* half is probed at all. An AIMU carrying the set
+# entry but with `_build_agent`'s wiring botched would pass this and still give every worker the wrong
+# cap. That is the floor's job, as everything this probe has ever pointed at eventually becomes.
+#
+# `ModelRefusalError` was this probe's surface while 0.27.0 was the floor, and
+# `make_async_subagent_tool(events=...)` before that; both are the floor's responsibility now.
+_PROBE_MODULE = "aimu.tools.builtin"
+_PROBE_SYMBOL = "SUBAGENT_SPEC_KEYS"
 _PROBE_PARAMETER: Optional[str] = None
-_PROBE_MEMBER: Optional[str] = None
+_PROBE_MEMBER: Optional[str] = "max_iterations"
 
 
 class AimuVersionError(RuntimeError):
