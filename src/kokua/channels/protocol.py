@@ -32,8 +32,12 @@ class RichChannel(Protocol):
         """Replay one whole conversation, replacing whatever is displayed. Offering this is what lets a
         conversation command typed at the composer repaint the view the core just moved."""
 
-    async def send_working(self, active: bool) -> None:
-        """Show or clear a "turn already running" indicator for the conversation now in view."""
+    async def send_working(self, elapsed: Optional[float]) -> None:
+        """Show a "turn already running" indicator for the conversation now in view, counting up from
+        `elapsed` seconds, or clear it when None.
+
+        A duration rather than a flag plus a duration, so "idle, and it has been going 12 seconds"
+        cannot be expressed."""
 
     async def send_notification(self, text: str) -> None:
         """Report that a background turn finished, without stealing the current view."""
