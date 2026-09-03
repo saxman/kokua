@@ -143,7 +143,9 @@ async def test_answer_chunks_coalesce_when_recorded_but_arrive_as_separate_frame
 
 async def test_a_tool_call_between_two_generations_starts_a_second_answer_entry():
     """One answer entry per round, so a multi-round spawn reads as rounds rather than one run-on
-    block. The parent's own iterations are separated the same way, by its continuation marker."""
+    block. The parent's own rounds are separated the same way, by the tool call sitting between two
+    generations. Neither level draws a loop marker for an ordinary round; that marker is reserved for
+    the round the loop injected, which is what the two tests below cover."""
     reporter, _channel = _reporter()
     events = _collect()
     await reporter.spawned("r-1", "researcher", "find X")

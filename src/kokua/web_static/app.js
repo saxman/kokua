@@ -497,8 +497,9 @@ function spawnArgsLine(frame) {
 // foldable rendered as markdown. Consecutive entries of one kind extend the open block, so
 // streamed text reads as prose rather than as one block per token, and an entry of another kind
 // closes it: that is what gives a multi-round sub-agent one thinking and one answer block per tool
-// round, the way the parent's own continuation marker separates its own tool rounds. An injected
-// round (a continuation nudge, or the forced wrap-up at the cap) carries its own row here instead.
+// round, the way a tool block separates the parent's own rounds. An injected round (a continuation
+// nudge, or the forced wrap-up at the cap) has no tool call to separate it, so it carries its own row
+// here instead.
 function appendSubagentEntry(card, entry) {
   if (entry.kind === "reasoning") {
     card.answer = null;

@@ -22,9 +22,11 @@ A block is closed by anything appended after it, which is what gives a multi-rou
 answer block per round: a round's tool call or reasoning always sits between two generations. The one
 round with nothing in between is the round AIMU drives itself, and that one announces itself. AIMU
 yields a ``CONTINUING`` chunk before an injected round, carrying which injection it is (a nudge after
-an empty turn, or the forced wrap-up at the round cap) and the prompt it sent, so the card separates
-those rounds the way the parent's own loop marker separates its iterations, and still keeps no
-iteration counter of its own: the counter could not have named the injection or quoted it anyway.
+an empty turn, or the forced wrap-up at the round cap) and the prompt it sent, so the card marks that
+round the way the parent's own loop marker marks an injected round of its own. An ordinary round needs
+no marker at either level, because the tool call between two generations is already that boundary. The
+card still keeps no iteration counter of its own: the counter could not have named the injection or
+quoted it anyway.
 """
 
 from __future__ import annotations
