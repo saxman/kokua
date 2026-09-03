@@ -111,6 +111,20 @@ async def test_phase_subagent_and_finish_are_no_ops():
     assert channel.sent == []
 
 
+async def test_a_loop_entry_reaches_a_card_channel_and_is_a_no_op_without_one():
+    """The entry is a card `append` like any other, so it needs no route of its own: a channel that
+    renders cards gets it, one that does not (the terminal) drops it silently."""
+    entry = {"id": "r-1", "append": {"kind": "loop", "reason": "continuation", "text": "Keep going."}}
+
+    rich = RichChannelDouble()
+    await ChannelUI(rich).show_subagent(entry)
+    assert rich.calls[-1] == ("subagent", (entry,))
+
+    bare = BareChannel()
+    await ChannelUI(bare).show_subagent(entry)
+    assert bare.sent == []
+
+
 async def test_approval_falls_back_to_a_text_question():
     channel = BareChannel()
     await ChannelUI(channel).ask_approval("execute_python", {"code": "1"})

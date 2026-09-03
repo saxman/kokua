@@ -35,6 +35,10 @@ def _generating(text):
     return StreamChunk(StreamingContentType.GENERATING, text)
 
 
+def _continuing(kind, prompt):
+    return StreamChunk(StreamingContentType.CONTINUING, {"kind": kind, "prompt": prompt})
+
+
 async def test_a_spawn_opens_a_running_card_and_closes_it_with_the_answer():
     """A provider that yields no GENERATING chunk streams nothing, so the terminal event carries the
     text rather than leaving the card empty."""
@@ -147,6 +151,44 @@ async def test_a_tool_call_between_two_generations_starts_a_second_answer_entry(
     await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "u"}))
     await reporter.chunk("r-1", _generating("second round"))
     assert [e.get("append", {}).get("text") for e in events[1:]] == ["first round", None, "second round"]
+
+
+async def test_an_injected_round_reaches_the_card_with_what_the_worker_was_told():
+    """A worker that hits the round cap is told to stop calling tools and answer from what it has.
+    Without this, the card showed a worker going quiet and coming back thinner, with no reason given."""
+    reporter, channel = _reporter()
+    events = _collect()
+    await reporter.spawned("researcher-abc", "researcher", "find X")
+    await reporter.chunk("researcher-abc", _continuing("final_answer", "You have reached the tool-use limit."))
+
+    entry = {"kind": "loop", "reason": "final_answer", "text": "You have reached the tool-use limit."}
+    assert channel.subagent_frames[-1] == {"id": "researcher-abc", "append": entry}
+    assert events[-1] == {"id": "researcher-abc", "append": entry}
+
+
+async def test_an_injected_round_starts_a_second_answer_entry():
+    """The break is the point. A nudge fires on an empty turn, so nothing else sits between the two
+    generations to close the block, and the card would otherwise show one uninterrupted answer."""
+    reporter, _ = _reporter()
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _generating("first round"))
+    await reporter.chunk("r-1", _continuing("continuation", "Keep going."))
+    await reporter.chunk("r-1", _generating("second round"))
+
+    answers = [e["append"]["text"] for e in events if e.get("append", {}).get("kind") == "answer"]
+    assert answers == ["first round", "second round"]
+
+
+async def test_a_tool_round_adds_no_loop_entry_to_the_card():
+    """AIMU raises the iteration counter for a tool round too, and injects nothing there. The tool
+    entry is what separates those rounds, as it always has."""
+    reporter, _ = _reporter()
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "u"}, "page"))
+
+    assert [e.get("append", {}).get("kind") for e in events[1:]] == ["tool"]
 
 
 async def test_an_interleaved_spawn_breaks_the_answer_block():

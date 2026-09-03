@@ -19,9 +19,12 @@ coalescing is immune to another turn's interleaved activity even though every co
 share this one reporter and, by default (``subagents.concurrent``), run concurrently.
 
 A block is closed by anything appended after it, which is what gives a multi-round sub-agent one
-answer block per round: a round's tool call or reasoning always sits between two generations, so the
-card separates the rounds the way the parent's own ``continuation`` marker separates its iterations,
-with no iteration counter to keep in sync.
+answer block per round: a round's tool call or reasoning always sits between two generations. The one
+round with nothing in between is the round AIMU drives itself, and that one announces itself. AIMU
+yields a ``CONTINUING`` chunk before an injected round, carrying which injection it is (a nudge after
+an empty turn, or the forced wrap-up at the round cap) and the prompt it sent, so the card separates
+those rounds the way the parent's own loop marker separates its iterations, and still keeps no
+iteration counter of its own: the counter could not have named the injection or quoted it anyway.
 """
 
 from __future__ import annotations
@@ -79,7 +82,18 @@ class SubagentReporter:
         await self._report(event)
 
     async def chunk(self, spawn_id: str, chunk: StreamChunk) -> None:
-        if chunk.phase == StreamingContentType.THINKING:
+        if chunk.phase == StreamingContentType.CONTINUING:
+            # The loop injected a prompt of its own. Recorded as an entry rather than inferred from a
+            # rise in chunk.iteration, because the counter cannot say which injection it was, and the
+            # two say opposite things to the worker: keep working, or stop and answer from what you have.
+            call = chunk.content if isinstance(chunk.content, dict) else {}
+            await self._report(
+                {
+                    "id": spawn_id,
+                    "append": {"kind": "loop", "reason": call.get("kind"), "text": call.get("prompt", "")},
+                }
+            )
+        elif chunk.phase == StreamingContentType.THINKING:
             if chunk.content:
                 await self._report({"id": spawn_id, "append": {"kind": "reasoning", "text": chunk.content}})
         elif chunk.phase == StreamingContentType.TOOL_CALLING:
