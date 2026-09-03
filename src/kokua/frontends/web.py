@@ -25,7 +25,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from kokua import images
 from kokua.core.assistant import Assistant, ModelClientError
-from kokua.core.conversations import ID_PREFIX_MIN
+from kokua.core.conversations import ID_PREFIX_MIN, TurnNotFound
 from kokua.core.messages import derive_title
 from kokua.channels.web import WebChannel
 from kokua.config import AssistantConfig, ConfigError
@@ -60,12 +60,12 @@ def _static_text(filename: str) -> str:
     return files("kokua").joinpath(f"web_static/{filename}").read_text(encoding="utf-8")
 
 
-_CONTROL_TYPES = ("new", "select", "delete", "settings", "get_settings", "get_tasks", "task", "export")
+_CONTROL_TYPES = ("new", "select", "delete", "branch", "settings", "get_settings", "get_tasks", "task", "export")
 
 
 def _parse_control(raw: str) -> Optional[dict]:
-    """Return a control object ({"type": "new"/"select"/"delete"/"settings"/"task"/"export"/..., ...}),
-    else None.
+    """Return a control object ({"type": "new"/"select"/"delete"/"branch"/"settings"/"task"/"export"/...,
+    ...}), else None.
 
     Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
     approval "y"/"n") and is fed to the channel unchanged.
@@ -389,6 +389,23 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                         except ModelClientError:
                             logger.warning("Could not build agent after conversation delete", exc_info=True)
                             await channel.send("Sorry, that conversation could not be deleted.")
+                            continue
+                    elif control["type"] == "branch":
+                        try:
+                            index = int(control.get("message_index", -1))
+                        except (TypeError, ValueError):
+                            await channel.send("Sorry, that branch point could not be read.")
+                            continue
+                        try:
+                            await assistant.branch_conversation(str(control.get("id", "")), index)
+                        except TurnNotFound:
+                            # Not a failure worth a log line: the turn is simply not stored yet, which
+                            # a page holding a stale index can ask about honestly.
+                            await channel.send("That turn isn't saved yet, so there is nothing to branch from.")
+                            continue
+                        except ModelClientError:
+                            logger.warning("Could not build agent for conversation branch", exc_info=True)
+                            await channel.send("Sorry, that conversation could not be branched.")
                             continue
                     await _sync_view(channel, assistant)
 

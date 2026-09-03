@@ -944,6 +944,47 @@ def test_ws_delete_active_conversation(tmp_path):
     assert any(item["type"] == "user" and item["text"] == "first message" for item in hist["items"])
 
 
+def test_ws_branch_forks_the_conversation_at_a_turn(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("first message")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        # The turn's own position, published once its transcript reached the store.
+        saved = _drain_until(ws, "turn_saved")
+        assert saved["conversation_id"] == active_id
+
+        ws.send_text(json.dumps({"type": "branch", "id": active_id, "message_index": saved["message_index"]}))
+        after = _drain_until(ws, "conversations")
+        hist = _drain_until(ws, "history")
+
+    titles = [i["title"] for i in after["items"]]
+    assert "Branch of first message" in titles
+    assert next(i["title"] for i in after["items"] if i["active"]) == "Branch of first message"
+    assert any(item["type"] == "user" and item["text"] == "first message" for item in hist["items"])
+
+
+def test_ws_branch_at_an_unknown_turn_says_so_and_does_not_switch(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "branch", "id": active_id, "message_index": 42}))
+        message = _drain_until(ws, "message")
+
+    assert "branch" in message["text"].lower()
+
+
 def test_ws_sends_settings_on_connect(tmp_path):
     from starlette.testclient import TestClient
 
