@@ -496,8 +496,9 @@ function spawnArgsLine(frame) {
 // same thing: a 💭 thinking foldable, a 🔧 <name> tool foldable, and the generated text as its own
 // foldable rendered as markdown. Consecutive entries of one kind extend the open block, so
 // streamed text reads as prose rather than as one block per token, and an entry of another kind
-// closes it -- which is what gives a multi-round sub-agent one thinking and one answer block per
-// round, the way the parent's own ↻ continuation marker separates its iterations.
+// closes it: that is what gives a multi-round sub-agent one thinking and one answer block per tool
+// round, the way the parent's own continuation marker separates its own tool rounds. An injected
+// round (a continuation nudge, or the forced wrap-up at the cap) carries its own row here instead.
 function appendSubagentEntry(card, entry) {
   if (entry.kind === "reasoning") {
     card.answer = null;
@@ -507,6 +508,11 @@ function appendSubagentEntry(card, entry) {
     return;
   }
   card.reasoning = null;
+  if (entry.kind === "loop") {
+    card.answer = null;
+    renderLoop(entry.text, undefined, { parent: card.body, reason: entry.reason });
+    return;
+  }
   if (entry.kind === "tool") {
     card.answer = null;
     renderTool(entry.name, entry.arguments, undefined, { parent: card.body, response: entry.response });
@@ -910,8 +916,16 @@ function renderTool(name, args, ts, opts) {
   if (returned) renderToolOutput(f.body, response);
   return f;
 }
-function renderLoop(text, ts) {
-  const f = addFoldable("loop", { kind: "continuation" }, undefined, ts);
+// The kind word each injection wears. AIMU raises the loop's counter for a tool round too, and this
+// marker is deliberately not drawn there (the tool block is that boundary), so both words below
+// describe a round AIMU drove itself: a nudge after a turn that came back empty, or the forced
+// tools-disabled wrap-up at the round cap. An item with no reason is one stored before the two were
+// told apart, and reads as the commoner of them.
+const LOOP_KINDS = { continuation: "continuation", final_answer: "tool-use limit" };
+
+function renderLoop(text, ts, opts) {
+  const kind = LOOP_KINDS[(opts && opts.reason) || "continuation"] || "continuation";
+  const f = addFoldable("loop", { kind }, { parent: opts && opts.parent }, ts);
   f.body.textContent = text || "";
   return f;
 }
@@ -958,7 +972,7 @@ function handleFrame(event) {
     // Agent-loop continuation boundary. Like a tool block, it ends the answer segment above it: the
     // next tokens open their own bubble below this marker.
     thinkingBlock = null;
-    renderLoop(frame.text, new Date());
+    renderLoop(frame.text, new Date(), { reason: frame.reason });
   } else if (frame.type === "token") {
     thinkingBlock = null;
     // A block that landed since the last token (a tool call, a loop marker, an image) ended the answer
@@ -1057,7 +1071,7 @@ function handleFrame(event) {
         setFoldLabel(f.label, "thinking", "", lineMetric(item.text));
       }
       else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response });
-      else if (item.type === "loop") renderLoop(item.text, item.ts);
+      else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
       else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);

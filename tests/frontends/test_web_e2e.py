@@ -559,6 +559,15 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
                             {"id": "r-1", "append": {"kind": "reasoning", "text": "fetch each page"}},
                             {"id": "r-1", "append": {"kind": "tool", "name": "get_webpage", "arguments": {"url": "u"}}},
                             {"id": "r-1", "append": {"kind": "answer", "text": "**Vendor A** is cheaper."}},
+                            {
+                                "id": "r-1",
+                                "append": {
+                                    "kind": "loop",
+                                    "reason": "final_answer",
+                                    "text": "You have reached the tool-use limit.",
+                                },
+                            },
+                            {"id": "r-1", "append": {"kind": "answer", "text": "Vendor A, then."}},
                             {"id": "r-1", "status": "done"},
                         ]
                     },
@@ -581,8 +590,8 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(args).to_have_text('agent_type="researcher", task="compare pricing"')
 
     nested = card.locator("> .fold-body > .bubble")
-    expect(nested).to_have_count(3)
-    thinking, tool, answer = nested.nth(0), nested.nth(1), nested.nth(2)
+    expect(nested).to_have_count(5)
+    thinking, tool, answer, loop, answer2 = (nested.nth(i) for i in range(5))
     expect(thinking).to_have_class(re.compile(r"\bthinking\b"))
     expect(thinking).to_have_class(re.compile(r"\bcollapsed\b"))
     expect(tool).to_have_class(re.compile(r"\btool\b"))
@@ -593,11 +602,60 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(answer).not_to_have_class(re.compile(r"\bcollapsed\b"))
     expect(answer.locator(".fold-body")).to_be_visible()
     expect(answer.locator("strong", has_text="Vendor A")).to_have_count(1)
+    # The injected round: its own kind word, distinct from an ordinary continuation, and the second
+    # answer block that follows it is where the worker's thinner reply lands.
+    expect(loop).to_have_class(re.compile(r"\bloop\b"))
+    expect(loop.locator(".fold-kind")).to_have_text("tool-use limit")
+    expect(answer2).to_have_class(re.compile(r"\bassistant\b"))
+    expect(answer2.locator(".fold-body")).to_contain_text("Vendor A, then.")
     # Expanding a nested block leaves the others closed: each folds on its own.
     thinking.locator(".fold-header").click()
     expect(thinking).not_to_have_class(re.compile(r"\bcollapsed\b"))
     expect(thinking.locator(".fold-body")).to_contain_text("fetch each page")
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
+
+
+def test_a_cards_injected_round_says_the_cap_was_hit_and_quotes_the_prompt(page, live_server):
+    """The row that tells a reader why a worker's answer got thinner. Its kind word distinguishes the
+    cap from an ordinary continuation, and its body carries what the worker was actually told."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    def seed(config):
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[{"role": "user", "content": "research the vendors"}],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                    "subagent": {
+                        "0": [
+                            {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+                            {
+                                "id": "r-1",
+                                "append": {
+                                    "kind": "loop",
+                                    "reason": "final_answer",
+                                    "text": "You have reached the tool-use limit.",
+                                },
+                            },
+                            {"id": "r-1", "status": "done"},
+                        ]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    card = page.locator(".bubble.subagent")
+    card.locator("> .fold-header").click()
+    row = card.locator("> .fold-body > .bubble.loop")
+    expect(row).to_have_count(1)
+    expect(row.locator(".fold-kind")).to_have_text("tool-use limit")
+    row.locator("> .fold-header").click()
+    expect(row.locator("> .fold-body")).to_contain_text("You have reached the tool-use limit.")
 
 
 def _seed_tool_call(result: str | None):
