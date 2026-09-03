@@ -870,7 +870,7 @@ than a shared one.
 `channels/web.py`'s `WebChannel` subclasses
 [AIMU's base `WebChannel`](https://saxman.info/aimu/how-to/build-personal-assistant/). The streaming transport
 (`token`/`thinking`/`tool`/`done` frames and `send()`) lives in AIMU's base; Kokua's subclass adds the
-`conversations`, `history`, and `approval` frames its richer page needs. The UI is a single
+`conversations`, `history`, `approval`, and `turn_saved` frames its richer page needs. The UI is a single
 self-contained `web_static/index.html` served as package data, plus vendored `marked` + `DOMPurify`
 (GitHub-flavored markdown, sanitized, rendered client-side as the answer streams) and vendored KaTeX,
 typeset after sanitization with `trust:false` once the turn completes. The server allowlists these assets: JS/CSS by name, the

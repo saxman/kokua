@@ -678,7 +678,24 @@ function tsParts(value) {
     full: d.toLocaleString(),
   };
 }
-// Caption a regular bubble with its datetime (below the content). No-op when value is absent.
+// The trailing row a finished bubble grows: its datetime caption and, once the turn it ends is
+// known, its branch control. Both are plain flow content appended after the bubble's own content,
+// not positioned relative to a corner, so a control never lands over wrapped text: it always sits
+// after however many lines the answer took, which is also just where a reader looks for the caption
+// already there. Returns the existing row on a second call, so the caption and the control (added at
+// different times: the caption when the bubble is stamped, the control once the turn ends) land in
+// the same row rather than each growing their own.
+function bubbleMetaRow(el) {
+  let row = el.querySelector(".bubble-meta");
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "bubble-meta";
+    el.appendChild(row);
+  }
+  return row;
+}
+// Caption a regular bubble with its datetime (below the content, in the trailing row). No-op when
+// value is absent.
 function stampBubble(el, value) {
   const t = tsParts(value);
   if (!t) return;
@@ -686,7 +703,7 @@ function stampBubble(el, value) {
   span.className = "bubble-ts";
   span.textContent = t.label;
   span.title = t.full;
-  el.appendChild(span);
+  bubbleMetaRow(el).appendChild(span);
 }
 // A turn's branch control, appended to the last answer bubble the turn produced. `messageIndex` is
 // the position of the turn's user message in the stored transcript, which is how the server names a
@@ -704,7 +721,7 @@ function addBranchControl(el, messageIndex) {
     if (!active || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: "branch", id: active.id, message_index: messageIndex }));
   });
-  el.appendChild(btn);
+  bubbleMetaRow(el).appendChild(btn);
 }
 // Caption a foldable block on its header line, so the time shows whether collapsed or expanded.
 function stampHeader(header, value) {
@@ -1214,7 +1231,13 @@ function handleFrame(event) {
       else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
-      else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);
+      // A verbose (/plan) turn's committed message is skipped on persist (its final answer is
+      // already this turn's last reasoning segment; see core/transcripts.py), so a reasoning
+      // item has to be able to close the turn out too, or a verbose turn would replay with no
+      // branch control at all. Harmless for an ordinary turn, whose message item lands after
+      // its reasoning and overwrites this reference: closeReplayTurn only ever stamps the
+      // last one, so a mid-trace reasoning segment is never the one that gets the control.
+      else if (item.type === "reasoning") replayLastAnswer = addMarkdownBubble("assistant", item.text, item.ts);
       else if (item.type === "message" && !isBlank(item.text)) replayLastAnswer = addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text, item.ts);
       // Why a turn stopped early. A scheduled run's error never reached this conversation live, so on
       // reload this is the only account of it the conversation has.
