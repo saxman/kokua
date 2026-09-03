@@ -1053,7 +1053,7 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.27.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.28.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -1068,15 +1068,24 @@ notice on startup.
   command_env_passthrough` where the capability and its handle are the same object, was the surface
   until 0.25.0, when it gave way to a signature check again: `make_async_subagent_tool(events=...)`,
   the parameter that lets a spawned sub-agent's model turns reach the sink the delegating turn opened.
-  Today it is a plain name lookup once more, on `aimu.aio.ModelRefusalError`. That is also the first
-  floor whose reason and whose probe are different capabilities: the floor moved to 0.27.0 for
-  *0.26.0*'s fix to AIMU's forced wrap-up (it no longer appends the wrap-up prompt on top of an
-  un-dispatched tool call, which Anthropic rejected outright and which made search-heavy sub-agents
-  fail rather than answer), and that fix has no handle a probe could honestly grip -- a private method
-  on a private class is exactly what a later refactor renames, and a probe pointed at one becomes a
-  wall in front of a newer, working AIMU. It covers one surface at a time by design; every earlier
-  release's capabilities are the floor's job, and `tests/test_aimu_compat.py` pins the floor against
-  `pyproject.toml`'s specifier so the two halves of that one decision cannot drift.
+  It was a plain name lookup once more, on `aimu.aio.ModelRefusalError`, while 0.27.0 was the floor.
+  That was also the first floor whose reason and whose probe were different capabilities: the floor
+  moved to 0.27.0 for *0.26.0*'s fix to AIMU's forced wrap-up (it no longer appends the wrap-up prompt
+  on top of an un-dispatched tool call, which Anthropic rejected outright and which made search-heavy
+  sub-agents fail rather than answer), and that fix has no handle a probe could honestly grip -- a
+  private method on a private class is exactly what a later refactor renames, and a probe pointed at
+  one becomes a wall in front of a newer, working AIMU.
+  The floor moved again for **0.28.0**, for the `"max_iterations"` entry AIMU added to
+  `SUBAGENT_SPEC_KEYS`, the spec key `core/agents.py` writes for an agent declaring its own tool-loop
+  cap and without which a per-agent cap has nowhere to go. The probe moved with it, to a membership
+  check on that set, its second use of that shape after `generate_kwargs`. Unlike its predecessors,
+  this one is not silence converted to noise: the set is already closed, so an AIMU predating 0.28.0
+  raises `ValueError` on the unrecognized key regardless of the probe, and the capability fails loudly
+  either way. What the probe buys is timing, a startup message naming the fix in place of a
+  `ValueError` at the first delegation, not a failure where none existed before.
+  It covers one surface at a time by design; every earlier release's capabilities are the floor's job,
+  and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two halves
+  of that one decision cannot drift.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.
