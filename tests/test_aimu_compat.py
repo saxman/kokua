@@ -111,9 +111,10 @@ def test_the_probe_names_the_spec_key_kokua_actually_writes():
     """The probe is only honest if the depended-on capability is the thing it looks up.
 
     ``core/agents.py`` writes this key into an ``agent_types`` spec for any agent declaring its own cap,
-    and AIMU's key set is closed, so an AIMU without the entry raises ``ValueError`` at the first
-    delegation. What the probe buys is therefore *timing*, not noise: a mid-session failure becomes a
-    startup message naming the fix. Narrower than the surfaces before it, and worth saying so.
+    and AIMU validates its closed key set when the spawn tool is built, so an AIMU without the entry
+    raises ``ValueError`` at startup with or without this probe. What the probe buys is therefore the
+    *wording*, not the timing: a message naming the fix. Narrower than the surfaces before it, and worth
+    saying so.
     """
     from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
 

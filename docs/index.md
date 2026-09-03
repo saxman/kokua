@@ -17,7 +17,7 @@ A toy cannot teach what real work costs, so Kokua does real work. And the machin
 followed rather than taken on faith, so every mechanism above is there to be read, run, and extended.
 
 Kokua isn't on PyPI; clone the repository and install with `uv` (Python 3.11+ and
-[AIMU](https://saxman.info/aimu/) 0.27.0 or newer):
+[AIMU](https://saxman.info/aimu/) 0.28.0 or newer):
 
 ```bash
 git clone https://github.com/saxman/kokua && cd kokua

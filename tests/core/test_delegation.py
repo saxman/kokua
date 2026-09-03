@@ -290,7 +290,7 @@ def test_a_spec_omits_generate_kwargs_when_nothing_is_declared_anywhere(tmp_path
 
 
 def test_every_spec_key_kokua_writes_is_one_aimu_accepts():
-    """AIMU raises on an unrecognized spec key, so a typo here would fail at the first delegation."""
+    """AIMU validates a spec when the spawn tool is built, so a typo here would fail at agent build."""
     from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
 
     assert {
@@ -311,15 +311,20 @@ def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypa
     and the tool is only constructed per spawn, so an undeclared worker two levels down raised
     ``ValueError: No available async client for model type 'NoneType'`` at the moment it was asked to
     do something, and only then.
+
+    ``max_iterations`` is the same trap one field over, which is why ``lead`` pins its own cap here.
+    AIMU reads a spec without the key as "the cap this tool was built with", so building ``lead``'s
+    spawn tool with ``max_iterations_for("lead")`` would hand every worker below it a cap it never
+    declared. Nothing else in the suite watches this construction site.
     """
     from kokua.core import agents as agents_mod
 
     from tests.conftest import TEST_DEFAULT_MODEL
 
-    captured = []
+    captured: list[tuple[object, dict]] = []
 
     def fake_make(model, **kwargs):
-        captured.append(model)
+        captured.append((model, kwargs))
 
         async def spawn_subagent(agent_type: str, task: str) -> str:
             """menu"""
@@ -330,13 +335,15 @@ def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypa
 
     agents = {
         "assistant": AgentConfig(delegates_to=["lead"]),
-        "lead": AgentConfig(tools=["web"], delegates_to=["helper"]),
+        "lead": AgentConfig(tools=["web"], delegates_to=["helper"], max_iterations=25),
         "helper": AgentConfig(tools=["web"]),
     }
     config, state = _state(tmp_path, agents)
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make)
     agents_mod.build_agent_specs(config, state, "assistant")
-    assert captured == [TEST_DEFAULT_MODEL]
+    assert [model for model, _ in captured] == [TEST_DEFAULT_MODEL]
+    assert [kwargs["max_iterations"] for _, kwargs in captured] == [config.max_iterations]
+    assert config.max_iterations_for("lead") == 25  # so the assertion above could have failed
 
 
 def test_the_delegate_is_built_with_the_metrics_forwarder(tmp_path, monkeypatch):

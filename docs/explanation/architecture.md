@@ -700,15 +700,14 @@ as much as for what it can. The capability is the `"max_iterations"` entry AIMU 
 without it, a per-agent cap has nowhere to go, since AIMU's own cap was one value shared by a whole spawn
 tool. The probe is a membership check on that same set, the second time after `generate_kwargs` and for
 the identical reason: the set itself shipped in 0.17.0, so its presence proves nothing and only its
-contents date a checkout. What is different here is that the set is now *closed* -- an AIMU predating
-0.28.0 raises `ValueError` on the unrecognized key rather than ignoring it, so unlike `stream_thinking` or
-`script_env` there is no silence for this probe to convert into noise. The capability fails loudly with or
-without it. What the probe buys instead is *timing*: a `ValueError` thrown at the first delegation,
-possibly deep into a session, becomes a startup message naming the fix instead. A real gain, and a
-narrower one than its predecessors could claim, which is worth saying plainly rather than dressing it up
-as one of them. The tool-level `max_iterations` argument on both spawn factories is old and unprobed, so
-the global-default half of the same feature stays the floor's job, as every capability older than the
-current probe eventually becomes.
+contents date a checkout. What is different here is that the set is now *closed*, and validated at
+factory-call time, which for Kokua is `wire_agent` building a conversation's agent. So an AIMU predating
+0.28.0 raises `ValueError` naming the key at startup already: no silence for the probe to convert into
+noise, and no mid-session failure to pull forward. What it buys is the wording, a message carrying the fix
+rather than a spec-key `ValueError` out of agent construction, which is also the path
+`state.refresh_workers` re-runs on every runtime MCP add and remove. Narrower than any predecessor's
+claim, and worth saying plainly rather than dressing up as one of them. The global tier needed none of
+this: the factory argument behind `[assistant].max_iterations` has existed since 0.12.0.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes

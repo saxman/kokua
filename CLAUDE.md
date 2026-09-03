@@ -160,21 +160,23 @@ Consequences for working in this repo:
   first, `max_iterations` now).
 
   **AIMU 0.28.0 is the current floor, and it is the case where a probe's honest claim is weaker than its
-  predecessors' and has to say so.** The capability is the ``"max_iterations"`` entry in
+  predecessors' and has to say so.** The capability is the `"max_iterations"` entry in
   `SUBAGENT_SPEC_KEYS`, the spec key `core/agents.py` writes for an agent declaring its own tool-loop cap,
   which is what makes `[agents.<name>].max_iterations` expressible at all: AIMU's cap was one value per
   spawn tool, so per-agent could not be said. The probe is a membership check on that set, the second time
   after `generate_kwargs` and for the same reason (the set shipped in 0.17.0, so only its contents date a
-  checkout). What is new is the honesty the shape demands. Every recent floor converted *silence* into a
+  checkout). What is new is how little it can honestly claim. Every recent floor converted *silence* into a
   startup error: an older AIMU accepted `stream_thinking`'s absence, `script_env`'s absence, an unknown
-  spec key in 0.17.0, and said nothing. This one cannot, because the key set is now closed and an AIMU
-  predating 0.28.0 raises `ValueError` naming the key. The capability fails loudly either way, so what the
-  probe buys is *timing*: a failure at the first delegation, which may be a long way into a session,
-  becomes a startup message carrying the fix. That is a real gain and a smaller one, and writing it down as
-  such is the point, because a probe that overclaims is worse than one that covers less. What it leaves
-  uncovered is the other half of the same feature: the tool-level `max_iterations` argument on both spawn
-  factories is old, so an AIMU with the set entry but broken `_build_agent` wiring would pass the probe and
-  still cap every worker wrong. The floor's job, as always.
+  spec key in 0.17.0, and said nothing. This one has no silence to convert, because the key set is closed
+  and an AIMU predating 0.28.0 raises `ValueError` naming the key. It does not move that failure earlier
+  either: `_validate_subagent_config` raises at factory-call time, and `wire_agent` calls the factory while
+  building a conversation's agent, so the raw `ValueError` already lands at startup. What the probe buys is
+  the message, one naming the fix rather than a spec-key `ValueError` out of agent construction; and since
+  that construction path doubles as `state.refresh_workers`, the raw version takes down every runtime MCP
+  add and remove along with delegation. A real gain, and a much smaller one than a predecessor's, which is
+  worth writing down, because a probe that overclaims is worse than one that covers less. What needs no
+  cover at all is the global tier: `[assistant].max_iterations` rides a factory argument that has existed
+  since 0.12.0, so it runs on an older AIMU and only the per-agent tier ever depended on 0.28.0.
 
   What the current surface says nothing about, only the floor covers. `tests/test_aimu_compat.py` pins
   `MINIMUM_AIMU` against `pyproject.toml`'s specifier, since the two are halves of one decision and

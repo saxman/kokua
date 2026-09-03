@@ -85,11 +85,15 @@ set has existed since 0.17.0, so only its contents date a checkout.
 
 This one is worth reading for what a probe *cannot* claim as much as for what it can. Because the key set
 is closed, an AIMU predating 0.28.0 raises ``ValueError`` on the unknown key rather than ignoring it, so
-unlike ``stream_thinking`` or ``script_env`` there is no silence to convert into noise. What moves is the
-*timing*: a failure at the first delegation, possibly a long way into a session, becomes a startup message
-naming the fix. Narrower than its predecessors, and stated as such rather than dressed up as one of them.
-The global-default half of the same feature (the tool-level ``max_iterations`` argument, old on both spawn
-factories) is not probed at all and is the floor's job.
+unlike ``stream_thinking`` or ``script_env`` there is no silence to convert into noise. Nor is there a
+later failure to pull forward: ``_validate_subagent_config`` runs at factory-call time, and Kokua calls
+that factory from ``wire_agent``, so the raw ``ValueError`` already lands when a conversation's agent is
+built, which for the entry agent is startup. What the probe buys is the *wording*, a message carrying the
+fix instead of a spec-key ``ValueError`` out of agent construction; worth having, since that construction
+path is also ``state.refresh_workers`` and so re-runs on every runtime MCP add and remove. Narrower than
+any predecessor's claim, and stated as such rather than dressed up as one of them. Only the per-agent tier
+ever needed 0.28.0: the factory argument behind ``[assistant].max_iterations`` has been on both spawn
+factories since 0.12.0, so the global tier works on an older AIMU and needs neither probe nor floor.
 
 This floor is the first where the capability that *forced* it up and the capability the probe *grips*
 are different, from different releases, and the split is worth understanding because it is the shape of
@@ -165,16 +169,17 @@ MINIMUM_AIMU = (0, 28, 0)
 #
 # What this probe buys is different from the several before it, and worth stating plainly rather than
 # borrowing their language. AIMU's key set is *closed*: `_validate_subagent_config` raises on an
-# unrecognized key rather than ignoring it. So an AIMU predating 0.28.0 does not degrade in silence here
-# the way an AIMU without `stream_thinking` or `script_env` did; it raises `ValueError` naming the key.
-# The capability fails loudly with or without this probe. What the probe converts is *when*: a
-# `ValueError` thrown the first time something delegates, which can be a long way into a session,
-# becomes a startup message carrying the fix. A real gain, and a narrower one than its predecessors.
+# unrecognized key rather than ignoring it, and it raises at factory-call time, which for Kokua is
+# `wire_agent` building a conversation's agent. So an AIMU predating 0.28.0 neither degrades in silence
+# (the way one without `stream_thinking` or `script_env` did) nor waits for a delegation: startup fails
+# already. What the probe converts is only the *message*, from a spec-key `ValueError` raised inside agent
+# construction into one naming the fix. Worth having, since that same construction path is
+# `state.refresh_workers` and re-runs on every runtime MCP add or remove, but narrower than any
+# predecessor's claim.
 #
-# What it leaves to the floor: the tool-level `max_iterations` parameter on both spawn factories is old,
-# predating 0.28.0, so nothing about the *global default* half is probed at all. An AIMU carrying the set
-# entry but with `_build_agent`'s wiring botched would pass this and still give every worker the wrong
-# cap. That is the floor's job, as everything this probe has ever pointed at eventually becomes.
+# What needs no cover at all: only the per-agent tier writes the spec key. The tool-level
+# `max_iterations` argument behind `[assistant].max_iterations` has been on both spawn factories since
+# 0.12.0, so that tier runs on an older AIMU unchanged.
 #
 # `ModelRefusalError` was this probe's surface while 0.27.0 was the floor, and
 # `make_async_subagent_tool(events=...)` before that; both are the floor's responsibility now.

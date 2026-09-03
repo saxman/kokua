@@ -125,7 +125,7 @@ Everything else is yours to remove, and here is what removing each shipped patte
 | `security.*` | lets the assistant change `confirm_tools`, and so remove its own approval gate |
 | `email.to` | lets the assistant mail someone other than you |
 | `paths.data_dir` | lets the assistant move its own state out from under you |
-| `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `system_message`, `description`, and `delegates_to`, set its `[agents.<name>.generation]` parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart. |
+| `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `max_iterations`, `system_message`, `description`, and `delegates_to`, set its `[agents.<name>.generation]` parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart. |
 | `scheduling.task.*` | changes the error message only. `update_config` still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule. |
 | `compute.command_env_passthrough` | lets the assistant name its own credentials for a `run_command` child to see; because the key is cold, that exposure is persistent, surviving into every later session rather than one command |
 
@@ -137,8 +137,14 @@ from, and reads both halves of it that startup reads: the agent tables and the `
 naming the entry agent. So two writes that each looked fine alone cannot add up to a file your next
 launch refuses. A `[agents.<name>.generation]` parameter gets a different check instead:
 the same type-and-range check `[assistant.generation]` gets, not a `validate_agents` dry run, since a bad
-`temperature` cannot break startup the way a bad delegate can. Either way, the write is checked before
-it is saved; neither check tells you the result is one you wanted, only that it starts.
+`temperature` cannot break startup the way a bad delegate can. An agent's `max_iterations` gets a check
+of its own for the same reason: an integer of 1 or more, enforced where the written string is coerced,
+since a cap cannot make a config unstartable. Every way in, the write is checked before it is saved;
+no check tells you the result is one you wanted, only that it starts.
+
+`[assistant].max_iterations` is not locked, so the assistant can raise or lower its own tool-loop cap
+there. That is deliberate, for the reason `[assistant].model` is unlocked: the key is startup-only, so
+no write escalates the session doing the writing, and what it moves is cost rather than reach.
 
 `[[mcp.server]]` is not in the list and is not writable by `update_config` either way; it is appended by
 `add_mcp_server`, which connects the server as well as recording it.
@@ -289,6 +295,9 @@ Raise it for work that legitimately needs more rounds, which in practice means s
 spends every round calling tools is the one still mid-investigation when the cap lands. Prefer raising it
 on the one agent that needs it, via the per-agent key below, over raising it here for everyone, since
 every agent's worst-case turn cost scales with this number.
+
+This key is not locked, so the assistant can change it too: see [who may change which
+key](#who-may-change-which-key).
 
 ### `generate_titles`
 
@@ -470,9 +479,9 @@ unattended.
 
 ### `model`, `thinking`, `generation`, `max_iterations`
 
-All three are resolved per agent and **never inherited down the delegation graph**: a delegator that pins
-a big model, reasons hard, or runs cold does not drag its workers along. A worker declaring nothing runs
-on the `[assistant]` defaults like every other undeclared agent.
+All four are resolved per agent and **never inherited down the delegation graph**: a delegator that pins
+a big model, reasons hard, runs cold, or loops longer does not drag its workers along. A worker declaring
+nothing runs on the `[assistant]` defaults like every other undeclared agent.
 
 An agent's `model` is the same string [`[assistant].model`](#model) is, suffixes included: a worker can
 be pinned to its own endpoint, or to the same remote server the assistant uses. Worth stating because the
@@ -497,8 +506,7 @@ context_length = 131072
 
 A model string AIMU cannot resolve fails startup naming the table it came from.
 
-`max_iterations` is the fourth of these and behaves like the other three in the one way that matters:
-it is resolved per agent and **never inherited down the delegation graph**. An assistant that declares
+`max_iterations` follows that rule too, and it is worth spelling out. An assistant that declares
 `max_iterations = 40` does not hand 40 to the workers it delegates to; each of them gets its own
 declaration if it has one, and `[assistant].max_iterations` otherwise. So raising a delegator's cap
 buys the delegator more rounds of *delegating*, not more rounds inside each worker. To give a worker a

@@ -849,11 +849,11 @@ alone. The case that does cost something is a configured MCP server, which conne
   model call at all, and `bool` is an `int` subclass, so an unguarded `max_iterations = true` would have
   been read as a cap of 1 rather than rejected. Startup-only and not a runtime setting, for the same
   reason `[assistant].model` is: nothing re-caps a live agent's loop.
-  Needs `aimu>=0.28.0`, which added the `"max_iterations"` sub-agent spec key the per-agent tier is
-  written into. Unlike earlier spec keys, an older AIMU does not swallow this one in silence: its key set
-  was already closed, so a checkout that predates 0.28.0 raises naming the key the first time an agent
-  delegates, rather than at startup. The floor moves that failure earlier, to a message with the fix
-  before a session is underway. See
+  The per-agent tier needs `aimu>=0.28.0`, which added the `"max_iterations"` sub-agent spec key it is
+  written into; the global tier rides a factory argument AIMU has had since 0.12.0. Unlike earlier spec
+  keys, an older AIMU does not swallow this one in silence: its key set was already closed and is checked
+  when a spawn tool is built, so a checkout predating 0.28.0 fails at startup either way, and what the
+  preflight adds is a message naming the fix instead of a raw `ValueError`. See
   [the configuration reference](https://saxman.info/kokua/reference/configuration/#max_iterations) and
   [the turn loop](https://saxman.info/kokua/how-agents-work/the-turn-loop/).
 - **A default tier of generation parameters, with per-key overrides.** `[assistant.generation]` sets
@@ -1079,10 +1079,10 @@ notice on startup.
   `SUBAGENT_SPEC_KEYS`, the spec key `core/agents.py` writes for an agent declaring its own tool-loop
   cap and without which a per-agent cap has nowhere to go. The probe moved with it, to a membership
   check on that set, its second use of that shape after `generate_kwargs`. Unlike its predecessors,
-  this one is not silence converted to noise: the set is already closed, so an AIMU predating 0.28.0
-  raises `ValueError` on the unrecognized key regardless of the probe, and the capability fails loudly
-  either way. What the probe buys is timing, a startup message naming the fix in place of a
-  `ValueError` at the first delegation, not a failure where none existed before.
+  this one is not silence converted to noise: the set is already closed and checked when a spawn tool
+  is built, so an AIMU predating 0.28.0 raises `ValueError` at startup with or without the probe. What
+  the probe buys is only the message, one naming the fix rather than a spec-key `ValueError` out of
+  agent construction.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's job,
   and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two halves
   of that one decision cannot drift.
