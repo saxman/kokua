@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -621,10 +622,20 @@ async def test_web_channel_send_working_emits_frame_regardless_of_foreground():
     channel.active_conversation_id = "viewed"
     token = streaming_conversation.set("other")  # a background turn's context; must not mute this
     try:
-        await channel.send_working(True)
+        await channel.send_working(12.5)
     finally:
         streaming_conversation.reset(token)
-    assert ws.frames == [{"type": "working", "active": True}]
+    assert ws.frames == [{"type": "working", "active": True, "elapsed": 12.5}]
+
+
+async def test_web_channel_send_working_with_no_elapsed_reports_idle():
+    """None is "no turn running", which is the only thing that turns the page's indicator off. The
+    wire keeps a boolean because that is what the page branches on; the Python side takes the
+    duration alone so "idle, and it has been running 12s" cannot be expressed."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_working(None)
+    assert ws.frames == [{"type": "working", "active": False}]
 
 
 async def test_web_channel_send_approval_request_emits_frame():
@@ -1461,14 +1472,19 @@ async def test_switch_into_running_conversation_sends_working_indicator(tmp_path
         await asyncio.Event().wait()
 
     handle = RunHandle.start(forever())
-    assistant._tracker.add(assistant.active_id, TurnInfo(handle=handle, started=0.0, preview="p"))
+    started = time.monotonic() - 30  # a turn already half a minute old when the view switches into it
+    assistant._tracker.add(assistant.active_id, TurnInfo(handle=handle, started=started, preview="p"))
     try:
         await _sync_view(channel, assistant)
     finally:
         handle.cancel()
         await asyncio.gather(handle.task, return_exceptions=True)
 
-    assert any(f.get("type") == "working" and f.get("active") is True for f in ws.frames)
+    working = [f for f in ws.frames if f.get("type") == "working"]
+    assert [f["active"] for f in working] == [True]
+    # The page counts up from this rather than from the moment of the switch, so a turn already
+    # running for a while does not read as one that just started.
+    assert working[0]["elapsed"] >= 30
 
 
 # --- Server round-trip via Starlette TestClient ----------------------------------------------

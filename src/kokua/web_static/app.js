@@ -16,7 +16,6 @@ const tasksRefresh = document.getElementById("tasks-refresh");
 const tasksCount = document.getElementById("tasks-count");
 const taskList = document.getElementById("task-list");
 const notifications = document.getElementById("notifications");
-const workingIndicator = document.getElementById("working-indicator");
 const convHeading = document.getElementById("conv-heading");
 
 // A background turn finished while the user was viewing a different conversation ("notification"
@@ -35,11 +34,97 @@ function showNotification(text) {
   notifications.appendChild(el);
 }
 
-// Shows/hides the "still working" indicator for the conversation currently being viewed. Set on
-// switching into a conversation with an in-flight turn ("working" frame); cleared once that turn's
-// next done/message frame arrives, or the view switches again (a "history" frame).
-function setWorking(active) {
-  workingIndicator.classList.toggle("hidden", !active);
+// The inline "working" indicator: a dim row saying a turn is under way, pinned to the foot of the
+// transcript for the turn's whole life, with the turn's output growing above it. It carries a spinner
+// and the seconds since the turn started, which is the half that says a slow turn is not a wedged one.
+//
+// Pinned, rather than cleared by the first thing that renders. That was the first shape of this, and
+// measuring it settled the question: on a local endpoint the first token lands about 25ms after the
+// send, so a row that content displaces is on screen for a frame or two and is never seen at all. What
+// the row answers is "is a turn running", which stays true until the turn ends, so that is its life.
+//
+// The pinning is what `appendToLog` is for: content is inserted *ahead* of the row rather than appended
+// after it, so the row stays last without ever being moved.
+// The heavy braille cycle rather than the light one: at the row's size a mostly-empty cell reads as a
+// speck of dust, while these are a solid mark that visibly turns.
+const SPINNER_FRAMES = ["\u28fe", "\u28fd", "\u28fb", "\u28bf", "\u287f", "\u28df", "\u28ef", "\u28f7"];
+const SPINNER_MS = 120;
+const reduceMotion = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+
+let workingElement = null;
+let workingTicker = null;    // spinner + elapsed interval, running only while the row is up
+let workingStartedAt = 0;    // when the turn began, which is what the count counts from
+let spinnerFrame = 0;
+
+// Raise the indicator for a turn that has already been running `elapsedMs` (0 for one this page just
+// sent, the server's own figure for one it is switching into), or take it down with null. A duration
+// rather than a flag beside one, matching `ChannelUI.show_working`, so "idle for 12s" cannot be said.
+function setWorking(elapsedMs) {
+  if (elapsedMs === null) {
+    removeWorking();
+    return;
+  }
+  if (workingElement) return;  // already up for this turn: leave its clock alone
+  workingStartedAt = Date.now() - elapsedMs;
+  workingElement = document.createElement("div");
+  workingElement.className = "working-inline";
+  workingElement.setAttribute("role", "status");
+  const spinner = document.createElement("span");
+  spinner.className = "working-spinner";
+  spinner.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.textContent = "Working\u2026";
+  const elapsed = document.createElement("span");
+  elapsed.className = "working-elapsed";
+  // Left unannounced: inside a role="status" row, a counter rewritten every second would talk over
+  // everything else a screen reader has to say, and "Working…" is the part carrying the meaning.
+  elapsed.setAttribute("aria-hidden", "true");
+  workingElement.appendChild(spinner);
+  workingElement.appendChild(label);
+  workingElement.appendChild(elapsed);
+  log.appendChild(workingElement);  // last, and appendToLog is what keeps it there
+  tickWorking(spinner, elapsed);  // paint now rather than leaving the row blank for one interval
+  workingTicker = setInterval(() => tickWorking(spinner, elapsed), SPINNER_MS);
+  autoscroll();
+}
+
+function removeWorking() {
+  if (workingTicker !== null) clearInterval(workingTicker);
+  workingTicker = null;
+  if (workingElement) workingElement.remove();
+  workingElement = null;
+}
+
+// Advance the glyph and the count. Under prefers-reduced-motion the glyph holds still and the seconds
+// are the only thing moving, which is the half that actually says the turn is not wedged.
+function tickWorking(spinner, elapsed) {
+  if (!(reduceMotion && reduceMotion.matches)) {
+    spinner.textContent = SPINNER_FRAMES[spinnerFrame];
+    spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
+  } else if (!spinner.textContent) {
+    spinner.textContent = SPINNER_FRAMES[0];
+  }
+  const text = Math.floor((Date.now() - workingStartedAt) / 1000) + "s";
+  if (elapsed.textContent !== text) elapsed.textContent = text;
+}
+
+// The single way anything reaches the transcript, so a renderer added later cannot leave the working
+// indicator stranded above the content it was meant to sit under. While a turn is running the row is
+// the log's last element, so a top-level block goes in ahead of it; `parent` is a sub-agent card's
+// body for a nested block, which is inside a block already placed and so just appends.
+function appendToLog(el, parent) {
+  if (parent) parent.appendChild(el);
+  else if (workingElement) log.insertBefore(el, workingElement);
+  else log.appendChild(el);
+}
+
+// The last block rendered in the transcript, looking past the working indicator. Throughout a turn the
+// indicator *is* the log's final element, and a caller asking whether anything has landed since the
+// last token means content, not the row saying a turn is running. Without this, that caller closes the
+// streaming bubble on every token and the answer arrives one bubble per token.
+function lastContentElement() {
+  const last = log.lastElementChild;
+  return last === workingElement ? last.previousElementSibling : last;
 }
 
 // A conversation's age for the sidebar. Coarse on purpose: the sidebar answers "which of these did I
@@ -621,7 +706,7 @@ function addBubble(cls, text, ts) {
   }
   el.appendChild(document.createTextNode(text || ""));
   stampBubble(el, ts);
-  log.appendChild(el);
+  appendToLog(el);
   autoscroll();
   return el;
 }
@@ -705,7 +790,7 @@ function addFoldable(cls, labelParts, opts, ts) {
   });
   outer.appendChild(header);
   outer.appendChild(body);
-  ((opts && opts.parent) || log).appendChild(outer);
+  appendToLog(outer, opts && opts.parent);
   autoscroll();
   return { outer, header, body, label };
 }
@@ -720,7 +805,7 @@ function addImageBubble(src, cls, ts) {
   img.alt = "image";
   el.appendChild(img);
   stampBubble(el, ts);
-  log.appendChild(el);
+  appendToLog(el);
   autoscroll();
   return el;
 }
@@ -813,7 +898,7 @@ function addMarkdownBubble(cls, text, ts) {
     typesetMath(el);
   }
   stampBubble(el, ts);
-  log.appendChild(el);
+  appendToLog(el);
   autoscroll();
   return el;
 }
@@ -964,7 +1049,7 @@ function handleFrame(event) {
     // A block that landed since the last token (a tool call, a loop marker, an image) ended the answer
     // segment it interrupted, so close that bubble and start a new one below. Moving the old bubble
     // down instead would drag prose the user already watched arrive underneath the cards it preceded.
-    if (streamingBubble && log.lastElementChild !== streamingBubble) finalizeStreaming();
+    if (streamingBubble && lastContentElement() !== streamingBubble) finalizeStreaming();
     // Only the *opening* is guarded: inside a bubble the same whitespace is real spacing between
     // words the reader can see, while ahead of one it is a section with nothing in it.
     if (!streamingBubble && isBlank(frame.text)) return;
@@ -978,7 +1063,7 @@ function handleFrame(event) {
     finalizeStreaming();
     autoscroll();
     setProcessing(false);
-    setWorking(false);
+    setWorking(null);
   } else if (frame.type === "phase") {
     // Verbose trace: close the previous phase's streamed bubble and start a labeled section.
     finalizeStreaming();
@@ -990,16 +1075,23 @@ function handleFrame(event) {
     addImageBubble(frame.url, "assistant", new Date());
   } else if (frame.type === "message") {
     addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text, new Date());
-    if (!frame.proactive) setProcessing(false);  // a reactive message ends the turn (e.g. "(stopped)" / error)
-    setWorking(false);
+    // A reactive message ends the turn (e.g. "(stopped)" / an error) and takes the indicator with it.
+    // A proactive one interrupts whatever is going on without ending it, so it leaves both alone: the
+    // indicator belongs to the turn now, not to "the last thing that arrived".
+    if (!frame.proactive) {
+      setProcessing(false);
+      setWorking(null);
+    }
   } else if (frame.type === "notification") {
     // A background turn on some OTHER conversation finished (never the one being viewed -- the
     // server only sends this when you've switched away); show it without touching this view or its
     // own working indicator.
     showNotification(frame.text);
   } else if (frame.type === "working") {
-    setWorking(!!frame.active);
     setProcessing(!!frame.active);
+    // `elapsed` is how long the turn has been running server-side, so switching into one that started
+    // minutes ago counts on from there rather than restarting at zero.
+    setWorking(frame.active ? (frame.elapsed || 0) * 1000 : null);
   } else if (frame.type === "approval") {
     renderApproval(frame.name, frame.arguments);
   } else if (frame.type === "plan") {
@@ -1043,8 +1135,8 @@ function handleFrame(event) {
     streamingText = "";
     thinkingBlock = null;
     stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
-    setWorking(false);  // reset; a "working" frame right behind this one re-shows it if still running
-    setProcessing(false);  // same for the composer: idle unless that "working" frame says otherwise
+    setProcessing(false);  // idle unless the "working" frame behind this one says otherwise
+    setWorking(null);  // reset; that same frame re-shows the indicator when the turn is still running
     for (const item of frame.items) {
       if (item.type === "user") addBubble("user", item.text, item.ts);
       // An in-flight turn's answer so far: left open (and unstamped), so the rest streams into it.
@@ -1099,7 +1191,7 @@ function renderApproval(name, args) {
   actions.appendChild(deny);
   el.appendChild(prompt);
   el.appendChild(actions);
-  log.appendChild(el);
+  appendToLog(el);
   autoscroll();
 }
 
@@ -1152,7 +1244,7 @@ function renderPlanReview(planText, critique) {
   el.appendChild(prompt);
   if (note) el.appendChild(note);
   el.appendChild(actions);
-  log.appendChild(el);
+  appendToLog(el);
   autoscroll();
 }
 
@@ -1195,7 +1287,7 @@ function connect() {
     input.disabled = true;
     sendBtn.disabled = true;
     setProcessing(false);
-    setWorking(false);
+    setWorking(null);
     if (frameReceived && !synced) {
       notice("Disconnected. Reload the page to reconnect.");
       return;
@@ -1339,6 +1431,7 @@ form.addEventListener("submit", (e) => {
   input.value = "";
   autoGrowInput();  // collapse the box back to one row
   setProcessing(true);  // a turn is now being processed; allow stopping it
+  setWorking(0);  // and say so in the transcript, until the first frame of the reply displaces it
 });
 
 // Cancel the in-flight reply. Disabled unless a turn is processing; disable on click so it
@@ -1346,4 +1439,5 @@ form.addEventListener("submit", (e) => {
 stopBtn.addEventListener("click", () => {
   if (ws.readyState === WebSocket.OPEN) ws.send("/stop");
   setProcessing(false);
+  setWorking(null);  // nothing is coming that would clear it: the server answers a stop with a message
 });

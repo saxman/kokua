@@ -160,6 +160,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     Shift+Enter inserts a newline (an IME's Enter does neither). Send is replaced by Stop for the
     duration of a turn rather than sitting beside a permanently disabled button, and switching
     conversations mid-turn updates it to match the conversation being viewed.
+  - **An inline working indicator says a turn is running.** A dim row pinned to the foot of the
+    transcript, a spinner over the seconds since the turn began, with the turn's output growing above
+    it. It goes up the moment you send and comes down when the turn ends. Switching into a conversation
+    whose turn is still running raises it too, counting on from that turn's real age rather than
+    restarting at zero: `ChannelUI.show_working` carries a duration (`None` for "nothing running")
+    rather than a flag beside one, so "idle for twelve seconds" cannot be expressed. It replaces a
+    static chip in the header, which said only that something was happening and said it a long way from
+    where it was happening. Pinning is deliberate and was measured rather than assumed: an indicator
+    that the first rendered content displaced was on screen for 23ms against a local endpoint, whose
+    first token lands about that fast, so what it answers has to be "is a turn running" (true until the
+    turn ends) rather than "has anything arrived yet".
   - **A Think picker beside the Plan toggle** sets the reasoning effort for the messages you send after
     it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
     `input` frame field, writes nothing to `config.toml`, and resets to the configured default on reload.
