@@ -779,14 +779,16 @@ def test_replay_items_empty():
     assert replay_items([]) == []
 
 
-def test_replay_items_continuation_user_turn_renders_loop_marker_with_prompt():
+def test_replay_items_continuation_user_turn_renders_loop_marker_with_prompt_and_reason():
     messages = [{"role": "user", "content": "Continue working.", PROVENANCE_KEY: PROVENANCE_CONTINUATION}]
-    assert replay_items(messages) == [{"type": "loop", "text": "Continue working."}]
+    assert replay_items(messages) == [{"type": "loop", "reason": "continuation", "text": "Continue working."}]
 
 
-def test_replay_items_final_answer_user_turn_renders_loop_marker_with_prompt():
+def test_replay_items_final_answer_user_turn_is_labelled_as_the_cap_not_a_nudge():
+    """The two injections say opposite things, so one item shape carrying no reason made a reload
+    unable to tell them apart even though the stored message always could."""
     messages = [{"role": "user", "content": "Give the final answer.", PROVENANCE_KEY: PROVENANCE_FINAL_ANSWER}]
-    assert replay_items(messages) == [{"type": "loop", "text": "Give the final answer."}]
+    assert replay_items(messages) == [{"type": "loop", "reason": "final_answer", "text": "Give the final answer."}]
 
 
 def test_replay_items_marks_proactive_assistant_turn():

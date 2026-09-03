@@ -337,10 +337,12 @@ def replay_items(
         if role == "user":
             if provenance in _LOOP_PROVENANCE:
                 # A framework-injected continuation/final-answer turn, not user input. Show a loop
-                # marker carrying the injected prompt text (for inspection), not a user bubble. It
-                # continues the turn already in progress rather than starting a new one, so it must not
-                # close that turn's failure notice either.
-                add({"type": "loop", "text": message_text(message.get("content"))}, ts)
+                # marker carrying the injected prompt text (for inspection) and which injection it was,
+                # not a user bubble. `reason` is the provenance itself, which is the same value the live
+                # channel reads off AIMU's CONTINUING chunk, so a replayed turn and a watched one render
+                # identically. It continues the turn already in progress rather than starting a new one,
+                # so it must not close that turn's failure notice either.
+                add({"type": "loop", "reason": provenance, "text": message_text(message.get("content"))}, ts)
                 continue
             flush_failure()  # whatever turn was in progress ends where this one begins
             if str(index) in failure:
