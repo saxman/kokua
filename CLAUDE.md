@@ -154,9 +154,10 @@ Consequences for working in this repo:
   but that is an attribute on a live client rather than a module symbol and Kokua reads it nowhere
   directly. The probe therefore covers exactly one surface at a time, in whatever shape that surface has,
   and it has taken three: a name lookup for a symbol (`resolve_default_text_model` first,
-  `ModelRefusalError` today), a *signature* check for a keyword argument no `getattr` would notice
+  `ModelRefusalError` second), a *signature* check for a keyword argument no `getattr` would notice
   (`SkillManager(include=...)` first, `script_env` second, `stream_thinking` third, `events` fourth), and
-  a membership check for an entry in a published set.
+  a membership check for an entry in a published set, today's shape for the second time (`generate_kwargs`
+  first, `max_iterations` now).
 
   **AIMU 0.28.0 is the current floor, and it is the case where a probe's honest claim is weaker than its
   predecessors' and has to say so.** The capability is the ``"max_iterations"`` entry in

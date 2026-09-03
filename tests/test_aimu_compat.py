@@ -57,9 +57,9 @@ def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
 def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
     """The probe follows whatever shape the newest surface has, and a set member is one of the three.
 
-    Not the shape in force today (0.25.0's surface is a keyword argument), but it was for 0.18.0, and
-    the branch has to stay exercised: a published set proves nothing by existing once the set itself
-    predates the capability, so only its contents can answer.
+    This is in fact today's shape too (0.28.0's surface is `max_iterations`), but exercised here against
+    0.18.0's `generate_kwargs` member instead of monkeypatching over the live probe, so the branch stays
+    covered independent of whichever member the real surface currently names.
     """
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "SUBAGENT_SPEC_KEYS")
