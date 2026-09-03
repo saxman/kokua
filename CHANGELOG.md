@@ -125,6 +125,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   agent, so it works with the model server down. A read that races the daemon's own persist reports the
   store as busy rather than parsing a torn file. See
   [Export a conversation](https://saxman.info/kokua/how-to/export-a-conversation/).
+- **Branch a conversation at a turn.** Every turn's answer in the web UI carries a branch control:
+  it forks a new conversation holding everything through that turn and switches to it, leaving the
+  original untouched in the sidebar. The fork carries the turn's recorded sub-agent cards, models,
+  and costs, is titled "Branch of <the original>", and never inherits a scheduled task's ownership,
+  so branching a task's run does not enter it into that task's retention. A terminal `/branch` is
+  not part of this (see `TODO.md`).
 
 ### Front ends
 

@@ -688,6 +688,24 @@ function stampBubble(el, value) {
   span.title = t.full;
   el.appendChild(span);
 }
+// A turn's branch control, appended to the last answer bubble the turn produced. `messageIndex` is
+// the position of the turn's user message in the stored transcript, which is how the server names a
+// turn; the page never computes it, because a count of rendered bubbles is not the same number.
+function addBranchControl(el, messageIndex) {
+  if (!el || el.dataset.branchIndex !== undefined || !Number.isInteger(messageIndex) || messageIndex < 0) return;
+  el.dataset.branchIndex = String(messageIndex);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "bubble-branch";
+  btn.textContent = "↱";
+  btn.title = "Branch a new conversation from here";
+  btn.addEventListener("click", () => {
+    const active = lastConversations.find((item) => item.active);
+    if (!active || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "branch", id: active.id, message_index: messageIndex }));
+  });
+  el.appendChild(btn);
+}
 // Caption a foldable block on its header line, so the time shows whether collapsed or expanded.
 function stampHeader(header, value) {
   const t = tsParts(value);
@@ -1141,6 +1159,15 @@ function handleFrame(event) {
     document.body.appendChild(a);
     a.click();
     a.remove();
+  } else if (frame.type === "turn_saved") {
+    // A turn reached the store. Only the transcript on screen can take the control, and only if this
+    // is the conversation it belongs to: a background turn's completion must not stamp a branch point
+    // from another conversation onto the one being viewed.
+    const active = lastConversations.find((item) => item.active);
+    if (active && active.id === frame.conversation_id) {
+      const answers = log.querySelectorAll(".bubble.assistant, .bubble.proactive");
+      addBranchControl(answers[answers.length - 1], frame.message_index);
+    }
   } else if (frame.type === "history") {
     // Also the marker that the server got past building an assistant for this connection, which is
     // what tells a later close apart from a refusal that never synced (see connect()).
@@ -1159,7 +1186,20 @@ function handleFrame(event) {
     stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
     setProcessing(false);  // idle unless the "working" frame behind this one says otherwise
     setWorking(null);  // reset; that same frame re-shows the indicator when the turn is still running
+    // The turn being replayed, and the last answer bubble it produced. A turn's branch control goes
+    // on that bubble, which is only known once the turn has ended: the next item carrying a
+    // message_index, or the end of the transcript.
+    let replayTurnIndex = -1;
+    let replayLastAnswer = null;
+    const closeReplayTurn = () => {
+      addBranchControl(replayLastAnswer, replayTurnIndex);
+      replayLastAnswer = null;
+    };
     for (const item of frame.items) {
+      if (Number.isInteger(item.message_index)) {
+        closeReplayTurn();
+        replayTurnIndex = item.message_index;
+      }
       if (item.type === "user") addBubble("user", item.text, item.ts);
       // An in-flight turn's answer so far: left open (and unstamped), so the rest streams into it.
       else if (item.type === "partial" && !isBlank(item.text)) { streamingText = item.text; streamingBubble = addBubble("assistant", streamingText); }
@@ -1175,11 +1215,12 @@ function handleFrame(event) {
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
       else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);
-      else if (item.type === "message" && !isBlank(item.text)) addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text, item.ts);
+      else if (item.type === "message" && !isBlank(item.text)) replayLastAnswer = addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text, item.ts);
       // Why a turn stopped early. A scheduled run's error never reached this conversation live, so on
       // reload this is the only account of it the conversation has.
       else if (item.type === "notice") addBubble("notice", item.text, item.ts);
     }
+    closeReplayTurn();  // the last turn ends at the end of the transcript
     autoscroll();
   }
 }

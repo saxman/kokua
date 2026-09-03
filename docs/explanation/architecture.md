@@ -455,6 +455,37 @@ because that read happens per conversation, so a change genuinely applies withou
 the test the model itself fails. There is no setting for *which* model writes the title, because the
 conversation already answers that.
 
+### Branching a conversation
+
+`ConversationBook.branch(conversation_id, user_index)` forks a conversation at one of its turns: it
+writes a new session holding a copy of the parent's transcript through the end of that turn, titles it
+`Branch of <the parent>`, and activates it through the same `_activate` path `create` uses, so a branch
+whose agent fails to build reverts the pointer rather than stranding the view. The parent is not
+touched, and the two are ordinary independent conversations afterwards.
+
+Three things decide the shape. The cut is **a turn boundary**, found by `turn_end`: the next message the
+user actually sent, skipping the `user`-role nudges the agent loop injects between tool-calling
+iterations (`messages.is_user_turn`). That is the only cut a transcript survives, because anywhere else
+can fall between an assistant message holding `tool_calls` and the `tool` messages answering them, which
+a provider rejects on the branch's *next* request rather than at the fork, where it could still be
+reported. The per-turn metadata maps (`subagent`, `trace`, `model`, `thinking`, `failure`, `usage`) are
+**filtered, not remapped**, because a prefix copy leaves every index where it was: the branch replays its
+inherited turns exactly as the parent does, cards and costs included. And `task_id` is **not inherited**,
+because a branch of a scheduled run is the user's conversation rather than another run of that task;
+inheriting it would nest the branch under the task and enter it into that task's retention pruning.
+
+Branching reads the store, never `agent_for`, for the reason the conversation tools do, and takes no
+turn-gate hold: it reads a snapshot of the parent and writes a brand-new key, so there is nothing for
+another turn's `persist` to collide with. A turn in flight on the parent is invisible to it, which is
+correct, since the cut is always behind that turn. Switching into the branch backgrounds a turn running
+in the parent rather than cancelling it, exactly as `select` does.
+
+The web page names a turn by the position of its user message, which `replay_items` already stamps on
+replayed items and which the `turn_saved` frame supplies for a turn that just finished live. That frame
+is published by `TurnRunner._persist`, after the store write and only when `ConversationBook.branchable`
+says the stored transcript really has a user turn there, so the page is never offered a branch point the
+store cannot serve.
+
 ## Plugins
 
 Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`) and `kokua.toolsets`
@@ -874,6 +905,13 @@ of ordering, and it is now a delay rather than a wedge. Whichever half finishes 
 in both directions: a disconnect ends the reader, and an unexpected error ends the applier and has to end
 the reader with it, since a reader left running would queue frames into a drain nobody reads, which is the
 same wedge with the halves swapped.
+
+Every control that changes which conversation is on screen (`new`, `select`, `delete`, and `branch`,
+which carries `id` and `message_index`) ends the same way: it resyncs the view rather than describing
+what changed, `select` and `delete` included, so the applying task never has to reason about a diff.
+Among the frames the server pushes, `turn_saved` (`{"conversation_id", "message_index"}`) takes no such
+resync, because it names one turn that already rendered rather than replacing anything: it exists only to
+say where that turn now lives in the store, so a bubble already on screen can grow a branch control.
 
 ### Reconnecting after a dropped socket
 

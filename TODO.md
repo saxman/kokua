@@ -148,3 +148,10 @@ enforced only at parse time, in `config/file.py`, and nowhere `validate_agents` 
 at the next startup. Fix by composing `agent_write` with the discarded per-key converter rather than
 replacing it, or by moving the range check somewhere `validate_agents` reaches. This shape will silently
 cost the next range-checked `agents.*` key too, not just this one.
+
+## 14. Reach conversation branching from the terminal
+The web UI forks a conversation at a turn (`ConversationBook.branch`, a control on each turn's
+answer). The terminal cannot: `/new`, `/conversations`, and `/switch` name conversations, and nothing
+names a *turn*. A `/branch` needs a numbered listing of the conversation's turns first, which is a
+design decision of its own (turn ordinals, counting back from the latest, or the message index the
+web control uses). Until then a terminal user branches by opening the web UI.
