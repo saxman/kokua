@@ -1412,3 +1412,40 @@ def test_a_refused_second_tab_does_not_retry(page, live_server):
 
     # The refused tab left the first one's session alone.
     expect(page.locator("#conv-list li")).to_have_count(1)
+
+
+def test_branching_a_turn_forks_the_conversation(page, live_server):
+    """The branch control on a finished turn forks a conversation holding that turn and switches to it.
+
+    The control only appears once the server says the turn reached the store (the `turn_saved` frame),
+    which is the half of this that no unit test can see: the page has no index for a live turn until
+    then, and offering one it invented would name the wrong turn.
+    """
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "ping")
+    page.click("#send")
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+
+    branch = page.locator(".bubble-branch")
+    expect(branch).to_have_count(1, timeout=10_000)
+    branch.click()
+
+    expect(page.locator("#conv-list li", has_text="Branch of ping")).to_be_visible(timeout=10_000)
+    # The fork opens holding the exchange it was made from, and the original is still beside it.
+    expect(page.locator(".bubble.user", has_text="ping")).to_be_visible()
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible()
+    expect(page.locator("#conv-list li")).to_have_count(2)
+
+
+def test_the_branch_control_survives_a_reload(page, live_server):
+    """A replayed turn carries the control too, stamped from the `message_index` on its user item."""
+    url = live_server(delay=0.0)
+    _open(page, url)
+    page.fill("#msg", "ping")
+    page.click("#send")
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+    expect(page.locator(".bubble-branch")).to_have_count(1, timeout=10_000)
+
+    page.reload()
+    page.wait_for_selector("#conv-list li")
+    expect(page.locator(".bubble-branch")).to_have_count(1, timeout=10_000)
