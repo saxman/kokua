@@ -447,6 +447,13 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         generation = config.generation_for(name)
         if generation:
             specs[name]["generate_kwargs"] = generation
+        # Declared only, like the model and unlike thinking or generation: AIMU reads a missing
+        # max_iterations as "the cap the spawn tool was built with", which _spawn_tool sets to the
+        # [assistant] default. So an undeclared worker inherits that default without Kokua writing it
+        # in, and inherits it rather than its delegator's pin. Tested `is not None` rather than truthy,
+        # so the parse-time floor stays the only thing with an opinion about the value.
+        if agent.max_iterations is not None:
+            specs[name]["max_iterations"] = agent.max_iterations
     return specs
 
 
@@ -481,6 +488,13 @@ def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Ca
     without an explicit sink its model turns are invisible to whatever cost accounting the delegator
     keeps. ``record_event`` is a module-level constant that reads the running turn off a contextvar
     when an event fires, so a tool built once here reports into whichever turn is running at call time.
+
+    ``max_iterations=config.max_iterations`` is the *global* default, deliberately not
+    ``config.max_iterations_for(delegator)``. AIMU reads a spec without the key as "the cap this tool
+    was built with", so passing the delegator's own resolved cap would make an undeclared worker inherit
+    its delegator's pin, which is the one thing ``max_iterations_for`` promises not to do. Same trap as
+    the model, one field over, and the same answer: ask the config for the default, not the caller for
+    its own.
     """
     observer: Optional[SubagentObserver] = state.observer
     return make_async_subagent_tool(
@@ -489,6 +503,7 @@ def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Ca
         tool_approval=state.tool_approval,
         observer=observer,
         events=record_event,
+        max_iterations=config.max_iterations,
     )
 
 
@@ -505,6 +520,10 @@ def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Op
     ``Model`` enum, so a default carrying an ``@base_url`` arrived here stripped of it, and every
     sub-agent was rebuilt against the provider default while the delegator kept talking to the
     override. See ``AssistantConfig.default_model``.
+
+    ``max_iterations`` is read from the config for the same reason and with the same consequence: the
+    global default, not the delegator's resolved cap, so a worker declaring no cap of its own gets
+    ``[assistant].max_iterations`` rather than inheriting its delegator's.
     """
     name = getattr(agent, "name", config.entry_agent)
     if not config.agents[name].delegates_to:
@@ -516,6 +535,7 @@ def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Op
         tool_approval=state.tool_approval,
         observer=observer,
         events=record_event,
+        max_iterations=config.max_iterations,
     )
 
 
