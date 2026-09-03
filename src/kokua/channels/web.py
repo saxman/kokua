@@ -291,8 +291,8 @@ class WebChannel(BaseWebChannel):
 
         Wraps the chunk iterator so the base ``send`` loop is reused unchanged (it has no per-chunk
         hook for image progress); strings (including proactive pushes) pass straight through. A
-        background turn needs no special path here: the base loop drains the whole stream either way --
-        so the agent run completes and its state persists -- and each frame it produces is muted or not
+        background turn needs no special path here: the base loop drains the whole stream either way
+        (so the agent run completes and its state persists), and each frame it produces is muted or not
         on its own, as the view stands when that frame is sent (see the module docstring).
         """
         if isinstance(content, str):

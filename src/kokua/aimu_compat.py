@@ -95,22 +95,23 @@ nudge fires and the run spends its iterations being refused again. ``core/turns.
 class at three sites so a declined request reads as declined rather than as a generic failure, and an
 AIMU without the name fails at import instead of degrading in silence.
 
-This floor is the first where the capability that *forced* it up and the capability the probe *grips*
-are different, from different releases, and the split is worth understanding because it is the shape of
-every future case where a bug fix rather than a feature moves the floor. The floor moved for **0.26.0**:
-its tool loop no longer strands an un-dispatched tool call before the forced wrap-up prompt. Before that
-fix, exhausting ``max_iterations`` on a turn that had requested tools left those calls unanswered and
-then appended the wrap-up's *user* message on top of them, which Anthropic rejects with ``messages.N:
-`tool_use` ids were found without `tool_result` blocks immediately after``. Search-heavy sub-agents hit
-it routinely, being the shape of run that spends every round calling tools and so the one still holding
-a pending call when the cap lands. That fix offers no handle worth gripping: ``_settle_pending_tools``
-is a private method on a private class, precisely the internal a later honest refactor would rename,
-which would turn this preflight into a wall in front of a *newer, working* AIMU -- the trap AIMU 0.20.0
-documents at length below. So it is the floor's job, like every capability no name lookup could ever
-have asked about. 0.27.0's other half sits in the same position: every provider now reports how a turn
-ended, so ``TruncatedTurnError`` fires outside Ollama for the first time and ``client.last_stop_reason``
-carries the provider's own word for it. That is an attribute on a live client rather than a module
-symbol, and Kokua reads it nowhere directly, so the floor covers it too.
+That floor was the first where the capability that *forced* it up and the capability the probe
+*gripped* were different, from different releases, and the split is worth understanding because it
+is the shape of every future case where a bug fix rather than a feature moves the floor. The floor
+moved for **0.26.0**: its tool loop no longer strands an un-dispatched tool call before the forced
+wrap-up prompt. Before that fix, exhausting ``max_iterations`` on a turn that had requested tools
+left those calls unanswered and then appended the wrap-up's *user* message on top of them, which
+Anthropic rejects with ``messages.N: `tool_use` ids were found without `tool_result` blocks
+immediately after``. Search-heavy sub-agents hit it routinely, being the shape of run that spends
+every round calling tools and so the one still holding a pending call when the cap lands. That fix
+offers no handle worth gripping: ``_settle_pending_tools`` is a private method on a private class,
+precisely the internal a later honest refactor would rename, which would turn this preflight into a
+wall in front of a *newer, working* AIMU, the trap AIMU 0.20.0 documents at length below. So it is
+the floor's job, like every capability no name lookup could ever have asked about. 0.27.0's other
+half sat in the same position, and is the floor's job to this day: every provider now reports how a
+turn ended, so ``TruncatedTurnError`` fires outside Ollama for the first time and
+``client.last_stop_reason`` carries the provider's own word for it. That is an attribute on a live
+client rather than a module symbol, and Kokua reads it nowhere directly, so the floor covers it too.
 
 AIMU 0.25.0 was the surface until 0.27.0, and the shape was a signature check, the fourth time: a
 sub-agent built by ``make_async_subagent_tool`` used to have no way to report its model turns anywhere
