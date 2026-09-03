@@ -155,9 +155,10 @@ immediately. Everything else is **startup-only**: change it, then restart.
 | `[capabilities].max_depth` | all of `[agents.*]`, `[mcp]` (including `[[mcp.server]]`), `[security]`, `[paths]`, `[frontend]`, `[web]`, `[logging]`, `[email]` |
 | `[scheduling].max_task_conversations` | |
 
-The model and the reasoning effort read like runtime settings and are not. Nothing rebinds a live model
-client, and no runtime writer can reach `[agents.*]`, so a hot `[assistant].model` could only ever report
-a change it had not made, or disagree with an agent's own declaration. Generation parameters are
+The model, the reasoning effort, and the tool-loop cap read like runtime settings and are not. Nothing
+rebinds a live model client, nothing re-caps a live agent's loop, and no runtime writer can reach
+`[agents.*]`, so a hot `[assistant].model` or `[assistant].max_iterations` could only ever report a
+change it had not made, or disagree with an agent's own declaration. Generation parameters are
 startup-only for a second reason as well: a live control always holds *some* value, so it would write
 that tier whether or not you asked for anything, shadowing every model card's tuned profile. A key absent
 from the file has to stay absent from the request.
@@ -262,6 +263,32 @@ Default `true`.
 
 Maximum per-conversation agents kept live in memory. Default `8`. An evicted agent rebuilds from
 persisted state on next access, so the cap bounds memory, not correctness.
+
+### `max_iterations`
+
+The tool-loop cap every agent runs under unless its own `[agents.<name>].max_iterations` overrides it:
+the most model calls one turn may make before AIMU stops the loop. Default `10`, which is also AIMU's
+own default, so leaving this unset changes nothing.
+
+```toml
+[assistant]
+max_iterations = 10
+```
+
+The count is model calls, not tool calls: the initial turn, plus every tool-follow-up turn, plus any
+continuation nudge the loop injects after an empty turn. The one call it does not count is the forced
+wrap-up, which runs *after* the cap is reached with tools disabled, so an agent that hits the cap still
+gets to answer from what it gathered. That is why hitting the cap is not an error and nothing in the
+transcript is marked truncated: you get a thinner answer, not a failure. [The turn
+loop](../how-agents-work/the-turn-loop.md) shows what that looks like in a real run.
+
+Must be an integer of 1 or more. A `0` would be a loop that makes no model call at all, so it is a
+startup error rather than a silently useless setting.
+
+Raise it for work that legitimately needs more rounds, which in practice means search: a worker that
+spends every round calling tools is the one still mid-investigation when the cap lands. Prefer raising it
+on the one agent that needs it, via the per-agent key below, over raising it here for everyone, since
+every agent's worst-case turn cost scales with this number.
 
 ### `generate_titles`
 
@@ -408,6 +435,7 @@ for what removing `agents.*` from `[security].locked_config_keys` actually permi
 | `model` | string | overrides `[assistant].model` for this agent alone |
 | `thinking` | bool or level | overrides `[assistant].thinking` for this agent alone |
 | `generation` | sub-table | overrides `[assistant.generation]`, **per key** |
+| `max_iterations` | integer >= 1 | overrides `[assistant].max_iterations` for this agent alone |
 
 ### `tools`
 
@@ -440,7 +468,7 @@ names, each built from its own table. The graph must be acyclic.
 A worker's gated tool calls (see [`[security]`](#security)) are routed to you for approval, not run
 unattended.
 
-### `model`, `thinking`, `generation`
+### `model`, `thinking`, `generation`, `max_iterations`
 
 All three are resolved per agent and **never inherited down the delegation graph**: a delegator that pins
 a big model, reasons hard, or runs cold does not drag its workers along. A worker declaring nothing runs
@@ -468,6 +496,19 @@ context_length = 131072
 ```
 
 A model string AIMU cannot resolve fails startup naming the table it came from.
+
+`max_iterations` is the fourth of these and behaves like the other three in the one way that matters:
+it is resolved per agent and **never inherited down the delegation graph**. An assistant that declares
+`max_iterations = 40` does not hand 40 to the workers it delegates to; each of them gets its own
+declaration if it has one, and `[assistant].max_iterations` otherwise. So raising a delegator's cap
+buys the delegator more rounds of *delegating*, not more rounds inside each worker. To give a worker a
+longer leash, declare it on that worker.
+
+```toml
+[agents.researcher]
+tools = ["web", "misc", "time"]
+max_iterations = 25    # a search-heavy worker: every round spends a tool call
+```
 
 ## `[[mcp.server]]`
 

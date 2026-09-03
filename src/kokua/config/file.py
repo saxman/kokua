@@ -210,6 +210,30 @@ def _generation_value(section: str, key: str, value: Any) -> Any:
     return value
 
 
+def _positive_int(section: str, key: str, value: Any) -> int:
+    """Validate a count that must be at least 1, naming the table it came from.
+
+    Shared by all three tiers that accept ``max_iterations``: the flat ``[assistant]`` schema, the
+    per-agent table, and the ``agents.*`` schema ``update_config`` writes through. One function, so the
+    two tiers cannot drift about what a cap is.
+
+    The ``bool`` guard is not redundant on the agent tier. ``_coerce_flat`` already rejects a bool for an
+    int-typed key, but ``_parse_agent`` checks a bare ``isinstance(value, expected)``, and ``bool`` is an
+    ``int`` subclass, so ``max_iterations = true`` would otherwise be accepted as a cap of 1. The range
+    check is here rather than in ``validate_agents`` because that function walks only ``[agents.*]``, so
+    an ``[assistant].max_iterations = 0`` would slip past it, and splitting one check across two files
+    to gain nothing is worse than either half alone.
+
+    No string branch, unlike ``_thinking``: ``_parse_scalar`` has already turned an ``update_config``
+    string into an int by the time a converter runs, because the schema declares this key ``(int,)``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"[{section}].{key} must be an integer >= 1, got {type(value).__name__}")
+    if value < 1:
+        raise ConfigError(f"[{section}].{key} must be an integer >= 1, got {value!r}")
+    return value
+
+
 def _generation(section: str, key: str, value: Any) -> dict:
     """Validate a ``[<agent>.generation]`` sub-table into a dict of checked parameters."""
     if not isinstance(value, dict):
@@ -247,7 +271,7 @@ def _parse_mcp_servers(value: Any) -> list[MCPServerConfig]:
 _AGENT_LIST_KEYS = {"tools", "delegates_to"}
 # Agent keys whose value set is closed rather than merely typed, so a validator decides instead of an
 # isinstance check. `thinking` is a bool-or-string union besides, which the type map below cannot express.
-_AGENT_VALIDATED_KEYS = {"thinking": _thinking, "generation": _generation}
+_AGENT_VALIDATED_KEYS = {"thinking": _thinking, "generation": _generation, "max_iterations": _positive_int}
 _AGENT_KEYS = {
     "description": str,
     "system_message": str,
@@ -256,6 +280,9 @@ _AGENT_KEYS = {
     "generation": object,  # a sub-table, validated by _AGENT_VALIDATED_KEYS; listed here for the same reason
     "tools": list,
     "delegates_to": list,
+    # `object`, not `int`: the fallback check below is a bare isinstance and bool is an int subclass, so
+    # `max_iterations = true` would pass as 1. _AGENT_VALIDATED_KEYS' _positive_int rejects it.
+    "max_iterations": object,
 }
 # Per-agent keys the old [subagents.roles.*] vocabulary used, now folded into the single `tools` list:
 # a group, a tool-pack, and an MCP server reference all named a toolset by a different vocabulary word,
@@ -403,6 +430,9 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("assistant", "agent"): ("entry_agent", (str,), "a string", None),
     ("assistant", "concurrent_tools"): ("concurrent_tools", (bool,), "a boolean", None),
     ("assistant", "agent_cache_cap"): ("agent_cache_cap", (int,), "an integer", None),
+    # The tool-loop cap every agent runs under unless its own [agents.<name>].max_iterations overrides
+    # it. Startup-only for the reason the model above is: nothing rebinds a live agent's cap.
+    ("assistant", "max_iterations"): ("max_iterations", (int,), "an integer >= 1", _positive_int),
     # [email]: SMTP send settings. No `password` key on purpose -- the password comes from the
     # KOKUA_EMAIL_PASSWORD env var, so putting it here is a hard "unknown config key" error.
     ("email", "host"): ("email_host", (str,), "a string", None),
@@ -513,6 +543,7 @@ AGENT_SCHEMA: dict[tuple[str, str], tuple] = {
     ("agents.*", "thinking"): ("thinking", (bool, str), "true, false, or low/medium/high", _thinking),
     ("agents.*", "tools"): ("tools", (list,), "a list of strings", _str_list),
     ("agents.*", "delegates_to"): ("delegates_to", (list,), "a list of strings", _str_list),
+    ("agents.*", "max_iterations"): ("max_iterations", (int,), "an integer >= 1", _positive_int),
     **{
         ("agents.*.generation", key): ("generation", types, label, _generation_value)
         for key, (types, label, _) in _GENERATION_KEYS.items()
