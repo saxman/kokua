@@ -897,3 +897,12 @@ async def test_branchable_answers_what_branch_would_accept(tmp_path):
 
     assert assistant._book.branchable(parent.key, 1)
     assert not assistant._book.branchable(parent.key, 2)
+
+
+async def test_branch_conversation_switches_and_abandons_a_pending_question(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    branch_id = await assistant.branch_conversation(parent.key, 1)
+
+    assert assistant._active_id == branch_id
+    assert assistant._store.get(branch_id).metadata["title"] == "Branch of Kauai trip"

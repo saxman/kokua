@@ -411,6 +411,15 @@ class Assistant:
         self._human.abandon_all()
         self._book.select(conversation_id)
 
+    async def branch_conversation(self, conversation_id: str, message_index: int) -> str:
+        """Fork a conversation at one of its turns and switch to the copy; returns the copy's id.
+
+        Abandons a pending approval the way ``new_conversation`` and ``select_conversation`` do: the
+        question belonged to the conversation being left, and nothing here will ever answer it.
+        """
+        self._human.abandon_all()
+        return self._book.branch(conversation_id, message_index)
+
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation, switching away from it if it was the one being viewed."""
         if conversation_id == self._active_id:
