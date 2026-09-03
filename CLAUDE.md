@@ -50,7 +50,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.27.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.28.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -59,7 +59,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.27.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.28.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -131,8 +131,8 @@ Consequences for working in this repo:
   `events` but not the recursive passthrough (a spawned worker forwarding its own `events` on to a
   grandchild it delegates to in turn) still passes, so a worker spawning its own worker could go
   uncounted without the probe raising anything -- the floor's job now that the surface has moved on.
-  **AIMU 0.27.0 is the current floor, and it is the first one whose reason and whose probe are different
-  capabilities from different releases.** Learn that split, because it is the shape of every future case
+  **AIMU 0.27.0 was the current floor until 0.28.0, and it is the first one whose reason and whose probe
+  are different capabilities from different releases.** Learn that split, because it is the shape of every future case
   where a bug fix rather than a feature moves the floor. The floor moved for *0.26.0*: AIMU's tool loop
   no longer strands an un-dispatched tool call before its forced wrap-up. Before that fix, exhausting
   `max_iterations` on a turn that had requested tools appended the wrap-up's *user* prompt straight on
@@ -154,9 +154,30 @@ Consequences for working in this repo:
   but that is an attribute on a live client rather than a module symbol and Kokua reads it nowhere
   directly. The probe therefore covers exactly one surface at a time, in whatever shape that surface has,
   and it has taken three: a name lookup for a symbol (`resolve_default_text_model` first,
-  `ModelRefusalError` today), a *signature* check for a keyword argument no `getattr` would notice
+  `ModelRefusalError` second), a *signature* check for a keyword argument no `getattr` would notice
   (`SkillManager(include=...)` first, `script_env` second, `stream_thinking` third, `events` fourth), and
-  a membership check for an entry in a published set.
+  a membership check for an entry in a published set, today's shape for the second time (`generate_kwargs`
+  first, `max_iterations` now).
+
+  **AIMU 0.28.0 is the current floor, and it is the case where a probe's honest claim is weaker than its
+  predecessors' and has to say so.** The capability is the `"max_iterations"` entry in
+  `SUBAGENT_SPEC_KEYS`, the spec key `core/agents.py` writes for an agent declaring its own tool-loop cap,
+  which is what makes `[agents.<name>].max_iterations` expressible at all: AIMU's cap was one value per
+  spawn tool, so per-agent could not be said. The probe is a membership check on that set, the second time
+  after `generate_kwargs` and for the same reason (the set shipped in 0.17.0, so only its contents date a
+  checkout). What is new is how little it can honestly claim. Every recent floor converted *silence* into a
+  startup error: an older AIMU accepted `stream_thinking`'s absence, `script_env`'s absence, an unknown
+  spec key in 0.17.0, and said nothing. This one has no silence to convert, because the key set is closed
+  and an AIMU predating 0.28.0 raises `ValueError` naming the key. It does not move that failure earlier
+  either: `_validate_subagent_config` raises at factory-call time, and `wire_agent` calls the factory while
+  building a conversation's agent, so the raw `ValueError` already lands at startup. What the probe buys is
+  the message, one naming the fix rather than a spec-key `ValueError` out of agent construction; and since
+  that construction path doubles as `state.refresh_workers`, the raw version takes down every runtime MCP
+  add and remove along with delegation. A real gain, and a much smaller one than a predecessor's, which is
+  worth writing down, because a probe that overclaims is worse than one that covers less. What needs no
+  cover at all is the global tier: `[assistant].max_iterations` rides a factory argument that has existed
+  since 0.12.0, so it runs on an older AIMU and only the per-agent tier ever depended on 0.28.0.
+
   What the current surface says nothing about, only the floor covers. `tests/test_aimu_compat.py` pins
   `MINIMUM_AIMU` against `pyproject.toml`'s specifier, since the two are halves of one decision and
   neither can detect the other drifting. If you add

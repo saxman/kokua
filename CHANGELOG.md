@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -843,6 +843,30 @@ alone. The case that does cost something is a configured MCP server, which conne
   the message rather than a setting anything stores, and it reaches the entry agent's own run alone: a
   spawned worker keeps its table's effort, and a workflow turn ignores the request rather than applying it
   to agents the user did not choose for. What the turn actually ran at is what `metadata.thinking` records.
+- **A default tool-loop cap, with per-agent overrides.** `[assistant].max_iterations` is the most model
+  calls any agent's turn may make; an agent that names its own `[agents.<name>].max_iterations` runs
+  under that instead. Both default to 10, which is also AIMU's own default. The count is model calls
+  rather than tool calls: the initial turn, every tool-follow-up turn, and any continuation nudge all
+  count against it, and AIMU's forced wrap-up (one call with tools disabled, run after the cap so the
+  agent still answers from what it has gathered) does not. That is why hitting the cap reads as a thinner
+  answer rather than a truncation error, and it is exactly the case a dial was wanted for: a search-heavy
+  worker is what feels it, since a run spending every round on tool calls is the one still
+  mid-investigation when the cap lands.
+  Resolved per agent and never inherited down the delegation graph, like `model` and `thinking`: raising
+  a delegator's cap buys it more rounds of delegating, not more rounds inside each worker it spawns. Both
+  spawn tools and `compose_subagent`'s are built with the global default rather than the delegator's
+  resolved cap, which is what makes that hold rather than merely describes it.
+  Rejected at parse time at both tiers unless it is an integer of 1 or more: `0` is a loop that makes no
+  model call at all, and `bool` is an `int` subclass, so an unguarded `max_iterations = true` would have
+  been read as a cap of 1 rather than rejected. Startup-only and not a runtime setting, for the same
+  reason `[assistant].model` is: nothing re-caps a live agent's loop.
+  The per-agent tier needs `aimu>=0.28.0`, which added the `"max_iterations"` sub-agent spec key it is
+  written into; the global tier rides a factory argument AIMU has had since 0.12.0. Unlike earlier spec
+  keys, an older AIMU does not swallow this one in silence: its key set was already closed and is checked
+  when a spawn tool is built, so a checkout predating 0.28.0 fails at startup either way, and what the
+  preflight adds is a message naming the fix instead of a raw `ValueError`. See
+  [the configuration reference](https://saxman.info/kokua/reference/configuration/#max_iterations) and
+  [the turn loop](https://saxman.info/kokua/how-agents-work/the-turn-loop/).
 - **A default tier of generation parameters, with per-key overrides.** `[assistant.generation]` sets
   `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`, `repetition_penalty`, `max_tokens`, and
   `context_length` for every agent; an agent's own `[agents.<name>.generation]` overrides it **per key**,
@@ -1040,7 +1064,7 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.27.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.28.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -1055,15 +1079,24 @@ notice on startup.
   command_env_passthrough` where the capability and its handle are the same object, was the surface
   until 0.25.0, when it gave way to a signature check again: `make_async_subagent_tool(events=...)`,
   the parameter that lets a spawned sub-agent's model turns reach the sink the delegating turn opened.
-  Today it is a plain name lookup once more, on `aimu.aio.ModelRefusalError`. That is also the first
-  floor whose reason and whose probe are different capabilities: the floor moved to 0.27.0 for
-  *0.26.0*'s fix to AIMU's forced wrap-up (it no longer appends the wrap-up prompt on top of an
-  un-dispatched tool call, which Anthropic rejected outright and which made search-heavy sub-agents
-  fail rather than answer), and that fix has no handle a probe could honestly grip -- a private method
-  on a private class is exactly what a later refactor renames, and a probe pointed at one becomes a
-  wall in front of a newer, working AIMU. It covers one surface at a time by design; every earlier
-  release's capabilities are the floor's job, and `tests/test_aimu_compat.py` pins the floor against
-  `pyproject.toml`'s specifier so the two halves of that one decision cannot drift.
+  It was a plain name lookup once more, on `aimu.aio.ModelRefusalError`, while 0.27.0 was the floor.
+  That was also the first floor whose reason and whose probe were different capabilities: the floor
+  moved to 0.27.0 for *0.26.0*'s fix to AIMU's forced wrap-up (it no longer appends the wrap-up prompt
+  on top of an un-dispatched tool call, which Anthropic rejected outright and which made search-heavy
+  sub-agents fail rather than answer), and that fix has no handle a probe could honestly grip -- a
+  private method on a private class is exactly what a later refactor renames, and a probe pointed at
+  one becomes a wall in front of a newer, working AIMU.
+  The floor moved again for **0.28.0**, for the `"max_iterations"` entry AIMU added to
+  `SUBAGENT_SPEC_KEYS`, the spec key `core/agents.py` writes for an agent declaring its own tool-loop
+  cap and without which a per-agent cap has nowhere to go. The probe moved with it, to a membership
+  check on that set, its second use of that shape after `generate_kwargs`. Unlike its predecessors,
+  this one is not silence converted to noise: the set is already closed and checked when a spawn tool
+  is built, so an AIMU predating 0.28.0 raises `ValueError` at startup with or without the probe. What
+  the probe buys is only the message, one naming the fix rather than a spec-key `ValueError` out of
+  agent construction.
+  It covers one surface at a time by design; every earlier release's capabilities are the floor's job,
+  and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two halves
+  of that one decision cannot drift.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.

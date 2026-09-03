@@ -226,12 +226,16 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
         # ImportError on those, instead of the fix the preflight prints.
         from aimu.aio.tools.builtin import make_async_subagent_tool
 
+        # The global default, not a per-agent cap: a composed worker is built per call and discarded
+        # with the call, so it is not an agent the config describes and [assistant].max_iterations is
+        # the only tier it has. Same reasoning as the model it is handed just above.
         spawn = make_async_subagent_tool(
             model,
             agent_types={label: spec},
             max_depth=1,
             tool_approval=state.tool_approval,
             observer=state.observer,
+            max_iterations=state.config.max_iterations,
         )
         return await spawn(label, task)
 
