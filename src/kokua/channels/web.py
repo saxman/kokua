@@ -334,7 +334,7 @@ class WebChannel(BaseWebChannel):
                 )
             elif chunk.phase == StreamingContentType.CONTINUING:
                 call = chunk.content if isinstance(chunk.content, dict) else {}
-                await self.send_frame({"type": "loop", "reason": call.get("kind"), "text": call.get("prompt", "")})
+                await self.send_frame({"type": "loop", "reason": call.get("kind", ""), "text": call.get("prompt", "")})
             else:
                 image = _image_frame_for(chunk)
                 if image is not None:

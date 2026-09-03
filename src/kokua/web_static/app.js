@@ -920,12 +920,19 @@ function renderTool(name, args, ts, opts) {
 // The kind word each injection wears. AIMU raises the loop's counter for a tool round too, and this
 // marker is deliberately not drawn there (the tool block is that boundary), so both words below
 // describe a round AIMU drove itself: a nudge after a turn that came back empty, or the forced
-// tools-disabled wrap-up at the round cap. An item with no reason is one stored before the two were
-// told apart, and reads as the commoner of them.
+// tools-disabled wrap-up at the round cap.
+//
+// Two fallbacks, and they answer differently on purpose. An absent reason means a producer that did
+// not send the key, and reads as the commoner of the two. An *unrecognized* reason renders as itself,
+// because a marker asserting the wrong injection is the bug this marker exists to remove: if AIMU
+// adds a third kind, "continuation" would be a claim that is wrong, where the raw word is merely odd.
 const LOOP_KINDS = { continuation: "continuation", final_answer: "tool-use limit" };
 
 function renderLoop(text, ts, opts) {
-  const kind = LOOP_KINDS[(opts && opts.reason) || "continuation"] || "continuation";
+  const reason = (opts && opts.reason) || "continuation";
+  // `hasOwnProperty`, not a truthiness test on the lookup: a reason of "toString" would otherwise
+  // find Object.prototype's method and label the row with a function.
+  const kind = Object.prototype.hasOwnProperty.call(LOOP_KINDS, reason) ? LOOP_KINDS[reason] : reason;
   const f = addFoldable("loop", { kind }, { parent: opts && opts.parent }, ts);
   f.body.textContent = text || "";
   return f;

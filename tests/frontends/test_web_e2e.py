@@ -658,6 +658,44 @@ def test_a_cards_injected_round_says_the_cap_was_hit_and_quotes_the_prompt(page,
     expect(row.locator("> .fold-body")).to_contain_text("You have reached the tool-use limit.")
 
 
+def test_a_loop_rows_two_fallbacks_answer_differently(page, live_server):
+    """Absent and unrecognized must not collapse into one answer. Every producer sends a reason, so
+    an absent one means a producer that omitted the key and is read as the commoner injection; an
+    unrecognized one is shown as itself, because labelling a third kind AIMU might add "continuation"
+    would assert the wrong thing about what the worker was told."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    def seed(config):
+        store = TinyDBSessionStore(str(config.sessions_path))
+        store.save(
+            Session(
+                key="seeded",
+                messages=[{"role": "user", "content": "research the vendors"}],
+                metadata={
+                    "title": "seeded",
+                    "created_at": "2026-08-10T00:00:00",
+                    "updated_at": "2026-08-10T00:00:00",
+                    "subagent": {
+                        "0": [
+                            {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+                            {"id": "r-1", "append": {"kind": "loop", "text": "keep going"}},
+                            {"id": "r-1", "append": {"kind": "loop", "reason": "some_new_kind", "text": "do this"}},
+                            {"id": "r-1", "status": "done"},
+                        ]
+                    },
+                },
+            )
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+    card = page.locator(".bubble.subagent")
+    card.locator("> .fold-header").click()
+    rows = card.locator("> .fold-body > .bubble.loop")
+    expect(rows).to_have_count(2)
+    expect(rows.nth(0).locator(".fold-kind")).to_have_text("continuation")
+    expect(rows.nth(1).locator(".fold-kind")).to_have_text("some_new_kind")
+
+
 def _seed_tool_call(result: str | None):
     """Return a `seed` planting one conversation whose turn called a tool, with `result` as the tool's
     reply (or no result message at all when it is None)."""

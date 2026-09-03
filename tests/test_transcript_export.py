@@ -307,6 +307,35 @@ def test_a_cards_injected_round_is_rendered_inside_the_card():
     assert "[tool-use limit reached: answer now]" in out
 
 
+def test_a_loop_item_with_no_reason_reads_as_a_continuation():
+    """Every producer sends a reason, so this covers one that omitted the key rather than any stored
+    artifact: absent is read as the commoner injection instead of losing the round entirely."""
+    assert _render_item({"type": "loop", "text": "keep going"}, None) == ["_[continued: keep going]_"]
+
+
+def test_a_loop_item_with_an_unrecognized_reason_shows_the_raw_reason():
+    """The one case where absent and unknown must not agree. Labelling a third injection kind
+    "continued" would assert the wrong thing about what the model was told, which is the failure
+    naming the injection exists to prevent; the raw word is merely unfamiliar."""
+    item = {"type": "loop", "reason": "some_new_kind", "text": "do something else"}
+    assert _render_item(item, None) == ["_[some_new_kind: do something else]_"]
+
+
+def test_a_cards_loop_entry_falls_back_and_caps_like_its_siblings():
+    """A card's loop entry goes through the same two fallbacks, and its prompt is capped like every
+    other model-supplied payload: a caller may set its own final-answer prompt, so nothing bounds
+    the length of what lands here."""
+    events = [
+        {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+        {"id": "r-1", "append": {"kind": "loop", "text": "x" * 40}},
+        {"id": "r-1", "append": {"kind": "loop", "reason": "some_new_kind", "text": "short"}},
+        {"id": "r-1", "status": "done"},
+    ]
+    out = "\n".join(_render_subagent(events, 10))
+    assert "_[continued: xxxxxxxxxx\n... [truncated, 40 chars total]]_" in out
+    assert "_[some_new_kind: short]_" in out
+
+
 def test_a_phase_with_detail_shows_both_the_label_and_the_detail():
     session = _session(
         [{"role": "user", "content": "plan it"}],

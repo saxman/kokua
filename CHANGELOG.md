@@ -216,7 +216,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer
     Each renders as a dim row naming which one it was (`continuation` or `tool-use limit`) and quoting
     the prompt it carried, distinct from the user's own turn. The marker means an injected round
     specifically, not any rise in the loop's iteration count, so it appears once per injection and not
-    after an ordinary tool round. A proactive message keeps its own uppercase label.
+    after an ordinary tool round: an ordinary round is already separated by the tool block between its
+    two halves, at the top level and inside a sub-agent card alike. A kind neither the page nor the
+    Markdown export knows a word for (a third one AIMU might add) is shown by its raw name rather than
+    labelled as a nudge, since a marker that names the wrong injection is the thing naming it was meant
+    to stop. A proactive message keeps its own uppercase label.
   - **No settings window.** The page's one settings control is a theme button in the header, cycling
     auto / light / dark; it is a per-browser `localStorage` preference applied before first paint and
     never reaches the server. Everything else runtime-mutable -- the planning toggles, and whatever else

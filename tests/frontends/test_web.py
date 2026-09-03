@@ -204,6 +204,19 @@ async def test_web_channel_stream_activity_shows_an_injected_round_and_withholds
     assert "token" not in types and "done" not in types  # answer withheld, no terminator
 
 
+async def test_web_channel_stream_activity_types_a_missing_kind_as_a_string():
+    """A `loop` frame's `reason` is documented as a string, so a chunk missing `kind` must not put a
+    null there. The same default as AIMU's base `send` arm, so the two paths agree on the shape."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.CONTINUING, {"prompt": "Keep going."})
+
+    await channel.stream_activity(gen())
+    assert {"type": "loop", "reason": "", "text": "Keep going."} in ws.frames
+
+
 async def test_web_channel_stream_activity_show_answer_emits_tokens():
     ws = _FakeWS()
     channel = WebChannel(ws)
