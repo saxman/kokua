@@ -12,6 +12,7 @@ module stays about state and the transport concern stays in ``channels/``.
 
 from __future__ import annotations
 
+import copy
 import uuid
 from datetime import datetime
 from typing import Callable, Optional, Union
@@ -21,7 +22,7 @@ from aimu.sessions import Session, TinyDBSessionStore
 
 from kokua.core.agent_registry import AgentRegistry
 from kokua.config import AssistantConfig
-from kokua.core.messages import compact_message_images, derive_title
+from kokua.core.messages import TITLE_MAX, compact_message_images, derive_title, is_user_turn
 from kokua.core.turn_gate import TurnGate
 
 
@@ -32,6 +33,45 @@ ID_PREFIX_MIN = 6
 # What a conversation with no title yet is called wherever one is named to a user, so the sidebar and
 # the /switch reply cannot drift apart on it.
 UNTITLED = "New conversation"
+
+# What a forked conversation is called, so a branch is never mistaken for its parent in a sidebar
+# that would otherwise show the same title twice (both derive from the same first user message).
+BRANCH_TITLE_PREFIX = "Branch of "
+
+# The session-metadata maps keyed by a turn's user-message index. A branch copies a *prefix* of the
+# transcript, so indices do not move and these are filtered rather than remapped. That is only true
+# while a branch keeps the parent's messages from index 0 onward; anything that changes what index 0
+# is has to revisit this.
+TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usage")
+
+
+class TurnNotFound(Exception):
+    """A branch named a turn the stored transcript does not have.
+
+    Raised rather than branching at some nearby point, because the caller asked for one exchange and
+    silently giving it another is the failure a user cannot see. The case that happens is a turn whose
+    ``persist`` has not landed yet.
+    """
+
+
+def turn_end(messages: list[dict], user_index: int) -> Optional[int]:
+    """The exclusive end of the turn opened at ``user_index``, or None if no user turn is there.
+
+    The end is the next message the user actually sent, or the end of the transcript. Injected loop
+    turns are skipped (see :func:`kokua.core.messages.is_user_turn`): they carry the ``user`` role but
+    sit *inside* a turn, between tool-calling iterations, so ending there would cut a turn off before
+    the answer it produced.
+
+    A turn boundary is also the only cut a transcript survives. Anywhere else can fall between an
+    assistant message holding ``tool_calls`` and the ``tool`` messages answering them, which a provider
+    rejects on the next request rather than here, where it could still be reported.
+    """
+    if not 0 <= user_index < len(messages) or not is_user_turn(messages[user_index]):
+        return None
+    for index in range(user_index + 1, len(messages)):
+        if is_user_turn(messages[index]):
+            return index
+    return len(messages)
 
 
 def _now() -> str:
@@ -240,6 +280,59 @@ class ConversationBook:
         not cancel it. On a build failure the active pointer reverts (see ``_activate``).
         """
         self._activate(conversation_id, revert_to=self._active_id)
+
+    def branchable(self, conversation_id: str, user_index: int) -> bool:
+        """Whether :meth:`branch` would accept this turn, asked without raising.
+
+        The front end's question, so a branch control is only ever offered for a turn that can
+        actually be branched. Reads the same ``turn_end`` the branch does, so the offer and the
+        operation cannot disagree.
+        """
+        return turn_end(self._store.get(conversation_id).messages, user_index) is not None
+
+    def branch(self, conversation_id: str, user_index: int) -> str:
+        """Fork a conversation at one of its turns into a new one, switch to it, and return its id.
+
+        The branch holds a copy of the parent's transcript through the end of the named turn, and the
+        two are ordinary independent conversations from here: nothing about the parent changes, and
+        deleting either leaves the other whole. A copy rather than a reference to the parent for that
+        reason, and because the duplication is text (images are already content-addressed references,
+        which a copy shares rather than duplicates).
+
+        Read from the store, never from ``agent_for``, for the reason ``toolsets/conversations.py``
+        gives: building an agent is neither cheap nor side-effect-free, and a running turn mutates the
+        live message list in place while the store holds a snapshot written once per turn. A turn in
+        flight on the parent is therefore invisible here, which is correct: the cut is always behind it.
+
+        No turn-gate hold. The call reads a snapshot of the parent and writes a brand-new key, so there
+        is nothing for another turn's ``persist`` (which saves whole sessions, under their own keys) to
+        collide with.
+        """
+        parent = self._store.get(conversation_id)
+        cut = turn_end(parent.messages, user_index)
+        if cut is None:
+            raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")
+        previous_id = self._active_id
+        title = f"{BRANCH_TITLE_PREFIX}{parent.metadata.get('title') or UNTITLED}"[:TITLE_MAX]
+        # Titled at birth, which is also what keeps `persist` from deriving one from the inherited
+        # first user message and handing the branch its parent's title.
+        session = self.new_session(title=title)
+        session.messages = [dict(message) for message in parent.messages[:cut]]
+        session.metadata["branched_from"] = {"conversation_id": conversation_id, "message_index": user_index}
+        for key in TURN_KEYED_METADATA:
+            kept = {
+                index: value
+                for index, value in parent.metadata.get(key, {}).items()
+                if index.isdigit() and int(index) < cut
+            }
+            if kept:
+                session.metadata[key] = copy.deepcopy(kept)
+        # `task_id` is deliberately not inherited: a branch of a scheduled run is the user's
+        # conversation, not another run of that task, and inheriting it would expose the branch to
+        # that task's retention pruning.
+        self._store.save(session)
+        self._activate(session.key, revert_to=previous_id)
+        return session.key
 
     async def delete(self, conversation_id: str, *, cancel_turn: Callable[[str], None]) -> bool:
         """Delete a conversation, switching away from it if it was the active one.

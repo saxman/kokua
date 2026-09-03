@@ -5,7 +5,9 @@ The image-rewriting half of this module is covered by tests/test_images.py.
 
 from __future__ import annotations
 
-from kokua.core.messages import derive_title, first_user_text, message_text
+from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROACTIVE
+
+from kokua.core.messages import derive_title, first_user_text, is_user_turn, message_text
 
 
 def test_message_text_reads_a_plain_string():
@@ -68,3 +70,22 @@ def test_first_user_text_is_the_whole_message_the_title_truncates():
 
 def test_first_user_text_is_none_without_a_user_message():
     assert first_user_text([{"role": "assistant", "content": "hi"}]) is None
+
+
+def test_is_user_turn_accepts_a_message_the_user_sent():
+    assert is_user_turn({"role": "user", "content": "hello"})
+
+
+def test_is_user_turn_rejects_a_loop_injected_user_message():
+    injected = {"role": "user", "content": "continue", PROVENANCE_KEY: PROVENANCE_CONTINUATION}
+    assert not is_user_turn(injected)
+
+
+def test_is_user_turn_rejects_other_roles():
+    assert not is_user_turn({"role": "assistant", "content": "hi"})
+    assert not is_user_turn({"role": "tool", "content": "12:00"})
+
+
+def test_is_user_turn_accepts_a_user_message_with_unrelated_provenance():
+    # PROVENANCE_PROACTIVE tags an unattended run's own messages, not a loop injection.
+    assert is_user_turn({"role": "user", "content": "brief me", PROVENANCE_KEY: PROVENANCE_PROACTIVE})

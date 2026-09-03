@@ -23,16 +23,12 @@ from typing import Any, Optional
 from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER, PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.sessions import Session
 
-from kokua.core.messages import message_text
+from kokua.core.messages import INJECTED_USER_PROVENANCE, message_text
 
 # Cut one message on its own, before any whole-transcript budget, so a single pasted document cannot
 # consume a read and hide every message around it.
 MAX_MESSAGE_CHARS = 2_000
 
-# User-role turns the agent loop injects between tool-calling iterations: not the user's words, so they
-# are left out of a transcript. ``replay_items``'s own ``_LOOP_PROVENANCE``, below, names the same two
-# provenances for its reading, which replays them as a loop marker rather than dropping them.
-_INJECTED_USER_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
 # The system message is the agent's own guidance, and a ``tool`` message is trace rather than conversation.
 _SKIPPED_ROLES = frozenset({"system", "tool"})
 
@@ -76,7 +72,7 @@ def readable_messages(messages: list[dict]) -> list[tuple[str, object, str]]:
         if role in _SKIPPED_ROLES:
             continue
         provenance = message.get(PROVENANCE_KEY)
-        if role == "user" and provenance in _INJECTED_USER_PROVENANCE:
+        if role == "user" and provenance in INJECTED_USER_PROVENANCE:
             continue
         content = message.get("content")
         text = (message_text(content) + _image_placeholders(content)).strip()

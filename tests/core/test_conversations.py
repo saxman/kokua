@@ -8,8 +8,10 @@ import asyncio
 import pytest
 
 from aimu.aio.channels.base import ChannelMessage
+from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY
 
 from kokua.core.assistant import Assistant
+from kokua.core.conversations import TurnNotFound
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
 from tests.helpers import BlockingModelClient, MockAsyncModelClient, settle_titles
 
@@ -753,3 +755,145 @@ async def test_titles_can_be_turned_off_at_runtime(tmp_path, monkeypatch):
 
     assert calls == []
     assert "generate_titles = false" in assistant._config.config_path.read_text(encoding="utf-8")
+
+
+# A parent transcript with two complete turns. Turn one runs a tool, so its copy has to carry the
+# tool result as well as the answer: the pairing is what a provider validates on the next request.
+BRANCH_MESSAGES = [
+    {"role": "system", "content": "you are kokua"},
+    {"role": "user", "content": "first question"},
+    {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "c1", "function": {"name": "clock", "arguments": "{}"}}],
+    },
+    {"role": "tool", "tool_call_id": "c1", "content": "12:00"},
+    {"role": "assistant", "content": "first answer"},
+    {"role": "user", "content": "second question"},
+    {"role": "assistant", "content": "second answer"},
+]
+
+
+async def _assistant_with_branchable_parent(tmp_path, **metadata):
+    """An assistant whose active conversation holds BRANCH_MESSAGES, plus that session."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    parent = assistant._session
+    parent.messages = [dict(message) for message in BRANCH_MESSAGES]
+    parent.metadata["title"] = "Kauai trip"
+    parent.metadata.update(metadata)
+    assistant._store.save(parent)
+    return assistant, parent
+
+
+async def test_branch_copies_through_the_end_of_the_named_turn(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    branched = assistant._store.get(branch_id)
+    assert [m.get("content") for m in branched.messages] == [
+        "you are kokua",
+        "first question",
+        "",
+        "12:00",
+        "first answer",
+    ]
+
+
+async def test_branch_switches_the_view_and_leaves_the_parent_alone(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    assert assistant._active_id == branch_id
+    assert assistant._store.get(parent.key).messages == BRANCH_MESSAGES
+
+
+async def test_branch_of_the_last_turn_copies_the_whole_transcript(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    branch_id = assistant._book.branch(parent.key, 5)
+
+    assert assistant._store.get(branch_id).messages == BRANCH_MESSAGES
+
+
+async def test_branch_does_not_end_a_turn_at_a_loop_injected_message(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    parent.messages.insert(4, {"role": "user", "content": "continue", PROVENANCE_KEY: PROVENANCE_CONTINUATION})
+    assistant._store.save(parent)
+
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    # The injected nudge and the answer after it both belong to turn one.
+    assert [m.get("content") for m in assistant._store.get(branch_id).messages][-2:] == ["continue", "first answer"]
+
+
+async def test_branch_titles_itself_after_its_parent(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    assert assistant._store.get(branch_id).metadata["title"] == "Branch of Kauai trip"
+
+
+async def test_branch_of_an_untitled_conversation_names_it_as_untitled(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    del parent.metadata["title"]
+    assistant._store.save(parent)
+
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    assert assistant._store.get(branch_id).metadata["title"] == "Branch of New conversation"
+
+
+async def test_branch_keeps_only_the_metadata_of_the_turns_it_copied(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(
+        tmp_path,
+        usage={"1": {"calls": 1}, "5": {"calls": 2}},
+        model={"1": "ollama:gemma", "5": "ollama:gemma"},
+        subagent={"5": [{"task": "check the ferry times"}]},
+    )
+
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    branched = assistant._store.get(branch_id)
+    assert branched.metadata["usage"] == {"1": {"calls": 1}}
+    assert branched.metadata["model"] == {"1": "ollama:gemma"}
+    assert "subagent" not in branched.metadata
+
+
+async def test_branch_records_where_it_came_from(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    assert assistant._store.get(branch_id).metadata["branched_from"] == {
+        "conversation_id": parent.key,
+        "message_index": 1,
+    }
+
+
+async def test_branch_does_not_inherit_the_task_that_minted_its_parent(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path, task_id="morning-brief")
+
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    assert "task_id" not in assistant._store.get(branch_id).metadata
+
+
+async def test_branch_refuses_an_index_that_is_not_a_user_turn(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    with pytest.raises(TurnNotFound):
+        assistant._book.branch(parent.key, 2)  # an assistant message
+    with pytest.raises(TurnNotFound):
+        assistant._book.branch(parent.key, 99)  # past the end
+    with pytest.raises(TurnNotFound):
+        assistant._book.branch(parent.key, -1)
+
+
+async def test_branchable_answers_what_branch_would_accept(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    assert assistant._book.branchable(parent.key, 1)
+    assert not assistant._book.branchable(parent.key, 2)

@@ -9,12 +9,29 @@ from __future__ import annotations
 
 from typing import Optional
 
+from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER, PROVENANCE_KEY
+
 from kokua import images
 
 
 # How much title a sidebar has room for: the placeholder is truncated to it and a generated title
 # (``core/titles.py``, which imports it) is bounded by it, so the two cannot disagree.
 TITLE_MAX = 40
+
+# The user-role messages the agent loop injects between tool-calling iterations. They are not
+# something a user sent, so a transcript leaves them out and a turn does not end at one.
+INJECTED_USER_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
+
+
+def is_user_turn(message: dict) -> bool:
+    """Whether *message* is one the user actually sent, rather than a nudge the loop injected.
+
+    Lives here rather than in either caller because two of them need the same answer for opposite
+    reasons: a transcript drops an injected turn from what was said, and a branch must not treat one
+    as the end of the turn it is copying, which would cut a turn off in the middle of its own tool
+    loop and lose the answer being branched from.
+    """
+    return message.get("role") == "user" and message.get(PROVENANCE_KEY) not in INJECTED_USER_PROVENANCE
 
 
 def message_text(content) -> str:
