@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -203,14 +203,20 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.27.0 or newer
     the spawn ends, which is the one place the page still waits for a terminal status to render (the
     assistant's own reply now renders as it streams). The parent's own duplicate `spawn_subagent` tool block is suppressed. Recording and
     display are independent, so a background turn's spawns are recorded even though its frames are
-    muted, and switching in later shows the work.
+    muted, and switching in later shows the work. A round the worker's own loop injected shows inside
+    the card too, naming which one it was and quoting the prompt, so a worker that hit the round cap
+    reads as an explained outcome rather than an answer that came back thinner for no visible reason.
   - **Rows carry a localized datetime caption**, revealed on hover (full precision in its tooltip) so
     the transcript is not dated line by line. On a foldable it rides the always-visible header, so it
     shows collapsed or expanded. Ephemeral chrome (notices, approval prompts, banners) is not stamped.
     Messages persisted before timestamps existed render without a caption.
-  - **Agent-loop continuations are distinguished from user input.** The loop injects its own turns as
-    `user`-role messages; these render as a dim `continuation` row showing the injected prompt rather
-    than as the user's own turn. A proactive message keeps its uppercase label.
+  - **A loop marker names which injection it was, live and on reload.** The loop injects two kinds of
+    turn that say opposite things to the model: a continuation nudge after an empty turn ("keep
+    working"), or a forced wrap-up with tools disabled at the round cap ("answer from what you have").
+    Each renders as a dim row naming which one it was (`continuation` or `tool-use limit`) and quoting
+    the prompt it carried, distinct from the user's own turn. The marker means an injected round
+    specifically, not any rise in the loop's iteration count, so it appears once per injection and not
+    after an ordinary tool round. A proactive message keeps its own uppercase label.
   - **No settings window.** The page's one settings control is a theme button in the header, cycling
     auto / light / dark; it is a per-browser `localStorage` preference applied before first paint and
     never reaches the server. Everything else runtime-mutable -- the planning toggles, and whatever else
@@ -1029,7 +1035,7 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.27.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.29.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -1044,15 +1050,22 @@ notice on startup.
   command_env_passthrough` where the capability and its handle are the same object, was the surface
   until 0.25.0, when it gave way to a signature check again: `make_async_subagent_tool(events=...)`,
   the parameter that lets a spawned sub-agent's model turns reach the sink the delegating turn opened.
-  Today it is a plain name lookup once more, on `aimu.aio.ModelRefusalError`. That is also the first
-  floor whose reason and whose probe are different capabilities: the floor moved to 0.27.0 for
-  *0.26.0*'s fix to AIMU's forced wrap-up (it no longer appends the wrap-up prompt on top of an
-  un-dispatched tool call, which Anthropic rejected outright and which made search-heavy sub-agents
-  fail rather than answer), and that fix has no handle a probe could honestly grip -- a private method
-  on a private class is exactly what a later refactor renames, and a probe pointed at one becomes a
-  wall in front of a newer, working AIMU. It covers one surface at a time by design; every earlier
-  release's capabilities are the floor's job, and `tests/test_aimu_compat.py` pins the floor against
-  `pyproject.toml`'s specifier so the two halves of that one decision cannot drift.
+  AIMU 0.27.0 moved it to a plain name lookup once more, on `aimu.aio.ModelRefusalError`, and was the
+  first floor whose reason and whose probe were different capabilities: the floor moved for *0.26.0*'s
+  fix to AIMU's forced wrap-up (it no longer appends the wrap-up prompt on top of an un-dispatched tool
+  call, which Anthropic rejected outright and which made search-heavy sub-agents fail rather than
+  answer), and that fix had no handle a probe could honestly grip: a private method on a private class
+  is exactly what a later refactor renames, and a probe pointed at one becomes a wall in front of a
+  newer, working AIMU. Today the floor is 0.29.0, and for once reason and probe are the same capability
+  again: `StreamingContentType.CONTINUING` is the phase a streamed driver yields before a round the loop
+  injected on its own rather than one the model asked for, the same chunk a loop marker reads to say
+  which injection it was (see "A loop marker names which injection it was" under Front ends, above). The
+  probe is a membership check again, the second time (`SUBAGENT_SPEC_KEYS` was the first), reading
+  `StreamingContentType.__members__` rather than a bare `in`, because `in` on an enum compares values on
+  Python 3.12 and raises `TypeError` on 3.11, where the capability here is a member's name, not its
+  value. It covers one surface at a time by design; every earlier release's capabilities are the floor's
+  job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
+  halves of that one decision cannot drift.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.

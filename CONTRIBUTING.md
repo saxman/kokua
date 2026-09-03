@@ -22,7 +22,7 @@ git clone https://github.com/saxman/aimu    # sibling of kokua/
 uv sync --all-extras                        # installs ../aimu editable
 ```
 
-A path source is installed without being checked against the `aimu>=0.27.0` specifier, so a sibling on
+A path source is installed without being checked against the `aimu>=0.29.0` specifier, so a sibling on
 an older branch is the failure mode to expect. Startup's preflight (`kokua.aimu_compat`) catches it and
 names the fix rather than failing on an import.
 

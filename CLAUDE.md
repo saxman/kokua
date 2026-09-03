@@ -50,7 +50,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.27.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.29.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -59,7 +59,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.27.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.29.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -131,9 +131,10 @@ Consequences for working in this repo:
   `events` but not the recursive passthrough (a spawned worker forwarding its own `events` on to a
   grandchild it delegates to in turn) still passes, so a worker spawning its own worker could go
   uncounted without the probe raising anything -- the floor's job now that the surface has moved on.
-  **AIMU 0.27.0 is the current floor, and it is the first one whose reason and whose probe are different
-  capabilities from different releases.** Learn that split, because it is the shape of every future case
-  where a bug fix rather than a feature moves the floor. The floor moved for *0.26.0*: AIMU's tool loop
+  AIMU 0.27.0 was the floor until 0.29.0, and it was the first one whose reason and whose probe were
+  different capabilities from different releases. That split is worth remembering, because it is the
+  shape of every future case where a bug fix rather than a feature moves the floor. The floor moved for
+  *0.26.0*: AIMU's tool loop
   no longer strands an un-dispatched tool call before its forced wrap-up. Before that fix, exhausting
   `max_iterations` on a turn that had requested tools appended the wrap-up's *user* prompt straight on
   top of the unanswered calls, which Anthropic rejects with ``messages.N: `tool_use` ids were found
@@ -153,10 +154,11 @@ Consequences for working in this repo:
   outside Ollama for the first time and `client.last_stop_reason` carries the provider's own word for it,
   but that is an attribute on a live client rather than a module symbol and Kokua reads it nowhere
   directly. The probe therefore covers exactly one surface at a time, in whatever shape that surface has,
-  and it has taken three: a name lookup for a symbol (`resolve_default_text_model` first,
-  `ModelRefusalError` today), a *signature* check for a keyword argument no `getattr` would notice
+  and it has taken three shapes: a name lookup for a symbol (`resolve_default_text_model` first,
+  `ModelRefusalError` second), a *signature* check for a keyword argument no `getattr` would notice
   (`SkillManager(include=...)` first, `script_env` second, `stream_thinking` third, `events` fourth), and
-  a membership check for an entry in a published set.
+  a membership check for an entry in a published set (`SUBAGENT_SPEC_KEYS`'s `generate_kwargs` first,
+  `StreamingContentType`'s `CONTINUING` today).
   What the current surface says nothing about, only the floor covers. `tests/test_aimu_compat.py` pins
   `MINIMUM_AIMU` against `pyproject.toml`'s specifier, since the two are halves of one decision and
   neither can detect the other drifting. If you add
@@ -166,6 +168,25 @@ Consequences for working in this repo:
   to something it can only pretend to check -- but look for a handle first, because 0.17.0 appeared to be
   that case and was not, and 0.20.0 shows the other outcome: no handle for the capability itself, so the
   probe takes the nearest one on its path and names what that leaves uncovered.
+  **AIMU 0.29.0 is the current floor, and it lands a new outcome in that same taxonomy: its reason and its
+  probe are the same capability again, unlike 0.27.0's split, and it is the very next floor move after
+  0.27.0's, whose own forcing capability (0.26.0's tool-loop fix) the probe deliberately never covered,
+  because a checkout missing it fails loudly on its own, with an outright provider rejection, rather than
+  degrading in silence.** 0.29.0's own capability has no such escape hatch: `StreamingContentType.CONTINUING`
+  is the phase a streamed driver yields before a round the loop injected on its own (a continuation nudge
+  after an empty turn, or the forced wrap-up at the round cap) rather than one the model asked for, and
+  Kokua reads it to say which injection a marker was and to show the words it sent, in a turn and inside a
+  sub-agent card. Left unprobed it is the silent-degradation case in its purest form: an older AIMU never
+  yields the phase, so `channels/web.py` and `core/subagents.py` never see a boundary, nothing is reported,
+  and nothing raises. The probe is a membership check on `StreamingContentType.__members__` for
+  `"CONTINUING"`, the third shape it has taken and the second time membership has answered
+  (0.18.0's `SUBAGENT_SPEC_KEYS` was the first): the class itself predates this floor by a long way, so its
+  mere presence proves nothing, and only whether it carries this member dates a checkout. It reads
+  `__members__` rather than writing a bare `in`, because `in` on an enum compares *values* on Python 3.12
+  and raises `TypeError` for a plain string on 3.11, which Kokua still supports, and the capability here is
+  a member's *name*, not its value. What it leaves to the floor: whether both streamed drivers emit the
+  chunk, and whether both injection kinds (a continuation nudge and a forced wrap-up) do, the same shape of
+  gap `events`' recursive passthrough left one level down for its own capability.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

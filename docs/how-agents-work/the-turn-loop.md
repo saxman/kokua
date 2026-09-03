@@ -186,11 +186,13 @@ place Kokua sets it deliberately is the plan workflow's independent reviewer,
 
 **What hitting it feels like.** Not an error. A search-heavy sub-agent that spends all ten rounds
 gathering hands back the wrap-up call's summary, which is thinner than the answer it was building
-toward, with nothing in the terminal marked as truncated. That edge is real enough to have moved this
-project's AIMU floor: before AIMU 0.26.0, hitting the cap with a call still pending produced a provider
-rejection instead of a wrap-up, and Kokua saw it as sub-agents failing rather than answering. The whole
-story is in [the architecture doc's account of the AIMU version
-floor](../explanation/architecture.md#generation-parameters).
+toward. The terminal marks the seam now: AIMU's own `CLIChannel` prints the injected round
+(`[continuing: final_answer] <prompt>`), and Kokua's terminal channel inherits it with no code of its
+own, so the transcript says why the answer is thinner rather than reading as one that simply ran short.
+That edge is real enough to have moved this project's AIMU floor: before AIMU 0.26.0, hitting the cap
+with a call still pending produced a provider rejection instead of a wrap-up, and Kokua saw it as
+sub-agents failing rather than answering. The whole story is in [the architecture doc's account of the
+AIMU version floor](../explanation/architecture.md#generation-parameters).
 
 **Knowing what it actually cost.** Kokua accumulates each turn's model calls, seconds, and tokens into a
 record stored with the conversation

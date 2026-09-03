@@ -658,8 +658,8 @@ construction still works and streams neither phase, and since Kokua no longer re
 anywhere there is not even an `AttributeError` to notice, which is the failure mode this preflight
 exists for.
 
-The repository floor is now `aimu>=0.27.0`, and it is the first floor whose *reason* and whose *probe*
-are different capabilities from different releases. That split is worth following, because it is the
+The floor was `aimu>=0.27.0` until 0.29.0, and it was the first floor whose *reason* and whose *probe*
+were different capabilities from different releases. That split is worth following, because it is the
 shape of every future case where a bug fix rather than a feature moves the floor.
 
 The floor moved for **0.26.0**: AIMU's tool loop no longer strands an un-dispatched tool call before its
@@ -673,9 +673,9 @@ class, exactly the kind of internal a later refactor would rename, and a probe p
 this preflight into a wall in front of a *newer, working* AIMU. That is the trap the 0.20.0 paragraph
 above describes, so the floor carries this one alone.
 
-The probe therefore grips **0.27.0**'s `ModelRefusalError` instead, a plain name lookup on `aimu.aio` and
-only the second time this probe has had that shape (0.21.0's `resolve_default_text_model` was the first).
-The capability *is* the exported name. Anthropic returns a refusal as HTTP 200 with
+The probe therefore gripped **0.27.0**'s `ModelRefusalError` instead, a plain name lookup on `aimu.aio`
+and only the second time this probe had had that shape (0.21.0's `resolve_default_text_model` was the
+first). The capability *is* the exported name. Anthropic returns a refusal as HTTP 200 with
 `stop_reason: "refusal"` and no content, so an AIMU that does not raise for it returns an empty string,
 which an agent loop cannot tell from a degenerate turn: the continuation nudge fires and the run spends
 its iterations being refused again. `core/turns.py` branches on the class at three sites so a declined
@@ -693,6 +693,27 @@ The probe covers one surface at a time; the version floor covers every earlier r
 capability first shipped tagged 0.24.0, but the number collided with a different, unrelated 0.24.0 that
 AIMU's own `main` released first; the branch carrying `events` rebased past it and renumbered to 0.25.0,
 so a real, released 0.24.0 correctly failed that probe rather than exposing a gap in it.)
+
+The floor is now `aimu>=0.29.0`, and unlike 0.27.0 it is a floor whose *reason* and whose *probe* are the
+same capability again. It moved for AIMU's `CONTINUING` chunk, the phase a streamed driver yields for a
+round the loop injected itself (a continuation nudge, or the forced wrap-up at the round cap) rather than
+one the model asked for. No other seam could carry it: Kokua constructs nothing differently against an
+older AIMU, so `channels/web.py` and `core/subagents.py` simply never see the phase, and nothing raises,
+which is the silent-degradation shape this preflight exists to catch.
+
+The probe is a membership check on `StreamingContentType.CONTINUING`, the third shape it has taken and
+the second time membership has answered (0.18.0's `SUBAGENT_SPEC_KEYS` was the first). `StreamingContentType`
+itself predates this floor by a long way, so its mere presence proves nothing; only whether it carries
+this member dates a checkout, the same argument `SUBAGENT_SPEC_KEYS` made one container kind over. It
+reads `__members__` rather than testing membership directly, because `in` on an enum compares *values* on
+Python 3.12 and raises `TypeError` for a plain string on 3.11, which Kokua still supports, and the
+capability here is a member's *name*, not its value.
+
+What the probe leaves to the floor: whether both streamed drivers emit the chunk, and whether both
+injection kinds (a continuation nudge and a forced wrap-up) do. A checkout carrying the member but wired
+to only one driver, or emitting it for only one injection kind, still passes, the same shape of gap
+0.25.0's `events` parameter left one level down, where only the first hop being wired was everything that
+probe could ask.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
@@ -1043,6 +1064,15 @@ rest of the old turn's tokens to the conversation the user had just moved to, si
 conversation changes *during* the send that is being gated. And gating purely on the contextvar would
 drop a background turn's sidebar refresh, because `TurnRunner._persist` pushes the conversation list from
 inside that turn's own task.
+
+A loop marker's meaning narrowed with AIMU 0.29.0's `CONTINUING` chunk: it now names an injected round
+specifically, one the loop inserted on its own (a continuation nudge after an empty turn, or the forced
+wrap-up at the round cap), and `reason` on the frame (`"continuation"` or `"final_answer"`) says which.
+Before it, `stream_activity` guessed the boundary from a rise in `StreamChunk.iteration`, which labelled
+the cap with the nudge's own wording and could draw a marker after an ordinary tool round too, since the
+counter rises there as well and no reload ever reproduced it. A marker now means exactly one thing, live
+and on reload alike, and `SubagentReporter.chunk` reads the identical chunk to draw the same boundary
+inside a sub-agent card.
 
 Whitespace alone does not open an answer bubble. A server that separates reasoning from the answer
 itself (mlx-lm, llama-server, vLLM) sends the newlines that followed the reasoning as the answer

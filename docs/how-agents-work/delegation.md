@@ -72,7 +72,12 @@ work, rendered as a tool call.
 
 Kokua *does* have a richer rendering, and the terminal is not it. A sub-agent card, which opens when
 the worker starts and fills in with its reasoning, its tool calls, and its answer, is a frame the web UI
-draws. `ChannelUI.show_subagent` degrades to nothing where cards are not rendered, which is
+draws. It also fills in with the boundary where the loop restarted the worker on its own rather than the
+worker's own model turn asking to continue: a nudge after an empty turn, or the forced wrap-up at the
+round cap, each entry carrying which one it was (`reason`, `"continuation"` or `"final_answer"`) and the
+exact words the worker was given (`text`), so a thinner answer near the cap reads as an explained outcome
+rather than a mystery.
+`ChannelUI.show_subagent` degrades to nothing where cards are not rendered, which is
 [principle 1](../explanation/design-principles.md#1-a-small-transport-agnostic-core) working as
 designed and is also why this page cannot show you one from a CLI capture.
 
