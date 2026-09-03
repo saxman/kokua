@@ -137,10 +137,13 @@ from, and reads both halves of it that startup reads: the agent tables and the `
 naming the entry agent. So two writes that each looked fine alone cannot add up to a file your next
 launch refuses. A `[agents.<name>.generation]` parameter gets a different check instead:
 the same type-and-range check `[assistant.generation]` gets, not a `validate_agents` dry run, since a bad
-`temperature` cannot break startup the way a bad delegate can. An agent's `max_iterations` gets a check
-of its own for the same reason: an integer of 1 or more, enforced where the written string is coerced,
-since a cap cannot make a config unstartable. Every way in, the write is checked before it is saved;
-no check tells you the result is one you wanted, only that it starts.
+`temperature` cannot break startup the way a bad delegate can. An agent's `max_iterations` is the
+exception: the `agents.*` write path checks it the same way it checks a flat key, by dry-running
+`validate_agents`, and that dry run does not repeat the range check parse time applies. So a `0` or a
+negative value passes the tool and is only refused at the next startup, when `config/file.py` parses it,
+and reaching that write at all means `agents.*` has already been removed from `locked_config_keys`,
+since the table is locked by default. Every other way in, the write is checked before it is saved; no
+check tells you the result is one you wanted, only that it starts.
 
 `[assistant].max_iterations` is not locked, so the assistant can raise or lower its own tool-loop cap
 there. That is deliberate, for the reason `[assistant].model` is unlocked: the key is startup-only, so
