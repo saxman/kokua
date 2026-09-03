@@ -83,6 +83,20 @@ def _capped(payload: str, limit: Optional[int]) -> str:
     return f"{payload[:limit]}\n... [truncated, {len(payload)} chars total]"
 
 
+# What each injected round is called in an export. The two say opposite things to the model (keep
+# working, or stop and answer from what you have), and an item stored before they were told apart
+# carries no reason and reads as the commoner of them. The wording is a phrase here and a single
+# kind word in the page's row ("tool-use limit"), because this one stands alone inside brackets in
+# prose while that one labels a foldable row a reader can open.
+_LOOP_LABELS = {"continuation": "continued", "final_answer": "tool-use limit reached"}
+
+
+def _loop_line(item: dict) -> str:
+    """The injected round as one line of prose for the export."""
+    label = _LOOP_LABELS.get(item.get("reason") or "continuation", "continued")
+    return f"_[{label}: {item.get('text', '')}]_"
+
+
 def render_markdown(session: Session, *, max_payload_chars: Optional[int] = DEFAULT_MAX_PAYLOAD_CHARS) -> str:
     """The conversation as a Markdown document: a header, then one section per turn.
 
@@ -342,6 +356,8 @@ def _render_subagent(events: list[dict], max_payload_chars: Optional[int]) -> li
             lines.append("**Error:**")
             lines.append("")
             lines.append(_fenced(_capped(append.get("text", ""), max_payload_chars)))
+        elif kind == "loop":
+            lines.append(_loop_line(append))
     status = events[-1].get("status")
     if status:
         lines.append("")
@@ -421,7 +437,7 @@ def _render_item(item: dict, max_payload_chars: Optional[int]) -> list[str]:
         url = item.get("url", "")
         return [f"_[image: {url}]_" if url else "_[image]_"]
     if item_type == "loop":
-        return [f"_[continued: {item['text']}]_"]
+        return [_loop_line(item)]
     if item_type == "tool":
         return _render_tool(item, max_payload_chars)
     if item_type == "notice":

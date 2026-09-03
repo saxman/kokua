@@ -4,7 +4,7 @@ import re
 
 from aimu.sessions import Session
 
-from kokua.transcript_export import _render_item, render_markdown
+from kokua.transcript_export import _render_item, _render_subagent, render_markdown
 
 
 def _session(messages, metadata=None):
@@ -278,8 +278,33 @@ def test_a_loop_continuation_item_names_the_injected_prompt():
             {"role": "assistant", "content": "done"},
         ]
     )
-    out = render_markdown(session)
-    assert "[continued: keep going]" in out
+    assert "[continued: keep going]" in render_markdown(session)
+
+
+def test_a_forced_wrap_up_item_says_the_cap_was_reached():
+    """Exported as a different phrase from a nudge, because the two told the model opposite things
+    and an export is what someone reads when the run is long over."""
+    session = _session(
+        [
+            {"role": "user", "content": "do it"},
+            {"role": "assistant", "content": "partial"},
+            {"role": "user", "content": "answer now", "provenance": "final_answer"},
+            {"role": "assistant", "content": "done"},
+        ]
+    )
+    assert "[tool-use limit reached: answer now]" in render_markdown(session)
+
+
+def test_a_cards_injected_round_is_rendered_inside_the_card():
+    """The card and the top level share one label helper, so a reader sees one phrasing
+    throughout."""
+    events = [
+        {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
+        {"id": "r-1", "append": {"kind": "loop", "reason": "final_answer", "text": "answer now"}},
+        {"id": "r-1", "status": "done"},
+    ]
+    out = "\n".join(_render_subagent(events, None))
+    assert "[tool-use limit reached: answer now]" in out
 
 
 def test_a_phase_with_detail_shows_both_the_label_and_the_detail():
