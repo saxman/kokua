@@ -117,7 +117,7 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    The surface today is ``StreamingContentType.CONTINUING``, the phase AIMU 0.29.0 yields before an
+    The surface today is ``StreamingContentType.CONTINUING``, the phase AIMU 0.28.0 yields before an
     injected round. An older AIMU never yields it, so Kokua's branches on it are dead code and the loop
     stops being watchable in a front end whose whole claim is that it is watched.
     """

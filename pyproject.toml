@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# 0.29.0 is the oldest AIMU carrying everything Kokua needs. Its own contribution is
+# 0.28.0 is the oldest AIMU carrying everything Kokua needs. The capability that moved the floor is
 # `StreamingContentType.CONTINUING`, the phase a driver yields to mark the boundary before a round the
 # loop itself injected (a nudge, a wrap-up); without it `channels/web.py` and `core/subagents.py` never
 # see the boundary, so neither reports it and nothing raises. Every earlier release in the floor's
@@ -27,7 +27,7 @@ classifiers = [
 # cannot drift. This pin is what ships in the wheel and what a PyPI install resolves;
 # [tool.uv.sources] below separately redirects development installs to the sibling checkout.
 dependencies = [
-    "aimu[anthropic,ollama,openai_compat,memory]>=0.29.0",
+    "aimu[anthropic,ollama,openai_compat,memory]>=0.28.0",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
     # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
     "tomlkit>=0.13",

@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.29.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.28.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -78,13 +78,13 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.29.0 is the current surface: a membership check on ``StreamingContentType.CONTINUING``, the
+AIMU 0.28.0 is the current surface: a membership check on ``StreamingContentType.CONTINUING``, the
 phase a streamed driver yields before a round the loop itself injected rather than one the model asked
 for. The argument for that shape, and what it does and does not cover, lives in the comment above the
 ``_PROBE_*`` constants below rather than here, so it is stated once instead of two places that can drift
 apart.
 
-AIMU 0.27.0 was the surface until 0.29.0, and it was a plain name lookup: ``ModelRefusalError``, exported
+AIMU 0.27.0 was the surface until 0.28.0, and it was a plain name lookup: ``ModelRefusalError``, exported
 from ``aimu.aio`` alongside ``ModelConnectionError``. The second time this module had that shape (0.21.0's
 ``resolve_default_text_model`` was the first) and for the same reason: the capability was the exported
 name, so a name lookup asked exactly the question that mattered, and nothing else had to be true of a
@@ -160,7 +160,7 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 29, 0)
+MINIMUM_AIMU = (0, 28, 0)
 
 # The newest AIMU surface Kokua depends on is `StreamingContentType.CONTINUING`, the phase a streamed
 # driver yields to mark the boundary before a round the loop itself injected (a continuation nudge, a

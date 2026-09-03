@@ -50,7 +50,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.29.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.28.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -59,7 +59,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.29.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.28.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -131,7 +131,7 @@ Consequences for working in this repo:
   `events` but not the recursive passthrough (a spawned worker forwarding its own `events` on to a
   grandchild it delegates to in turn) still passes, so a worker spawning its own worker could go
   uncounted without the probe raising anything -- the floor's job now that the surface has moved on.
-  AIMU 0.27.0 was the floor until 0.29.0, and it was the first one whose reason and whose probe were
+  AIMU 0.27.0 was the floor until 0.28.0, and it was the first one whose reason and whose probe were
   different capabilities from different releases. That split is worth remembering, because it is the
   shape of every future case where a bug fix rather than a feature moves the floor. The floor moved for
   *0.26.0*: AIMU's tool loop
@@ -168,11 +168,11 @@ Consequences for working in this repo:
   to something it can only pretend to check -- but look for a handle first, because 0.17.0 appeared to be
   that case and was not, and 0.20.0 shows the other outcome: no handle for the capability itself, so the
   probe takes the nearest one on its path and names what that leaves uncovered.
-  **AIMU 0.29.0 is the current floor, and it lands a new outcome in that same taxonomy: its reason and its
+  **AIMU 0.28.0 is the current floor, and it lands a new outcome in that same taxonomy: its reason and its
   probe are the same capability again, unlike 0.27.0's split, and it is the very next floor move after
   0.27.0's, whose own forcing capability (0.26.0's tool-loop fix) the probe deliberately never covered,
   because a checkout missing it fails loudly on its own, with an outright provider rejection, rather than
-  degrading in silence.** 0.29.0's own capability has no such escape hatch: `StreamingContentType.CONTINUING`
+  degrading in silence.** The 0.28.0 capability Kokua depends on has no such escape hatch: `StreamingContentType.CONTINUING`
   is the phase a streamed driver yields before a round the loop injected on its own (a continuation nudge
   after an empty turn, or the forced wrap-up at the round cap) rather than one the model asked for, and
   Kokua reads it to say which injection a marker was and to show the words it sent, in a turn and inside a

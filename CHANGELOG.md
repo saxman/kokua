@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -1039,7 +1039,7 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.29.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.28.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -1060,7 +1060,7 @@ notice on startup.
   call, which Anthropic rejected outright and which made search-heavy sub-agents fail rather than
   answer), and that fix had no handle a probe could honestly grip: a private method on a private class
   is exactly what a later refactor renames, and a probe pointed at one becomes a wall in front of a
-  newer, working AIMU. Today the floor is 0.29.0, and for once reason and probe are the same capability
+  newer, working AIMU. Today the floor is 0.28.0, and for once reason and probe are the same capability
   again: `StreamingContentType.CONTINUING` is the phase a streamed driver yields before a round the loop
   injected on its own rather than one the model asked for, the same chunk a loop marker reads to say
   which injection it was (see "A loop marker names which injection it was" under Front ends, above). The

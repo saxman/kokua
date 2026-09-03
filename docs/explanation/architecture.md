@@ -658,7 +658,7 @@ construction still works and streams neither phase, and since Kokua no longer re
 anywhere there is not even an `AttributeError` to notice, which is the failure mode this preflight
 exists for.
 
-The floor was `aimu>=0.27.0` until 0.29.0, and it was the first floor whose *reason* and whose *probe*
+The floor was `aimu>=0.27.0` until 0.28.0, and it was the first floor whose *reason* and whose *probe*
 were different capabilities from different releases. That split is worth following, because it is the
 shape of every future case where a bug fix rather than a feature moves the floor.
 
@@ -694,7 +694,7 @@ capability first shipped tagged 0.24.0, but the number collided with a different
 AIMU's own `main` released first; the branch carrying `events` rebased past it and renumbered to 0.25.0,
 so a real, released 0.24.0 correctly failed that probe rather than exposing a gap in it.)
 
-The floor is now `aimu>=0.29.0`, and unlike 0.27.0 it is a floor whose *reason* and whose *probe* are the
+The floor is now `aimu>=0.28.0`, and unlike 0.27.0 it is a floor whose *reason* and whose *probe* are the
 same capability again. It moved for AIMU's `CONTINUING` chunk, the phase a streamed driver yields for a
 round the loop injected itself (a continuation nudge, or the forced wrap-up at the round cap) rather than
 one the model asked for. No other seam could carry it: Kokua constructs nothing differently against an
@@ -1065,7 +1065,7 @@ conversation changes *during* the send that is being gated. And gating purely on
 drop a background turn's sidebar refresh, because `TurnRunner._persist` pushes the conversation list from
 inside that turn's own task.
 
-A loop marker's meaning narrowed with AIMU 0.29.0's `CONTINUING` chunk: it now names an injected round
+A loop marker's meaning narrowed with AIMU 0.28.0's `CONTINUING` chunk: it now names an injected round
 specifically, one the loop inserted on its own (a continuation nudge after an empty turn, or the forced
 wrap-up at the round cap), and `reason` on the frame (`"continuation"` or `"final_answer"`) says which.
 Before it, `stream_activity` guessed the boundary from a rise in `StreamChunk.iteration`, which labelled
