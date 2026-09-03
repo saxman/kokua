@@ -118,8 +118,9 @@ async def _sync_view(channel: WebChannel, assistant: Assistant) -> None:
     channel.active_conversation_id = assistant.active_id
     await channel.send_conversations(assistant.list_conversations())
     await channel.send_history(assistant.history, assistant.history_metadata)
-    if assistant.turn_running(assistant.active_id):
-        await channel.send_working(True)
+    elapsed = assistant.turn_elapsed(assistant.active_id)
+    if elapsed is not None:
+        await channel.send_working(elapsed)
 
 
 # How many words of a conversation's title become its exported filename's slug. Enough to tell two

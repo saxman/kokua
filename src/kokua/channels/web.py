@@ -240,12 +240,20 @@ class WebChannel(BaseWebChannel):
         """A background turn finished; tell the user without stealing the current view."""
         await self.send_frame({"type": "notification", "text": text})
 
-    async def send_working(self, active: bool) -> None:
+    async def send_working(self, elapsed: Optional[float]) -> None:
         """Tell the page whether the conversation it is now viewing has a turn already running in
-        the background (started before this switch). Never muted (``working`` is not in
-        ``_TURN_FRAMES``): this describes the viewed conversation's own state, not a running turn's
-        streamed content, so it is sent regardless of what ``streaming_conversation`` names."""
-        await self.send_frame({"type": "working", "active": active})
+        the background (started before this switch), and how many seconds it has been running.
+
+        Never muted (``working`` is not in ``_TURN_FRAMES``): this describes the viewed conversation's
+        own state, not a running turn's streamed content, so it is sent regardless of what
+        ``streaming_conversation`` names.
+
+        The frame keeps a boolean because that is what the page branches on; ``elapsed`` rides along
+        only when there is a turn to time, and the page's indicator counts up from it."""
+        frame: dict[str, Any] = {"type": "working", "active": elapsed is not None}
+        if elapsed is not None:
+            frame["elapsed"] = elapsed
+        await self.send_frame(frame)
 
     async def feed_input(self, text: str, image_paths: list[str], thinking: Optional[str] = None) -> None:
         """Enqueue a user turn carrying attached image file paths, a per-turn reasoning effort, or both

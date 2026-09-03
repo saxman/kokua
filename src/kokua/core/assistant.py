@@ -328,6 +328,18 @@ class Assistant:
         indicator on switching into a conversation)."""
         return self._tracker.running(conversation_id)
 
+    def turn_elapsed(self, conversation_id: str) -> Optional[float]:
+        """Seconds `conversation_id`'s in-flight turn has been running, or None when none is.
+
+        What a front end's working indicator counts up from, so switching into a turn that started
+        minutes ago says so instead of restarting from zero. A duration rather than a start time
+        because the tracker keeps a monotonic clock reading, which is meaningless as a timestamp.
+        """
+        info = self._tracker.get(conversation_id)
+        if info is None or info.handle.done:
+            return None
+        return time.monotonic() - info.started
+
     @property
     def _memory_store(self):
         """The shared semantic memory store, or None when no agent declared the memory toolset.
@@ -699,7 +711,7 @@ class Assistant:
         # clears the working indicator, so the notice has to precede the frame that re-lights it. A
         # channel that prints as it goes has neither behavior and reads the same in any order.
         await self._ui.send(headline)
-        await self._ui.show_working(self.turn_running(self._active_id))
+        await self._ui.show_working(self.turn_elapsed(self._active_id))
 
     def _stop_active_turn(self) -> None:
         """Cancel the viewed conversation's tracked turn (if any); the /stop branch's helper."""

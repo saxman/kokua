@@ -57,9 +57,9 @@ def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
 def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
     """The probe follows whatever shape the newest surface has, and a set member is one of the three.
 
-    Not the shape in force today (0.25.0's surface is a keyword argument), but it was for 0.18.0, and
-    the branch has to stay exercised: a published set proves nothing by existing once the set itself
-    predates the capability, so only its contents can answer.
+    This is in fact today's shape too (0.28.0's surface is `max_iterations`), but exercised here against
+    0.18.0's `generate_kwargs` member instead of monkeypatching over the live probe, so the branch stays
+    covered independent of whichever member the real surface currently names.
     """
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "SUBAGENT_SPEC_KEYS")
@@ -133,6 +133,21 @@ def test_the_probe_targets_the_release_the_floor_names():
     assert aimu_compat._PROBE_PARAMETER is None
 
 
+def test_the_floor_covers_the_spec_key_the_probe_no_longer_grips():
+    """0.28.0 brought two capabilities Kokua depends on, and only one fits the single probe slot.
+
+    ``core/agents.py`` writes ``"max_iterations"`` into an ``agent_types`` spec for an agent declaring its
+    own cap, and AIMU validates that closed key set when the spawn tool is built, so an AIMU without the
+    entry raises ``ValueError`` at agent construction with or without a probe. That loudness is why the
+    probe grips the phase instead, which degrades in silence. This pins the half left to the floor, so a
+    sibling that satisfies the version check but lacks the key fails here rather than at the first
+    delegation.
+    """
+    from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
+
+    assert "max_iterations" in SUBAGENT_SPEC_KEYS
+
+
 def test_the_probe_names_the_phase_kokua_actually_branches_on():
     """The probe is only honest if the depended-on capability is the thing it looks up.
 
@@ -152,6 +167,18 @@ def test_the_probe_names_the_phase_kokua_actually_branches_on():
     for module in (web, subagents):
         assert f"StreamingContentType.{aimu_compat._PROBE_MEMBER}" in Path(module.__file__).read_text()
     require_aimu()  # does not raise against the AIMU this suite runs on
+
+
+def test_the_default_cap_matches_aimus_own():
+    """``AssistantConfig.max_iterations`` restates AIMU's ``Agent`` default so four construction sites can
+    pass it unconditionally. Two halves of one decision, and nothing else in the suite would notice them
+    drifting: if AIMU raises its default, Kokua would quietly pin the old number for every agent.
+    """
+    from aimu import aio
+
+    from kokua.config.schema import AssistantConfig
+
+    assert AssistantConfig().max_iterations == aio.Agent.max_iterations
 
 
 def test_the_declared_floor_matches_the_packaged_requirement():

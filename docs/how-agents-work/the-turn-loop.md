@@ -178,10 +178,15 @@ tool call still pending triggers a single forced wrap-up call with tools disable
 cap. If even the wrap-up produces nothing, AIMU raises `DegenerateTurnError` instead of returning an
 empty string, so the failure reaches you as a failure.
 
-**The cap you are running.** AIMU's default is ten model calls per turn, and Kokua does not override it
-for the entry agent, so ten is what the transcript above was running under (it used three). The one
-place Kokua sets it deliberately is the plan workflow's independent reviewer,
-[`workflows/critics.py`](https://github.com/saxman/kokua/blob/main/src/kokua/workflows/critics.py), at
+**The cap you are running.** AIMU's default is ten model calls per turn, and Kokua's own default matches
+it, so ten is what the transcript above was running under (it used three). You can change that:
+`[assistant].max_iterations` sets what every agent runs under, and `[agents.<name>].max_iterations`
+overrides it for one agent, which is usually what you want (see
+[configuration](../reference/configuration.md#max_iterations)). A cap is resolved per agent and never
+inherited down the delegation graph, so raising the assistant's buys it more rounds of *delegating*, not
+more rounds inside each worker. The one cap that is not a config key is the plan workflow's independent
+reviewer, fixed at
+[`workflows/critics.py`](https://github.com/saxman/kokua/blob/main/src/kokua/workflows/critics.py)'s
 `max_iterations=6` to bound what verification can spend.
 
 **What hitting it feels like.** Not an error. A search-heavy sub-agent that spends all ten rounds
@@ -199,6 +204,10 @@ That edge is real enough to have moved this project's AIMU floor: before AIMU 0.
 with a call still pending produced a provider rejection instead of a wrap-up, and Kokua saw it as
 sub-agents failing rather than answering. The whole story is in [the architecture doc's account of the
 AIMU version floor](../explanation/architecture.md#generation-parameters).
+
+So when a sub-agent's answer reads thinner than the work it clearly did, the cap is the first thing to
+check, and the fix is to raise it on that worker rather than on everyone: every agent's worst-case turn
+cost scales with its own cap, and a search-heavy researcher is usually the only one that needs more.
 
 **Knowing what it actually cost.** Kokua accumulates each turn's model calls, seconds, and tokens into a
 record stored with the conversation

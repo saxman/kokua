@@ -286,3 +286,69 @@ def test_generation_for_returns_a_fresh_dict(tmp_path):
     config = _load(tmp_path, GENERATION)
     config.generation_for("researcher")["temperature"] = 1.9
     assert config.generation == {"temperature": 0.7, "context_length": 32768}
+
+
+def test_an_agent_declares_its_own_max_iterations(tmp_path):
+    body = MINIMAL.replace('tools = ["web"]', 'tools = ["web"]\nmax_iterations = 25')
+    config = _load(tmp_path, body)
+    assert config.agents["researcher"].max_iterations == 25
+    assert config.max_iterations_for("researcher") == 25
+
+
+def test_the_default_cap_applies_to_an_agent_that_declares_none(tmp_path):
+    body = MINIMAL.replace('agent = "assistant"\n', 'agent = "assistant"\nmax_iterations = 15\n')
+    config = _load(tmp_path, body)
+    assert config.agents["researcher"].max_iterations is None
+    assert config.max_iterations_for("researcher") == 15
+
+
+def test_the_cap_falls_back_to_aimus_own_default_when_nothing_is_declared(tmp_path):
+    config = _load(tmp_path, MINIMAL)
+    assert config.max_iterations_for("researcher") == 10
+
+
+def test_an_agents_cap_does_not_reach_an_agent_it_delegates_to(tmp_path):
+    """Never inherited down the delegation graph, the reason model_for and thinking_for are not: a
+    delegator given a long leash does not drag its workers along."""
+    body = MINIMAL.replace('delegates_to = ["researcher"]\n', 'delegates_to = ["researcher"]\nmax_iterations = 40\n')
+    config = _load(tmp_path, body)
+    assert config.max_iterations_for("assistant") == 40
+    assert config.max_iterations_for("researcher") == 10
+
+
+def test_the_cap_for_an_agent_that_does_not_exist_is_the_default(tmp_path):
+    """`max_iterations_for` is called with a composed sub-agent's label at no site today, but it reads
+    `self.agents.get(...)` like its two siblings and must not raise on a name with no table."""
+    config = _load(tmp_path, MINIMAL)
+    assert config.max_iterations_for("nobody") == 10
+
+
+@pytest.mark.parametrize("bad", ["true", "0", "-1", '"25"', "2.5"])
+def test_an_agents_cap_must_be_a_positive_integer(tmp_path, bad):
+    """`true` is the one that needs the guard: bool is an int subclass, so it would pass as a cap of 1."""
+    body = MINIMAL.replace('tools = ["web"]', f'tools = ["web"]\nmax_iterations = {bad}')
+    with pytest.raises(ConfigError) as excinfo:
+        _load(tmp_path, body)
+    assert "max_iterations" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("bad", ["true", "0", "-1", "2.5"])
+def test_the_default_cap_must_be_a_positive_integer(tmp_path, bad):
+    """The [assistant] tier needs its own coverage: validate_agents walks only [agents.*], so this key
+    would slip past a check that lived there."""
+    body = MINIMAL.replace('agent = "assistant"\n', f'agent = "assistant"\nmax_iterations = {bad}\n')
+    with pytest.raises(ConfigError) as excinfo:
+        _load(tmp_path, body)
+    assert "max_iterations" in str(excinfo.value)
+
+
+def test_update_config_can_write_the_default_cap(tmp_path):
+    """AGENT_SCHEMA and _STARTUP_SCHEMA are what make a key reachable by the tool at all. [assistant] is
+    not in locked_config_keys, so this one is writable; the [agents.*] tier is refused by the lock, which
+    test_the_agents_section_cannot_be_written_by_the_assistant already covers."""
+    from kokua.config.file import coerce_config_string
+    from tests.helpers import core_table
+
+    assert coerce_config_string("assistant", "max_iterations", "25", table=core_table()) == 25
+    with pytest.raises(ConfigError):
+        coerce_config_string("assistant", "max_iterations", "0", table=core_table())

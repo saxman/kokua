@@ -172,8 +172,9 @@ Consequences for working in this repo:
   probe are the same capability again, unlike 0.27.0's split, and it is the very next floor move after
   0.27.0's, whose own forcing capability (0.26.0's tool-loop fix) the probe deliberately never covered,
   because a checkout missing it fails loudly on its own, with an outright provider rejection, rather than
-  degrading in silence.** The 0.28.0 capability Kokua depends on has no such escape hatch: `StreamingContentType.CONTINUING`
-  is the phase a streamed driver yields before a round the loop injected on its own (a continuation nudge
+  degrading in silence.** The 0.28.0 capability Kokua depends on has no such escape hatch.
+  `StreamingContentType.CONTINUING` is the phase a streamed driver yields before a round the loop
+  injected on its own (a continuation nudge
   after an empty turn, or the forced wrap-up at the round cap) rather than one the model asked for, and
   Kokua reads it to say which injection a marker was and to show the words it sent, in a turn and inside a
   sub-agent card. Left unprobed it is the silent-degradation case in its purest form: an older AIMU never
@@ -187,6 +188,18 @@ Consequences for working in this repo:
   a member's *name*, not its value. What it leaves to the floor: whether both streamed drivers emit the
   chunk, and whether both injection kinds (a continuation nudge and a forced wrap-up) do, the same shape of
   gap `events`' recursive passthrough left one level down for its own capability.
+  **0.28.0 brought a second capability Kokua depends on, and it is the floor's job rather than the
+  probe's.** The `"max_iterations"` entry in `SUBAGENT_SPEC_KEYS` is the spec key `core/agents.py` writes
+  for an agent declaring its own tool-loop cap, which is what makes `[agents.<name>].max_iterations`
+  expressible at all: AIMU's cap was one value per spawn tool, so per-agent could not be said. It needs no
+  probe, and the reason is the counterpoint to every recent floor. Those converted *silence* into a startup
+  error; this key set is closed, so an AIMU predating 0.28.0 raises `ValueError` naming the key, and
+  `_validate_subagent_config` raises at factory-call time, which `wire_agent` reaches while building a
+  conversation's agent. A probe there would buy the message and not the timing, which is a real gain but a
+  much smaller one than a predecessor's, and with one slot to spend it goes to the capability that fails
+  silently. Worth writing down, because a probe that overclaims is worse than one that covers less. The
+  global tier needs nothing either: `[assistant].max_iterations` rides a factory argument that has existed
+  since 0.12.0, so only the per-agent tier ever depended on 0.28.0.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

@@ -169,8 +169,8 @@ class _ViewChannel(_ConvCapturingChannel):
         self.histories.append(messages)
         self.order.append("history")
 
-    async def send_working(self, active: bool) -> None:
-        self.working.append(active)
+    async def send_working(self, elapsed: float | None) -> None:
+        self.working.append(elapsed)
         self.order.append("working")
 
     async def send_conversations(self, items):
@@ -192,7 +192,7 @@ async def test_a_switch_repaints_a_channel_that_draws_a_whole_conversation(tmp_p
     assert channel.histories == [[]]  # the new, empty conversation
     marked_active = [item["id"] for item in channel.conversation_pushes[-1] if item["active"]]
     assert marked_active == [assistant._active_id]
-    assert channel.working == [False]  # nothing running: the indicator history frames reset stays off
+    assert channel.working == [None]  # nothing running: the indicator history frames reset stays off
     # Pinned, because both ends of it are load-bearing on the web page: a history frame replaces the
     # whole transcript (so a notice sent before it is never seen) and an ordinary message clears the
     # working indicator (so the notice cannot come after the frame that re-lights it).
@@ -228,7 +228,7 @@ async def test_switching_into_a_running_turn_relights_the_working_indicator(tmp_
         await asyncio.gather(_serve(assistant), watch())
 
         assert assistant._active_id == running_id
-        assert channel.working[-1] is True  # the turn it switched back into is still in flight
+        assert channel.working[-1] is not None  # the turn it switched back into is still in flight
     finally:
         client.release.set()
         info = assistant._tracker.get(running_id)

@@ -715,6 +715,17 @@ to only one driver, or emitting it for only one injection kind, still passes, th
 0.25.0's `events` parameter left one level down, where only the first hop being wired was everything that
 probe could ask.
 
+0.28.0 brought a second capability Kokua depends on, and it is worth reading for what a probe *cannot*
+claim. The `"max_iterations"` entry AIMU added to `SUBAGENT_SPEC_KEYS` is the spec key `core/agents.py`
+writes for an agent declaring its own tool-loop cap; without it a per-agent cap has nowhere to go, since
+AIMU's own cap was one value shared by a whole spawn tool. That set is *closed* and validated at
+factory-call time, which for Kokua is `wire_agent` building a conversation's agent, so an AIMU predating
+0.28.0 raises `ValueError` naming the key at startup already: no silence to convert into noise, and no
+mid-session failure to pull forward. A probe there would buy the wording rather than the timing, which is
+why the one slot goes to the phase above, which has no such escape hatch, and this key is left to the
+floor. The global tier needed none of it: the factory argument behind `[assistant].max_iterations` has
+existed since 0.12.0.
+
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
 the whole window the prompt and the output share, so `context_length = 32768` with `max_tokens = 4096`
@@ -921,6 +932,42 @@ mid-stream an expression stands as the source the model wrote. And `finalizeStre
 pending timer before it stamps the bubble: a tick landing after the stamp would reset `innerHTML` and
 drop the caption. The `history` replay path cancels it too, since it drops the bubble reference the
 tick would have written into.
+
+### Saying a turn is under way
+
+A sent message used to leave the transcript unchanged until the first frame of the reply landed.
+`.working-inline` fills that gap: a dim row at the foot of the log carrying a spinner and the turn's
+elapsed seconds, indented into the same column as the thinking and tool rows it sits beneath.
+
+**The row is pinned for the turn's whole life, and that was measured rather than assumed.** The first
+version cleared it on the first thing that rendered, on the reasoning that content should replace it.
+Instrumenting the page (a `MutationObserver` on `#log` against a tap on every inbound frame) showed the
+row living for 23 milliseconds on a local endpoint, whose first token arrives about that fast. The
+question the row answers is "is a turn running", and that stays true until the turn ends, so that is its
+life. Its elapsed count is the turn's age, not the age of the current lull, which is what makes it
+readable as "this is slow" rather than "this just started".
+
+Three details are load-bearing:
+
+- **Every renderer goes through `appendToLog`,** which inserts a top-level block *before* the row
+  rather than appending after it. That is the whole of the pinning: the row stays last without anything
+  ever moving it. The alternative, re-appending the row after each render, does the same work with a
+  reflow and a flicker per block.
+- **`lastContentElement()` looks past the row.** A `token` frame decides whether to close the open
+  bubble by asking whether anything has landed since the last one, and it reads the log's last element
+  to find out. With the row pinned, that element is *always* the indicator, so the unguarded check
+  would close the bubble on every token and render the answer one bubble per token.
+- **The row is created and destroyed, not shown and hidden.** A permanently present element would be
+  the log's last child even when idle, so both points above would need a second condition; and the
+  ticker interval that drives the spinner has to stop when the turn does, which destruction handles for
+  free.
+
+`ChannelUI.show_working` carries a duration and not a flag: `None` means nothing is running, and a
+number is how long the turn has already been going, from `Assistant.turn_elapsed`. That is what lets a
+switch into a background turn count on from its real age instead of restarting at zero, and it makes
+"idle, and it has been running twelve seconds" unsayable rather than merely wrong. The `working` frame
+on the wire keeps a boolean, because that is what the page branches on, with `elapsed` riding along
+only when there is a turn to time.
 
 ### The tasks section, and the settings frames behind it
 

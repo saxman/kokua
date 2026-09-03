@@ -115,8 +115,9 @@ class ChannelUI:
         if self._history is not None:
             await self._history(messages, metadata)
 
-    async def show_working(self, active: bool) -> None:
-        """Say whether the conversation now in view has a turn already running behind it.
+    async def show_working(self, elapsed: Optional[float]) -> None:
+        """Say whether the conversation now in view has a turn already running behind it, and for how
+        long (None when none is).
 
         Paired with :meth:`show_history`, which resets the indicator as it repaints: without this
         call right behind it, a switch into a conversation with a live turn leaves the page looking
@@ -124,7 +125,7 @@ class ChannelUI:
         to reset either, so the pair is a no-op together.
         """
         if self._working is not None:
-            await self._working(active)
+            await self._working(elapsed)
 
     async def notify(self, text: str) -> None:
         """Report a background turn's completion. Skipped by a channel that cannot background a turn."""

@@ -95,6 +95,20 @@ nudge fires and the run spends its iterations being refused again. ``core/turns.
 class at three sites so a declined request reads as declined rather than as a generic failure, and an
 AIMU without the name fails at import instead of degrading in silence.
 
+0.28.0 carries a second capability Kokua depends on, and the contrast is why the probe grips the phase
+rather than it: the ``"max_iterations"`` entry in ``SUBAGENT_SPEC_KEYS``, which ``core/agents.py`` writes
+for an agent declaring its own tool-loop cap. Because that key set is closed, an AIMU predating 0.28.0
+raises ``ValueError`` on the unknown key rather than ignoring it, so unlike ``stream_thinking`` or
+``script_env`` there is no silence to convert into noise. Nor is there a later failure to pull forward:
+``_validate_subagent_config`` runs at factory-call time, and Kokua calls that factory from ``wire_agent``,
+so the raw ``ValueError`` already lands when a conversation's agent is built, which for the entry agent is
+startup. A probe there would buy the *wording*, a message carrying the fix instead of a spec-key
+``ValueError`` out of agent construction, and nothing else. The phase above has no such escape hatch, so
+it is the surface worth the one slot, and the spec key is the floor's job. Only the per-agent tier ever
+needed 0.28.0 in the first place: the factory argument behind ``[assistant].max_iterations`` has been on
+both spawn factories since 0.12.0, so the global tier works on an older AIMU and needs neither probe nor
+floor.
+
 That floor was the first where the capability that *forced* it up and the capability the probe
 *gripped* were different, from different releases, and the split is worth understanding because it
 is the shape of every future case where a bug fix rather than a feature moves the floor. The floor
@@ -186,7 +200,9 @@ MINIMUM_AIMU = (0, 28, 0)
 # chunk, and whether *both* injection kinds (a continuation nudge and a forced wrap-up) do. A checkout
 # carrying the member but wired to only one driver, or emitting it for only one injection kind, still
 # passes this probe, the same kind of gap `events`' recursive passthrough left one level down for its
-# own capability.
+# own capability. The other capability 0.28.0 brought, the `"max_iterations"` spec key, is the floor's
+# job for the reason the module docstring gives: an older AIMU rejects that key loudly on its own, so
+# it never needed the one probe slot the way a silent phase does.
 #
 # `make_async_subagent_tool(events=...)` was this probe's surface while 0.25.0 was the floor,
 # `make_command_tool` (a name lookup) before that, and `ModelRefusalError` (a name lookup) while 0.27.0

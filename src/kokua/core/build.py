@@ -166,6 +166,7 @@ def wire_agent(config: AssistantConfig, state: LiveState, agent_name: str, *, cl
         name=agent_name,
         concurrent_tool_calls=config.concurrent_tools,
         thinking=config.thinking_for(agent_name),
+        max_iterations=config.max_iterations_for(agent_name),
     )
     agent.tools = build_tools(toolsets, ToolsetContext(state=state, agent=agent, agent_name=agent_name))
     agent.tool_approval = state.tool_approval

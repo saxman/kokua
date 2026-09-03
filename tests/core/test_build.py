@@ -786,6 +786,40 @@ def test_an_agent_is_wired_with_no_thinking_when_nothing_is_declared(tmp_path):
     assert agent.thinking is None
 
 
+def test_the_entry_agent_is_built_with_its_own_resolved_cap(tmp_path):
+    """The only per-agent-resolved site: the entry agent is an [agents.*] entry like any other, which is
+    why nothing here needs a special case for it."""
+    from kokua.config.schema import AssistantConfig
+    from kokua.core.agents import build_registry
+    from kokua.core.build import wire_agent
+
+    config = AssistantConfig(
+        data_dir=tmp_path,
+        agents={"assistant": AgentConfig(tools=[], max_iterations=30)},
+        entry_agent="assistant",
+        max_iterations=10,
+    )
+    state = LiveState(config=config, registry=build_registry(config))
+    agent = wire_agent(config, state, "assistant", client=MockAsyncModelClient([]))
+    assert agent.max_iterations == 30
+
+
+def test_the_entry_agent_falls_back_to_the_global_cap(tmp_path):
+    from kokua.config.schema import AssistantConfig
+    from kokua.core.agents import build_registry
+    from kokua.core.build import wire_agent
+
+    config = AssistantConfig(
+        data_dir=tmp_path,
+        agents={"assistant": AgentConfig(tools=[])},
+        entry_agent="assistant",
+        max_iterations=15,
+    )
+    state = LiveState(config=config, registry=build_registry(config))
+    agent = wire_agent(config, state, "assistant", client=MockAsyncModelClient([]))
+    assert agent.max_iterations == 15
+
+
 def test_validate_model_string_rejects_one_this_process_cannot_build():
     """No install has a "bogus-provider", so this is the rejection any typo'd provider gets, carrying
     AIMU's own message -- which names the providers whose extras *are* installed."""

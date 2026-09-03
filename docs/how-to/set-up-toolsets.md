@@ -169,7 +169,7 @@ session store or connects to anything, so a bad config fails with nothing writte
 | --- | --- |
 | Unknown name in an agent's `tools` | **Startup fails**, naming the agent, the name, and every available toolset. |
 | `skills` on any agent but the entry agent | **Startup fails.** Spawned workers are plain AIMU agents and cannot host it. |
-| Unknown key in an `[agents.*]` table | **Startup fails**, naming the key. Only `description`, `system_message`, `tools`, and `delegates_to` are accepted. |
+| Unknown key in an `[agents.*]` table | **Startup fails**, naming the key. Only `description`, `system_message`, `tools`, `delegates_to`, `model`, `thinking`, `generation`, and `max_iterations` are accepted. |
 | An old per-role key (`groups`, `tool_packs`, `mcp_servers`) | **Startup fails**, telling you to list it in `tools` instead. |
 | `[assistant].agent` naming no table | **Startup fails**, listing the agents you did configure. |
 | `delegates_to` naming an unknown agent | **Startup fails**, listing the agents you did configure. |

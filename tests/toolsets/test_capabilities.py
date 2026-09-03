@@ -289,6 +289,17 @@ async def test_compose_subagent_calls_aimu_with_max_depth_one_at_every_level(tmp
     assert spawn.calls[0]["max_depth"] == 1
 
 
+async def test_compose_subagent_passes_the_configured_tool_loop_cap(tmp_path, monkeypatch):
+    """A composed worker is built per call and discarded with it, so `[assistant].max_iterations` is the
+    only tier it has, and this is the one construction site nothing else watches. Dropping the argument
+    would leave every composed worker on AIMU's own default instead of the configured one, silently.
+    """
+    state = _state(tmp_path, max_iterations=30)
+    compose, spawn = _compose(state, monkeypatch)
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    assert spawn.calls[0]["max_iterations"] == 30
+
+
 async def test_a_composed_worker_can_compose_again_while_depth_remains(tmp_path, monkeypatch):
     state = _state(tmp_path, toolset_settings={"capabilities": {"max_depth": 2}})
     compose, spawn = _compose(state, monkeypatch)

@@ -160,6 +160,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     Shift+Enter inserts a newline (an IME's Enter does neither). Send is replaced by Stop for the
     duration of a turn rather than sitting beside a permanently disabled button, and switching
     conversations mid-turn updates it to match the conversation being viewed.
+  - **An inline working indicator says a turn is running.** A dim row pinned to the foot of the
+    transcript, a spinner over the seconds since the turn began, with the turn's output growing above
+    it. It goes up the moment you send and comes down when the turn ends. Switching into a conversation
+    whose turn is still running raises it too, counting on from that turn's real age rather than
+    restarting at zero: `ChannelUI.show_working` carries a duration (`None` for "nothing running")
+    rather than a flag beside one, so "idle for twelve seconds" cannot be expressed. It replaces a
+    static chip in the header, which said only that something was happening and said it a long way from
+    where it was happening. Pinning is deliberate and was measured rather than assumed: an indicator
+    that the first rendered content displaced was on screen for 23ms against a local endpoint, whose
+    first token lands about that fast, so what it answers has to be "is a turn running" (true until the
+    turn ends) rather than "has anything arrived yet".
   - **A Think picker beside the Plan toggle** sets the reasoning effort for the messages you send after
     it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
     `input` frame field, writes nothing to `config.toml`, and resets to the configured default on reload.
@@ -842,6 +853,30 @@ alone. The case that does cost something is a configured MCP server, which conne
   the message rather than a setting anything stores, and it reaches the entry agent's own run alone: a
   spawned worker keeps its table's effort, and a workflow turn ignores the request rather than applying it
   to agents the user did not choose for. What the turn actually ran at is what `metadata.thinking` records.
+- **A default tool-loop cap, with per-agent overrides.** `[assistant].max_iterations` is the most model
+  calls any agent's turn may make; an agent that names its own `[agents.<name>].max_iterations` runs
+  under that instead. Both default to 10, which is also AIMU's own default. The count is model calls
+  rather than tool calls: the initial turn, every tool-follow-up turn, and any continuation nudge all
+  count against it, and AIMU's forced wrap-up (one call with tools disabled, run after the cap so the
+  agent still answers from what it has gathered) does not. That is why hitting the cap reads as a thinner
+  answer rather than a truncation error, and it is exactly the case a dial was wanted for: a search-heavy
+  worker is what feels it, since a run spending every round on tool calls is the one still
+  mid-investigation when the cap lands.
+  Resolved per agent and never inherited down the delegation graph, like `model` and `thinking`: raising
+  a delegator's cap buys it more rounds of delegating, not more rounds inside each worker it spawns. Both
+  spawn tools and `compose_subagent`'s are built with the global default rather than the delegator's
+  resolved cap, which is what makes that hold rather than merely describes it.
+  Rejected at parse time at both tiers unless it is an integer of 1 or more: `0` is a loop that makes no
+  model call at all, and `bool` is an `int` subclass, so an unguarded `max_iterations = true` would have
+  been read as a cap of 1 rather than rejected. Startup-only and not a runtime setting, for the same
+  reason `[assistant].model` is: nothing re-caps a live agent's loop.
+  The per-agent tier needs `aimu>=0.28.0`, which added the `"max_iterations"` sub-agent spec key it is
+  written into; the global tier rides a factory argument AIMU has had since 0.12.0. Unlike earlier spec
+  keys, an older AIMU does not swallow this one in silence: its key set was already closed and is checked
+  when a spawn tool is built, so a checkout predating 0.28.0 fails at startup either way, and what the
+  preflight adds is a message naming the fix instead of a raw `ValueError`. See
+  [the configuration reference](https://saxman.info/kokua/reference/configuration/#max_iterations) and
+  [the turn loop](https://saxman.info/kokua/how-agents-work/the-turn-loop/).
 - **A default tier of generation parameters, with per-key overrides.** `[assistant.generation]` sets
   `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`, `repetition_penalty`, `max_tokens`, and
   `context_length` for every agent; an agent's own `[agents.<name>.generation]` overrides it **per key**,
@@ -1067,7 +1102,11 @@ notice on startup.
   probe is a membership check again, the second time (`SUBAGENT_SPEC_KEYS` was the first), reading
   `StreamingContentType.__members__` rather than a bare `in`, because `in` on an enum compares values on
   Python 3.12 and raises `TypeError` on 3.11, where the capability here is a member's name, not its
-  value. It covers one surface at a time by design; every earlier release's capabilities are the floor's
+  value. 0.28.0's other capability, the `"max_iterations"` entry in `SUBAGENT_SPEC_KEYS` behind a
+  per-agent tool-loop cap, is the floor's job instead: that key set is closed and checked when a spawn
+  tool is built, so an AIMU predating 0.28.0 raises `ValueError` naming it at startup with or without a
+  probe, and the one slot goes to the capability that would otherwise fail silently.
+  It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
   halves of that one decision cannot drift.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the

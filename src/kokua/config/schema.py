@@ -47,6 +47,10 @@ class AgentConfig:
 
     ``generation`` overrides ``[assistant.generation]`` *per key* (see ``AssistantConfig.generation_for``),
     so an agent that wants only a colder temperature keeps the default's context length.
+
+    ``max_iterations`` overrides ``[assistant].max_iterations`` for this agent alone (see
+    ``AssistantConfig.max_iterations_for``): the most real model calls one of its turns may make before
+    AIMU forces a wrap-up. A search-heavy worker is what wants it raised.
     """
 
     description: str = ""
@@ -56,6 +60,10 @@ class AgentConfig:
     generation: dict = field(default_factory=dict)
     tools: list[str] = field(default_factory=list)
     delegates_to: list[str] = field(default_factory=list)
+    # This agent's tool-loop cap, overriding [assistant].max_iterations for it alone (see
+    # AssistantConfig.max_iterations_for). None means undeclared. The parse layer rejects anything
+    # below 1, so every value that reaches here is a real cap.
+    max_iterations: Optional[int] = None
 
 
 @dataclass
@@ -134,6 +142,17 @@ class AssistantConfig:
     entry_agent: str = "assistant"
     # Run independent tool calls in one turn concurrently, so several delegations overlap.
     concurrent_tools: bool = True
+    # The tool-loop cap every agent runs under unless its own [agents.<name>].max_iterations overrides
+    # it: the most real model calls one turn may make, the forced wrap-up excepted. Startup-only, like
+    # the model and the effort above, since the value is baked into an Agent at construction and into
+    # each spawn tool, so a live field could only report a change it had not made.
+    #
+    # This restates AIMU's own Agent default rather than being Optional, so the four construction sites
+    # can pass it unconditionally instead of each guarding a None. Safe to restate only because there is
+    # no tier beneath it (unlike [assistant.generation], where a defaulted value would shadow a model
+    # card's tuned profile), and tests/test_aimu_compat.py pins the two so a change upstream is caught
+    # rather than silently overridden.
+    max_iterations: int = 10
     # Whether a new conversation's title is written by the model (core/titles.py) rather than left as
     # the first message truncated. Runtime-mutable, so it is also a CORE_RUNTIME_SETTINGS entry: the
     # spawn reads it per conversation, which is what makes a change apply with no restart.
@@ -256,6 +275,24 @@ class AssistantConfig:
         """
         agent = self.agents.get(agent_name)
         return {**self.generation, **(agent.generation if agent else {})}
+
+    def max_iterations_for(self, agent_name: str) -> int:
+        """The tool-loop cap ``agent_name`` runs under: its own declaration, else the ``[assistant]`` default.
+
+        Per agent and never inherited down the delegation graph, for the reason ``model_for`` and
+        ``thinking_for`` are not: a delegator given a long leash does not drag its workers along. What
+        makes that hold at the spawn sites is that they are built with ``self.max_iterations`` rather
+        than with this method's answer for the delegator; see ``core.agents._spawn_tool``.
+
+        Resolved on ``is None`` for the field's type, not because a falsy declaration is meaningful. That
+        is the difference from ``thinking_for``, where ``thinking = false`` is a real declaration an
+        ``or`` would swallow. Here the parse layer rejects ``0``, so every declared value is truthy and
+        an ``or`` would behave identically today. ``is None`` simply does not depend on that floor
+        staying in place.
+        """
+        agent = self.agents.get(agent_name)
+        declared = agent.max_iterations if agent else None
+        return self.max_iterations if declared is None else declared
 
     @property
     def skills_dir(self) -> Path:

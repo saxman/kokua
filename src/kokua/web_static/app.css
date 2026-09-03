@@ -114,7 +114,7 @@ body.resizing { user-select: none; }
    spending a row's width on the word. */
 .task-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--accent); }
 .task-row.enabled .task-dot { background: var(--accent); }
-/* The same pulse the header's working indicator uses, for the same meaning: a turn is under way. */
+/* Pulsing means the same here as everywhere else on the page: a turn is under way. */
 .task-row.running .task-dot { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
 .task-conv.running .task-conv-label { color: var(--fg); font-style: italic; }
 .task-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -148,15 +148,9 @@ header { display: flex; align-items: center; justify-content: space-between; gap
   border-bottom: 1px solid var(--border); }
 #conv-heading { font-size: 0.95em; font-weight: 600; white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; }
-/* Shown in the header while the conversation being viewed has a turn running in the background
-   (e.g. switched into mid-turn); cleared once that turn's next done/message/notification arrives. */
-#working-indicator { display: flex; align-items: center; gap: 6px; font-size: 0.82em;
-  color: var(--fg-dim); background: none; border: none; padding: 0; }
-#working-indicator .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
-  animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  #working-indicator .dot, .task-row.running .task-dot { animation: none; opacity: 1; }
+  .task-row.running .task-dot { animation: none; opacity: 1; }
 }
 /* Dismissible banners for background-turn completions ("notification" frames), stacked above the log. */
 #notifications { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 0; }
@@ -182,6 +176,20 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .proactive::before { content: "proactive"; display: block; font-size: 0.72em; text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--fg-faint); margin-bottom: 2px; }
 .notice { align-self: center; font-size: 0.85em; color: var(--fg-dim); margin: 12px 0; }
+
+/* The turn is under way and has produced nothing yet: a dim row at the foot of the transcript,
+   indented to sit in the machine-event column with the thinking and tool rows it is standing in for.
+   Removed the moment anything renders into the log, and re-added when output goes quiet again, so it
+   never competes with content for the reader's eye. Sized and spaced so that swap does not shift the
+   text above it. */
+.working-inline { display: flex; align-items: baseline; gap: 8px; margin: 1px 0 1px 14px;
+  font-size: 0.85em; color: var(--fg-dim); }
+/* Monospace and a fixed width: braille glyphs are drawn small and ragged by a proportional UI face,
+   and a cell that resizes per frame would jiggle the words beside it. */
+.working-spinner { flex: none; width: 1ch; font-family: ui-monospace, monospace; font-size: 1.15em;
+  color: var(--accent); }
+/* Tabular figures so the count ticking 9s -> 10s does not nudge anything sideways. */
+.working-elapsed { color: var(--fg-faint); font-variant-numeric: tabular-nums; }
 
 /* Machine events: dim monochrome rows told apart by their kind word and their indent, not by a fill
    or a border. This is where the amber went.

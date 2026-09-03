@@ -290,10 +290,17 @@ def test_a_spec_omits_generate_kwargs_when_nothing_is_declared_anywhere(tmp_path
 
 
 def test_every_spec_key_kokua_writes_is_one_aimu_accepts():
-    """AIMU raises on an unrecognized spec key, so a typo here would fail at the first delegation."""
+    """AIMU validates a spec when the spawn tool is built, so a typo here would fail at agent build."""
     from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
 
-    assert {"system_message", "tools", "model", "thinking", "generate_kwargs"} <= SUBAGENT_SPEC_KEYS
+    assert {
+        "system_message",
+        "tools",
+        "model",
+        "thinking",
+        "generate_kwargs",
+        "max_iterations",
+    } <= SUBAGENT_SPEC_KEYS
 
 
 def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypatch):
@@ -304,15 +311,20 @@ def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypa
     and the tool is only constructed per spawn, so an undeclared worker two levels down raised
     ``ValueError: No available async client for model type 'NoneType'`` at the moment it was asked to
     do something, and only then.
+
+    ``max_iterations`` is the same trap one field over, which is why ``lead`` pins its own cap here.
+    AIMU reads a spec without the key as "the cap this tool was built with", so building ``lead``'s
+    spawn tool with ``max_iterations_for("lead")`` would hand every worker below it a cap it never
+    declared. Nothing else in the suite watches this construction site.
     """
     from kokua.core import agents as agents_mod
 
     from tests.conftest import TEST_DEFAULT_MODEL
 
-    captured = []
+    captured: list[tuple[object, dict]] = []
 
     def fake_make(model, **kwargs):
-        captured.append(model)
+        captured.append((model, kwargs))
 
         async def spawn_subagent(agent_type: str, task: str) -> str:
             """menu"""
@@ -323,13 +335,15 @@ def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypa
 
     agents = {
         "assistant": AgentConfig(delegates_to=["lead"]),
-        "lead": AgentConfig(tools=["web"], delegates_to=["helper"]),
+        "lead": AgentConfig(tools=["web"], delegates_to=["helper"], max_iterations=25),
         "helper": AgentConfig(tools=["web"]),
     }
     config, state = _state(tmp_path, agents)
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make)
     agents_mod.build_agent_specs(config, state, "assistant")
-    assert captured == [TEST_DEFAULT_MODEL]
+    assert [model for model, _ in captured] == [TEST_DEFAULT_MODEL]
+    assert [kwargs["max_iterations"] for _, kwargs in captured] == [config.max_iterations]
+    assert config.max_iterations_for("lead") == 25  # so the assertion above could have failed
 
 
 def test_the_delegate_is_built_with_the_metrics_forwarder(tmp_path, monkeypatch):
@@ -404,3 +418,38 @@ def test_the_forwarder_attributes_a_delegates_cost_to_the_delegate():
         current_metrics.reset(token)
     record = metrics.record(wall_seconds=3.0)
     assert record["by_agent"]["subagent-research"]["input_tokens"] == 900
+
+
+def test_a_spec_carries_the_cap_its_agent_declares(tmp_path):
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"], max_iterations=25),
+    }
+    config, state = _state(tmp_path, agents)
+    assert build_agent_specs(config, state, "assistant")["researcher"]["max_iterations"] == 25
+
+
+def test_a_spec_omits_the_cap_when_its_agent_declares_none(tmp_path):
+    """Unlike thinking and generate_kwargs, this key needs no resolved value written in: AIMU reads a
+    missing max_iterations as "the cap the spawn tool was built with", which is the [assistant] default."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    config.max_iterations = 15
+    assert "max_iterations" not in build_agent_specs(config, state, "assistant")["researcher"]
+
+
+def test_the_spawn_tool_is_built_with_the_global_cap_not_the_delegators(tmp_path, monkeypatch):
+    """The inheritance bug this guards against: since a spec without the key falls back to the tool's
+    value, passing max_iterations_for(delegator) would make an undeclared worker inherit its delegator's
+    pin, which is the one thing max_iterations_for promises not to do."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"], max_iterations=40),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    config.max_iterations = 10
+    agent = _FakeAgent("assistant", "ollama:qwen3:8b")
+    assert _captured_spawn_kwargs(monkeypatch, config, state, agent)["max_iterations"] == 10

@@ -18,11 +18,23 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# 0.28.0 is the oldest AIMU carrying everything Kokua needs. The capability that moved the floor is
+# 0.28.0 is the oldest AIMU carrying everything Kokua needs. Three releases contribute to it. 0.26.0 is
+# why the floor first moved: its tool loop no longer strands an un-dispatched tool call before the forced
+# wrap-up prompt, and without that fix every Anthropic run reaching its round cap mid-tool-call died on
+# a 400 naming the unanswered `tool_use` ids rather than answering -- which made search-heavy sub-agents
+# fail routinely, since they are the runs that spend every round calling tools. 0.27.0 then adds
+# `ModelRefusalError`, which `core/turns.py` catches at three sites so a request the model's classifiers
+# decline reads as declined instead of as a generic failure, and makes every provider report how a turn
+# ended so `TruncatedTurnError` fires outside Ollama for the first time. 0.28.0 adds a `"max_iterations"`
+# entry to `SUBAGENT_SPEC_KEYS`, the spec key `core/agents.py` writes for an agent declaring its own
+# tool-loop cap; that set has been closed since 0.17.0 and is checked when a spawn tool is built, so an
+# older AIMU raises `ValueError` at startup either way and the preflight buys the wording of that failure,
+# not its timing. 0.28.0 carries a second capability Kokua needs, and it is the one the probe grips:
 # `StreamingContentType.CONTINUING`, the phase a driver yields to mark the boundary before a round the
-# loop itself injected (a nudge, a wrap-up); without it `channels/web.py` and `core/subagents.py` never
-# see the boundary, so neither reports it and nothing raises. Every earlier release in the floor's
-# history is listed in `kokua.aimu_compat`, which is also what enforces this floor for a sibling
+# loop itself injected (a nudge, a wrap-up). Without it `channels/web.py` and `core/subagents.py` never
+# see the boundary, so neither reports it and nothing raises anywhere, which is the silent case the
+# spec key above does not have. Every earlier release in the floor's history is listed in
+# `kokua.aimu_compat`, which is also what enforces this floor for a sibling
 # checkout, and `tests/test_aimu_compat.py` pins this specifier against that one so the two halves
 # cannot drift. This pin is what ships in the wheel and what a PyPI install resolves;
 # [tool.uv.sources] below separately redirects development installs to the sibling checkout.

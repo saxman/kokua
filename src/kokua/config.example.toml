@@ -34,6 +34,8 @@ concurrent_tools = true
 # Max per-conversation agents kept live in memory; an evicted one rebuilds from persisted state.
 agent_cache_cap = 8
 
+# max_iterations = 10           # model calls one turn may make; raise for search-heavy work
+
 # Have the model write each new conversation's title from the message that opened it, on the model that
 # conversation runs on. Applies immediately (no restart), and update_config may change it. false leaves
 # the title as that message truncated, which is also the fallback whenever the call fails.
@@ -113,6 +115,7 @@ delegates_to = ["researcher", "coder"]
 description = "Research specialist: gather and verify information from the web."
 # model = "ollama:qwen3:32b"   # this agent alone runs on a bigger model
 # thinking = "high"            # ...and reasons harder than the rest; `false` would turn it off
+# max_iterations = 25          # ...and gets more rounds, since every round spends a search
 tools = ["web", "misc", "time"]
 system_message = """\
 You are a research sub-agent. Investigate the task with web search and page lookups, verify claims \
