@@ -4,7 +4,7 @@ These cover the one surface pytest otherwise can't reach: the page script in ``w
 turning server frames into DOM. The server-side frame contract (what frames are emitted, and the
 muting/gating that decides them) is already unit-tested in ``test_web.py`` against a fake socket; here
 we run the real page in headless Chromium against a live server so the client's rendering is exercised
-too -- notification banners, the "working" indicator, and that a background turn's output never leaks
+too -- notification banners, the inline "working" indicator, and that a background turn's output never leaks
 into the conversation being viewed.
 
 Deselected by default (``addopts = -m 'not e2e'``); run with ``uv run pytest -m e2e``. Needs the ``web``
@@ -40,7 +40,6 @@ from kokua.frontends.web import build_app  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 REPLY = "Hello from the assistant."
-_HIDDEN = re.compile(r"(^|\s)hidden(\s|$)")
 
 
 class _SlowClient(MockAsyncModelClient):
@@ -55,6 +54,10 @@ class _SlowClient(MockAsyncModelClient):
     conversations. That is what makes a test of muting mean anything: with the reply alone, the only
     frame still in flight across the switch is the turn's `done` terminator, which renders no content,
     so a leak of the reply's remaining tokens would go unnoticed.
+
+    `lead_delay` holds the turn open *before* its first chunk, which is the only way to observe the
+    gap between sending and the first frame -- what the inline working indicator fills. Distinct from
+    `delay`, which holds the turn open after the reply has already rendered.
 
     `tool_response`, if given, streams one TOOL_CALLING chunk carrying it ahead of the reply. AIMU yields
     that phase only once a call has returned, so the chunk carries the call and its result together --
@@ -71,9 +74,11 @@ class _SlowClient(MockAsyncModelClient):
         tool_between: str = "",
         thinking: str = "",
         blank_lead: str = "",
+        lead_delay: float = 0.0,
     ):
         super().__init__([])
         self._delay = delay
+        self._lead_delay = lead_delay
         self._reply = reply
         self._tail = tail
         self._tool_response = tool_response
@@ -91,6 +96,7 @@ class _SlowClient(MockAsyncModelClient):
 
     async def _chat_streamed(self, user_message, generate_kwargs=None, use_tools=True, images=None):
         self.messages.append({"role": "user", "content": user_message})
+        await asyncio.sleep(self._lead_delay)  # the silence a sent message opens with
         if self._thinking:
             yield StreamChunk(StreamingContentType.THINKING, self._thinking)
         if self._blank_lead:
@@ -166,6 +172,7 @@ def live_server():
         tool_between: str = "",
         thinking: str = "",
         blank_lead: str = "",
+        lead_delay: float = 0.0,
     ) -> str:
         config = AssistantConfig(agents=example_agents(), entry_agent="assistant")
         if seed is not None:
@@ -180,6 +187,7 @@ def live_server():
                 tool_between=tool_between,
                 thinking=thinking,
                 blank_lead=blank_lead,
+                lead_delay=lead_delay,
             ),
         )
         return _serve(app, _free_port(), started)
@@ -417,7 +425,7 @@ def test_switching_back_mid_turn_shows_the_turn_so_far_and_keeps_streaming(page,
     # Replayed from the catch-up record, not from the store: neither is persisted yet.
     expect(page.locator(".bubble.user", has_text="ping")).to_be_visible()
     expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible()
-    expect(page.locator("#working-indicator")).not_to_have_class(_HIDDEN)  # still marked as running
+    expect(page.locator(".working-inline")).to_be_visible()  # still marked as running
 
     # The tail then streams into the bubble the replay left open: one bubble holding the whole reply.
     expect(page.locator(".bubble.assistant", has_text=TAIL)).to_be_visible(timeout=15_000)
@@ -513,8 +521,8 @@ def test_theme_button_cycles_and_persists(page, live_server):
 
 
 def test_working_indicator_on_switch_into_running(page, live_server):
-    """Switching back into a conversation whose turn is still running shows the 'working' indicator,
-    which clears once that turn completes."""
+    """Switching back into a conversation whose turn is still running shows the inline 'working'
+    indicator at the foot of the replayed transcript, which clears once that turn completes."""
     _open(page, live_server(delay=3.0))
     page.fill("#msg", "ping")
     page.click("#send")
@@ -525,13 +533,75 @@ def test_working_indicator_on_switch_into_running(page, live_server):
     page.click("#new-conv")  # switch away; sidebar becomes [new, original]
     expect(page.locator("#conv-list li")).to_have_count(2)
 
-    working = page.locator("#working-indicator")
-    expect(working).to_have_class(_HIDDEN)  # the fresh conversation is idle
+    working = page.locator(".working-inline")
+    expect(working).to_have_count(0)  # the fresh conversation is idle
     page.locator("#conv-list li").nth(1).click()  # back into the original, still-running conversation
-    expect(working).to_be_visible()  # .hidden is display:none, so visible == indicator shown
-    expect(working).not_to_have_class(_HIDDEN)
+    expect(working).to_be_visible()
 
-    expect(working).to_have_class(_HIDDEN, timeout=10_000)  # clears once the turn completes
+    expect(working).to_have_count(0, timeout=10_000)  # clears once the turn completes
+
+
+def test_working_indicator_appears_on_send_and_stays_until_the_turn_ends(page, live_server):
+    """The gap a sent message used to leave. The row goes up locally on submit, counts up, and stays
+    pinned at the foot of the transcript for the whole turn: the reply renders *above* it, and only
+    the turn ending takes it down. A turn on a fast endpoint reaches its first token in tens of
+    milliseconds, so an indicator that cleared on first content would never be seen at all."""
+    # lead_delay makes the pre-reply gap observable; delay holds the turn open past the reply, so
+    # "the answer did not displace the row" is checked while the turn is genuinely still running.
+    _open(page, live_server(lead_delay=1.0, delay=3.0))
+    working = page.locator(".working-inline")
+    expect(working).to_have_count(0)  # idle before anything is sent
+
+    page.fill("#msg", "ping")
+    page.click("#send")
+    expect(working).to_be_visible()
+    expect(working).to_contain_text(re.compile(r"Working"))
+    expect(working.locator(".working-elapsed")).to_contain_text(re.compile(r"\d+s"))
+
+    reply = page.locator(".bubble.assistant", has_text=REPLY)
+    expect(reply).to_be_visible(timeout=10_000)
+    expect(working).to_be_visible()  # the answer did not displace it
+    # ...because content is inserted ahead of the row, not appended after it.
+    assert page.evaluate("() => document.querySelector('#log').lastElementChild.classList.contains('working-inline')")
+    expect(working).to_have_count(0, timeout=10_000)  # gone once the turn ends
+
+
+def test_working_indicator_survives_a_pause_without_splitting_the_answer(page, live_server):
+    """A turn that streams, goes quiet, then streams again keeps one answer bubble. The regression the
+    pinned row could cause: the page decides "did something land since the last token" from the log's
+    last element, which is now always the indicator, so an unguarded check would open a fresh bubble
+    for every pause."""
+    _open(page, live_server(delay=3.0, tail=TAIL))
+    page.fill("#msg", "ping")
+    page.click("#send")
+
+    working = page.locator(".working-inline")
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
+    expect(working).to_be_visible()  # the turn is quiet but not over
+
+    expect(page.locator(".bubble.assistant", has_text=TAIL)).to_be_visible(timeout=15_000)
+    expect(page.locator(".bubble.assistant")).to_have_count(1)  # one bubble, not one per pause
+    expect(working).to_have_count(0, timeout=10_000)
+
+
+def test_working_indicator_counts_the_whole_turn_not_each_lull(page, live_server):
+    """The count is the turn's age, so it is still climbing after the answer has started arriving."""
+    _open(page, live_server(delay=4.0, tail=TAIL))
+    page.fill("#msg", "ping")
+    page.click("#send")
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
+    expect(page.locator(".working-inline .working-elapsed")).to_have_text(re.compile(r"[2-9]\d*s"), timeout=10_000)
+
+
+def test_stopping_a_turn_clears_the_working_indicator(page, live_server):
+    """Stop hands the composer back, so it has to take the indicator down with it: there is no frame
+    coming that would."""
+    _open(page, live_server(delay=10.0))
+    page.fill("#msg", "ping")
+    page.click("#send")
+    expect(page.locator(".working-inline")).to_be_visible()
+    page.click("#stop")
+    expect(page.locator(".working-inline")).to_have_count(0)
 
 
 def test_subagent_card_replays_with_its_nested_trace(page, live_server):
