@@ -53,6 +53,17 @@ class _ConvCapturingChannel(FakeChannel):
         self.conversation_pushes.append(items)
 
 
+class _TurnSavedChannel(FakeChannel):
+    """Captures the turn_saved frames a turn publishes."""
+
+    def __init__(self):
+        super().__init__()
+        self.turns_saved: list[tuple[str, int]] = []
+
+    async def send_turn_saved(self, conversation_id: str, message_index: int) -> None:
+        self.turns_saved.append((conversation_id, message_index))
+
+
 class SubagentCapturingChannel(FakeChannel):
     """A channel that records ``subagent`` frames."""
 

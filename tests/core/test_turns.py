@@ -12,7 +12,14 @@ from aimu.aio.channels.base import Channel, ChannelMessage
 from kokua.core.assistant import Assistant
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
-from tests.channels import FakeChannel, _ConvCapturingChannel, _config, example_agents, planning_settings
+from tests.channels import (
+    FakeChannel,
+    _ConvCapturingChannel,
+    _TurnSavedChannel,
+    _config,
+    example_agents,
+    planning_settings,
+)
 from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
 from tests.helpers import MockAsyncModelClient
 
@@ -36,6 +43,28 @@ async def test_assistant_proactive_message(tmp_path):
     await assistant._proactive("remind")
 
     assert channel.sent == ["Don't forget lunch."]
+
+
+async def test_a_completed_turn_publishes_where_it_starts(tmp_path):
+    channel = _TurnSavedChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["sure"]))
+
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    assert len(channel.turns_saved) == 1
+    conversation_id, index = channel.turns_saved[0]
+    assert conversation_id == assistant._active_id
+    stored = assistant._store.get(conversation_id)
+    assert stored.messages[index]["role"] == "user"
+
+
+async def test_a_turn_that_committed_no_user_message_publishes_nothing(tmp_path):
+    channel = _TurnSavedChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["sure"]))
+
+    await assistant._turns._persist(assistant._active_id, -1)
+
+    assert channel.turns_saved == []
 
 
 async def test_assistant_proactive_tags_turn_provenance(tmp_path):

@@ -218,3 +218,22 @@ def test_catch_up_bookkeeping_is_a_no_op_on_a_bare_channel():
     ui = ChannelUI(BareChannel())
     ui.begin_catch_up("c1", "hi", None)
     ui.end_catch_up("c1")
+
+
+async def test_turn_saved_is_a_no_op_on_a_channel_that_cannot_take_it():
+    ui = ChannelUI(BareChannel())
+    await ui.turn_saved("abc123", 4)  # no frame to send, and no error either
+
+
+async def test_turn_saved_reaches_a_channel_that_offers_it():
+    class _Channel(BareChannel):
+        def __init__(self):
+            super().__init__()
+            self.saved = []
+
+        async def send_turn_saved(self, conversation_id, message_index):
+            self.saved.append((conversation_id, message_index))
+
+    channel = _Channel()
+    await ChannelUI(channel).turn_saved("abc123", 4)
+    assert channel.saved == [("abc123", 4)]

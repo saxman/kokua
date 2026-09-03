@@ -39,6 +39,13 @@ class RichChannel(Protocol):
         A duration rather than a flag plus a duration, so "idle, and it has been going 12 seconds"
         cannot be expressed."""
 
+    async def send_turn_saved(self, conversation_id: str, message_index: int) -> None:
+        """Say that a turn's transcript has reached the store, and where that turn starts.
+
+        The index is the position of the turn's user message, which is what identifies a turn to
+        anything that acts on one (branching it, replaying its recorded cards). Sent after the write,
+        so a front end offering an action on the turn is never offering one the store cannot serve."""
+
     async def send_notification(self, text: str) -> None:
         """Report that a background turn finished, without stealing the current view."""
 

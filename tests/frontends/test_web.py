@@ -176,6 +176,13 @@ async def test_web_channel_send_conversations_emits_frame():
     assert ws.frames == [{"type": "conversations", "items": items}]
 
 
+async def test_web_channel_send_turn_saved_emits_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_turn_saved("abc123", 4)
+    assert ws.frames == [{"type": "turn_saved", "conversation_id": "abc123", "message_index": 4}]
+
+
 async def test_web_channel_send_settings_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -2047,6 +2054,7 @@ def test_the_export_control_does_not_refresh_the_sidebar_or_history(tmp_path):
         _drain_until(ws, "done")
         convs = _drain_until(ws, "conversations")
         active_id = next(i["id"] for i in convs["items"] if i["active"])
+        _drain_until(ws, "turn_saved")  # the turn just answered publishes its own start position
         ws.send_text(json.dumps({"type": "export", "id": active_id}))
         ws.send_text(json.dumps({"type": "get_tasks"}))
         frames = []

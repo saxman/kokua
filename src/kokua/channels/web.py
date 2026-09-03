@@ -255,6 +255,17 @@ class WebChannel(BaseWebChannel):
             frame["elapsed"] = elapsed
         await self.send_frame(frame)
 
+    async def send_turn_saved(self, conversation_id: str, message_index: int) -> None:
+        """Tell the page a turn has reached the store, and where in the transcript it starts.
+
+        Never muted (``turn_saved`` is not in ``_TURN_FRAMES``): it carries the conversation it is
+        about, so the page can file it against the right transcript or ignore it, which is exactly
+        what a background turn's completion needs. Muting it by view would instead lose it, and the
+        page would keep an unbranchable turn until the next reload."""
+        await self.send_frame(
+            {"type": "turn_saved", "conversation_id": conversation_id, "message_index": message_index}
+        )
+
     async def feed_input(self, text: str, image_paths: list[str], thinking: Optional[str] = None) -> None:
         """Enqueue a user turn carrying attached image file paths, a per-turn reasoning effort, or both
         (the web pump's ``input`` frame).

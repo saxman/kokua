@@ -329,7 +329,7 @@ class TurnRunner:
                         await self._ui.send("(stopped)", reply_to=msg)
                     except Exception:
                         pass
-                    await self._persist(conversation_id)
+                    await self._persist(conversation_id, user_index)
                     return
                 except ModelConnectionError as exc:
                     # before the send: invariant 5
@@ -365,7 +365,7 @@ class TurnRunner:
                     )
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
-                await self._persist(conversation_id)
+                await self._persist(conversation_id, user_index)
         finally:
             current_metrics.reset(metrics_token)
             subagent_events.reset(collector_token)
@@ -719,9 +719,10 @@ class TurnRunner:
             # The reason is recorded here rather than left to `_report`, whose status line goes to
             # whichever conversation the user is viewing rather than to this one. Before the persist,
             # and synchronously, for invariant 5's reason.
+            proactive_index = resolve_user_index(agent.model_client.messages, start)
             self._record_provenance(
                 conversation_id,
-                resolve_user_index(agent.model_client.messages, start),
+                proactive_index,
                 failure=failure,
                 # An unattended run has no message from a user and so carries no request: the configured
                 # effort is both what it would run at and what it did.
@@ -729,7 +730,7 @@ class TurnRunner:
                 metrics=metrics,
                 started=started,
             )
-            await self._persist(conversation_id)
+            await self._persist(conversation_id, proactive_index)
             if stopped:
                 if spec.echo_reply:  # the user is watching this conversation, as the CLI's one user is
                     try:
@@ -753,8 +754,15 @@ class TurnRunner:
         except Exception:
             logger.warning("A scheduled task ran; its notification could not be delivered", exc_info=True)
 
-    async def _persist(self, conversation_id: str) -> None:
-        """Snapshot the turn onto its session, refreshing the sidebar if a title was just derived."""
+    async def _persist(self, conversation_id: str, user_index: int = -1) -> None:
+        """Snapshot the turn onto its session, refreshing the sidebar if a title was just derived, and
+        publish where the turn starts so a front end can offer an action on it.
+
+        The publication is deliberately after the write and reads the *stored* transcript through
+        ``branchable``: a front end offering to branch a turn must never be offered one the store does
+        not hold, and an index that names no user turn there (an unattended run whose only user-role
+        message was a loop injection, or a turn that committed none at all) is no turn to act on.
+        """
         title_derived = self._book.persist(conversation_id)
         # The store now holds what the catch-up record stood in for. Dropped here, between the write and
         # the next await, rather than in the caller's `finally`: a switch-in landing in between would
@@ -765,3 +773,5 @@ class TurnRunner:
             # After the push, not instead of it: the truncated title shows now and the generated one
             # replaces it (with a push of its own) whenever the model answers.
             self._spawn_title(conversation_id)
+        if self._book.branchable(conversation_id, user_index):
+            await self._ui.turn_saved(conversation_id, user_index)

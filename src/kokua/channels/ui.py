@@ -53,6 +53,7 @@ class ChannelUI:
         self._end_catch_up = getattr(channel, "end_catch_up", None)
         self._history = getattr(channel, "send_history", None)
         self._working = getattr(channel, "send_working", None)
+        self._turn_saved = getattr(channel, "send_turn_saved", None)
 
     @property
     def channel(self) -> Channel:
@@ -126,6 +127,16 @@ class ChannelUI:
         """
         if self._working is not None:
             await self._working(elapsed)
+
+    async def turn_saved(self, conversation_id: str, message_index: int) -> None:
+        """Publish the position of a turn whose transcript has just been stored.
+
+        A front end uses it to offer an action on the turn that only makes sense once the store has
+        it, which today is branching. A channel that offers no such action never asked for the index,
+        so this is a no-op there.
+        """
+        if self._turn_saved is not None:
+            await self._turn_saved(conversation_id, message_index)
 
     async def notify(self, text: str) -> None:
         """Report a background turn's completion. Skipped by a channel that cannot background a turn."""
