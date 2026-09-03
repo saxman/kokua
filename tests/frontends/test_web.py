@@ -116,9 +116,33 @@ async def test_web_channel_send_suppresses_spawn_subagent_tool_frame():
     ]
 
 
-async def test_web_channel_send_emits_loop_marker_on_iteration_increment():
-    from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
+async def test_web_channel_send_relays_an_injected_round_with_the_prompt_that_was_sent():
+    """The base channel maps the CONTINUING chunk; Kokua's override only has to stop swallowing it.
+    The wrap-up's wording is the case that matters: a marker showing the nudge's text here would say
+    the model was told to keep working when it was told to stop."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
 
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "a")
+        yield StreamChunk(
+            StreamingContentType.CONTINUING,
+            {"kind": "final_answer", "prompt": "You have reached the tool-use limit."},
+        )
+        yield StreamChunk(StreamingContentType.GENERATING, "b")
+
+    await channel.send(gen())
+    assert ws.frames == [
+        {"type": "token", "text": "a"},
+        {"type": "loop", "reason": "final_answer", "text": "You have reached the tool-use limit."},
+        {"type": "token", "text": "b"},
+        {"type": "done"},
+    ]
+
+
+async def test_web_channel_send_no_longer_marks_a_bare_iteration_rise():
+    """A tool round raises the counter and injects nothing. Replay never drew a marker there, so
+    drawing one live made a turn read differently after a reload than it did while it arrived."""
     ws = _FakeWS()
     channel = WebChannel(ws)
 
@@ -127,12 +151,7 @@ async def test_web_channel_send_emits_loop_marker_on_iteration_increment():
         yield StreamChunk(StreamingContentType.GENERATING, "b", iteration=1)
 
     await channel.send(gen())
-    assert ws.frames == [
-        {"type": "token", "text": "a"},
-        {"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT},
-        {"type": "token", "text": "b"},
-        {"type": "done"},
-    ]
+    assert [f["type"] for f in ws.frames] == ["token", "token", "done"]
 
 
 async def test_web_channel_skips_empty_generating_chunks():
@@ -164,20 +183,24 @@ async def test_web_channel_send_settings_emits_frame():
     assert ws.frames == [{"type": "settings", "values": values}]
 
 
-async def test_web_channel_stream_activity_shows_loop_withholds_answer():
+async def test_web_channel_stream_activity_shows_an_injected_round_and_withholds_the_answer():
+    """`stream_activity` maps chunks itself rather than reusing the base loop, so the branch has to
+    exist in both places or a planned turn shows no boundary while an ordinary one does."""
     ws = _FakeWS()
     channel = WebChannel(ws)
 
     async def gen():
-        yield StreamChunk(StreamingContentType.THINKING, "pondering", iteration=0)
-        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 1}}, iteration=0)
-        yield StreamChunk(StreamingContentType.GENERATING, "the ", iteration=1)  # withheld; iteration bump -> loop
-        yield StreamChunk(StreamingContentType.GENERATING, "answer", iteration=1)
+        yield StreamChunk(StreamingContentType.THINKING, "pondering")
+        yield StreamChunk(StreamingContentType.TOOL_CALLING, {"name": "calc", "arguments": {"x": 1}})
+        yield StreamChunk(StreamingContentType.CONTINUING, {"kind": "continuation", "prompt": "Keep going."})
+        yield StreamChunk(StreamingContentType.GENERATING, "the ")
+        yield StreamChunk(StreamingContentType.GENERATING, "answer")
 
     answer = await channel.stream_activity(gen())
     assert answer == "the answer"  # accumulated, not streamed
+    assert {"type": "loop", "reason": "continuation", "text": "Keep going."} in ws.frames
     types = [f["type"] for f in ws.frames]
-    assert "thinking" in types and "tool" in types and "loop" in types  # the loop stays visible
+    assert "thinking" in types and "tool" in types
     assert "token" not in types and "done" not in types  # answer withheld, no terminator
 
 

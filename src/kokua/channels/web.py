@@ -287,18 +287,18 @@ class WebChannel(BaseWebChannel):
         *,
         reply_to: Optional[ChannelMessage] = None,
     ) -> None:
-        """Stream a reply, emitting a ``loop`` marker at each agent-loop iteration boundary.
+        """Stream a reply, forwarding an ``image`` frame for each image-progress chunk along the way.
 
         Wraps the chunk iterator so the base ``send`` loop is reused unchanged (it has no per-chunk
-        hook); strings (including proactive pushes) pass straight through. A background turn needs no
-        special path here: the base loop drains the whole stream either way -- so the agent run
-        completes and its state persists -- and each frame it produces is muted or not on its own, as
-        the view stands when that frame is sent (see the module docstring).
+        hook for image progress); strings (including proactive pushes) pass straight through. A
+        background turn needs no special path here: the base loop drains the whole stream either way --
+        so the agent run completes and its state persists -- and each frame it produces is muted or not
+        on its own, as the view stands when that frame is sent (see the module docstring).
         """
         if isinstance(content, str):
             await super().send(content, reply_to=reply_to)
             return
-        await super().send(self._mark_loop_boundaries(content), reply_to=reply_to)
+        await super().send(self._forward_image_frames(content), reply_to=reply_to)
 
     async def stream_activity(self, chunks: AsyncIterator[StreamChunk], *, show_answer: bool = False) -> str:
         """Stream the agentic loop live and return the accumulated GENERATING text.
@@ -313,14 +313,8 @@ class WebChannel(BaseWebChannel):
         mid-stream stops the rest. ``chunks`` is fully drained and the accumulated text returned either
         way: the caller needs it regardless of who's watching.
         """
-        from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
-
         parts: list[str] = []
-        last_iteration = 0
         async for chunk in chunks:
-            if chunk.iteration > last_iteration:
-                await self.send_frame({"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT})
-                last_iteration = chunk.iteration
             if chunk.phase == StreamingContentType.GENERATING:
                 if isinstance(chunk.content, str):
                     parts.append(chunk.content)
@@ -338,27 +332,24 @@ class WebChannel(BaseWebChannel):
                         "response": call.get("response"),
                     }
                 )
+            elif chunk.phase == StreamingContentType.CONTINUING:
+                call = chunk.content if isinstance(chunk.content, dict) else {}
+                await self.send_frame({"type": "loop", "reason": call.get("kind"), "text": call.get("prompt", "")})
             else:
                 image = _image_frame_for(chunk)
                 if image is not None:
                     await self.send_frame(image)
         return "".join(parts)
 
-    async def _mark_loop_boundaries(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
-        """Yield ``chunks`` unchanged, emitting a ``loop`` frame just before each iteration increment.
+    async def _forward_image_frames(self, chunks: AsyncIterator[StreamChunk]) -> AsyncIterator[StreamChunk]:
+        """Yield ``chunks`` unchanged, sending an ``image`` frame for each image-progress chunk.
 
-        ``StreamChunk.iteration`` is 0 for the first response and rises by one per agent-loop
-        continuation, so a rise marks the boundary the injected turn sits at. The chunk carries the
-        iteration number but not the injected prompt text, so the marker shows the default continuation
-        prompt (kokua never overrides ``continuation_prompt``); replay reads the actual stored content.
+        The base ``send`` loop has no branch for image progress and no per-chunk hook, so this wrapper
+        is how those frames reach the page. Loop boundaries used to be inferred here from a rise in
+        ``StreamChunk.iteration``; AIMU now yields a ``CONTINUING`` chunk carrying the injected prompt
+        itself, which the base loop maps, so nothing is guessed on this path any more.
         """
-        from aimu.aio.agent import DEFAULT_CONTINUATION_PROMPT
-
-        last_iteration = 0
         async for chunk in chunks:
-            if chunk.iteration > last_iteration:
-                await self.send_frame({"type": "loop", "text": DEFAULT_CONTINUATION_PROMPT})
-                last_iteration = chunk.iteration
             image = _image_frame_for(chunk)
             if image is not None:
                 await self.send_frame(image)
