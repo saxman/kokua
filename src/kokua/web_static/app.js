@@ -685,12 +685,25 @@ function tsParts(value) {
 // already there. Returns the existing row on a second call, so the caption and the control (added at
 // different times: the caption when the bubble is stamped, the control once the turn ends) land in
 // the same row rather than each growing their own.
+//
+// Tracked in a WeakMap keyed by the bubble element, NOT looked up by `el.querySelector(".bubble-meta")`:
+// do not "simplify" this back to one. An assistant bubble's own content is untrusted (model or tool
+// output; see the note above renderMarkdown), and DOMPurify sanitizes it without restricting
+// attributes, so a `class` survives: a reply containing literal `<div class="bubble-meta">...</div>`
+// would be a perfectly valid match for that selector, and a class-based lookup can't tell it apart
+// from the row this function creates. Landing the caption or the branch control inside
+// attacker-controlled markup that way silently reintroduces the misplacement (or the invisibility)
+// this row exists to prevent. A WeakMap entry has no representation in HTML at all, so nothing a
+// model or a tool result writes can forge a hit in it: the row this function returns is always the
+// one it created itself.
+const bubbleMetaRows = new WeakMap();
 function bubbleMetaRow(el) {
-  let row = el.querySelector(".bubble-meta");
+  let row = bubbleMetaRows.get(el);
   if (!row) {
     row = document.createElement("div");
     row.className = "bubble-meta";
     el.appendChild(row);
+    bubbleMetaRows.set(el, row);
   }
   return row;
 }

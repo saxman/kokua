@@ -348,7 +348,7 @@ button.secondary, .notification-banner button { background: none; border-color: 
    its branch control. Both are ordinary flow content appended after however many lines the bubble's
    own content wrapped to, rather than positioned relative to a corner, so neither ever sits over
    wrapped text and the control always reads as coming after the answer, not over its first line. */
-.bubble-meta { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
+.bubble-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-top: 2px; }
 .bubble:hover .bubble-ts, .fold-header:hover > .fold-ts { opacity: 1; }
 /* Quiet until the bubble is hovered, like the timestamp beside it, because it is an affordance you
    look for rather than one you should keep noticing, except to a keyboard user tabbing through the
