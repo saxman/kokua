@@ -999,6 +999,100 @@ def test_ws_branch_at_an_unknown_turn_says_so_and_does_not_switch(tmp_path):
     assert "conversations" not in seen_types and "history" not in seen_types
 
 
+def test_ws_truncate_deletes_the_turn_and_everything_after_it(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one", "reply two"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("first message")
+        _drain_until(ws, "done")
+        _drain_until(ws, "conversations")
+        first_saved = _drain_until(ws, "turn_saved")
+        ws.send_text("second message")
+        _drain_until(ws, "done")
+        _drain_until(ws, "turn_saved")
+
+        # Delete from the *first* turn, so the assertion cannot pass on a page that simply cleared
+        # everything: the conversation must survive with neither turn in it.
+        ws.send_text(
+            json.dumps(
+                {
+                    "type": "truncate",
+                    "id": first_saved["conversation_id"],
+                    "message_index": first_saved["message_index"],
+                }
+            )
+        )
+        after = _drain_until(ws, "conversations")
+        hist = _drain_until(ws, "history")
+
+    assert [i["id"] for i in after["items"]] == [first_saved["conversation_id"]]
+    assert not [item for item in hist["items"] if item["type"] == "user"]
+    # Emptied, so it reads as a fresh conversation rather than one named after a turn that is gone.
+    assert after["items"][0]["title"] == "New conversation"
+
+
+def test_ws_truncate_keeps_the_turns_before_the_one_it_deletes(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one", "reply two"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("first message")
+        _drain_until(ws, "done")
+        _drain_until(ws, "conversations")
+        _drain_until(ws, "turn_saved")
+        ws.send_text("second message")
+        _drain_until(ws, "done")
+        second_saved = _drain_until(ws, "turn_saved")
+
+        ws.send_text(
+            json.dumps(
+                {
+                    "type": "truncate",
+                    "id": second_saved["conversation_id"],
+                    "message_index": second_saved["message_index"],
+                }
+            )
+        )
+        _drain_until(ws, "conversations")
+        hist = _drain_until(ws, "history")
+
+    texts = [item["text"] for item in hist["items"] if item["type"] == "user"]
+    assert texts == ["first message"]
+
+
+def test_ws_truncate_at_an_unknown_turn_says_so_and_changes_nothing(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        request = json.dumps({"type": "truncate", "id": active_id, "message_index": 42})
+        # Sent twice, and everything between the two replies is collected: draining only to the first
+        # `message` frame would pass whether or not a `_sync_view` followed it, which is the half that
+        # says "changed nothing".
+        ws.send_text(request)
+        _drain_until(ws, "message")
+        ws.send_text(request)
+        seen_types = []
+        while True:
+            frame = ws.receive_json()
+            seen_types.append(frame["type"])
+            if frame["type"] == "message":
+                break
+
+    assert seen_types == ["message"]
+
+
 def test_ws_sends_settings_on_connect(tmp_path):
     from starlette.testclient import TestClient
 

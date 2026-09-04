@@ -25,7 +25,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from kokua import images
 from kokua.core.assistant import Assistant, ModelClientError
-from kokua.core.conversations import ID_PREFIX_MIN, TurnNotFound
+from kokua.core.conversations import ID_PREFIX_MIN, ConversationNotFound, TurnInFlight, TurnNotFound
 from kokua.core.messages import derive_title
 from kokua.channels.web import WebChannel
 from kokua.config import AssistantConfig, ConfigError
@@ -60,12 +60,23 @@ def _static_text(filename: str) -> str:
     return files("kokua").joinpath(f"web_static/{filename}").read_text(encoding="utf-8")
 
 
-_CONTROL_TYPES = ("new", "select", "delete", "branch", "settings", "get_settings", "get_tasks", "task", "export")
+_CONTROL_TYPES = (
+    "new",
+    "select",
+    "delete",
+    "branch",
+    "truncate",
+    "settings",
+    "get_settings",
+    "get_tasks",
+    "task",
+    "export",
+)
 
 
 def _parse_control(raw: str) -> Optional[dict]:
-    """Return a control object ({"type": "new"/"select"/"delete"/"branch"/"settings"/"task"/"export"/...,
-    ...}), else None.
+    """Return a control object ({"type": "new"/"select"/"delete"/"branch"/"truncate"/"settings"/"task"/
+    "export"/...}), else None.
 
     Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
     approval "y"/"n") and is fed to the channel unchanged.
@@ -406,6 +417,29 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                         except ModelClientError:
                             logger.warning("Could not build agent for conversation branch", exc_info=True)
                             await channel.send("Sorry, that conversation could not be branched.")
+                            continue
+                    elif control["type"] == "truncate":
+                        try:
+                            index = int(control.get("message_index", -1))
+                        except (TypeError, ValueError):
+                            await channel.send("Sorry, that turn could not be read.")
+                            continue
+                        try:
+                            await assistant.truncate_conversation(str(control.get("id", "")), index)
+                        except TurnInFlight:
+                            # Actionable, so it says what to do: the user can stop the turn and retry.
+                            await channel.send(
+                                "A turn is still running in that conversation, so nothing was deleted. "
+                                "Stop it with /stop, then try again."
+                            )
+                            continue
+                        except ConversationNotFound:
+                            await channel.send("That conversation is gone, so there was nothing to delete from.")
+                            continue
+                        except TurnNotFound:
+                            # Not worth a log line, like the branch control's: a page holding an index
+                            # from before an earlier deletion, or a turn whose save has not landed.
+                            await channel.send("That turn isn't saved yet, so there was nothing to delete.")
                             continue
                     await _sync_view(channel, assistant)
 
