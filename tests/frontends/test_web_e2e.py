@@ -1420,32 +1420,70 @@ def test_branching_a_turn_forks_the_conversation(page, live_server):
     The control only appears once the server says the turn reached the store (the `turn_saved` frame),
     which is the half of this that no unit test can see: the page has no index for a live turn until
     then, and offering one it invented would name the wrong turn.
+
+    Two turns are sent so the control's index is meaningfully exercised: a single-turn conversation
+    cannot tell a real per-turn `message_index` from a hard-coded 0, and branching from the *first*
+    turn while a second exists is what proves the fork was cut at the right place rather than copying
+    the whole parent. The control is located inside `.bubble-meta`, the trailing row it belongs in
+    beside the timestamp caption, so a control rendered somewhere else in the bubble would not count.
     """
     _open(page, live_server(delay=0.0))
-    page.fill("#msg", "ping")
+    page.fill("#msg", "first")
     page.click("#send")
     expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+    page.fill("#msg", "second")
+    page.click("#send")
+    expect(page.locator(".bubble.user", has_text="second")).to_be_visible(timeout=10_000)
 
-    branch = page.locator(".bubble-branch")
-    expect(branch).to_have_count(1, timeout=10_000)
-    branch.click()
+    branches = page.locator(".bubble .bubble-meta .bubble-branch")
+    expect(branches).to_have_count(2, timeout=10_000)
+    # `dataset.branchIndex` is stamped on the answer bubble itself (the control's click handler
+    # closes over the value instead), so the index is read from the bubble, not the button.
+    stamped = page.locator(".bubble[data-branch-index]")
+    expect(stamped).to_have_count(2)
+    first_index = stamped.nth(0).get_attribute("data-branch-index")
+    second_index = stamped.nth(1).get_attribute("data-branch-index")
+    assert first_index is not None and second_index is not None
+    assert first_index != second_index
 
-    expect(page.locator("#conv-list li", has_text="Branch of ping")).to_be_visible(timeout=10_000)
-    # The fork opens holding the exchange it was made from, and the original is still beside it.
-    expect(page.locator(".bubble.user", has_text="ping")).to_be_visible()
-    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible()
+    branches.nth(0).click()  # branch from the first turn, not the last
+
+    # The fork is the one now shown, not merely an item the sidebar grew.
+    fork_item = page.locator("#conv-list li.active", has_text="Branch of first")
+    expect(fork_item).to_be_visible(timeout=10_000)
     expect(page.locator("#conv-list li")).to_have_count(2)
+    # It holds only the turn branched from, not the one that came after it in the parent.
+    expect(page.locator(".bubble.user", has_text="first")).to_be_visible()
+    expect(page.locator(".bubble.user", has_text="second")).to_have_count(0)
+    expect(page.locator(".bubble .bubble-meta .bubble-branch")).to_have_count(1)
 
 
 def test_the_branch_control_survives_a_reload(page, live_server):
-    """A replayed turn carries the control too, stamped from the `message_index` on its user item."""
+    """A replayed turn carries the control too, stamped from the `message_index` on its user item.
+
+    Two turns again, so replay is checked for more than presence: each control's index must come back
+    unchanged, not renumbered by render order (which a naive replay that counted bubbles instead of
+    reading `message_index` would do identically to the live page, since both turns render in order
+    either way)."""
     url = live_server(delay=0.0)
     _open(page, url)
-    page.fill("#msg", "ping")
+    page.fill("#msg", "first")
     page.click("#send")
     expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
-    expect(page.locator(".bubble-branch")).to_have_count(1, timeout=10_000)
+    page.fill("#msg", "second")
+    page.click("#send")
+    expect(page.locator(".bubble.user", has_text="second")).to_be_visible(timeout=10_000)
+
+    expect(page.locator(".bubble .bubble-meta .bubble-branch")).to_have_count(2, timeout=10_000)
+    stamped = page.locator(".bubble[data-branch-index]")
+    expect(stamped).to_have_count(2)
+    before = [stamped.nth(i).get_attribute("data-branch-index") for i in range(2)]
+    assert before[0] is not None and before[1] is not None and before[0] != before[1]
 
     page.reload()
     page.wait_for_selector("#conv-list li")
-    expect(page.locator(".bubble-branch")).to_have_count(1, timeout=10_000)
+    expect(page.locator(".bubble .bubble-meta .bubble-branch")).to_have_count(2, timeout=10_000)
+    stamped = page.locator(".bubble[data-branch-index]")
+    expect(stamped).to_have_count(2)
+    after = [stamped.nth(i).get_attribute("data-branch-index") for i in range(2)]
+    assert after == before
