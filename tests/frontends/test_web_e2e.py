@@ -1487,3 +1487,140 @@ def test_the_branch_control_survives_a_reload(page, live_server):
     expect(stamped).to_have_count(2)
     after = [stamped.nth(i).get_attribute("data-branch-index") for i in range(2)]
     assert after == before
+
+
+def test_deleting_from_a_turn_removes_it_and_everything_after_it(page, live_server):
+    """The delete-from-here control on a user turn, end to end.
+
+    Two turns, and the *first* one is deleted, so the assertion cannot pass on a page that merely
+    cleared the transcript: the conversation has to survive with neither turn in it while the second
+    turn's deletion is what proves the cut ran forward from the one that was clicked. The control is
+    located inside `.bubble-meta`, the trailing row it belongs in beside the timestamp caption, so one
+    rendered elsewhere in the bubble would not count.
+    """
+    page.on("dialog", lambda dialog: dialog.accept())
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "first")
+    page.click("#send")
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+    page.fill("#msg", "second")
+    page.click("#send")
+    expect(page.locator(".bubble.user", has_text="second")).to_be_visible(timeout=10_000)
+
+    controls = page.locator(".bubble.user .bubble-meta .bubble-truncate")
+    expect(controls).to_have_count(2, timeout=10_000)
+    # Stamped on the bubble itself (the click handler closes over the value), so the index is read
+    # from the bubble rather than the button, and the two turns must not share one.
+    stamped = page.locator(".bubble.user[data-truncate-index]")
+    expect(stamped).to_have_count(2)
+    first_index = stamped.nth(0).get_attribute("data-truncate-index")
+    second_index = stamped.nth(1).get_attribute("data-truncate-index")
+    assert first_index is not None and second_index is not None
+    assert first_index != second_index
+
+    controls.nth(0).click()
+
+    expect(page.locator(".bubble.user")).to_have_count(0, timeout=10_000)
+    expect(page.locator(".bubble", has_text=REPLY)).to_have_count(0)
+    # The conversation itself survives, emptied and renamed back to the placeholder.
+    expect(page.locator("#conv-list li")).to_have_count(1)
+    expect(page.locator("#conv-list li")).to_contain_text("New conversation")
+
+
+def test_the_truncate_control_survives_a_reload(page, live_server):
+    """A replayed turn carries the control too, stamped from the `message_index` on its user item.
+
+    Two turns again, so replay is checked for more than presence: each index must come back unchanged
+    rather than renumbered by render order, which a page counting bubbles instead of reading
+    `message_index` would get right live and wrong here.
+    """
+    url = live_server(delay=0.0)
+    _open(page, url)
+    page.fill("#msg", "first")
+    page.click("#send")
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+    page.fill("#msg", "second")
+    page.click("#send")
+    expect(page.locator(".bubble.user", has_text="second")).to_be_visible(timeout=10_000)
+
+    expect(page.locator(".bubble.user .bubble-meta .bubble-truncate")).to_have_count(2, timeout=10_000)
+    stamped = page.locator(".bubble.user[data-truncate-index]")
+    expect(stamped).to_have_count(2)
+    before = [stamped.nth(i).get_attribute("data-truncate-index") for i in range(2)]
+    assert before[0] is not None and before[1] is not None and before[0] != before[1]
+
+    page.reload()
+    page.wait_for_selector("#conv-list li")
+    expect(page.locator(".bubble.user .bubble-meta .bubble-truncate")).to_have_count(2, timeout=10_000)
+    stamped = page.locator(".bubble.user[data-truncate-index]")
+    expect(stamped).to_have_count(2)
+    after = [stamped.nth(i).get_attribute("data-truncate-index") for i in range(2)]
+    assert after == before
+
+
+def test_declining_the_confirmation_deletes_nothing(page, live_server):
+    """The confirmation is the only thing standing in front of an irreversible delete."""
+    page.on("dialog", lambda dialog: dialog.dismiss())
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "first")
+    page.click("#send")
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+
+    control = page.locator(".bubble.user .bubble-meta .bubble-truncate").first
+    expect(control).to_have_count(1, timeout=10_000)
+    control.click()
+
+    expect(page.locator(".bubble.user", has_text="first")).to_be_visible()
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible()
+
+
+def test_a_second_message_sent_mid_reply_does_not_share_the_first_turns_truncate_control(page, live_server):
+    """Regression guard: two turns pending a `turn_saved` at once must not collapse onto one bubble.
+
+    The page used to keep a single reference to "the bubble that opened the live turn", overwritten on
+    every submit. Sending a second message while the first turn's reply was still streaming (ordinary
+    behavior; nothing here disables the composer mid-turn) meant that by the time the first turn's
+    `turn_saved` frame arrived, the lone reference already pointed at the *second* bubble, which got
+    stamped with the *first* turn's index. `addTruncateControl` refuses to stamp a bubble twice, so the
+    first bubble was left with no control at all and the second one carried the wrong index -- meaning a
+    user who clicked delete on their second message would silently delete both. `pendingTurnBubbles`
+    (`app.js`), a FIFO of bubbles awaiting their save consumed oldest first, is what fixed it: this test
+    would fail on the old single-reference code, since only one control would ever appear (on the wrong
+    bubble) instead of two.
+
+    `delay` here is well above zero, deliberately: the turn is held open past the point its reply
+    renders, which is the window this test sends the second message inside, before the first turn's
+    `turn_saved` can have arrived.
+    """
+    page.on("dialog", lambda dialog: dialog.accept())
+    _open(page, live_server(delay=2.0))
+    page.fill("#msg", "first")
+    page.click("#send")
+    # The first reply renders almost immediately (the mock streams it before its hold), well inside the
+    # 2-second window still left before that turn persists and its `turn_saved` frame goes out. The
+    # second message is sent inside that window, while the first turn's bubble is still pending a save.
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+    page.fill("#msg", "second")
+    # #send is hidden (not disabled) while a turn is processing, so submit the way the composer's own
+    # keydown listener does rather than clicking a control Playwright would refuse to act on.
+    page.locator("#msg").press("Enter")
+    expect(page.locator(".bubble.user", has_text="second")).to_be_visible(timeout=10_000)
+
+    # Both turns must finish (the second queues behind the first on the same conversation) before both
+    # controls can exist, so wait for the second reply too.
+    expect(page.locator(".bubble", has_text=REPLY)).to_have_count(2, timeout=20_000)
+
+    controls = page.locator(".bubble.user .bubble-meta .bubble-truncate")
+    expect(controls).to_have_count(2, timeout=10_000)
+    stamped = page.locator(".bubble.user[data-truncate-index]")
+    expect(stamped).to_have_count(2)
+    first_index = stamped.nth(0).get_attribute("data-truncate-index")
+    second_index = stamped.nth(1).get_attribute("data-truncate-index")
+    assert first_index is not None and second_index is not None
+    assert first_index != second_index
+
+    controls.nth(1).click()  # delete from the second turn only
+
+    expect(page.locator(".bubble.user", has_text="second")).to_have_count(0, timeout=10_000)
+    expect(page.locator(".bubble.user", has_text="first")).to_be_visible()
+    expect(page.locator(".bubble", has_text=REPLY)).to_have_count(1)
