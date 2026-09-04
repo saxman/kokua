@@ -516,11 +516,20 @@ let subagentCards = {};      // sub-agent card id -> element, so a "running" car
 // none. null between turns and while the current turn hasn't produced a top-level answer yet, which is
 // exactly when a branch control should be withheld rather than land on the wrong bubble.
 let liveLastAnswer = null;
-// The bubble that opened the live turn, which is where its delete-from-here control goes once the
-// server says the turn reached the store. Cleared after use so a later `turn_saved` (a scheduled run
-// in this conversation, which draws no user bubble at all) cannot stamp this turn's bubble with
-// another turn's index.
-let liveTurnFirstBubble = null;
+// The bubbles that opened live turns whose `turn_saved` has not arrived yet, oldest first, each tagged
+// with the conversation it was drawn for. A queue rather than one reference because sending a follow-up
+// while a reply is still streaming is ordinary: the server queues that turn behind the first (turns on
+// one conversation serialize in submission order, so their saves land in that order too), and a single
+// reference would by then point at the newer bubble and stamp it with the older turn's index. That is
+// worse than losing the control, because the index is a valid turn boundary the server will honour, so
+// the user would click delete on one message and lose that one and the message before it.
+//
+// One case this does not cover: a proactive run in the conversation being viewed, landing its own
+// `turn_saved` while the user has a bubble waiting here, consumes that entry and stamps it with the
+// proactive turn's index instead. Narrower than the case above (it needs a proactive turn in the very
+// conversation the user just sent to), and a reload repairs it, since the replay path derives indices
+// from the server rather than from this queue.
+let pendingTurnBubbles = [];
 
 // Render/update a sub-agent card as a foldable block. Two producers share this frame type: a
 // planning reviewer (role + status + issues) and a spawned sub-agent (role + task + status, its
@@ -1246,10 +1255,14 @@ function handleFrame(event) {
     const active = lastConversations.find((item) => item.active);
     if (active && active.id === frame.conversation_id) {
       addBranchControl(liveLastAnswer, frame.message_index, frame.conversation_id);
-      addTruncateControl(liveTurnFirstBubble, frame.message_index, frame.conversation_id);
-      // One turn, one stamp: a proactive run in this conversation draws no user bubble, so leaving
-      // this set would put its index on the bubble of whatever the user sent last.
-      liveTurnFirstBubble = null;
+      // Take the oldest bubble still waiting on a save in this conversation, which is the turn this
+      // frame is about. A frame with nothing waiting is a turn the page never drew a bubble for (a
+      // proactive run), and stamps nothing.
+      const waiting = pendingTurnBubbles.findIndex((p) => p.conversationId === frame.conversation_id);
+      if (waiting !== -1) {
+        const [pending] = pendingTurnBubbles.splice(waiting, 1);
+        addTruncateControl(pending.bubble, frame.message_index, frame.conversation_id);
+      }
     }
   } else if (frame.type === "history") {
     // Also the marker that the server got past building an assistant for this connection, which is
@@ -1267,7 +1280,7 @@ function handleFrame(event) {
     streamingText = "";
     thinkingBlock = null;
     liveLastAnswer = null;
-    liveTurnFirstBubble = null;
+    pendingTurnBubbles = [];  // the bubbles these referred to were just detached by the repaint
     stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
     setProcessing(false);  // idle unless the "working" frame behind this one says otherwise
     setWorking(null);  // reset; that same frame re-shows the indicator when the turn is still running
@@ -1597,12 +1610,16 @@ form.addEventListener("submit", (e) => {
   // liveLastAnswer's own comment).
   liveLastAnswer = null;
   const now = new Date();
-  // The first of these is the turn's opening bubble, whichever it is: an image-only message has no
-  // text bubble, and its control has to land on the image instead.
-  liveTurnFirstBubble = text ? addBubble("user", text, now) : null;  // the user's own words, not the /plan wrapper
+  // The first bubble this message draws is the turn's opening bubble, whichever it is: an image-only
+  // message has no text bubble, so its control has to land on the image instead.
+  let opening = text ? addBubble("user", text, now) : null;  // the user's own words, not the /plan wrapper
   for (const item of attached) {
     const bubble = addImageBubble(item.dataUrl, "user", now);  // echo attachments locally
-    if (!liveTurnFirstBubble) liveTurnFirstBubble = bubble;
+    if (!opening) opening = bubble;
+  }
+  if (opening) {
+    const active = lastConversations.find((item) => item.active);
+    if (active) pendingTurnBubbles.push({ bubble: opening, conversationId: active.id });
   }
   const thinking = thinkingChoice();
   if (attached.length || thinking) {
