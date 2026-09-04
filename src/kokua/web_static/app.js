@@ -1248,11 +1248,13 @@ function handleFrame(event) {
     const closeReplayTurn = () => {
       addBranchControl(replayLastAnswer, replayTurnIndex, replayConversationId);
       replayLastAnswer = null;
-      // A boundary-less turn (a user message with no text and no images: nothing in replay_items
-      // stamps it with a message_index) must not leave the *previous* turn's index behind for the
-      // next answer bubble to inherit. Resetting here means that turn renders with no control at all,
-      // which is the safe failure: no control rather than one that forks the wrong turn.
-      replayTurnIndex = -1;
+      // replayTurnIndex is left as is: a boundary-less turn (a user message with no text and no
+      // images, so nothing in replay_items stamps it with a message_index) never calls this at its
+      // own start, and its answer inherits the previous turn's index instead of getting one of its
+      // own. Nothing today produces that case (the composer refuses an empty submit, an image-only
+      // message still yields index-bearing image items, and a scheduled run's prompt is real text),
+      // so it goes unfixed here; closing it for real means replay_items emitting an index-bearing
+      // item for every user message, not a reset on this side.
     };
     for (const item of frame.items) {
       if (Number.isInteger(item.message_index)) {
