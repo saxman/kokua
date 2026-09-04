@@ -1083,22 +1083,31 @@ async def test_truncate_conversation_refuses_while_that_conversation_has_a_turn_
     and it keeps a deletion from applying minutes later and silently taking a turn that arrived in the
     meantime with it.
     """
+    import time
+
+    from aimu.aio import RunHandle
+
+    from kokua.core.turn_registry import TurnInfo
+
     client = BlockingModelClient()
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
     conversation_id = assistant._active_id
 
-    turn = asyncio.create_task(
+    # Tracked the way `Assistant._serve_channel` tracks a reactive turn: it wraps `_handle` in a
+    # RunHandle and registers that at submit time. Calling `_handle` directly is what a test has, and
+    # the tracker is what `turn_running` reads, so the registration has to be made here too.
+    handle = RunHandle.start(
         assistant._handle(ChannelMessage(text="a long job", channel="fake"), conversation_id=conversation_id)
     )
+    assistant._tracker.add(conversation_id, TurnInfo(handle=handle, started=time.monotonic(), preview="a long job"))
     await asyncio.wait_for(client.started.wait(), timeout=5)
 
     try:
         with pytest.raises(TurnInFlight):
-            # A wait_for so a refusal that turned into a queue fails the test instead of hanging it.
             await asyncio.wait_for(assistant.truncate_conversation(conversation_id, 1), timeout=5)
     finally:
         client.release.set()
-        await turn
+        await handle.task
 
     # The turn ran to completion and kept its transcript: the refusal cut nothing.
     assert any(m.get("content") == "a long job" for m in assistant._store.get(conversation_id).messages)
@@ -1106,6 +1115,12 @@ async def test_truncate_conversation_refuses_while_that_conversation_has_a_turn_
 
 async def test_truncate_conversation_allows_a_turn_running_elsewhere(tmp_path):
     """The refusal is per conversation, like the turn slot it stands in for."""
+    import time
+
+    from aimu.aio import RunHandle
+
+    from kokua.core.turn_registry import TurnInfo
+
     clients: dict = {}
 
     def factory(conversation_id):
@@ -1122,16 +1137,18 @@ async def test_truncate_conversation_allows_a_turn_running_elsewhere(tmp_path):
     tidy.messages = [dict(message) for message in BRANCH_MESSAGES]
     assistant._store.save(tidy)
 
-    turn = asyncio.create_task(
+    handle = RunHandle.start(
         assistant._handle(ChannelMessage(text="a long job", channel="fake"), conversation_id=busy_id)
     )
+    assistant._tracker.add(busy_id, TurnInfo(handle=handle, started=time.monotonic(), preview="a long job"))
     await asyncio.wait_for(blocking.started.wait(), timeout=5)
 
     try:
+        assert assistant.turn_running(busy_id) is True
         assert await asyncio.wait_for(assistant.truncate_conversation(tidy_id, 5), timeout=5) == 2
     finally:
         blocking.release.set()
-        await turn
+        await handle.task
 
 
 async def test_truncate_conversation_waits_for_a_non_turn_gate_holder_rather_than_refusing(tmp_path):
