@@ -509,13 +509,6 @@ let streamingBubble = null;  // the assistant answer bubble accumulating tokens
 let streamingText = "";      // raw answer text, the source of truth every live render reparses
 let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
 let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
-// The current turn's top-level answer bubble (assistant or proactive), tracked as it renders rather
-// than found afterward by querying the DOM: a query for ".bubble.assistant" also matches a sub-agent
-// card's own nested answer block (a foldable, collapsed by default) and, for a turn that ends in tool
-// output with no answer of its own, would reach back into a PRIOR turn's bubble instead of finding
-// none. null between turns and while the current turn hasn't produced a top-level answer yet, which is
-// exactly when a branch control should be withheld rather than land on the wrong bubble.
-let liveLastAnswer = null;
 // The bubbles that opened live turns whose `turn_saved` has not arrived yet, oldest first, each tagged
 // with the conversation it was drawn for. A queue rather than one reference because sending a follow-up
 // while a reply is still streaming is ordinary: the server queues that turn behind the first (turns on
@@ -749,9 +742,11 @@ function stampBubble(el, value) {
   span.title = t.full;
   bubbleMetaRow(el).appendChild(span);
 }
-// A turn's branch control, appended to the last answer bubble the turn produced. `messageIndex` is
-// the position of the turn's user message in the stored transcript, which is how the server names a
-// turn; the page never computes it, because a count of rendered bubbles is not the same number.
+// A turn's branch control, appended to the bubble that opens the turn, beside the delete-from-here
+// control: both act on a whole turn, so both belong on the one bubble that names it rather than
+// scattered across the turn's output. `messageIndex` is the position of the turn's user message in
+// the stored transcript, which is how the server names a turn; the page never computes it, because a
+// count of rendered bubbles is not the same number.
 // `conversationId` is captured at the time the bubble is stamped (the live conversation for a fresh
 // turn, the conversation being replayed for one loaded from history) rather than read from
 // `lastConversations` at click time: the active conversation can change between the stamp and the
@@ -764,8 +759,8 @@ function addBranchControl(el, messageIndex, conversationId) {
   btn.type = "button";
   btn.className = "bubble-branch";
   btn.textContent = "↱";
-  btn.title = "Branch a new conversation from here";
-  btn.setAttribute("aria-label", "Branch a new conversation from here");
+  btn.title = "Branch a new conversation including this exchange";
+  btn.setAttribute("aria-label", "Branch a new conversation including this exchange");
   btn.addEventListener("click", () => {
     if (ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: "branch", id: conversationId, message_index: messageIndex }));
@@ -796,6 +791,13 @@ function addTruncateControl(el, messageIndex, conversationId) {
     ws.send(JSON.stringify({ type: "truncate", id: conversationId, message_index: messageIndex }));
   });
   bubbleMetaRow(el).appendChild(btn);
+}
+// Both of a turn's controls, on the bubble that opens it. One helper rather than two calls at each
+// site so the pair cannot drift apart: they act on the same turn and read the same index, and the
+// order they are appended in is the order they appear, constructive before destructive.
+function stampTurnControls(bubble, messageIndex, conversationId) {
+  addBranchControl(bubble, messageIndex, conversationId);
+  addTruncateControl(bubble, messageIndex, conversationId);
 }
 // Caption a foldable block on its header line, so the time shows whether collapsed or expanded.
 function stampHeader(header, value) {
@@ -1186,7 +1188,6 @@ function handleFrame(event) {
     if (!streamingBubble && isBlank(frame.text)) return;
     if (!streamingBubble) {
       streamingBubble = addBubble("assistant", "");
-      liveLastAnswer = streamingBubble;
       streamingText = "";
     }
     streamingText += frame.text;
@@ -1206,7 +1207,7 @@ function handleFrame(event) {
     thinkingBlock = null;
     addImageBubble(frame.url, "assistant", new Date());
   } else if (frame.type === "message") {
-    liveLastAnswer = addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text, new Date());
+    addMarkdownBubble(frame.proactive ? "proactive" : "assistant", frame.text, new Date());
     // A reactive message ends the turn (e.g. "(stopped)" / an error) and takes the indicator with it.
     // A proactive one interrupts whatever is going on without ending it, so it leaves both alone: the
     // indicator belongs to the turn now, not to "the last thing that arrived".
@@ -1257,14 +1258,13 @@ function handleFrame(event) {
     // from another conversation onto the one being viewed.
     const active = lastConversations.find((item) => item.active);
     if (active && active.id === frame.conversation_id) {
-      addBranchControl(liveLastAnswer, frame.message_index, frame.conversation_id);
       // Take the oldest bubble still waiting on a save in this conversation, which is the turn this
       // frame is about. A frame with nothing waiting is a turn the page never drew a bubble for (a
       // proactive run), and stamps nothing.
       const waiting = pendingTurnBubbles.findIndex((p) => p.conversationId === frame.conversation_id);
       if (waiting !== -1) {
         const [pending] = pendingTurnBubbles.splice(waiting, 1);
-        addTruncateControl(pending.bubble, frame.message_index, frame.conversation_id);
+        stampTurnControls(pending.bubble, frame.message_index, frame.conversation_id);
       }
     }
   } else if (frame.type === "history") {
@@ -1282,7 +1282,6 @@ function handleFrame(event) {
     streamingBubble = null;
     streamingText = "";
     thinkingBlock = null;
-    liveLastAnswer = null;
     pendingTurnBubbles = [];  // the bubbles these referred to were just detached by the repaint
     stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
     setProcessing(false);  // idle unless the "working" frame behind this one says otherwise
@@ -1291,34 +1290,18 @@ function handleFrame(event) {
     // updated lastConversations by the time `history` arrives (see _sync_view), so this is the
     // conversation being switched to, not the one switched from.
     const replayConversationId = (lastConversations.find((item) => item.active) || {}).id;
-    // The turn being replayed, and the last answer bubble it produced. A turn's branch control goes
-    // on that bubble, which is only known once the turn has ended: the next item carrying a
-    // message_index, or the end of the transcript.
+    // The turn being replayed, and whether its controls have been placed. Both controls go on the
+    // first bubble of the turn, so they are placed as soon as one appears rather than at the turn's
+    // end, and a turn drawing several bubbles (a message with text and images) stamps only the first.
     let replayTurnIndex = -1;
-    let replayLastAnswer = null;
-    // Whether the turn being replayed has had its delete-from-here control placed. Unlike the branch
-    // control, this one goes on the first bubble of the turn, so it is placed as soon as one appears
-    // rather than when the turn ends.
     let replayTurnStamped = false;
-    const closeReplayTurn = () => {
-      addBranchControl(replayLastAnswer, replayTurnIndex, replayConversationId);
-      replayLastAnswer = null;
-      // replayTurnIndex is left as is: a boundary-less turn (a user message with no text and no
-      // images, so nothing in replay_items stamps it with a message_index) never calls this at its
-      // own start, and its answer inherits the previous turn's index instead of getting one of its
-      // own. Nothing today produces that case (the composer refuses an empty submit, an image-only
-      // message still yields index-bearing image items, and a scheduled run's prompt is real text),
-      // so it goes unfixed here; closing it for real means replay_items emitting an index-bearing
-      // item for every user message, not a reset on this side.
-    };
     const stampTurnStart = (bubble) => {
       if (replayTurnStamped) return;
-      addTruncateControl(bubble, replayTurnIndex, replayConversationId);
+      stampTurnControls(bubble, replayTurnIndex, replayConversationId);
       replayTurnStamped = true;
     };
     for (const item of frame.items) {
       if (Number.isInteger(item.message_index)) {
-        closeReplayTurn();
         replayTurnIndex = item.message_index;
         replayTurnStamped = false;
       }
@@ -1327,7 +1310,6 @@ function handleFrame(event) {
       else if (item.type === "partial" && !isBlank(item.text)) {
         streamingText = item.text;
         streamingBubble = addBubble("assistant", streamingText);
-        liveLastAnswer = streamingBubble;
       }
       else if (item.type === "plan") renderPlan(item.text);
       else if (item.type === "image") {
@@ -1345,19 +1327,12 @@ function handleFrame(event) {
       else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
-      // A verbose (/plan) turn's committed message is skipped on persist (its final answer is
-      // already this turn's last reasoning segment; see core/transcripts.py), so a reasoning
-      // item has to be able to close the turn out too, or a verbose turn would replay with no
-      // branch control at all. Harmless for an ordinary turn, whose message item lands after
-      // its reasoning and overwrites this reference: closeReplayTurn only ever stamps the
-      // last one, so a mid-trace reasoning segment is never the one that gets the control.
-      else if (item.type === "reasoning") replayLastAnswer = addMarkdownBubble("assistant", item.text, item.ts);
-      else if (item.type === "message" && !isBlank(item.text)) replayLastAnswer = addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text, item.ts);
+      else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);
+      else if (item.type === "message" && !isBlank(item.text)) addMarkdownBubble(item.proactive ? "proactive" : "assistant", item.text, item.ts);
       // Why a turn stopped early. A scheduled run's error never reached this conversation live, so on
       // reload this is the only account of it the conversation has.
       else if (item.type === "notice") addBubble("notice", item.text, item.ts);
     }
-    closeReplayTurn();  // the last turn ends at the end of the transcript
     autoscroll();
   }
 }
@@ -1608,10 +1583,6 @@ form.addEventListener("submit", (e) => {
   if ((!text && attached.length === 0) || ws.readyState !== WebSocket.OPEN) return;
   stickToBottom = true;  // sending snaps back to the bottom to follow the reply
   subagentCards = {};  // new turn: card ids (reviewer's plan-review-0, ... or a spawn's id) start fresh
-  // A new turn hasn't produced an answer yet, so its branch control must not land on the previous
-  // turn's bubble if this one turns out to end in tool output with no answer of its own (see
-  // liveLastAnswer's own comment).
-  liveLastAnswer = null;
   const now = new Date();
   // The first bubble this message draws is the turn's opening bubble, whichever it is: an image-only
   // message has no text bubble, so its control has to land on the image instead.

@@ -486,6 +486,16 @@ is published by `TurnRunner._persist`, after the store write and only when `Conv
 says the stored transcript really has a user turn there, so the page is never offered a branch point the
 store cannot serve.
 
+The control itself sits on the bubble that *opens* the turn, beside the delete-from-here control, and
+`stampTurnControls` places the pair together so they cannot drift apart. Anchoring both on the turn's
+first bubble rather than on its answer is what lets the page name a turn without inference: that bubble
+is the one `message_index` refers to, so nothing has to associate an answer back to the user message
+above it, and a turn whose output is a sub-agent card, an image, or nothing at all needs no special case.
+It also keeps the newest turn branchable, which anchoring on the *following* user message would not: there
+is no message after the newest turn, and the answer you just read is the one most likely to be forked.
+The label says "including this exchange" because a control on your own message otherwise reads as an
+offer to re-ask it, which would cut before the message rather than after its answer.
+
 ### Truncating a conversation
 
 `ConversationBook.truncate(conversation_id, user_index)` is branching's mirror image: a branch keeps
