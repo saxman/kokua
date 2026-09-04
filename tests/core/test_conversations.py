@@ -1132,3 +1132,31 @@ async def test_truncate_conversation_allows_a_turn_running_elsewhere(tmp_path):
     finally:
         blocking.release.set()
         await turn
+
+
+async def test_truncate_conversation_waits_for_a_non_turn_gate_holder_rather_than_refusing(tmp_path):
+    """The refusal asks the turn tracker, not "is this conversation's gate slot held".
+
+    Every `gate.turn` holder takes that slot, including a title write and a delete, so refusing on the
+    slot would report a turn in flight when none is running and tell the user to stop something that
+    does not exist. A non-turn holder is short, so waiting it out is correct.
+    """
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    holding = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold_the_slot():
+        async with assistant._gate.turn(parent.key):
+            holding.set()
+            await release.wait()
+
+    holder = asyncio.create_task(hold_the_slot())
+    await asyncio.wait_for(holding.wait(), timeout=5)
+    truncating = asyncio.create_task(assistant.truncate_conversation(parent.key, 5))
+    try:
+        await asyncio.sleep(0.05)  # long enough for it to reach the gate and block there
+        assert not truncating.done()  # waiting on the slot, not refused outright
+    finally:
+        release.set()
+    assert await asyncio.wait_for(truncating, timeout=5) == 2
+    await holder

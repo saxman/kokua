@@ -437,8 +437,7 @@ class Assistant:
         conversation. A pending question belongs to a turn in flight, which this refuses outright, and
         the conversation being edited is the one already in view.
         """
-        lock = self._registry.lock(conversation_id)
-        if lock.locked():
+        if self.turn_running(conversation_id):
             raise TurnInFlight(f"Conversation {conversation_id} has a turn in flight.")
         return await self._book.truncate(conversation_id, message_index)
 
