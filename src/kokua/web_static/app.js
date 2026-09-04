@@ -210,6 +210,19 @@ function renderConversations() {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "export", id: item.id }));
     });
     li.appendChild(exportBtn);
+    // Copies the whole conversation. Unlike a turn's branch control it does not switch the view, so
+    // the label rather than a jump is what tells you it worked; the new row appearing is the rest.
+    const duplicate = document.createElement("button");
+    duplicate.type = "button";
+    duplicate.className = "conv-duplicate";
+    duplicate.textContent = "\u29c9";
+    duplicate.title = "Duplicate conversation";
+    duplicate.setAttribute("aria-label", "Duplicate conversation");  // the glyph is no accessible name
+    duplicate.addEventListener("click", (e) => {
+      e.stopPropagation();  // don't also trigger switch
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "duplicate", id: item.id }));
+    });
+    li.appendChild(duplicate);
     const del = document.createElement("button");
     del.type = "button";
     del.className = "conv-delete";

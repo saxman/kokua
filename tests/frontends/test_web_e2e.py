@@ -1360,6 +1360,28 @@ def test_the_sidebar_export_button_downloads_the_conversation_without_navigating
     expect(page.locator("#conv-list li")).to_have_count(1)
 
 
+# --- Sidebar duplicate button ---------------------------------------------------------------------
+
+
+def test_the_sidebar_duplicate_button_adds_a_copy_and_leaves_the_view_where_it_was(page, live_server):
+    """The server side of the "duplicate" control is unit-tested against a fake socket in test_web.py;
+    what only a real browser shows is that the button reaches it without also switching the view, which
+    is the whole point of putting the control on a sidebar row rather than on a turn."""
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "the conversation to copy")
+    page.click("#send")
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
+    original = page.locator("#conv-list li.active .conv-title").inner_text()
+
+    page.locator("#conv-list li.active .conv-duplicate").click()
+
+    expect(page.locator("#conv-list li")).to_have_count(2, timeout=10_000)
+    expect(page.locator("#conv-list .conv-title", has_text=f"Copy of {original}")).to_have_count(1)
+    # Still reading the original: the copy is a row in the list, not the conversation on screen.
+    expect(page.locator("#conv-list li.active .conv-title")).to_have_text(original)
+    expect(page.locator(".bubble.user", has_text="the conversation to copy")).to_be_visible()
+
+
 def test_the_page_reconnects_after_the_server_restarts(page, restartable_server):
     """Restarting Kokua under an open browser brings the page back on its own.
 

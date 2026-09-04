@@ -66,6 +66,7 @@ _CONTROL_TYPES = (
     "delete",
     "branch",
     "truncate",
+    "duplicate",
     "settings",
     "get_settings",
     "get_tasks",
@@ -75,8 +76,8 @@ _CONTROL_TYPES = (
 
 
 def _parse_control(raw: str) -> Optional[dict]:
-    """Return a control object ({"type": "new"/"select"/"delete"/"branch"/"truncate"/"settings"/"task"/
-    "export"/...}), else None.
+    """Return a control object ({"type": "new"/"select"/"delete"/"branch"/"truncate"/"duplicate"/
+    "settings"/"task"/"export"/...}), else None.
 
     Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
     approval "y"/"n") and is fed to the channel unchanged.
@@ -347,6 +348,24 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                         except Exception:
                             logger.warning("Could not export conversation", exc_info=True)
                             await channel.send("Sorry, that conversation could not be exported.")
+                        continue
+                    # A duplicate writes a new conversation without switching to it, so it answers with
+                    # a fresh conversation list (the copy has to appear in the sidebar) and, unlike
+                    # select/new/delete/branch, skips the history replay below: the page is still
+                    # displaying the conversation it was already on.
+                    if control["type"] == "duplicate":
+                        try:
+                            await assistant.duplicate_conversation(str(control.get("id", "")))
+                        except ConversationNotFound:
+                            # Not worth a log line, like the branch control's: a row for a conversation
+                            # another tab has since deleted is a stale page, not a fault.
+                            await channel.send("That conversation is gone, so there was nothing to copy.")
+                            continue
+                        except Exception:
+                            logger.warning("Could not duplicate conversation", exc_info=True)
+                            await channel.send("Sorry, that conversation could not be duplicated.")
+                            continue
+                        await channel.send_conversations(assistant.list_conversations())
                         continue
                     # Task controls mostly touch only the scheduled-task registry, so like the settings
                     # controls they answer with a fresh task list and skip the history refresh.

@@ -937,6 +937,89 @@ async def test_branch_conversation_reverts_active_id_on_build_failure(tmp_path):
     assert assistant._active_id == original_id
 
 
+async def test_duplicate_copies_the_whole_transcript(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    copy_id = assistant._book.duplicate(parent.key)
+
+    assert assistant._store.get(copy_id).messages == BRANCH_MESSAGES
+
+
+async def test_duplicate_leaves_the_view_and_the_parent_alone(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    copy_id = assistant._book.duplicate(parent.key)
+
+    assert copy_id != parent.key
+    assert assistant._active_id == parent.key
+    assert assistant._store.get(parent.key).messages == BRANCH_MESSAGES
+
+
+async def test_duplicate_titles_itself_after_its_parent(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    copy_id = assistant._book.duplicate(parent.key)
+
+    assert assistant._store.get(copy_id).metadata["title"] == "Copy of Kauai trip"
+
+
+async def test_duplicate_of_an_untitled_conversation_names_it_as_untitled(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    del parent.metadata["title"]
+    assistant._store.save(parent)
+
+    copy_id = assistant._book.duplicate(parent.key)
+
+    assert assistant._store.get(copy_id).metadata["title"] == "Copy of New conversation"
+
+
+async def test_duplicate_keeps_the_metadata_of_every_turn(tmp_path):
+    """Nothing is cut, so unlike a branch there is no per-turn map to filter."""
+    assistant, parent = await _assistant_with_branchable_parent(
+        tmp_path,
+        usage={"1": {"calls": 1}, "5": {"calls": 2}},
+        subagent={"5": [{"task": "check the ferry times"}]},
+    )
+
+    copy_id = assistant._book.duplicate(parent.key)
+
+    copied = assistant._store.get(copy_id)
+    assert copied.metadata["usage"] == {"1": {"calls": 1}, "5": {"calls": 2}}
+    assert copied.metadata["subagent"] == {"5": [{"task": "check the ferry times"}]}
+
+
+async def test_duplicate_records_where_it_came_from(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    copy_id = assistant._book.duplicate(parent.key)
+
+    assert assistant._store.get(copy_id).metadata["copied_from"] == {"conversation_id": parent.key}
+
+
+async def test_duplicate_does_not_inherit_the_task_that_minted_its_parent(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path, task_id="morning-brief")
+
+    copy_id = assistant._book.duplicate(parent.key)
+
+    assert "task_id" not in assistant._store.get(copy_id).metadata
+
+
+async def test_duplicate_refuses_a_conversation_the_store_does_not_have(tmp_path):
+    assistant, _ = await _assistant_with_branchable_parent(tmp_path)
+
+    with pytest.raises(ConversationNotFound):
+        assistant._book.duplicate("nosuchconversation")
+
+
+async def test_duplicate_conversation_lists_the_copy_without_switching_to_it(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    copy_id = await assistant.duplicate_conversation(parent.key)
+
+    assert assistant.active_id == parent.key
+    assert {item["id"] for item in assistant.list_conversations()} == {parent.key, copy_id}
+
+
 async def test_truncate_removes_the_named_turn_and_everything_after_it(tmp_path):
     assistant, parent = await _assistant_with_branchable_parent(tmp_path)
 

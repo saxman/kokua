@@ -38,6 +38,10 @@ UNTITLED = "New conversation"
 # that would otherwise show the same title twice (both derive from the same first user message).
 BRANCH_TITLE_PREFIX = "Branch of "
 
+# What a whole-conversation copy is called, for the same reason a branch is prefixed: two rows deriving
+# their title from the same first user message are otherwise indistinguishable in a sidebar.
+COPY_TITLE_PREFIX = "Copy of "
+
 # The session-metadata maps keyed by a turn's user-message index. A branch copies a *prefix* of the
 # transcript, so indices do not move and these are filtered rather than remapped. That is only true
 # while a branch keeps the parent's messages from index 0 onward; anything that changes what index 0
@@ -385,6 +389,47 @@ class ConversationBook:
         # that task's retention pruning.
         self._store.save(session)
         self._activate(session.key, revert_to=previous_id)
+        return session.key
+
+    def duplicate(self, conversation_id: str) -> str:
+        """Copy a whole conversation into a new one, without switching to it. Returns its id.
+
+        A branch asks about a turn; this asks about a conversation, which is why it takes no index,
+        keeps every turn's metadata rather than filtering it through :func:`_metadata_before`, and does
+        not need ``turn_end``: nothing is cut, so there is no boundary to land on. The copy and the
+        original are ordinary independent conversations from here, exactly as a branch and its parent
+        are.
+
+        Unlike :meth:`branch` it does not activate what it wrote. The control this serves is a sidebar
+        row's, so it acts on a conversation the user is not necessarily reading, and moving the view
+        onto the copy would take them out of the one they are. That also leaves this the one
+        conversation-minting method with no ``_activate`` and so no pointer to revert: nothing here can
+        fail on an agent build, because no agent is built.
+
+        Read from the store, never from ``agent_for``, and unheld, for the reasons :meth:`branch` gives
+        in full: the read is a snapshot and the write is a brand-new key. A turn in flight on the
+        original is therefore invisible, so the copy is that conversation as last persisted, which is
+        the same thing a branch of its last turn would give.
+        """
+        if not self.exists(conversation_id):
+            raise ConversationNotFound(f"Conversation {conversation_id} is not in the store.")
+        original = self._store.get(conversation_id)
+        title = f"{COPY_TITLE_PREFIX}{original.metadata.get('title') or UNTITLED}"[:TITLE_MAX]
+        # Titled at birth for the reason `branch` documents: it is what stops `persist` deriving a title
+        # from the inherited first user message and handing the copy its original's title.
+        session = self.new_session(title=title)
+        # The same copy discipline as `branch`: one level per message, since a committed message's values
+        # are replaced wholesale rather than mutated, and a deep copy of the metadata maps, whose values a
+        # subsystem holding a live session could still append to in place.
+        session.messages = [dict(message) for message in original.messages]
+        session.metadata["copied_from"] = {"conversation_id": conversation_id}
+        for key in TURN_KEYED_METADATA:
+            if key in original.metadata:
+                session.metadata[key] = copy.deepcopy(original.metadata[key])
+        # `task_id` is deliberately not inherited, as in `branch`: a copy of a scheduled run is the
+        # user's conversation, not another run of that task, and inheriting it would expose the copy to
+        # that task's retention pruning.
+        self._store.save(session)
         return session.key
 
     async def truncate(

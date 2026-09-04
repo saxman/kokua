@@ -132,6 +132,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   and costs, is titled "Branch of <the original>", and never inherits a scheduled task's ownership,
   so branching a task's run does not enter it into that task's retention. A terminal `/branch` is
   not part of this (see `TODO.md`).
+- **Duplicate a whole conversation.** Every row in the web UI's sidebar carries a duplicate control,
+  beside export and delete: it copies that conversation, with its recorded sub-agent cards, models, and
+  costs, into a new one titled "Copy of <the original>". Unlike a branch it does not move the view, so a
+  row you are not reading can be copied without leaving the one you are; the copy appears in the sidebar
+  and nothing else changes. Like a branch it never inherits a scheduled task's ownership. There is no
+  terminal command or agent tool for it.
 - **Delete a conversation's turns from a turn onward.** Every user turn in the web UI carries a
   delete-from-here control: it removes that turn and every turn after it from the saved conversation,
   in place, leaving the earlier turns and the conversation itself untouched. The deleted turns leave

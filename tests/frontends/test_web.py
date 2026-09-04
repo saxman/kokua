@@ -999,6 +999,72 @@ def test_ws_branch_at_an_unknown_turn_says_so_and_does_not_switch(tmp_path):
     assert "conversations" not in seen_types and "history" not in seen_types
 
 
+def test_ws_duplicate_copies_the_conversation_and_leaves_the_view_on_the_original(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("first message")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+
+        ws.send_text(json.dumps({"type": "duplicate", "id": active_id}))
+        after = _drain_until(ws, "conversations")
+
+    titles = [i["title"] for i in after["items"]]
+    assert "Copy of first message" in titles
+    assert next(i["id"] for i in after["items"] if i["active"]) == active_id
+
+
+def test_the_duplicate_control_refreshes_the_sidebar_but_not_the_history(tmp_path):
+    """The copy has to appear in the list, but the page is still displaying the original, so a history
+    replay would be a redraw of what is already on screen.
+
+    A trailing "get_tasks" control is what makes this a real check, for the reason
+    ``test_the_export_control_does_not_refresh_the_sidebar_or_history`` gives at length: one queue and
+    one applying task means "tasks" cannot arrive until everything the "duplicate" control queued has
+    already been sent.
+    """
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["ok"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        _drain_until(ws, "tasks")  # the rest of the connect-time push: history, settings, tasks
+        ws.send_text(json.dumps({"type": "duplicate", "id": active_id}))
+        ws.send_text(json.dumps({"type": "get_tasks"}))
+        frames = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame["type"] == "tasks":
+                break
+    assert [f["type"] for f in frames] == ["conversations", "tasks"]
+
+
+def test_duplicating_an_unknown_conversation_answers_rather_than_closing_the_socket(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["ok"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text(json.dumps({"type": "duplicate", "id": "no-such-conversation"}))
+        frame = _drain_until(ws, "message")
+        # The socket is still live: another control still answers.
+        ws.send_text(json.dumps({"type": "get_tasks"}))
+        _drain_until(ws, "tasks")
+    assert "copy" in frame["text"].lower()
+
+
 def test_ws_truncate_deletes_the_turn_and_everything_after_it(tmp_path):
     import json
 

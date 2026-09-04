@@ -544,6 +544,27 @@ the window between the check and the gate. It is injected rather than looked up 
 the gate while the assistant owns the turn tracker, and `core`'s conversation layer must not reach upward
 for it.
 
+### Duplicating a conversation
+
+`ConversationBook.duplicate(conversation_id)` copies a whole conversation into a new one. It is the
+third member of the branch/truncate family and the one that asks about a *conversation* rather than a
+turn, which is what removes most of the shape the other two need: no index, no `turn_end`, and no
+metadata filtering, because nothing is cut. It keeps the copy discipline they share (one level per
+message, a deep copy of the per-turn maps), titles the result `Copy of <the original>`, records
+`copied_from`, and leaves `task_id` behind for the same reason a branch does.
+
+Two things distinguish it. It **does not activate** what it wrote, so it is the one
+conversation-minting method with no `_activate` and therefore no pointer to revert: no agent is built,
+so nothing here can fail on a model client. And it is reached from a **sidebar row** rather than from a
+turn, which is why not switching is the right default: the row you copy is often not the conversation
+you are reading, and moving the view onto the copy would take you out of it. What tells you it worked is
+the new row, not a jump.
+
+The web control follows from that. `duplicate` is handled in `frontends/web.py` beside `export` and the
+settings and task controls, in the group that answers *without* the sidebar-and-history refresh the
+switching controls get: it pushes a fresh conversation list, because the copy has to appear, and skips
+the history replay, because the page is still displaying what it was already displaying.
+
 ## Plugins
 
 Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`) and `kokua.toolsets`

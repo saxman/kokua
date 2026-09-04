@@ -420,6 +420,14 @@ class Assistant:
         self._human.abandon_all()
         return self._book.branch(conversation_id, message_index)
 
+    async def duplicate_conversation(self, conversation_id: str) -> str:
+        """Copy a whole conversation into a new one, leaving the view where it is; returns the copy's id.
+
+        Abandons no pending approval, unlike ``branch_conversation``: the question belongs to the
+        conversation the user is still looking at, and copying another row is no reason to drop it.
+        """
+        return self._book.duplicate(conversation_id)
+
     async def truncate_conversation(self, conversation_id: str, message_index: int) -> int:
         """Delete a turn and everything after it from a conversation; returns messages removed.
 
