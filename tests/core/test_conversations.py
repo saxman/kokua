@@ -1033,8 +1033,8 @@ async def test_truncate_keeps_the_conversations_turn_lock(tmp_path):
 
 async def test_truncate_refuses_an_index_that_is_not_a_user_turn(tmp_path):
     assistant, parent = await _assistant_with_branchable_parent(tmp_path)
-    # A loop-injected nudge carries the `user` role but sits *inside* a turn, so cutting at it would
-    # strand the assistant message holding `tool_calls` before it without the results answering them.
+    # A loop-injected nudge carries the `user` role but sits *inside* a turn, between tool-calling
+    # iterations, so cutting at it would end that turn before the answer it went on to produce.
     parent.messages.insert(4, {"role": "user", "content": "continue", PROVENANCE_KEY: PROVENANCE_CONTINUATION})
     assistant._store.save(parent)
     expected = list(parent.messages)

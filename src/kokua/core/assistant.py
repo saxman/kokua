@@ -432,16 +432,18 @@ class Assistant:
         save, and a later reader must not "fix" the refusal by leaning on that.
 
         What the refusal actually buys is a bounded wait, an unsurprised user, and one thing the hold
-        does not cover. The web front end applies controls on the one task reading its socket, so waiting
-        out a local model's turn wedges every control in the UI, ``/stop`` included, which is the same
-        wedge that moved ``delete`` off the gate's exclusive hold; and a deletion that applied minutes
-        later would take a turn that arrived in between with it, which is not what the user was looking
-        at when they asked. Beyond the user's experience, though, ``TurnRunner.reactive`` fetches its
-        agent before taking the gate, so a turn queued behind a truncation holds a reference to the agent
-        the truncation then drops. It runs to completion on that orphaned agent and streams an answer
-        that ``ConversationBook.persist`` discards, because persist re-fetches the agent and snapshots the
-        rebuilt one. Refusing keeps that turn from being started behind a cut in the first place. See
-        ``TODO.md`` for the deeper fix, which belongs to the turn runner rather than here.
+        does not cover. The web front end applies controls in arrival order on a single task, so waiting
+        out a local model's turn leaves every control behind it, ``/stop`` included, queued until it
+        returns. The socket is read on a separate task, which makes that a delay rather than a wedge (see
+        ``frontends/web.py``), but it is still the queueing cost that moved ``delete`` off the gate's
+        exclusive hold. A deletion that applied minutes later would also take a turn that arrived in
+        between with it, which is not what the user was looking at when they asked. Beyond the user's
+        experience, though, ``TurnRunner.reactive`` fetches its agent before taking the gate, so a turn
+        queued behind a truncation holds a reference to the agent the truncation then drops. It runs to
+        completion on that orphaned agent and streams an answer that ``ConversationBook.persist``
+        discards, because persist re-fetches the agent and snapshots the rebuilt one. Refusing keeps that
+        turn from being started behind a cut in the first place. See ``TODO.md`` for the deeper fix,
+        which belongs to the turn runner rather than here.
 
         ``turn_running`` is handed to the book so the same question is re-asked inside the gate hold: the
         check here is made before an ``await``, and a turn already in flight when it ran could otherwise

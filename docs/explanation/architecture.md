@@ -520,17 +520,19 @@ actually *in flight* is then refused, in `Assistant.truncate_conversation`, and 
 reading in two parts. What the hold already covers: a turn holds the same slot across its own persist,
 so the cut can never be interleaved with a turn's save, and the tempting rationale for the refusal (a
 turn's save would undo the cut) is false. What the refusal adds: a bounded wait (the web front end
-applies controls on the one task reading its socket, `/stop` included), a user who is not surprised by a
-deletion applying minutes later and silently taking a turn that arrived in between, and one piece of
-correctness the hold misses. `TurnRunner.reactive` fetches its agent *before* taking the gate, so a turn
-queued behind a truncation would run to completion on the agent the truncation dropped and have its
-answer discarded by `persist`, which re-fetches the agent and snapshots the rebuilt one. Refusing keeps
-such a turn from starting behind a cut; `TODO.md` carries the deeper fix, which belongs to the turn
-runner. The refusal is asked twice, once by `Assistant.truncate_conversation` before it awaits anything
-and once inside the book's hold through a `turn_running` predicate that method injects, so a turn already
-in flight cannot slip through the window between the check and the gate. It is injected rather than
-looked up because the book holds the gate while the assistant owns the turn tracker, and `core`'s
-conversation layer must not reach upward for it.
+applies controls in arrival order on a single task, so a control parked on the gate leaves every control
+behind it, `/stop` included, queued until it returns; the socket is read on a separate task, so that is a
+delay rather than a wedge), a user who is not surprised by a deletion applying minutes later and silently
+taking a turn that arrived in between, and one piece of correctness the hold misses.
+`TurnRunner.reactive` fetches its agent *before* taking the gate, so a turn queued behind a truncation
+would run to completion on the agent the truncation dropped and have its answer discarded by `persist`,
+which re-fetches the agent and snapshots the rebuilt one. Refusing keeps such a turn from starting behind
+a cut; `TODO.md` carries the deeper fix, which belongs to the turn runner. The refusal is asked twice,
+once by `Assistant.truncate_conversation` before it awaits anything and once inside the book's hold
+through a `turn_running` predicate that method injects, so a turn already in flight cannot slip through
+the window between the check and the gate. It is injected rather than looked up because the book holds
+the gate while the assistant owns the turn tracker, and `core`'s conversation layer must not reach upward
+for it.
 
 ## Plugins
 

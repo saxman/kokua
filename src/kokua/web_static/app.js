@@ -1620,20 +1620,38 @@ form.addEventListener("submit", (e) => {
     const bubble = addImageBubble(item.dataUrl, "user", now);  // echo attachments locally
     if (!opening) opening = bubble;
   }
-  // Text the server answers as a command runs no turn and so never sends a `turn_saved`. Enqueuing a
-  // bubble for one strands the entry at the head of the queue, where it shifts every later turn's
-  // control by one (see the queue's declaration); leaving it out costs at most a missing control on a
-  // bubble that has no turn to delete anyway. `/plan` is the exception: it does run a turn.
-  const runsATurn = !text.startsWith("/") || /^\/plan(\s|$)/i.test(text);
-  if (opening && runsATurn) {
+  const thinking = thinkingChoice();
+  // What the server will actually parse, settled before the queue below reads it, because it is not
+  // always what was typed. A message carrying anything besides its text goes as an input frame, which
+  // never takes the /plan wrapper: an image turn has never been plannable, and the picker is disabled
+  // whenever Plan is on, so a frame and a wrapper can never both be wanted.
+  const asFrame = attached.length > 0 || thinking !== null;
+  const outgoing = !asFrame && planNext && !/^\/plan(\s|$)/i.test(text) ? "/plan " + text : text;
+  // The queue is positional, so its two failure directions are not equally bad. Withholding an entry
+  // for a message that does run a turn is the bad one: that turn's `turn_saved` consumes some earlier
+  // bubble's entry instead, so a "delete this turn and everything after it" control ends up deleting
+  // from a turn later than the one it sits on, which is a destructive control pointed at the wrong
+  // target. Enqueuing one for a message that runs no turn only strands the entry at the head, shifting
+  // later controls by one turn until the next repaint clears the queue. So this suppresses exactly the
+  // words the server reserves (`Assistant._serve_channel`), read the way it reads them: /stop and /diag
+  // are matched against the whole message, the conversation commands tolerate whitespace after the
+  // slash and run with or without an argument, and a workflow command with no task is answered with a
+  // usage line. Everything else is enqueued, including an unrecognized "/"-word, which the server
+  // deliberately runs as an ordinary turn so that "/usr/local/bin is missing" reaches the model.
+  //
+  // One case stays wrong and cannot be decided here: a "/word" naming a workflow command that an
+  // installed toolset offers but the entry agent does not declare is answered with no turn, and the
+  // page has no way to know which words those are. It strands an entry, shifting later controls until
+  // the next repaint.
+  const answeredAsCommand =
+    /^\/(stop|diag)$/i.test(outgoing) ||
+    /^\/\s*(new|conversations|switch)(\s|$)/i.test(outgoing) ||
+    /^\/\s*plan\s*$/i.test(outgoing);
+  if (opening && !answeredAsCommand) {
     const active = lastConversations.find((item) => item.active);
     if (active) pendingTurnBubbles.push({ bubble: opening, conversationId: active.id });
   }
-  const thinking = thinkingChoice();
-  if (attached.length || thinking) {
-    // A message carrying anything besides its text goes as an input frame. /plan wrapping does not apply
-    // to one: an image turn has never been plannable, and the picker is disabled whenever Plan is on, so
-    // a frame and a wrapper can never both be wanted.
+  if (asFrame) {
     const frame = { type: "input", text };
     if (attached.length) frame.images = attached.map(a => a.dataUrl);
     if (thinking) frame.thinking = thinking;
@@ -1643,7 +1661,6 @@ form.addEventListener("submit", (e) => {
       renderPreviews();
     }
   } else {
-    const outgoing = planNext && !/^\/plan(\s|$)/i.test(text) ? "/plan " + text : text;
     ws.send(outgoing);
   }
   input.value = "";

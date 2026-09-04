@@ -188,3 +188,20 @@ what keeps the window shut from the other side. The fix is in the turn runner ra
 those call sites: re-fetch the agent inside the hold (or pin and revalidate it across the wait) so a turn
 always runs on the agent the conversation has when it actually starts. That is a change to
 invariant-governed code, so it wants its own pass over the invariants at the top of `core/turns.py`.
+
+## 18. Let the server say which messages became turns, instead of the page guessing
+`app.js`'s `pendingTurnBubbles` is a positional queue: each `turn_saved` consumes the oldest entry for
+that conversation, because nothing correlates a sent message with the save it produces. That forces the
+page to predict server behavior before it sends, deciding for itself which composer text will be
+answered as a command and run no turn, and it has to keep that prediction in step with
+`Assistant._serve_channel`'s dispatch and with `_slash_command`'s parsing. Every wrong prediction costs
+a control: withholding an entry for a message that does run a turn mis-targets a later delete control,
+and enqueuing one for a message that runs no turn shifts the rest until a repaint. Two cases stay wrong
+today for reasons the page cannot fix, since it cannot know them: a workflow command an installed
+toolset offers but the entry agent does not declare, and a message consumed as the answer to a pending
+approval.
+
+Make the server authoritative instead. Either a frame saying a message was answered without becoming a
+turn, or a client-supplied token echoed back on `turn_saved` so the queue matches rather than counts;
+the token is the stronger of the two, since it also survives a proactive turn's save landing in the
+conversation being viewed. Either one lets the page stop parsing commands it does not own.
