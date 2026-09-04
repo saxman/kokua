@@ -906,9 +906,11 @@ in both directions: a disconnect ends the reader, and an unexpected error ends t
 the reader with it, since a reader left running would queue frames into a drain nobody reads, which is the
 same wedge with the halves swapped.
 
-Every control that changes which conversation is on screen (`new`, `select`, `delete`, and `branch`,
-which carries `id` and `message_index`) ends the same way: it resyncs the view rather than describing
-what changed, `select` and `delete` included, so the applying task never has to reason about a diff.
+`new`, `select`, `delete`, and `branch` (which carries `id` and `message_index`) all end the same way:
+each resyncs the view rather than describing what changed, so the applying task never has to reason
+about a diff. `delete` takes that same path even when the conversation it removes is not the one on
+screen, where the resync only refreshes the sidebar; the four share one mechanism regardless of which of
+them actually changes what the user sees.
 Among the frames the server pushes, `turn_saved` (`{"conversation_id", "message_index"}`) takes no such
 resync, because it names one turn that already rendered rather than replacing anything: it exists only to
 say where that turn now lives in the store, so a bubble already on screen can grow a branch control.

@@ -979,10 +979,24 @@ def test_ws_branch_at_an_unknown_turn_says_so_and_does_not_switch(tmp_path):
     with TestClient(app).websocket_connect("/ws") as ws:
         convs = _drain_until(ws, "conversations")
         active_id = next(i["id"] for i in convs["items"] if i["active"])
-        ws.send_text(json.dumps({"type": "branch", "id": active_id, "message_index": 42}))
+        request = json.dumps({"type": "branch", "id": active_id, "message_index": 42})
+        ws.send_text(request)
         message = _drain_until(ws, "message")
+        # The failure must be the whole of the reply: no `conversations` or `history` frame is allowed
+        # to sneak in before it (which would mean a switch happened despite the error) or after it
+        # (which would mean one is still coming). Provoking the identical failure a second time and
+        # collecting everything in between is what actually exercises "does not switch", since draining
+        # only to the first `message` frame passes whether or not `_sync_view` ran.
+        ws.send_text(request)
+        seen_types = []
+        while True:
+            frame = ws.receive_json()
+            if frame["type"] == "message":
+                break
+            seen_types.append(frame["type"])
 
     assert "branch" in message["text"].lower()
+    assert "conversations" not in seen_types and "history" not in seen_types
 
 
 def test_ws_sends_settings_on_connect(tmp_path):

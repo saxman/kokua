@@ -317,6 +317,14 @@ class ConversationBook:
         # Titled at birth, which is also what keeps `persist` from deriving one from the inherited
         # first user message and handing the branch its parent's title.
         session = self.new_session(title=title)
+        # A one-level copy of each message, not a deep one: a message dict's values (role, content,
+        # provenance, tool_calls) are only ever replaced wholesale, never mutated in place, once a turn
+        # commits it, so the branch and the parent sharing the same nested lists/dicts is safe under
+        # that discipline. The metadata slices just below get `copy.deepcopy` instead because their
+        # values (usage counters, a trace list) are the opposite: a subsystem reading `session.metadata`
+        # off a live in-memory session could still append to one in place. Both copies are equally safe
+        # today only because `TinyDBSessionStore.get` reparses from JSON on every call, handing back
+        # fresh objects either way; the distinction matters the day a store hands back live references.
         session.messages = [dict(message) for message in parent.messages[:cut]]
         session.metadata["branched_from"] = {"conversation_id": conversation_id, "message_index": user_index}
         for key in TURN_KEYED_METADATA:

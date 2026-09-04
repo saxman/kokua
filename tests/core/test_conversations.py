@@ -906,3 +906,32 @@ async def test_branch_conversation_switches_and_abandons_a_pending_question(tmp_
 
     assert assistant._active_id == branch_id
     assert assistant._store.get(branch_id).metadata["title"] == "Branch of Kauai trip"
+
+
+async def test_branch_conversation_reverts_active_id_on_build_failure(tmp_path):
+    """branch reuses _activate verbatim, the same as select/new/delete, so a build failure on the
+    new branch's agent must revert the active pointer exactly like it does for the other three."""
+    from kokua.core.assistant import ModelClientError
+
+    calls = {"n": 0}
+
+    def factory(conversation_id):
+        calls["n"] += 1
+        if calls["n"] > 1:  # the parent conversation builds fine; the branch's own build fails
+            raise ModelClientError("model no longer available")
+        return MockAsyncModelClient([])
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    parent = assistant._session
+    parent.messages = [dict(message) for message in BRANCH_MESSAGES]
+    parent.metadata["title"] = "Kauai trip"
+    assistant._store.save(parent)
+    original_id = assistant._active_id
+
+    with pytest.raises(ModelClientError):
+        await assistant.branch_conversation(parent.key, 1)
+
+    # Reverts to the parent, which was active before the call; the branch's own session record
+    # still lingers in the store, unused but harmless, the same best-effort revert new_conversation
+    # documents.
+    assert assistant._active_id == original_id

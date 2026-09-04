@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER, PROVENANCE_KEY, PROVENANCE_PROACTIVE
+from aimu.models import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.sessions import Session
 
 from kokua.core.messages import INJECTED_USER_PROVENANCE, message_text
@@ -209,8 +209,11 @@ def search(
 # --- replay --------------------------------------------------------------------------------------
 
 # User-role turns the agent loop injects between tool-calling iterations. They are byte-for-byte
-# ordinary user messages except for this provenance tag, so display keys off the tag alone.
-_LOOP_PROVENANCE = frozenset({PROVENANCE_CONTINUATION, PROVENANCE_FINAL_ANSWER})
+# ordinary user messages except for this provenance tag, so display keys off the tag alone. Same set
+# as messages.INJECTED_USER_PROVENANCE (both name "a loop injection, not real user input"), kept under
+# its own name here because the two call sites ask different questions of it: that one filters a
+# message out of what counts as user input, this one decides how to render one that was not filtered.
+_LOOP_PROVENANCE = INJECTED_USER_PROVENANCE
 
 # AIMU's make_async_subagent_tool (aimu/aio/tools/builtin.py) defaults its built tool's name to this
 # literal; kokua never overrides it. A spawn's own `subagent` card already shows its role, task, and

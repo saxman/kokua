@@ -754,7 +754,7 @@ class TurnRunner:
         except Exception:
             logger.warning("A scheduled task ran; its notification could not be delivered", exc_info=True)
 
-    async def _persist(self, conversation_id: str, user_index: int = -1) -> None:
+    async def _persist(self, conversation_id: str, user_index: int) -> None:
         """Snapshot the turn onto its session, refreshing the sidebar if a title was just derived, and
         publish where the turn starts so a front end can offer an action on it.
 
