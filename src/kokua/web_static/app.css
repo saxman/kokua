@@ -353,10 +353,14 @@ button.secondary, .notification-banner button { background: none; border-color: 
 /* Quiet until the bubble is hovered, like the timestamp beside it, because it is an affordance you
    look for rather than one you should keep noticing, except to a keyboard user tabbing through the
    transcript, for whom :focus-visible has to reveal it the way hover does for a pointer. */
-.bubble-branch { border: none; background: none; padding: 0; color: var(--fg-faint); font-size: 0.95em;
-  line-height: 1.2; cursor: pointer; opacity: 0; transition: opacity 0.12s; }
-.bubble:hover .bubble-branch, .bubble-branch:focus-visible { opacity: 1; }
+.bubble-branch, .bubble-truncate { border: none; background: none; padding: 0; color: var(--fg-faint);
+  font-size: 0.95em; line-height: 1.2; cursor: pointer; opacity: 0; transition: opacity 0.12s; }
+.bubble:hover .bubble-branch, .bubble-branch:focus-visible,
+.bubble:hover .bubble-truncate, .bubble-truncate:focus-visible { opacity: 1; }
 .bubble-branch:hover { color: var(--accent); }
+/* Destructive, so its hover colour says so rather than matching the branch control beside it. The
+   same `--danger` the sidebar's delete controls use, declared in both the light and dark blocks. */
+.bubble-truncate:hover { color: var(--danger); }
 .attach-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 8px; }
 .attach-previews .chip { position: relative; }
 .attach-previews img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }

@@ -516,6 +516,11 @@ let subagentCards = {};      // sub-agent card id -> element, so a "running" car
 // none. null between turns and while the current turn hasn't produced a top-level answer yet, which is
 // exactly when a branch control should be withheld rather than land on the wrong bubble.
 let liveLastAnswer = null;
+// The bubble that opened the live turn, which is where its delete-from-here control goes once the
+// server says the turn reached the store. Cleared after use so a later `turn_saved` (a scheduled run
+// in this conversation, which draws no user bubble at all) cannot stamp this turn's bubble with
+// another turn's index.
+let liveTurnFirstBubble = null;
 
 // Render/update a sub-agent card as a foldable block. Two producers share this frame type: a
 // planning reviewer (role + status + issues) and a spawned sub-agent (role + task + status, its
@@ -752,6 +757,31 @@ function addBranchControl(el, messageIndex, conversationId) {
   btn.addEventListener("click", () => {
     if (ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type: "branch", id: conversationId, message_index: messageIndex }));
+  });
+  bubbleMetaRow(el).appendChild(btn);
+}
+// A turn's delete-from-here control, appended to the bubble that opens the turn. `messageIndex` and
+// `conversationId` are read exactly as `addBranchControl` reads them, and for the same reasons: the
+// page never computes an index (a count of rendered bubbles is not the same number), and the
+// conversation is captured at stamp time because the active one can change before the click.
+//
+// The glyph is the sidebar's delete "×" rather than something bespoke, so the destructive affordance
+// looks the same wherever it appears; what it deletes is in the label and in the confirmation, since
+// a glyph cannot say "and everything after this".
+function addTruncateControl(el, messageIndex, conversationId) {
+  if (!el || el.dataset.truncateIndex !== undefined || !Number.isInteger(messageIndex) || messageIndex < 0) return;
+  if (!conversationId) return;
+  el.dataset.truncateIndex = String(messageIndex);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "bubble-truncate";
+  btn.textContent = "×";
+  btn.title = "Delete this turn and everything after it";
+  btn.setAttribute("aria-label", "Delete this turn and everything after it");
+  btn.addEventListener("click", () => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (!confirm("Delete this turn and everything after it? This cannot be undone.")) return;
+    ws.send(JSON.stringify({ type: "truncate", id: conversationId, message_index: messageIndex }));
   });
   bubbleMetaRow(el).appendChild(btn);
 }
@@ -1216,6 +1246,10 @@ function handleFrame(event) {
     const active = lastConversations.find((item) => item.active);
     if (active && active.id === frame.conversation_id) {
       addBranchControl(liveLastAnswer, frame.message_index, frame.conversation_id);
+      addTruncateControl(liveTurnFirstBubble, frame.message_index, frame.conversation_id);
+      // One turn, one stamp: a proactive run in this conversation draws no user bubble, so leaving
+      // this set would put its index on the bubble of whatever the user sent last.
+      liveTurnFirstBubble = null;
     }
   } else if (frame.type === "history") {
     // Also the marker that the server got past building an assistant for this connection, which is
@@ -1233,6 +1267,7 @@ function handleFrame(event) {
     streamingText = "";
     thinkingBlock = null;
     liveLastAnswer = null;
+    liveTurnFirstBubble = null;
     stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
     setProcessing(false);  // idle unless the "working" frame behind this one says otherwise
     setWorking(null);  // reset; that same frame re-shows the indicator when the turn is still running
@@ -1245,6 +1280,10 @@ function handleFrame(event) {
     // message_index, or the end of the transcript.
     let replayTurnIndex = -1;
     let replayLastAnswer = null;
+    // Whether the turn being replayed has had its delete-from-here control placed. Unlike the branch
+    // control, this one goes on the first bubble of the turn, so it is placed as soon as one appears
+    // rather than when the turn ends.
+    let replayTurnStamped = false;
     const closeReplayTurn = () => {
       addBranchControl(replayLastAnswer, replayTurnIndex, replayConversationId);
       replayLastAnswer = null;
@@ -1256,12 +1295,18 @@ function handleFrame(event) {
       // so it goes unfixed here; closing it for real means replay_items emitting an index-bearing
       // item for every user message, not a reset on this side.
     };
+    const stampTurnStart = (bubble) => {
+      if (replayTurnStamped) return;
+      addTruncateControl(bubble, replayTurnIndex, replayConversationId);
+      replayTurnStamped = true;
+    };
     for (const item of frame.items) {
       if (Number.isInteger(item.message_index)) {
         closeReplayTurn();
         replayTurnIndex = item.message_index;
+        replayTurnStamped = false;
       }
-      if (item.type === "user") addBubble("user", item.text, item.ts);
+      if (item.type === "user") stampTurnStart(addBubble("user", item.text, item.ts));
       // An in-flight turn's answer so far: left open (and unstamped), so the rest streams into it.
       else if (item.type === "partial" && !isBlank(item.text)) {
         streamingText = item.text;
@@ -1269,7 +1314,12 @@ function handleFrame(event) {
         liveLastAnswer = streamingBubble;
       }
       else if (item.type === "plan") renderPlan(item.text);
-      else if (item.type === "image") addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user", item.ts);
+      else if (item.type === "image") {
+        const bubble = addImageBubble(item.url, item.from === "assistant" ? "assistant" : "user", item.ts);
+        // An image the user uploaded can be a turn's opening bubble (an image-only message emits no
+        // "user" item at all); one the assistant generated is mid-turn and never opens it.
+        if (item.from !== "assistant") stampTurnStart(bubble);
+      }
       else if (item.type === "thinking") {
         const f = addFoldable("thinking", { kind: "thinking" }, undefined, item.ts);
         f.body.textContent = item.text || "";
@@ -1547,8 +1597,13 @@ form.addEventListener("submit", (e) => {
   // liveLastAnswer's own comment).
   liveLastAnswer = null;
   const now = new Date();
-  if (text) addBubble("user", text, now);  // show the user's own words, not the /plan wrapper
-  for (const item of attached) addImageBubble(item.dataUrl, "user", now);  // echo attachments locally
+  // The first of these is the turn's opening bubble, whichever it is: an image-only message has no
+  // text bubble, and its control has to land on the image instead.
+  liveTurnFirstBubble = text ? addBubble("user", text, now) : null;  // the user's own words, not the /plan wrapper
+  for (const item of attached) {
+    const bubble = addImageBubble(item.dataUrl, "user", now);  // echo attachments locally
+    if (!liveTurnFirstBubble) liveTurnFirstBubble = bubble;
+  }
   const thinking = thinkingChoice();
   if (attached.length || thinking) {
     // A message carrying anything besides its text goes as an input frame. /plan wrapping does not apply

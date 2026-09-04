@@ -486,6 +486,42 @@ is published by `TurnRunner._persist`, after the store write and only when `Conv
 says the stored transcript really has a user turn there, so the page is never offered a branch point the
 store cannot serve.
 
+### Truncating a conversation
+
+`ConversationBook.truncate(conversation_id, user_index)` is branching's mirror image: a branch keeps
+`messages[:turn_end(...)]` in a new conversation, and a truncation keeps `messages[:user_index]` in this
+one, deleting the named turn and every turn after it. The conversation keeps its id and its place in the
+sidebar, so the view does not move.
+
+Four things decide the shape, and three of them are branching's answers read backwards. The cut is **a
+turn boundary**, validated through the same `turn_end`, because everything before a message the user
+actually sent is complete turns: any other cut can leave the transcript ending between an assistant
+message holding `tool_calls` and the `tool` messages answering them, which a provider rejects on the
+conversation's next request rather than at the click. The per-turn metadata maps are **filtered, not
+remapped**, since a prefix cut leaves every surviving index where it was. The **title is dropped** when
+no user turn survives, which makes an emptied conversation indistinguishable from a fresh one instead of
+leaving it named after a turn that is gone (the system message survives such a cut, so "emptied" is
+about user turns rather than about an empty list). And the conversation's **cached agent is dropped, not
+discarded**: `AgentRegistry.drop_agent` forgets the agent and keeps the per-conversation lock, because
+the truncation is holding that lock while it writes and replacing it would let a queued turn and a later
+one serialize against different objects. The agent rebuilds from the shortened store, which is how the
+deleted turns leave the model's context as well as the display.
+
+One consequence is recorded rather than guarded. A branch stores `branched_from`, the
+`{conversation_id, message_index}` it was forked at, and truncating the *parent* can delete the index a
+child points to. Nothing reads the key today, and the user is allowed to tidy a parent without it
+silently breaking a child, so a later change that reads it (sidebar nesting is the obvious one) has to
+tolerate a fork point that no longer resolves.
+
+Concurrency splits into two halves that answer different questions. The write is held under the
+conversation's own `gate.turn` slot, like `delete` and `retitle`, because the store saves whole sessions
+and a read-modify-write racing a turn's `persist` would revert one of them. A conversation with a turn
+actually *in flight* is then refused, in `Assistant.truncate_conversation`, and that half is not about
+correctness: a turn holds the same slot across its own persist, so the hold already makes an interleaving
+impossible. The refusal keeps the wait bounded (the web front end applies controls on the one task
+reading its socket) and keeps a deletion from applying minutes later, silently taking a turn that
+arrived in between with it.
+
 ## Plugins
 
 Two entry-point groups: `kokua.frontends` (a `FrontEnd` with `run(config, args)`) and `kokua.toolsets`

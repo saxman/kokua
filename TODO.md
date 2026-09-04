@@ -149,9 +149,27 @@ at the next startup. Fix by composing `agent_write` with the discarded per-key c
 replacing it, or by moving the range check somewhere `validate_agents` reaches. This shape will silently
 cost the next range-checked `agents.*` key too, not just this one.
 
-## 14. Reach conversation branching from the terminal
+## 14. Reach conversation branching and truncation from the terminal
 The web UI forks a conversation at a turn (`ConversationBook.branch`, a control on each turn's
-answer). The terminal cannot: `/new`, `/conversations`, and `/switch` name conversations, and nothing
-names a *turn*. A `/branch` needs a numbered listing of the conversation's turns first, which is a
+answer) and deletes a turn and everything after it (`ConversationBook.truncate`, a control on each
+user turn). The terminal can do neither: `/new`, `/conversations`, and `/switch` name conversations,
+and nothing names a *turn*. Both need a numbered listing of the conversation's turns first, which is a
 design decision of its own (turn ordinals, counting back from the latest, or the message index the
-web control uses). Until then a terminal user branches by opening the web UI.
+web controls use). One listing unblocks both. Until then a terminal user opens the web UI.
+
+## 15. Decide whether the assistant may delete the user's turns
+`ConversationBook.truncate` deletes a turn and everything after it, and only the web UI can reach it:
+the `conversations` toolset is read-only, as its module docstring promises. An agent tool for it is a
+strictly larger grant than branching's (which was also declined): a model that can delete the user's
+record can erase the evidence of what it did. If it is ever added it wants a `[security]
+confirm_tools` gate as part of the same change, and the open question is whether a confirmed
+destructive tool is worth having at all when the control is two clicks away in the UI.
+
+## 16. Nothing collects orphaned images
+Deleting a conversation, and now deleting turns from one (`ConversationBook.truncate`), drops messages
+holding content-addressed `/images/<hash>` references while their files stay under
+`$KOKUA_HOME/data/images`. Nothing prunes them, so the directory only grows. A collector has to cover
+every route that drops such a reference and has to be safe against sharing (the store is
+content-addressed, so two conversations can hold the same hash, and an export or a `/images` URL a user
+saved can outlive both). Decide between a sweep at startup, a reference count, and leaving it alone with
+the growth documented.

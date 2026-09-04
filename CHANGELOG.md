@@ -131,6 +131,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   and costs, is titled "Branch of <the original>", and never inherits a scheduled task's ownership,
   so branching a task's run does not enter it into that task's retention. A terminal `/branch` is
   not part of this (see `TODO.md`).
+- **Delete a conversation's turns from a turn onward.** Every user turn in the web UI carries a
+  delete-from-here control: it removes that turn and every turn after it from the saved conversation,
+  in place, leaving the earlier turns and the conversation itself untouched. The deleted turns leave
+  the model's context too, along with their recorded cards, traces, and costs. Deleting from the first
+  turn empties the conversation and returns it to "New conversation" rather than leaving it named after
+  a turn that is gone. A conversation with a turn still running is refused rather than queued behind
+  it, and says so. There is no undo, and no terminal command or agent tool for it (see `TODO.md`).
 
 ### Front ends
 
