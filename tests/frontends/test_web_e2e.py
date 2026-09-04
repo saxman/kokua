@@ -1531,8 +1531,13 @@ def test_the_truncate_control_survives_a_reload(page, live_server):
     """A replayed turn carries the control too, stamped from the `message_index` on its user item.
 
     Two turns again, so replay is checked for more than presence: each index must come back unchanged
-    rather than renumbered by render order, which a page counting bubbles instead of reading
-    `message_index` would get right live and wrong here.
+    across the repaint, and the two turns must not collapse onto a single index.
+
+    What this does not catch, said plainly so nobody reads more into it: a page that derived an index by
+    counting rendered bubbles rather than reading `message_index` would count the same way before and
+    after the reload, so `before == after` would still hold. The sibling branch-control test says the
+    same of itself. The stored indices are not 0 and 1 in any case, since the system message occupies
+    index 0 of a stored transcript.
     """
     url = live_server(delay=0.0)
     _open(page, url)
@@ -1582,7 +1587,7 @@ def test_a_second_message_sent_mid_reply_does_not_share_the_first_turns_truncate
     behavior; nothing here disables the composer mid-turn) meant that by the time the first turn's
     `turn_saved` frame arrived, the lone reference already pointed at the *second* bubble, which got
     stamped with the *first* turn's index. `addTruncateControl` refuses to stamp a bubble twice, so the
-    first bubble was left with no control at all and the second one carried the wrong index -- meaning a
+    first bubble was left with no control at all and the second one carried the wrong index, meaning a
     user who clicked delete on their second message would silently delete both. `pendingTurnBubbles`
     (`app.js`), a FIFO of bubbles awaiting their save consumed oldest first, is what fixed it: this test
     would fail on the old single-reference code, since only one control would ever appear (on the wrong
@@ -1605,6 +1610,11 @@ def test_a_second_message_sent_mid_reply_does_not_share_the_first_turns_truncate
     # keydown listener does rather than clicking a control Playwright would refuse to act on.
     page.locator("#msg").press("Enter")
     expect(page.locator(".bubble.user", has_text="second")).to_be_visible(timeout=10_000)
+
+    # Both turns pending at the same time is the whole point of this test, so assert it rather than
+    # trusting the delay: on a slower machine the second submit could land after the first turn was
+    # already saved, which would quietly turn this into the sequential case another test covers.
+    assert page.evaluate("() => pendingTurnBubbles.length") == 2
 
     # Both turns must finish (the second queues behind the first on the same conversation) before both
     # controls can exist, so wait for the second reply too.
