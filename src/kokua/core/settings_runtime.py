@@ -72,17 +72,29 @@ class SettingsApplier:
         self.persist(applied)
 
     async def apply(self, settings: dict) -> dict:
-        """Apply a sanitized settings dict live; returns it, for the caller to persist.
+        """Apply a sanitized settings *payload* live; returns it, for the caller to persist.
 
         Everything happens under an exclusive gate hold (waits for in-flight turns to drain, blocks
-        new ones), so no turn reads a half-applied set.
+        new ones), so no turn reads a half-applied set. The set is what earns the hold: a settings
+        panel sends several keys at once, and a turn reading one toolset's new flag beside its old one
+        is the tear this excludes. :meth:`apply_one` writes a single key and takes no hold at all, for
+        the reason stated there.
         """
         async with self._gate.exclusive():
-            for setting in self._table.settings:
-                if setting.wire_key not in settings:
-                    continue
-                setting.write(self._config, settings[setting.wire_key])
+            self._write(settings)
         return settings
+
+    def _write(self, settings: dict) -> None:
+        """Write each named setting into the live config. Synchronous, and that is load-bearing.
+
+        No ``await`` anywhere in this loop, so it runs to completion before any other coroutine is
+        scheduled. That is what lets :meth:`apply_one` skip the gate: a reader can see the values from
+        before this call or the values from after it, never a mixture.
+        """
+        for setting in self._table.settings:
+            if setting.wire_key not in settings:
+                continue
+            setting.write(self._config, settings[setting.wire_key])
 
     def persist(self, settings: dict) -> None:
         """Write an applied settings dict back into config.toml, one ``[section].key`` per setting."""
@@ -96,9 +108,29 @@ class SettingsApplier:
 
         Builds the wire-shaped settings dict for the single change and applies it. Raises if it cannot
         be applied, so the tool skips persisting a change that did not take.
+
+        **Takes no gate hold, unlike :meth:`apply`, and the asymmetry is the point rather than an
+        oversight.** Its one caller is ``update_config``, a tool, and a tool runs inside its turn, which
+        holds that conversation's reader for its whole length (invariant 1 in ``core/turns.py``).
+        Reaching for the exclusive hold from there deadlocks outright: the writer waits for the reader
+        count to reach zero, and the count includes the very turn that is awaiting this call. It also
+        blocked every *other* conversation while it hung, the gate being writer-preferring, so one tool
+        call stopped the whole assistant rather than only its own conversation.
+
+        What makes going without safe is reach, which is how ``core/turn_gate.py`` says the side of an
+        operation is decided: this writes one scalar through :meth:`_write`, with no ``await`` between
+        reading the table and writing the value, so there is no half-applied state for a turn to
+        observe. The multi-key tear ``apply`` excludes cannot arise from a single key. Reaching for the
+        writer when nothing needed excluding is the same mistake ``ConversationBook.delete`` once made,
+        and the gate's own module docstring names it: it is how an unbounded wait gets built out of
+        bounded parts.
+
+        Still ``async``, though nothing here awaits: ``config_store.apply_setting`` takes this as an
+        ``Awaitable[None]``, and that seam is what lets the bottom layer apply a value it cannot itself
+        reach.
         """
         applied: dict = {}
         setting = self._table.by_toml(section, key)
         if setting is not None:
             applied[setting.wire_key] = value
-        await self.apply(self._table.sanitize(applied))
+        self._write(self._table.sanitize(applied))

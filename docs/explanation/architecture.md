@@ -874,6 +874,20 @@ table's contents depend on which toolsets are installed. The
 sanitizer predates the removal of the web settings window and outlived it: `update_config` is now its
 only caller, so "panel" in the surrounding code names a surface that no longer exists.
 
+`SettingsApplier` writes a hot value two ways, and which gate hold each takes is decided by reach, the
+rule `core/turn_gate.py` states. `apply` takes a whole payload and holds the gate *exclusively*, so no
+turn reads a set half applied: several keys land together, and a turn seeing one toolset's new flag
+beside its old one is the tear that hold excludes. `apply_one` writes a single key and takes **no hold at
+all**, which is not a shortcut. Its one caller is `update_config`, a tool, and a tool runs inside its
+turn, which holds that conversation's reader for its whole length; reaching for the exclusive hold from
+there deadlocked outright, since the writer waits for a reader count that includes the turn awaiting the
+call, and being writer-preferring it queued every other conversation's next turn behind it too. One key
+needs no exclusion: the write loop is synchronous with no `await` in it, so a reader sees the values
+from before the call or from after it and never a mixture. This was the same misjudgement
+`ConversationBook.delete` once made with the same cause, which is why the gate's module docstring leads
+with it: reaching for the writer when a single slot, or none, would do is how an unbounded wait gets
+built out of bounded parts.
+
 ## State
 
 Everything lives under `~/.kokua` (override with `KOKUA_HOME`). `config.toml` sits at the root;

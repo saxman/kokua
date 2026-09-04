@@ -83,6 +83,15 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   so the change applies to the next conversation with no restart, and it is the one entry in
   `CORE_RUNTIME_SETTINGS`, since no capability owns it. Which model writes the title is not
   configurable: the conversation already answers that.
+- **A hot setting applies from inside a turn.** `update_config` on a hot key reached
+  `SettingsApplier.apply`, which held the turn gate *exclusively*, from a tool that was itself running
+  inside a turn holding that conversation's reader: the writer waited for a reader count that included
+  the turn awaiting it, so the call never returned. Because the gate is writer-preferring, it also
+  queued every *other* conversation's next turn behind it, making one tool call stop the whole
+  assistant until the turn was cancelled. The applier now writes a single key without any hold, which
+  is safe because that write is synchronous and reaches one scalar, and keeps the exclusive hold for a
+  whole payload, where several keys really can be read half applied. The tests missed it because every
+  one of them stubbed the hot-apply callable, so the hold was never taken.
 - **`/stop`** cancels an in-flight reply and keeps the partial turn so the conversation continues (the
   web UI has a Stop button for the same). Built on AIMU's `aio.RunHandle`; reactive turns run as
   background tasks, so the channel keeps reading mid-turn -- which is also what lets a web approval

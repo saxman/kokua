@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import tomllib
 from pathlib import Path
 
@@ -231,3 +232,91 @@ async def test_update_config_writes_the_model_for_the_next_restart(tmp_path):
     assert settings.load(str(cfg.config_path), table=core_table())["model"] == "ollama:qwen3:8b"
     assert assistant._config.model == "m1"  # the running conversations keep the client they were built with
     assert "restart" in result.lower()
+
+
+# --- applying one hot setting from inside a turn ---------------------------------------------------
+#
+# `update_config` is a tool, a tool runs inside its turn, and a turn holds that conversation's reader
+# on the gate for its whole length. So the one caller `apply_one` has always calls it from under a
+# reader, which is exactly the shape `apply`'s exclusive hold cannot survive: the writer waits for the
+# reader count to reach zero, and the count includes the turn that is waiting on this call.
+
+
+def _real_gate() -> TurnGate:
+    """A gate whose per-conversation locks are real, so ``gate.turn`` can actually be taken.
+
+    The module's other tests use a lock factory answering None, which is enough for ``apply`` (the
+    exclusive path never asks for a conversation's lock) and not for anything holding a turn.
+    """
+    locks: dict = {}
+    return TurnGate(lambda conversation_id: locks.setdefault(conversation_id, asyncio.Lock()))
+
+
+async def test_applying_one_setting_does_not_wait_on_the_turn_calling_it(tmp_path: Path):
+    """The regression. A single-key write reaches one scalar, so it takes no gate hold at all, and the
+    turn dispatching the tool is not waiting on itself."""
+    config = AssistantConfig(config_path=tmp_path / "config.toml", toolset_settings={"widgets": {"verbose": False}})
+    applier = SettingsApplier(config, _real_gate(), table=_table(), state=lambda: None)
+
+    async with applier._gate.turn("c1"):
+        await asyncio.wait_for(applier.apply_one("widgets", "verbose", True), timeout=5)
+
+    assert config.toolset_settings["widgets"]["verbose"] is True
+
+
+async def test_applying_a_whole_payload_still_drains_in_flight_turns(tmp_path: Path):
+    """The other half of the asymmetry, so the fix above cannot quietly become "no settings write ever
+    synchronizes". A panel payload is several keys, and a turn must not read it half applied."""
+    config = AssistantConfig(config_path=tmp_path / "config.toml", toolset_settings={"widgets": {"verbose": False}})
+    gate = _real_gate()
+    applier = SettingsApplier(config, gate, table=_table(), state=lambda: None)
+
+    async with gate.turn("c1"):
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(applier.apply(_table().sanitize({"widgets.verbose": True})), timeout=0.5)
+
+
+async def test_the_update_config_tool_applies_a_hot_key_from_inside_a_turn(tmp_path):
+    """End to end, through the real tool on a real agent. The suite's other coverage of ``update_config``
+    stubs ``apply_hot``, so the hold this used to take was never entered and the deadlock never showed."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    update_config = next(fn for fn in agent.tools if getattr(fn, "__name__", "") == "update_config")
+
+    async with assistant._gate.turn(conversation_id):
+        answer = await asyncio.wait_for(update_config("assistant", "generate_titles", "false"), timeout=5)
+
+    assert "applied it to the current session" in answer
+    assert assistant._config.generate_titles is False
+
+
+async def test_a_hot_key_applied_in_one_turn_does_not_block_another_conversation(tmp_path):
+    """The amplification, pinned. The gate is writer-preferring, so while a settings write waits for a
+    reader that will never be released, every *other* conversation's next turn queues behind it too: one
+    tool call on one conversation stopped the whole assistant rather than only its own."""
+    assistant = await Assistant.create(
+        _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["ok"])
+    )
+    busy = assistant._active_id
+    await assistant.new_conversation()
+    other = assistant._active_id
+    agent = assistant._book.agent_for(busy)
+    update_config = next(fn for fn in agent.tools if getattr(fn, "__name__", "") == "update_config")
+
+    async def turn_calling_the_tool():
+        async with assistant._gate.turn(busy):
+            await update_config("assistant", "generate_titles", "false")
+            # Held open past the call, so the assertion below is about the settings write and not about
+            # a turn that had already finished.
+            await asyncio.sleep(0.2)
+
+    running = asyncio.create_task(turn_calling_the_tool())
+    await asyncio.sleep(0.05)
+
+    async def unrelated_turn():
+        async with assistant._gate.turn(other):
+            return "ran"
+
+    assert await asyncio.wait_for(unrelated_turn(), timeout=5) == "ran"
+    await running
