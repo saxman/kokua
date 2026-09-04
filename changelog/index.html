@@ -1803,6 +1803,26 @@ The pre-release development history is in the git log.</p>
   so the change applies to the next conversation with no restart, and it is the one entry in
   <code>CORE_RUNTIME_SETTINGS</code>, since no capability owns it. Which model writes the title is not
   configurable: the conversation already answers that.</li>
+<li><strong>A hot setting applies from inside a turn.</strong> <code>update_config</code> on a hot key reached
+  <code>SettingsApplier.apply</code>, which held the turn gate <em>exclusively</em>, from a tool that was itself running
+  inside a turn holding that conversation's reader: the writer waited for a reader count that included
+  the turn awaiting it, so the call never returned. Because the gate is writer-preferring, it also
+  queued every <em>other</em> conversation's next turn behind it, making one tool call stop the whole
+  assistant until the turn was cancelled. The applier now writes a single key without any hold, which
+  is safe because that write is synchronous and reaches one scalar, and keeps the exclusive hold for a
+  whole payload, where several keys really can be read half applied. The tests missed it because every
+  one of them stubbed the hot-apply callable, so the hold was never taken.</li>
+<li><strong>A conversation can also be renamed on purpose</strong>, three ways, all ending at the same guarded write.
+  A sidebar row's pencil edits its title in place (Enter and blur commit, Escape abandons), sending the
+  title the page was showing along with the new one, so a row a generated title has already moved under
+  loses to what is stored and is repainted rather than silently overwriting it. The editor carries a ✨ that asks the
+  model instead, and unlike the automatic title that one reads the <em>whole</em> conversation, condensed to
+  keep both ends (the opening says what it was for, the tail says where it went), because a conversation
+  renamed later has usually gone somewhere its first message did not predict. It ignores
+  <code>generate_titles</code>, which governs the title nobody asked for. And <code>rename_conversation</code> gives the
+  assistant the same job. That last one is where turn invariant 1 becomes visible: a tool holds its
+  turn's gate slot and the write needs the same one, so the tool queues the write behind the turn and
+  says so in its reply, since a read later in that turn still shows the old name.</li>
 <li><strong><code>/stop</code></strong> cancels an in-flight reply and keeps the partial turn so the conversation continues (the
   web UI has a Stop button for the same). Built on AIMU's <code>aio.RunHandle</code>; reactive turns run as
   background tasks, so the channel keeps reading mid-turn -- which is also what lets a web approval
@@ -1845,6 +1865,26 @@ The pre-release development history is in the git log.</p>
   agent, so it works with the model server down. A read that races the daemon's own persist reports the
   store as busy rather than parsing a torn file. See
   <a href="https://saxman.info/kokua/how-to/export-a-conversation/">Export a conversation</a>.</li>
+<li><strong>Branch a conversation at a turn.</strong> Every turn in the web UI carries a branch control, on the
+  message that opened it and beside the delete-from-here control:
+  it forks a new conversation holding everything through that turn and switches to it, leaving the
+  original untouched in the sidebar. The fork carries the turn's recorded sub-agent cards, models,
+  and costs, is titled "Branch of <the original>", and never inherits a scheduled task's ownership,
+  so branching a task's run does not enter it into that task's retention. A terminal <code>/branch</code> is
+  not part of this (see <code>TODO.md</code>).</li>
+<li><strong>Duplicate a whole conversation.</strong> Every row in the web UI's sidebar carries a duplicate control,
+  beside export and delete: it copies that conversation, with its recorded sub-agent cards, models, and
+  costs, into a new one titled "Copy of <the original>". Unlike a branch it does not move the view, so a
+  row you are not reading can be copied without leaving the one you are; the copy appears in the sidebar
+  and nothing else changes. Like a branch it never inherits a scheduled task's ownership. There is no
+  terminal command or agent tool for it.</li>
+<li><strong>Delete a conversation's turns from a turn onward.</strong> Every user turn in the web UI carries a
+  delete-from-here control: it removes that turn and every turn after it from the saved conversation,
+  in place, leaving the earlier turns and the conversation itself untouched. The deleted turns leave
+  the model's context too, along with their recorded cards, traces, and costs. Deleting from the first
+  turn empties the conversation and returns it to "New conversation" rather than leaving it named after
+  a turn that is gone. A conversation with a turn still running is refused rather than queued behind
+  it, and says so. There is no undo, and no terminal command or agent tool for it (see <code>TODO.md</code>).</li>
 </ul>
 <h3 id="front-ends">Front ends<a class="headerlink" href="#front-ends" title="Permanent link">&para;</a></h3>
 <ul>
@@ -1863,8 +1903,8 @@ The pre-release development history is in the git log.</p>
     messages are not warm. The disclosure triangle is the only glyph on the page; every block names its
     kind in words.</li>
 <li><strong>Conversations</strong> are listed in a sidebar, auto-titled from the first message, each row showing its
-    relative age, with new / select / delete (deleting the active one switches to the most recently
-    updated remaining conversation). The header strip names the conversation being viewed. The sidebar
+    relative age, with new / select / rename / rename-with-AI / delete (deleting the active one switches
+    to the most recently updated remaining conversation). The header strip names the conversation being viewed. The sidebar
     collapses to an icon rail and drag-resizes between 180 and 480px; the divider is keyboard-operable.
     Width, collapsed state, and theme are per-browser preferences applied before first paint, so there
     is no flash on load.</li>
@@ -2087,11 +2127,11 @@ The pre-release development history is in the git log.</p>
   session store is opened or any MCP server connected, so a bad config leaves nothing written and nothing
   connected. One agent shape backs this: <code>wire_agent</code> builds any agent from its declaration, selecting
   its toolsets once and feeding the same list to both its tools and its prompt.</li>
-<li><strong>The assistant can look across your other conversations.</strong> The <code>conversations</code> toolset, three
-  read-only tools:
+<li><strong>The assistant can look across your other conversations.</strong> The <code>conversations</code> toolset, three reads
+  and one write:
   <code>list_conversations</code> (ids, last-active times, message counts, titles), <code>read_conversation</code> (one
-  transcript as plain text), and <code>search_conversations</code> (case-insensitive text across every saved
-  conversation, with snippets). So "what did we decide about the deployment last week?" is answerable,
+  transcript as plain text), <code>search_conversations</code> (case-insensitive text across every saved
+  conversation, with snippets), and <code>rename_conversation</code> (a title, and nothing else). So "what did we decide about the deployment last week?" is answerable,
   and context from a past thread can be carried into a <code>spawn_subagent</code> task. The shipped config gives it
   to the entry agent and to no worker, and a test pins that: a worker shares no history and has no
   conversation identity, so the capability would widen a spawn's blast radius for nothing.</li>

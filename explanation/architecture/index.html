@@ -1304,6 +1304,50 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#renaming-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Renaming a conversation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#branching-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Branching a conversation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#truncating-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Truncating a conversation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicating-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicating a conversation
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1755,6 +1799,50 @@
     <span class="md-ellipsis">
       
         Titling a conversation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#renaming-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Renaming a conversation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#branching-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Branching a conversation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#truncating-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Truncating a conversation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#duplicating-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Duplicating a conversation
       
     </span>
   </a>
@@ -2379,7 +2467,7 @@ this table exists rather than a naming convention alone:</p>
 <td><code>scheduling</code></td>
 </tr>
 <tr>
-<td><code>list_conversations</code>, <code>read_conversation</code>, <code>search_conversations</code></td>
+<td><code>list_conversations</code>, <code>read_conversation</code>, <code>search_conversations</code>, <code>rename_conversation</code></td>
 <td><code>toolsets/conversations.py</code></td>
 <td><code>conversations</code></td>
 </tr>
@@ -2421,8 +2509,9 @@ the sidebar was showing prose written to steer a model.</p>
 <h3 id="reading-across-conversations">Reading across conversations<a class="headerlink" href="#reading-across-conversations" title="Permanent link">&para;</a></h3>
 <p><code>toolsets/conversations.py</code> defines <code>list_conversations</code>, <code>read_conversation</code>, and
 <code>search_conversations</code> over <code>core/transcripts.py</code> (flattening, truncation, search) and
-<code>ConversationBook.resolve</code> (an id or a unique prefix). Two decisions in it are worth knowing before
-changing them.</p>
+<code>ConversationBook.resolve</code> (an id or a unique prefix). It also defines <code>rename_conversation</code>, the one
+tool here that writes, covered under <a href="#renaming-a-conversation">Renaming a conversation</a> below. Two
+decisions in it are worth knowing before changing them.</p>
 <p>The shipped config gives it to the entry agent and to no worker, deliberately: a worker shares no history
 and has no conversation identity, so "the user's other conversations" means nothing to it, and granting
 the capability would widen a spawn's blast radius for no gain. When a worker needs history, the entry
@@ -2455,9 +2544,10 @@ instead, and that one is titled like any other first turn.</p>
 user is waiting for and a title is worth neither a round-trip on the end of their first turn nor an error
 they have to read: every failure path -- an endpoint that is down, a model string naming nothing, an
 answer that sanitizes to nothing -- returns None, and the placeholder stands. It is <strong>guarded on the way
-in</strong>: <code>retitle</code> writes only if the title it was built to replace is still there, so a conversation
-deleted while the model was writing is not resurrected by a store whose <code>get</code> answers a missing key with
-a fresh empty session, and a rename, if Kokua ever grows one, wins over a title in flight. And it takes <strong>that conversation's
+in</strong>: <code>retitle</code> checks that the conversation is still in the store, so one deleted while the model was
+writing is not resurrected by a <code>get</code> that answers a missing key with a fresh empty session, and it
+checks that the title it was built to replace is still there, so a rename that landed first wins over a
+title in flight. And it takes <strong>that conversation's
 own turn slot</strong> for the write, like <code>delete</code> and for the same bounded reason, because the store saves
 whole sessions: an unsynchronized read-modify-write would revert whatever the next turn persisted between
 the read and the write. Shutdown cancels a title still in flight rather than awaiting it, for the reason
@@ -2468,6 +2558,143 @@ no capability owns it: <code>Assistant._spawn_title</code> is the only reader. I
 because that read happens per conversation, so a change genuinely applies without a restart, which is
 the test the model itself fails. There is no setting for <em>which</em> model writes the title, because the
 conversation already answers that.</p>
+<h3 id="renaming-a-conversation">Renaming a conversation<a class="headerlink" href="#renaming-a-conversation" title="Permanent link">&para;</a></h3>
+<p>A title can also be replaced on purpose, three ways, all of them ending at the same
+<code>ConversationBook.retitle</code> the generated title uses.</p>
+<p><strong>By hand.</strong> The sidebar row's pencil swaps its title for an input (Enter and blur commit, Escape
+abandons) and sends a <code>rename</code> control carrying the new title <em>and</em> the one the page was showing.
+<code>Assistant.rename_conversation</code> clamps to 40 characters, refuses an empty title rather than clearing the
+one there, and passes the old title as <code>retitle</code>'s <code>replacing</code> guard: a row a generated title has already
+moved under loses to what is stored, and the page is told so and repainted. The page defers its own
+re-render while an edit is open, because until the input is committed the typed title exists nowhere
+else.</p>
+<p><strong>By asking the model.</strong> The ✨ inside that same editor sends a <code>retitle</code> control, and
+<code>Assistant.regenerate_title</code>
+spawns <code>titles.summarize_conversation_title</code> in the background exactly as the automatic title is
+spawned. It differs from that one in what it reads and in who may ask. It reads the <em>whole</em> conversation
+rather than the opening message (<code>titles.condense_transcript</code>: the first entry always, the newest
+entries filling a 4000-character budget, an omission marker between), because a conversation renamed
+later has usually gone somewhere its first message did not predict, and re-reading only that message
+would hand back the title already showing. And it ignores <code>[assistant] generate_titles</code>, which governs
+the title nobody asked for. The control returns as soon as the call <em>starts</em>, never awaiting it: the web
+front end applies controls in arrival order on one task, so awaiting a local model here would queue
+every control behind it, <code>/stop</code> included. The sidebar is pushed however the call ends, including on a
+decline, because the row shows "naming" until a conversation list arrives and nothing else would ever
+clear it.</p>
+<p>That ✨ lives in the editor rather than beside the pencil for a measured reason, and the number is
+worth keeping. A sidebar row is 240px by default, its hover controls are invisible but still take
+clicks, and each one added eats the title: three controls left the title 130px, four leave it 93px,
+and five left it <strong>56px</strong>, which is about six characters before the ellipsis. At five, the row's own
+centre point was the duplicate button, so clicking a row to switch conversations copied it instead.
+Grouping the two ways of naming under one control is what keeps the row a row. The same arithmetic is
+why a sixth control here would need a menu rather than a place in the line.</p>
+<p><strong>By the assistant.</strong> <code>rename_conversation</code> is a tool, and it is the one place in this repository where
+turn invariant 1 shows up as a visible design constraint rather than a rule to obey. A tool runs inside
+its turn, that turn holds its conversation's turn slot for its whole length, and <code>retitle</code> takes the same
+slot, so awaiting the write from inside the tool would wait on a lock the waiting task itself holds. The
+tool therefore hands the write to <code>Assistant.schedule_rename</code>, which queues it as a background task the
+way a title is queued; the gate's per-conversation lock is a plain <code>asyncio.Lock</code> with no owning task, so
+the queued write simply waits the turn out. Two consequences are stated rather than hidden. The tool's
+own reply says the rename lands when the turn finishes, since a <code>read_conversation</code> later in the same
+turn still shows the old title and a model told nothing would "correct" itself in a second call. And the
+queued write passes <code>replacing=None</code>: the only title it could read when queued is the one from before
+that turn's own <code>persist</code>, so comparing against it would refuse every rename asked for on a
+conversation's first turn. The existence check and the gate still apply.</p>
+<h3 id="branching-a-conversation">Branching a conversation<a class="headerlink" href="#branching-a-conversation" title="Permanent link">&para;</a></h3>
+<p><code>ConversationBook.branch(conversation_id, user_index)</code> forks a conversation at one of its turns: it
+writes a new session holding a copy of the parent's transcript through the end of that turn, titles it
+<code>Branch of &lt;the parent&gt;</code>, and activates it through the same <code>_activate</code> path <code>create</code> uses, so a branch
+whose agent fails to build reverts the pointer rather than stranding the view. The parent is not
+touched, and the two are ordinary independent conversations afterwards.</p>
+<p>Three things decide the shape. The cut is <strong>a turn boundary</strong>, found by <code>turn_end</code>: the next message the
+user actually sent, skipping the <code>user</code>-role nudges the agent loop injects between tool-calling
+iterations (<code>messages.is_user_turn</code>). That is the only cut a transcript survives, because anywhere else
+can fall between an assistant message holding <code>tool_calls</code> and the <code>tool</code> messages answering them, which
+a provider rejects on the branch's <em>next</em> request rather than at the fork, where it could still be
+reported. The per-turn metadata maps (<code>subagent</code>, <code>trace</code>, <code>model</code>, <code>thinking</code>, <code>failure</code>, <code>usage</code>) are
+<strong>filtered, not remapped</strong>, because a prefix copy leaves every index where it was: the branch replays its
+inherited turns exactly as the parent does, cards and costs included. And <code>task_id</code> is <strong>not inherited</strong>,
+because a branch of a scheduled run is the user's conversation rather than another run of that task;
+inheriting it would nest the branch under the task and enter it into that task's retention pruning.</p>
+<p>Branching reads the store, never <code>agent_for</code>, for the reason the conversation tools do, and takes no
+turn-gate hold: it reads a snapshot of the parent and writes a brand-new key, so there is nothing for
+another turn's <code>persist</code> to collide with. A turn in flight on the parent is invisible to it, which is
+correct, since the cut is always behind that turn. Switching into the branch backgrounds a turn running
+in the parent rather than cancelling it, exactly as <code>select</code> does.</p>
+<p>The web page names a turn by the position of its user message, which <code>replay_items</code> already stamps on
+replayed items and which the <code>turn_saved</code> frame supplies for a turn that just finished live. That frame
+is published by <code>TurnRunner._persist</code>, after the store write and only when <code>ConversationBook.branchable</code>
+says the stored transcript really has a user turn there, so the page is never offered a branch point the
+store cannot serve.</p>
+<p>The control itself sits on the bubble that <em>opens</em> the turn, beside the delete-from-here control, and
+<code>stampTurnControls</code> places the pair together so they cannot drift apart. Anchoring both on the turn's
+first bubble rather than on its answer is what lets the page name a turn without inference: that bubble
+is the one <code>message_index</code> refers to, so nothing has to associate an answer back to the user message
+above it, and a turn whose output is a sub-agent card, an image, or nothing at all needs no special case.
+It also keeps the newest turn branchable, which anchoring on the <em>following</em> user message would not: there
+is no message after the newest turn, and the answer you just read is the one most likely to be forked.
+The label says "including this exchange" because a control on your own message otherwise reads as an
+offer to re-ask it, which would cut before the message rather than after its answer.</p>
+<h3 id="truncating-a-conversation">Truncating a conversation<a class="headerlink" href="#truncating-a-conversation" title="Permanent link">&para;</a></h3>
+<p><code>ConversationBook.truncate(conversation_id, user_index)</code> is branching's mirror image: a branch keeps
+<code>messages[:turn_end(...)]</code> in a new conversation, and a truncation keeps <code>messages[:user_index]</code> in this
+one, deleting the named turn and every turn after it. The conversation keeps its id and its place in the
+sidebar, so the view does not move.</p>
+<p>Four things decide the shape, and three of them are branching's answers read backwards. The cut is <strong>a
+turn boundary</strong>, validated through the same <code>turn_end</code>, because everything before a message the user
+actually sent is complete turns: any other cut can leave the transcript ending between an assistant
+message holding <code>tool_calls</code> and the <code>tool</code> messages answering them, which a provider rejects on the
+conversation's next request rather than at the click. The per-turn metadata maps are <strong>filtered, not
+remapped</strong>, since a prefix cut leaves every surviving index where it was. The <strong>title is dropped</strong> when
+no user turn survives, which makes an emptied conversation indistinguishable from a fresh one instead of
+leaving it named after a turn that is gone (the system message survives such a cut, so "emptied" is
+about user turns rather than about an empty list). And the conversation's <strong>cached agent is dropped, not
+discarded</strong>: <code>AgentRegistry.drop_agent</code> forgets the agent and keeps the per-conversation lock, because
+the truncation is holding that lock while it writes and replacing it would let a queued turn and a later
+one serialize against different objects. The agent rebuilds from the shortened store, which is how the
+deleted turns leave the model's context as well as the display.</p>
+<p>One consequence is recorded rather than guarded. A branch stores <code>branched_from</code>, the
+<code>{conversation_id, message_index}</code> it was forked at, and truncating the <em>parent</em> can delete the index a
+child points to. Nothing reads the key today, and the user is allowed to tidy a parent without it
+silently breaking a child, so a later change that reads it (sidebar nesting is the obvious one) has to
+tolerate a fork point that no longer resolves.</p>
+<p>Concurrency splits into two halves that answer different questions. The write is held under the
+conversation's own <code>gate.turn</code> slot, like <code>delete</code> and <code>retitle</code>, because the store saves whole sessions
+and a read-modify-write racing a turn's <code>persist</code> would revert one of them. A conversation with a turn
+actually <em>in flight</em> is then refused, in <code>Assistant.truncate_conversation</code>, and the refusal is worth
+reading in two parts. What the hold already covers: a turn holds the same slot across its own persist,
+so the cut can never be interleaved with a turn's save, and the tempting rationale for the refusal (a
+turn's save would undo the cut) is false. What the refusal adds: a bounded wait (the web front end
+applies controls in arrival order on a single task, so a control parked on the gate leaves every control
+behind it, <code>/stop</code> included, queued until it returns; the socket is read on a separate task, so that is a
+delay rather than a wedge), a user who is not surprised by a deletion applying minutes later and silently
+taking a turn that arrived in between, and one piece of correctness the hold misses.
+<code>TurnRunner.reactive</code> fetches its agent <em>before</em> taking the gate, so a turn queued behind a truncation
+would run to completion on the agent the truncation dropped and have its answer discarded by <code>persist</code>,
+which re-fetches the agent and snapshots the rebuilt one. Refusing keeps such a turn from starting behind
+a cut; <code>TODO.md</code> carries the deeper fix, which belongs to the turn runner. The refusal is asked twice,
+once by <code>Assistant.truncate_conversation</code> before it awaits anything and once inside the book's hold
+through a <code>turn_running</code> predicate that method injects, so a turn already in flight cannot slip through
+the window between the check and the gate. It is injected rather than looked up because the book holds
+the gate while the assistant owns the turn tracker, and <code>core</code>'s conversation layer must not reach upward
+for it.</p>
+<h3 id="duplicating-a-conversation">Duplicating a conversation<a class="headerlink" href="#duplicating-a-conversation" title="Permanent link">&para;</a></h3>
+<p><code>ConversationBook.duplicate(conversation_id)</code> copies a whole conversation into a new one. It is the
+third member of the branch/truncate family and the one that asks about a <em>conversation</em> rather than a
+turn, which is what removes most of the shape the other two need: no index, no <code>turn_end</code>, and no
+metadata filtering, because nothing is cut. It keeps the copy discipline they share (one level per
+message, a deep copy of the per-turn maps), titles the result <code>Copy of &lt;the original&gt;</code>, records
+<code>copied_from</code>, and leaves <code>task_id</code> behind for the same reason a branch does.</p>
+<p>Two things distinguish it. It <strong>does not activate</strong> what it wrote, so it is the one
+conversation-minting method with no <code>_activate</code> and therefore no pointer to revert: no agent is built,
+so nothing here can fail on a model client. And it is reached from a <strong>sidebar row</strong> rather than from a
+turn, which is why not switching is the right default: the row you copy is often not the conversation
+you are reading, and moving the view onto the copy would take you out of it. What tells you it worked is
+the new row, not a jump.</p>
+<p>The web control follows from that. <code>duplicate</code> is handled in <code>frontends/web.py</code> beside <code>export</code> and the
+settings and task controls, in the group that answers <em>without</em> the sidebar-and-history refresh the
+switching controls get: it pushes a fresh conversation list, because the copy has to appear, and skips
+the history replay, because the page is still displaying what it was already displaying.</p>
 <h2 id="plugins">Plugins<a class="headerlink" href="#plugins" title="Permanent link">&para;</a></h2>
 <p>Two entry-point groups: <code>kokua.frontends</code> (a <code>FrontEnd</code> with <code>run(config, args)</code>) and <code>kokua.toolsets</code>
 (a <code>Toolset</code> with <code>build(ctx)</code>). The built-in <code>cli</code>/<code>web</code> front ends and the three plugin toolsets are
@@ -2741,6 +2968,19 @@ entry, <code>[assistant].generate_titles</code>; every other hot setting a run h
 table's contents depend on which toolsets are installed. The
 sanitizer predates the removal of the web settings window and outlived it: <code>update_config</code> is now its
 only caller, so "panel" in the surrounding code names a surface that no longer exists.</p>
+<p><code>SettingsApplier</code> writes a hot value two ways, and which gate hold each takes is decided by reach, the
+rule <code>core/turn_gate.py</code> states. <code>apply</code> takes a whole payload and holds the gate <em>exclusively</em>, so no
+turn reads a set half applied: several keys land together, and a turn seeing one toolset's new flag
+beside its old one is the tear that hold excludes. <code>apply_one</code> writes a single key and takes <strong>no hold at
+all</strong>, which is not a shortcut. Its one caller is <code>update_config</code>, a tool, and a tool runs inside its
+turn, which holds that conversation's reader for its whole length; reaching for the exclusive hold from
+there deadlocked outright, since the writer waits for a reader count that includes the turn awaiting the
+call, and being writer-preferring it queued every other conversation's next turn behind it too. One key
+needs no exclusion: the write loop is synchronous with no <code>await</code> in it, so a reader sees the values
+from before the call or from after it and never a mixture. This was the same misjudgement
+<code>ConversationBook.delete</code> once made with the same cause, which is why the gate's module docstring leads
+with it: reaching for the writer when a single slot, or none, would do is how an unbounded wait gets
+built out of bounded parts.</p>
 <h2 id="state">State<a class="headerlink" href="#state" title="Permanent link">&para;</a></h2>
 <p>Everything lives under <code>~/.kokua</code> (override with <code>KOKUA_HOME</code>). <code>config.toml</code> sits at the root;
 <code>data/</code> holds only content: <code>sessions.json</code>, <code>skills/</code>, <code>memory/</code>, <code>documents/</code>, <code>downloads/</code>,
@@ -2806,7 +3046,7 @@ than a shared one.</p>
 <code>channels/web.py</code>'s <code>WebChannel</code> subclasses
 <a href="https://saxman.info/aimu/how-to/build-personal-assistant/">AIMU's base <code>WebChannel</code></a>. The streaming transport
 (<code>token</code>/<code>thinking</code>/<code>tool</code>/<code>done</code> frames and <code>send()</code>) lives in AIMU's base; Kokua's subclass adds the
-<code>conversations</code>, <code>history</code>, and <code>approval</code> frames its richer page needs. The UI is a single
+<code>conversations</code>, <code>history</code>, <code>approval</code>, and <code>turn_saved</code> frames its richer page needs. The UI is a single
 self-contained <code>web_static/index.html</code> served as package data, plus vendored <code>marked</code> + <code>DOMPurify</code>
 (GitHub-flavored markdown, sanitized, rendered client-side as the answer streams) and vendored KaTeX,
 typeset after sanitization with <code>trust:false</code> once the turn completes. The server allowlists these assets: JS/CSS by name, the
@@ -2836,6 +3076,14 @@ of ordering, and it is now a delay rather than a wedge. Whichever half finishes 
 in both directions: a disconnect ends the reader, and an unexpected error ends the applier and has to end
 the reader with it, since a reader left running would queue frames into a drain nobody reads, which is the
 same wedge with the halves swapped.</p>
+<p><code>new</code>, <code>select</code>, <code>delete</code>, and <code>branch</code> (which carries <code>id</code> and <code>message_index</code>) all end the same way:
+each resyncs the view rather than describing what changed, so the applying task never has to reason
+about a diff. <code>delete</code> takes that same path even when the conversation it removes is not the one on
+screen, where the resync only refreshes the sidebar; the four share one mechanism regardless of which of
+them actually changes what the user sees.
+Among the frames the server pushes, <code>turn_saved</code> (<code>{"conversation_id", "message_index"}</code>) takes no such
+resync, because it names one turn that already rendered rather than replacing anything: it exists only to
+say where that turn now lives in the store, so a bubble already on screen can grow a branch control.</p>
 <h3 id="reconnecting-after-a-dropped-socket">Reconnecting after a dropped socket<a class="headerlink" href="#reconnecting-after-a-dropped-socket" title="Permanent link">&para;</a></h3>
 <p>The page opens its socket through a <code>connect()</code> function that reassigns the <code>ws</code> binding on every
 attempt, so restarting Kokua under an open browser does not leave a page whose only recovery is a reload.
