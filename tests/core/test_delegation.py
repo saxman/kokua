@@ -453,3 +453,16 @@ def test_the_spawn_tool_is_built_with_the_global_cap_not_the_delegators(tmp_path
     config.max_iterations = 10
     agent = _FakeAgent("assistant", "ollama:qwen3:8b")
     assert _captured_spawn_kwargs(monkeypatch, config, state, agent)["max_iterations"] == 10
+
+
+def test_the_shipped_analyst_can_read_the_export_the_assistant_hands_it(tmp_path):
+    """`export_conversation` answers with a path, and a path is a dead end unless something the
+    assistant can reach reads files. Pins that pairing over the shipped example rather than the
+    example's prose: the delegate has to exist, be reachable from the entry agent, and actually
+    resolve to an agent holding `read_file`."""
+    from tests.channels import example_agents
+
+    config, state = _state(tmp_path, example_agents())
+    spec = build_agent_specs(config, state, "assistant")["analyst"]
+
+    assert "read_file" in {fn.__name__ for fn in spec["tools"]}

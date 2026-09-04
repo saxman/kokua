@@ -386,7 +386,7 @@ and does so inside the function that needs it rather than at module scope, becau
 imports `settings_sources` at module level to build its cold-key schema -- hoisting the upward import
 would close that loop and break `import kokua.toolsets.core` on a partially-initialized module.
 
-Note the convention is only part of the answer: twelve of the 31 tools the shipped entry agent holds
+Note the convention is only part of the answer: twelve of the 32 tools the shipped entry agent holds
 come from AIMU and are not in this repo at all, which is why
 [docs/explanation/architecture.md](docs/explanation/architecture.md#how-an-agents-tools-resolve) carries
 the full inventory and `tests/core/test_build.py` pins it as an exact set. That inventory is what

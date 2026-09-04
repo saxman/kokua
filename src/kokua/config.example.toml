@@ -103,13 +103,13 @@ locked_config_keys = [
 # `description` is the label a delegator sees.
 
 [agents.assistant]
-# The agent you talk to (see [assistant].agent above): cross-cutting tools to manage itself, plus two
-# sub-agents for specialized work. Anything neither specialist covers, it composes a sub-agent for on
+# The agent you talk to (see [assistant].agent above): cross-cutting tools to manage itself, plus three
+# sub-agents for specialized work. Anything none of them covers, it composes a sub-agent for on
 # the spot with `capabilities`, so there is no catch-all role here to route to instead.
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark"]
-delegates_to = ["researcher", "coder"]
+delegates_to = ["researcher", "coder", "analyst"]
 
 [agents.researcher]
 description = "Research specialist: gather and verify information from the web."
@@ -133,6 +133,20 @@ tools = ["fs", "compute", "time"]
 system_message = """\
 You are a coding sub-agent. Complete the task by reading and writing files and running code (Python, \
 shell, or calculations). Report exactly what you did and the concrete result."""
+
+# Reads a file so a long one costs its context rather than the conversation's: this is the delegate
+# `export_conversation` is meant to be paired with. `fs` grants read of any file on this machine, not
+# only an export; drop this agent (and its name from delegates_to above) if you would rather not have
+# a second delegate with that reach.
+[agents.analyst]
+description = "Analysis specialist: read a long file and answer questions about what it shows."
+tools = ["fs", "time"]
+system_message = """\
+You are an analysis sub-agent. You are given the path to a file, usually the Markdown export of one of \
+the user's conversations, holding the reasoning, tool calls, tool results, sub-agent activity, and \
+per-turn cost of a run. Read it and answer the question asked about it, quoting the lines you drew each \
+conclusion from. If the read comes back truncated, say so and say which part of the file you saw: an \
+answer drawn from the opening of a run must never be reported as an answer about the whole run."""
 
 # More agents to copy, each mixing built-in groups, MCP servers, and plugin toolsets in the one list.
 # [agents.stock-trader]

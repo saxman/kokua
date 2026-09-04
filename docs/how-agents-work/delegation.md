@@ -83,7 +83,9 @@ designed and is also why this page cannot show you one from a CLI capture.
 
 **The choice was made from one line of prose per role.** The model's reasoning lists what it can
 delegate to, and those two lines are verbatim the `description` fields of `[agents.coder]` and
-`[agents.researcher]` in the config file. Watch it reason honestly and still get stuck: `This seems
+`[agents.researcher]` in the config file. (This run was captured before the shipped config grew a third
+delegate, `analyst`; your own run of the same prompt lists three roles rather than two, and the point
+below holds for all of them.) Watch it reason honestly and still get stuck: `This seems
 like it could be handled by either sub-agent`. Neither role fits a request to summarize a concept, and
 there is no "none of these" option, so it picked one and justified it afterwards. A role menu always
 returns a role.
@@ -116,7 +118,7 @@ There are two routes, and the difference between them is the whole design.
 ```toml
 [agents.assistant]
 ...
-delegates_to = ["researcher", "coder"]
+delegates_to = ["researcher", "coder", "analyst"]
 
 [agents.researcher]
 description = "Research specialist: gather and verify information from the web."

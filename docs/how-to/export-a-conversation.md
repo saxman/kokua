@@ -9,10 +9,11 @@ terminal is gone.
 It reads the conversation straight out of the session store and writes the file; nothing else. No
 model client, no agent, no front end, so it works even with the model server down.
 
-There are two routes to the same content, written to different files: the `kokua export` command
-below, and a download button in the web UI's sidebar (see [From the web UI](#from-the-web-ui)). Both
-call the same renderer, so the two files read identically; only their names differ (see each route's
-section below).
+There are three routes to the same content, written to different files: the `kokua export` command
+below, a download button in the web UI's sidebar (see [From the web UI](#from-the-web-ui)), and
+asking the assistant to export one so it can analyze it (see [Have the assistant analyze a
+conversation](#have-the-assistant-analyze-a-conversation)). All three call the same renderer, so the
+files read identically; only their names differ (see each route's section below).
 
 ## The command
 
@@ -96,15 +97,58 @@ an `"export"` control over the same socket every other sidebar action uses, and 
 writing the file and pointing the page at the existing `/download/{name}` route (the one that already
 serves generated PDFs and other artifacts) rather than opening a second way to fetch a file.
 
-**The web route cannot lift the truncation cap.** `--full` is a command-line flag; the web download
-always exports with `DEFAULT_MAX_PAYLOAD_CHARS` in effect, so a browser-only user can never see an
-untruncated tool payload. Use `kokua export --full` from the command line if you need one.
+**The download button cannot lift the truncation cap.** `--full` is a command-line flag, and the
+sidebar's button always exports with `DEFAULT_MAX_PAYLOAD_CHARS` in effect. A browser-only user is not
+stuck, though: asking the assistant to export the conversation runs the tool below, which does take
+the flag. Or use `kokua export --full` from the command line.
 
 **Data at rest.** A full transcript, once exported, persists indefinitely under `downloads_path` and
 is served by `/download/{name}` over plain HTTP with no authentication. The path-traversal guards on
 that route are sound and the default `[web] host` is loopback-only, but `host` is a setting a user can
 change, and a conversation is often the most sensitive thing Kokua holds. Treat an exported file, and
 the host it is served from, accordingly.
+
+## Have the assistant analyze a conversation
+
+The same export is a tool the assistant holds, `export_conversation`, which is how you get an answer
+about a run rather than a file about it. Ask in plain words:
+
+> Something went wrong in the conversation about the flight prices yesterday. Which tool call failed,
+> and what did it return?
+
+The assistant finds the conversation (`list_conversations` or `search_conversations`), exports it, and
+gets back a path plus how long the file is. What happens next depends on the length, and that is the
+part worth understanding.
+
+**A path, not the transcript.** The tool answers with a file path on purpose. AIMU's `fs` group offers
+`read_file(path, max_lines)` and no offset, so a file can be read from its first line and nowhere else,
+and a tool that returned the Markdown directly would spend the asking conversation's whole context on
+one run's tool output. So a long export is meant to be handed to a sub-agent: the assistant passes the
+path and your question to a worker whose fresh context absorbs the file, and only the findings come
+back. `config.example.toml` ships `[agents.analyst]` for exactly this, and the assistant's guidance
+tells it to delegate rather than read once the file is past a few hundred lines. A short export it will
+usually just read itself, which is the right call: a delegation costs a spawn.
+
+**Ask for `full` detail when the tool result is the thing you are debugging.** The tool takes the same
+cap `--full` lifts, so "export it with the full tool output" gets you a file with nothing cut.
+
+**What it cannot do yet.** If the export is longer than the analyst's own context, the read stops part
+way and the analysis covers only the beginning of the run. The analyst is instructed to say so rather
+than answer as if it had read the whole thing, so you get "I saw the first N lines" instead of a
+confident partial answer, but the underlying fix (paging into a file) is not there yet: it needs an
+`offset` on AIMU's `read_file`, which is item 19 in `TODO.md`. For a very long run, `kokua export` plus
+your own editor is still the more reliable read.
+
+**The current conversation is a blind spot, and it says so.** The export renders the *stored*
+transcript, and the turn you are in right now is not stored until it finishes. Exporting the
+conversation you are talking in gets you everything up to this turn, and the answer says as much; the
+same goes for a conversation whose reply is still streaming somewhere else.
+
+**This grants a delegate that reads files.** `[agents.analyst]` declares `fs`, which grants read of any
+file on the machine and not only of an export. That is the same reach `[agents.coder]` already ships
+with, and like every capability here it is a line in your `config.toml`: delete the agent and its name
+from `[agents.assistant].delegates_to` if you would rather not have it, and the export tool still works
+(the assistant will read the file itself, or hand you the path).
 
 ## The store, mid-write
 

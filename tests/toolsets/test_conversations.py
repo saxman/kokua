@@ -7,6 +7,7 @@ plain coroutines. The transcript helpers underneath are covered in ``tests/core/
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from aimu.aio.channels.base import ChannelMessage
 from aimu.sessions import Session, TinyDBSessionStore
@@ -15,6 +16,7 @@ from kokua.core.assistant import Assistant
 from kokua.toolsets.conversations import (
     ACTIVE_CONVERSATION_NOTE,
     BLANK_QUERY,
+    LARGE_EXPORT_NOTE,
     MAX_CONTEXT_CHARS,
     NO_CONVERSATIONS,
     RUNNING_TURN_NOTE,
@@ -44,9 +46,12 @@ def _book(tmp_path, *sessions: Session, adopt=True) -> ConversationBook:
     return book
 
 
-def _tools(book: ConversationBook, running=(), schedule_rename=None) -> dict:
+def _tools(book: ConversationBook, running=(), schedule_rename=None, downloads_path=None) -> dict:
     tools = make_conversation_tools(
-        book, lambda conversation_id: conversation_id in running, schedule_rename or (lambda cid, title: None)
+        book,
+        lambda conversation_id: conversation_id in running,
+        schedule_rename or (lambda cid, title: None),
+        downloads_path or Path("/nonexistent-downloads"),
     )
     return {fn.__name__: fn for fn in tools}
 
@@ -306,8 +311,9 @@ async def test_search_and_read_agree_through_the_wired_tools(tmp_path):
     assert assistant._active_id in await tools["list_conversations"]()
 
 
-def test_the_toolset_builds_its_four_tools(tmp_path):
-    """Three reads and exactly one write, so the one thing this capability can change stays countable."""
+def test_the_toolset_builds_its_five_tools(tmp_path):
+    """Three reads, one rename, and one export, so what this capability can change stays countable:
+    the rename touches a title, the export touches no conversation at all."""
     from kokua.config.schema import AssistantConfig
     from kokua.registry import LiveState, ToolsetContext
     from kokua.toolsets.conversations import TOOLSET
@@ -323,7 +329,13 @@ def test_the_toolset_builds_its_four_tools(tmp_path):
     )
     names = {fn.__name__ for fn in TOOLSET.build(ToolsetContext(state=state, agent=object(), agent_name="assistant"))}
 
-    assert names == {"list_conversations", "read_conversation", "search_conversations", "rename_conversation"}
+    assert names == {
+        "list_conversations",
+        "read_conversation",
+        "search_conversations",
+        "rename_conversation",
+        "export_conversation",
+    }
 
 
 def test_the_guidance_names_the_cross_conversation_tools():
@@ -331,7 +343,13 @@ def test_the_guidance_names_the_cross_conversation_tools():
     about tools it does not have."""
     from kokua.toolsets.conversations import TOOLSET
 
-    for name in ("list_conversations", "read_conversation", "search_conversations", "rename_conversation"):
+    for name in (
+        "list_conversations",
+        "read_conversation",
+        "search_conversations",
+        "rename_conversation",
+        "export_conversation",
+    ):
         assert name in TOOLSET.guidance
 
 
@@ -394,3 +412,141 @@ async def test_rename_says_the_write_lands_after_the_turn(tmp_path):
     answer = await _tools(book)["rename_conversation"]("aaaaaaaa1", "Kauai")
 
     assert "turn" in answer.lower()
+
+
+# --- export_conversation ---------------------------------------------------------------------------
+
+
+def _detailed_messages(tool_result="the answer") -> list[dict]:
+    """A turn carrying everything the plain reading tools drop: reasoning, a call, and its result."""
+    return [
+        _said("user", "what is it"),
+        _said(
+            "assistant",
+            "it is this",
+            thinking="first I weigh the options",
+            tool_calls=[{"id": "c1", "function": {"name": "search_web", "arguments": '{"q": "it"}'}}],
+        ),
+        {"role": "tool", "tool_call_id": "c1", "content": tool_result},
+    ]
+
+
+async def test_export_writes_the_detail_the_reading_tools_drop(tmp_path):
+    """The whole point: reasoning, the call, its arguments, and its result, none of which
+    `read_conversation` will ever show."""
+    book = _book(tmp_path, _session("aaaaaaaa1", title="Kauai trip", messages=_detailed_messages()))
+
+    await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1")
+
+    written = (tmp_path / "downloads" / "aaaaaaaa1.md").read_text(encoding="utf-8")
+    assert "first I weigh the options" in written
+    assert "search_web" in written
+    assert '{"q": "it"}' in written
+    assert "the answer" in written
+
+
+async def test_export_reports_the_path_and_how_big_the_file_is(tmp_path):
+    """The answer is what the model acts on: it has to name the path to hand onward, and enough
+    about the size to decide whether to read it here or delegate it."""
+    book = _book(tmp_path, _session("aaaaaaaa1", title="Kauai trip", messages=_detailed_messages()))
+
+    answer = await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1")
+
+    assert str(tmp_path / "downloads" / "aaaaaaaa1.md") in answer
+    assert "lines" in answer
+    assert "Kauai trip" in answer
+
+
+async def test_export_creates_the_downloads_directory(tmp_path):
+    """A fresh $KOKUA_HOME has never had an artifact written into it."""
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages()))
+
+    await _tools(book, downloads_path=tmp_path / "never-existed")["export_conversation"]("aaaaaaaa1")
+
+    assert (tmp_path / "never-existed" / "aaaaaaaa1.md").exists()
+
+
+async def test_export_caps_a_long_tool_result_by_default(tmp_path):
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages(tool_result="y" * 9000)))
+
+    await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1")
+
+    written = (tmp_path / "downloads" / "aaaaaaaa1.md").read_text(encoding="utf-8")
+    assert "truncated" in written
+    assert "y" * 9000 not in written
+
+
+async def test_export_full_keeps_a_long_tool_result_whole(tmp_path):
+    """Debugging a tool result is one of the reasons to export at all, so the cap has to be liftable."""
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages(tool_result="y" * 9000)))
+
+    await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1", full=True)
+
+    written = (tmp_path / "downloads" / "aaaaaaaa1.md").read_text(encoding="utf-8")
+    assert "y" * 9000 in written
+
+
+async def test_export_of_an_unknown_conversation_writes_nothing(tmp_path):
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages()))
+
+    answer = await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("zzzzzzzz9")
+
+    assert not (tmp_path / "downloads").exists()
+    assert "list_conversations" in answer
+
+
+async def test_export_accepts_an_id_prefix(tmp_path):
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages()))
+
+    await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaa")
+
+    assert (tmp_path / "downloads" / "aaaaaaaa1.md").exists()
+
+
+async def test_re_exporting_overwrites_rather_than_piling_up(tmp_path):
+    """The name is the conversation id, so a second export of the same conversation replaces the
+    first instead of leaving the model to choose between two files."""
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages()))
+    export = _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]
+
+    await export("aaaaaaaa1")
+    await export("aaaaaaaa1", full=True)
+
+    assert [path.name for path in (tmp_path / "downloads").iterdir()] == ["aaaaaaaa1.md"]
+
+
+async def test_export_of_a_conversation_with_a_running_turn_says_the_file_stops_short(tmp_path):
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages()))
+
+    answer = await _tools(book, downloads_path=tmp_path / "downloads", running={"aaaaaaaa1"})["export_conversation"](
+        "aaaaaaaa1"
+    )
+
+    assert RUNNING_TURN_NOTE in answer
+
+
+async def test_export_of_the_current_conversation_says_this_turn_is_not_in_the_file(tmp_path):
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages()))
+
+    answer = await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1")
+
+    assert book.active_id == "aaaaaaaa1"
+    assert ACTIVE_CONVERSATION_NOTE in answer
+
+
+async def test_a_long_export_tells_the_model_to_delegate_it_rather_than_read_it(tmp_path):
+    """`read_file` truncates from the top and takes no offset (TODO item 19), so a file past this
+    size is one the model should hand to a sub-agent whose context can hold it, not read here."""
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages() * 200))
+
+    answer = await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1")
+
+    assert LARGE_EXPORT_NOTE in answer
+
+
+async def test_a_short_export_does_not_suggest_delegating(tmp_path):
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages()))
+
+    answer = await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1")
+
+    assert LARGE_EXPORT_NOTE not in answer

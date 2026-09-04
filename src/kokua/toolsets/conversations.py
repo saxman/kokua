@@ -1,26 +1,37 @@
-"""The ``conversations`` toolset: sight of the user's other conversations, and their names.
+"""The ``conversations`` toolset: sight of the user's other conversations, their names, and their detail.
 
 ``list_conversations``, ``read_conversation`` and ``search_conversations`` let the entry agent answer
 "what did we decide about X last week?" and carry context out of a past thread into a `spawn_subagent`
-task. ``rename_conversation`` is the one thing here that writes, and it writes exactly one field: what
-a conversation is called in the sidebar. All four are entry-agent-only, like the other cross-cutting
-tools: a worker shares no history and has no conversation identity, so "the user's other
-conversations" only means something to the agent the user is talking to.
+task. Those three read what was *said*. ``export_conversation`` is for the other question, how a
+conversation *ran*: it writes the Markdown export, which keeps the reasoning, the tool calls with their
+arguments and results, the sub-agent activity, and the per-turn cost that the reading tools deliberately
+drop. ``rename_conversation`` writes exactly one field, what a conversation is called in the sidebar.
+All five are entry-agent-only, like the other cross-cutting tools: a worker shares no history and has no
+conversation identity, so "the user's other conversations" only means something to the agent the user is
+talking to.
+
+Two of the five write, and it is worth being precise about what: a rename changes a conversation's
+title, and an export changes nothing about any conversation, only leaving a file under
+``downloads_path`` named for the conversation it rendered. Nothing here can write a message, a
+transcript, or a path the model chose.
 
 Everything here is presentation. The transcript reading, flattening, and searching are in
-``core/transcripts.py``, and resolving an id or a unique prefix is ``ConversationBook.resolve``. What is
-left in this module is the tool schemas, the bounds a model may pass and how they are clamped, and the
-sentences it reads back -- including the two markers that keep a stored snapshot honest.
+``core/transcripts.py``, the export rendering is ``transcript_export.render_markdown``, and resolving an
+id or a unique prefix is ``ConversationBook.resolve``. What is left in this module is the tool schemas,
+the bounds a model may pass and how they are clamped, and the sentences it reads back -- including the
+two markers that keep a stored snapshot honest.
 
 ``ToolsetContext`` carries the live ``ConversationBook``, the assistant's ``turn_running``, and its
 ``schedule_rename`` off ``LiveState``, which is what lets this module build the tools without importing
-``core.assistant``. The third of those is not a convenience: a rename cannot be written inline from a
-tool, because the write takes the turn slot the calling turn is already holding, and
-``Assistant.schedule_rename`` is what turns that deadlock into a write queued behind the turn.
+``core.assistant``; the export's directory comes off ``ctx.config`` instead, since it is a path the
+config derives rather than live state. ``schedule_rename`` is not a convenience: a rename cannot be
+written inline from a tool, because the write takes the turn slot the calling turn is already holding,
+and ``Assistant.schedule_rename`` is what turns that deadlock into a write queued behind the turn.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from aimu.sessions import Session
@@ -28,6 +39,7 @@ from aimu.tools import tool
 
 from kokua.core.transcripts import flatten_transcript, readable_messages, search, short_time, truncate_lines
 from kokua.registry.registry import Toolset
+from kokua.transcript_export import DEFAULT_MAX_PAYLOAD_CHARS, render_markdown
 
 if TYPE_CHECKING:
     # Annotation only. A real import would run kokua/core/__init__.py, and this module is reached from
@@ -58,6 +70,24 @@ BLANK_TITLE = "Give a title to rename the conversation to. An empty title would 
 # silence for success would "correct" itself in a second call.
 RENAME_DEFERRED_NOTE = "It takes effect when this turn finishes, so it will still read as the old title until then."
 
+# Above this many lines, an export is a file the model should hand onward rather than read. The number
+# is a judgment about context rather than about the file: a few hundred lines of transcript is already
+# thousands of tokens, and AIMU's `read_file` truncates from the top and takes no offset, so a model
+# that starts reading a long export cannot page to the part it wanted (see TODO item 19). Deliberately
+# not a config setting: it advises, and the model is free to read the file anyway.
+DELEGATE_ABOVE_LINES = 400
+
+EXPORT_CONTENTS_NOTE = (
+    "The file holds the whole record: what was said, the reasoning behind each answer, every tool call "
+    "with its arguments and its result, any sub-agent activity, each turn's model and reasoning effort, "
+    "what it cost, and why a turn stopped if it stopped short."
+)
+LARGE_EXPORT_NOTE = (
+    "This file is long. If you can delegate to a sub-agent that reads files, give it this path and the "
+    "question instead of reading the file here: reading it yourself would spend this conversation's "
+    "context on it, and a single read cannot cover a file this size anyway."
+)
+
 
 def _clamp(value, low: int, high: int, default: int) -> int:
     """A model-supplied bound, coerced and clamped to ``[low, high]``.
@@ -82,6 +112,7 @@ def make_conversation_tools(
     book: "ConversationBook",
     turn_running: Callable[[str], bool],
     schedule_rename: Callable[[str, str], None],
+    downloads_path: Path,
 ) -> list[Callable]:
     """Build the cross-conversation tools bound to the live ``ConversationBook``.
 
@@ -104,6 +135,12 @@ def make_conversation_tools(
     ``rename_conversation`` is the exception to all of that, and takes nothing from the book but the id
     resolution: the write itself is handed to ``schedule_rename`` rather than made here, because a tool
     holds its turn's gate slot and the write needs the same one (invariant 1 in ``core/turns.py``).
+
+    ``export_conversation`` reads the store like the rest and writes its file inside
+    ``downloads_path``, under a name taken from the resolved session's key. Passing the directory in
+    rather than reading it off the config keeps the one thing this factory writes outside the store
+    visible in its signature, and the name coming from the store rather than from the model is what
+    makes a path the model chose unreachable: there is no argument here that reaches the filesystem.
     """
 
     def _unknown(conversation_id: str) -> str:
@@ -257,21 +294,78 @@ def make_conversation_tools(
         schedule_rename(session.key, title)
         return f"Renaming {session.key} from {was!r} to {title!r}. {RENAME_DEFERRED_NOTE}"
 
-    return [list_conversations, read_conversation, search_conversations, rename_conversation]
+    @tool
+    async def export_conversation(conversation_id: str, full: bool = False) -> str:
+        """Write one saved conversation to a Markdown file, including everything `read_conversation` drops.
+
+        Use this when the question is how a conversation *ran* rather than what was said in it: why a
+        turn failed, which tools were called and what they returned, what the reasoning was, what a
+        sub-agent was asked and what it answered, or what a turn cost. Give an id from
+        `list_conversations` or `search_conversations` (a unique leading fragment of at least six
+        characters also works).
+
+        This changes nothing about the conversation. The file is named for the conversation, so
+        exporting the same one again replaces that file rather than leaving two. The answer says how
+        long the file is: when it is long, hand the path to a sub-agent that can read files together
+        with the question you want answered, instead of reading the file into this conversation.
+
+        Args:
+            conversation_id: The conversation to export (full id, or a unique leading fragment).
+            full: Keep every tool call's arguments and result whole. Off by default, which cuts any one
+                of them past a few thousand characters and says so where it cut. Turn it on when the
+                exact text of a long tool result is what you are trying to read.
+        """
+        session = book.resolve(conversation_id)
+        if session is None:
+            return _unknown(conversation_id)
+        markdown = render_markdown(session, max_payload_chars=None if full else DEFAULT_MAX_PAYLOAD_CHARS)
+        # The web front end's download route serves this directory and 404s rather than creating it,
+        # so a fresh $KOKUA_HOME may never have had anything written here.
+        downloads_path.mkdir(parents=True, exist_ok=True)
+        destination = downloads_path / f"{session.key}.md"
+        destination.write_text(markdown, encoding="utf-8")
+
+        # Lines, because that is the unit `read_file` caps by, and the file's real byte size, because
+        # that is what a reader comparing it against a context window needs.
+        lines = len(markdown.splitlines())
+        kilobytes = len(markdown.encode("utf-8")) / 1024
+        answer = [
+            f"Exported {session.key} -- {_title_of(session)} "
+            f"({len(readable_messages(session.messages))} messages, "
+            f"last active {short_time(session.metadata.get('updated_at'))}).",
+            f"File: {destination} ({lines} lines, {kilobytes:.1f} KB)",
+            EXPORT_CONTENTS_NOTE,
+        ]
+        if lines > DELEGATE_ABOVE_LINES:
+            answer.append(LARGE_EXPORT_NOTE)
+        if session.key == book.active_id:
+            answer.append(ACTIVE_CONVERSATION_NOTE)
+        # Last, because the turn it is talking about is newer than anything in the file.
+        if turn_running(session.key):
+            answer.append(RUNNING_TURN_NOTE)
+        return "\n".join(answer)
+
+    return [list_conversations, read_conversation, search_conversations, rename_conversation, export_conversation]
 
 
 CONVERSATIONS_GUIDANCE = (
     " You can see across the user's other chat conversations with `list_conversations`, "
     "`read_conversation`, and `search_conversations`, which read their saved transcripts. This turn is "
-    "not saved yet, so use your own context for the conversation you are in. `rename_conversation` is "
-    "the one of these that changes anything, and all it changes is a conversation's title."
+    "not saved yet, so use your own context for the conversation you are in. Those three show what was "
+    "said; when you are asked about how a conversation ran, which tools it called, what they returned, "
+    "or why a turn failed, use `export_conversation`, which writes all of that to a file and gives you "
+    "the path. `rename_conversation` is the only one that changes a conversation, and all it changes is "
+    "the title."
 )
 
 TOOLSET = Toolset(
     name="conversations",
-    description="Visibility across the user's other conversations, and renaming them.",
+    description="Visibility across the user's other conversations: reading, renaming, and exporting one in full.",
     build=lambda ctx: make_conversation_tools(
-        ctx.state.conversation_book, ctx.state.turn_running, ctx.state.schedule_rename
+        ctx.state.conversation_book,
+        ctx.state.turn_running,
+        ctx.state.schedule_rename,
+        ctx.config.downloads_path,
     ),
     guidance=CONVERSATIONS_GUIDANCE,
     cross_cutting=True,

@@ -164,7 +164,7 @@ the transcript above is that block's behavior:
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark"]
-delegates_to = ["researcher", "coder"]
+delegates_to = ["researcher", "coder", "analyst"]
 ```
 
 Eleven names, no `fs`, no `compute`, no `web`. Every name is resolved against a registry built at
@@ -275,6 +275,6 @@ descriptions are re-sent on every round of every turn. Declaring a capability yo
   and [Architecture: agents and delegation](../explanation/architecture.md#agents-and-delegation) for
   how a declaration becomes a built agent.
 - [The shipped entry agent's
-  inventory](../explanation/architecture.md#the-shipped-entry-agents-inventory): all 31 tools and where
+  inventory](../explanation/architecture.md#the-shipped-entry-agents-inventory): all 32 tools and where
   each comes from.
 - [Configuration reference](../reference/configuration.md): every key in the tables above.

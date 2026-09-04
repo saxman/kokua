@@ -169,7 +169,7 @@ model filled in, lives in `aimu.tools.builtin`:
     """
 ```
 
-That is the general case, not an exception. Twelve of the 31 tools the shipped assistant holds are
+That is the general case, not an exception. Twelve of the 32 tools the shipped assistant holds are
 AIMU's rather than Kokua's, more than a third, and more once skills are installed, since AIMU injects a
 tool per skill script on top of that set. [How an agent's tools
 resolve](../explanation/architecture.md#how-an-agents-tools-resolve) carries the full inventory, and a

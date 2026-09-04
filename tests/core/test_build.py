@@ -188,6 +188,7 @@ ENTRY_AGENT_TOOLS = {
         "read_conversation",
         "search_conversations",
         "rename_conversation",
+        "export_conversation",
     },
     "kokua toolsets/config.py": {"read_config", "update_config"},
     "kokua toolsets/mcp.py": {"add_mcp_server", "remove_mcp_server"},

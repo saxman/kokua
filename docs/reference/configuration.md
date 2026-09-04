@@ -395,12 +395,16 @@ tool, give its server a `[[mcp.server]]` table here and name that server in an a
 a tool from a toolset nothing declares, name that toolset in an agent's `tools`. Both are known from the
 next start.
 
-Three names worth considering adding, all ungated by default: `read_conversation`,
-`search_conversations`, and `rename_conversation`. A saved transcript is untrusted text, since a worker
-may have pasted web content into it, so an injection landing in one conversation can influence another.
-The two reads are ungated by default because gating a read would make an unattended scheduled run that
-reads history fail silently. The rename writes, but it writes one field: the worst an injection gets from
-it is a conversation misleadingly named in the sidebar, with no message touched and nothing lost.
+Four names worth considering adding, all ungated by default: `read_conversation`,
+`search_conversations`, `rename_conversation`, and `export_conversation`. A saved transcript is
+untrusted text, since a worker may have pasted web content into it, so an injection landing in one
+conversation can influence another. The two reads are ungated by default because gating a read would
+make an unattended scheduled run that reads history fail silently. The rename writes, but it writes one
+field: the worst an injection gets from it is a conversation misleadingly named in the sidebar, with no
+message touched and nothing lost. The export is the one whose reason to gate is not about the
+conversation at all: it changes nothing and can only write inside `downloads_path` under a name taken
+from the conversation's own id, but what it writes there is a whole transcript in the clear, in a folder
+`/download/{name}` serves unauthenticated. Gate it if that folder is the part you are protecting.
 
 ### `locked_config_keys`
 

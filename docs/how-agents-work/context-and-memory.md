@@ -208,7 +208,7 @@ friendlier sentence.
 **The arithmetic is not abstract, and the numbers are in this repository.** A locally served model is
 commonly given a 32768-token window. Set `[assistant.generation] max_tokens = 4096` and roughly 28k
 remains for the system prompt, the tool block, and the entire conversation. The shipped entry agent
-resolves to 31 tools, each contributing its name, description, and a described parameter list on
+resolves to 32 tools, each contributing its name, description, and a described parameter list on
 *every* round of *every* turn ([Tool calling](tool-calling.md)), before a single word of conversation.
 That block is a fixed subtraction from the budget, and a long working session on a real task is how you
 spend what is left.

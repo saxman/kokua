@@ -261,7 +261,9 @@ At least one agent is therefore required, and `Assistant.create` refuses a confi
 What the *shipped* config declares is a lean entry agent: `kokua config init` gives
 `[agents.assistant]` the cross-cutting toolsets (memory, documents, skills, config, `mcp`,
 scheduling, conversations, `planning`, `capabilities`, the clock) and no domain toolset, delegating web
-work to `researcher` and filesystem and compute work to `coder`. There is deliberately no catch-all role
+work to `researcher`, filesystem and compute work to `coder`, and reading a long file to `analyst` (the
+delegate `export_conversation` is meant to be paired with; see [Analyzing another
+conversation](#analyzing-another-conversation)). There is deliberately no catch-all role
 alongside them: a task neither specialist covers is what `compose_subagent` is for, and a `generalist`
 declared next to it would claim the same slot more cheaply and win. That keeps the always-on agent's
 tool context small, and the prompt tells it so: `assemble_system_message` adds the "you are a lean
@@ -355,9 +357,9 @@ unconfigured, which is what `email-report` did on the entry agent until the seco
 
 #### The shipped entry agent's inventory
 
-All 31 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
+All 32 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
 `config.example.toml` declares, not a fixed list: a different `tools` line produces a different set.
-Twelve of the 31 come from AIMU, more than a third, and so are not greppable in this repository (more
+Twelve of the 32 come from AIMU, more than a third, and so are not greppable in this repository (more
 once skills are installed, since AIMU injects a tool per skill script on top of this set), which is why
 this table exists rather than a naming convention alone:
 
@@ -370,7 +372,7 @@ this table exists rather than a naming convention alone:
 | `add_mcp_server`, `remove_mcp_server` | `toolsets/mcp.py` | `mcp` |
 | `read_config`, `update_config` | `toolsets/config.py` | `config` |
 | `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task`, `stop_scheduled_task` | `toolsets/scheduling.py` | `scheduling` |
-| `list_conversations`, `read_conversation`, `search_conversations`, `rename_conversation` | `toolsets/conversations.py` | `conversations` |
+| `list_conversations`, `read_conversation`, `search_conversations`, `rename_conversation`, `export_conversation` | `toolsets/conversations.py` | `conversations` |
 | `list_capabilities`, `compose_subagent` | `toolsets/capabilities.py` | `capabilities` |
 | `benchmark_model` | `toolsets/benchmark.py` | `benchmark` |
 | `spawn_subagent` | AIMU `make_async_subagent_tool` | implied by a non-empty `delegates_to` |
@@ -400,9 +402,11 @@ the sidebar was showing prose written to steer a model.
 
 `toolsets/conversations.py` defines `list_conversations`, `read_conversation`, and
 `search_conversations` over `core/transcripts.py` (flattening, truncation, search) and
-`ConversationBook.resolve` (an id or a unique prefix). It also defines `rename_conversation`, the one
-tool here that writes, covered under [Renaming a conversation](#renaming-a-conversation) below. Two
-decisions in it are worth knowing before changing them.
+`ConversationBook.resolve` (an id or a unique prefix). It also defines two tools that are not plain
+reads: `rename_conversation`, covered under [Renaming a
+conversation](#renaming-a-conversation) below, and `export_conversation`, covered under [Analyzing
+another conversation](#analyzing-another-conversation). Two decisions in it are worth knowing before
+changing them.
 
 The shipped config gives it to the entry agent and to no worker, deliberately: a worker shares no history
 and has no conversation identity, so "the user's other conversations" means nothing to it, and granting
@@ -424,6 +428,38 @@ registry bound, so any accidental `agent_for` path fails rather than passing qui
 ordering live; `list()` projects it and `most_recent_or_new` takes its head. It costs one store read per
 conversation, which is already what a sidebar push costs. A bulk read belongs in AIMU's store, and this
 is the seam it would land behind.
+
+### Analyzing another conversation
+
+The three reading tools answer "what was said". `export_conversation` answers a different question, "how
+did that run go", and the difference is everything `read_conversation` deliberately drops: the reasoning,
+each tool call with its arguments and its result, sub-agent activity, each turn's model and reasoning
+effort, what it cost, and why a turn stopped when it stopped short. That is not a second renderer.
+`transcript_export.render_markdown` already produced exactly this document for `kokua export` and for the
+sidebar's download button, over the same `replay_items` the web channel replays a reload from, so the
+tool is a resolve, a render, and a write.
+
+It returns a path, not the document. That is the whole design, and it is forced by a limit worth
+understanding: AIMU's `fs` group is `list_directory` and `read_file(path, max_lines)`, with no offset and
+no search, so a file is readable from its first line downward and nowhere else. A tool that returned the
+Markdown itself would put a run's entire tool output into the context of the conversation asking about
+it, which is the one context that cannot afford it. Handing back a path lets the answer go to a
+sub-agent instead: the entry agent exports, spawns a worker that declares `fs`, and gives it the path
+plus the question, so the transcript is spent against a fresh context and only the findings come back.
+`config.example.toml` ships `[agents.analyst]` as that worker, and
+`test_the_shipped_analyst_can_read_the_export_the_assistant_hands_it` pins the pairing, since a path is
+a dead end unless something the entry agent can reach reads files.
+
+Three consequences to know before changing it. The answer reports the file's line count and size and
+advises delegating past `DELEGATE_ABOVE_LINES`, because a model cannot see how big a file is before
+reading it, and the advice is a sentence rather than a refusal: the tool does not know what the model
+has to delegate to. Nothing slices, so an export larger than the analyst's context is read from its top
+and no further; the analyst's own instructions tell it to report a truncated read as truncated, which
+converts a silent partial answer into a stated one, and the real fix is an `offset` on AIMU's
+`read_file` (item 19 in `TODO.md`). And the write is bounded by construction rather than by validation:
+the directory comes from `AssistantConfig.downloads_path` and the filename from the resolved session's
+key, so no argument the model passes reaches the filesystem, which is why exporting the same
+conversation twice replaces one file instead of accumulating.
 
 ### Titling a conversation
 

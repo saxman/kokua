@@ -205,3 +205,30 @@ Make the server authoritative instead. Either a frame saying a message was answe
 turn, or a client-supplied token echoed back on `turn_saved` so the queue matches rather than counts;
 the token is the stronger of the two, since it also survives a proactive turn's save landing in the
 conversation being viewed. Either one lets the page stop parsing commands it does not own.
+
+## 19. `read_file` can only ever read a file from its first line
+`aimu.tools.builtin.read_file(path, max_lines)` truncates from the top and takes no offset, and
+`list_directory` is the only other member of the `fs` group (`toolsets/fs.py` wraps the group unchanged
+and narrows nothing). An agent handed a file larger than its context can therefore read the beginning of
+that file and nothing else: the truncation notice honestly names the total line count and the parameter
+that would return more, but every larger `max_lines` starts again at line 1, so the only way to reach
+line 900 is to also carry lines 1 through 899. There is no search either, so an agent cannot locate the
+part it wants before paying for everything above it.
+
+Surfaced by conversation analysis: an agent that exports another conversation with `render_markdown` and
+hands the path to a delegate holding `fs` is reading a document whose full tool payloads run to tens of
+thousands of characters, and the turn worth debugging is rarely the first one. The failure is quiet,
+which is what makes it worth fixing: a truncated read of a transcript looks exactly like a complete read
+of a short one, so an analysis silently covers the opening turns and reports as though it covered the
+run.
+
+Note: the fix belongs upstream in the editable `../aimu` sibling. A Kokua-side slicing tool would sit
+beside the group's own `read_file` as a second, differently-shaped way to read a file, which is the
+duplication `toolsets/fs.py` exists to avoid. It raises the AIMU floor and moves the compat probe, in the
+shape that surface has taken four times already: a signature check on `read_file` for the new parameter,
+as `SkillManager(include=...)`, `script_env`, `stream_thinking`, and `events` each were.
+
+Fix direction: an `offset` parameter (a 1-indexed first line, defaulting to 1) beside `max_lines`, which
+makes a large file reachable in pages. Worth deciding at the same time whether paging alone is enough or
+whether the group also wants a search that returns matching line numbers, since paging makes a file
+reachable while search is what makes the right page findable without reading the wrong ones first.
