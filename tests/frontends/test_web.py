@@ -1065,6 +1065,115 @@ def test_duplicating_an_unknown_conversation_answers_rather_than_closing_the_soc
     assert "copy" in frame["text"].lower()
 
 
+def test_ws_rename_gives_the_conversation_the_typed_title(tmp_path):
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("first message")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+
+        ws.send_text(json.dumps({"type": "rename", "id": active_id, "title": "Kauai", "replacing": "first message"}))
+        after = _drain_until(ws, "conversations")
+
+    assert next(i["title"] for i in after["items"] if i["id"] == active_id) == "Kauai"
+
+
+def test_the_rename_control_refreshes_the_sidebar_but_not_the_history(tmp_path):
+    """A title is not part of the transcript, so replaying the history would redraw what is on screen.
+
+    A trailing "get_tasks" control is what makes this a real check, for the reason
+    ``test_the_export_control_does_not_refresh_the_sidebar_or_history`` gives at length.
+    """
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["ok"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        _drain_until(ws, "tasks")
+        ws.send_text(json.dumps({"type": "rename", "id": active_id, "title": "Kauai", "replacing": ""}))
+        ws.send_text(json.dumps({"type": "get_tasks"}))
+        frames = []
+        while True:
+            frame = ws.receive_json()
+            frames.append(frame)
+            if frame["type"] == "tasks":
+                break
+    assert [f["type"] for f in frames] == ["conversations", "tasks"]
+
+
+def test_a_rename_against_a_title_that_moved_is_refused_and_the_sidebar_snaps_back(tmp_path):
+    """The page is the only thing holding the typed title until the server answers, so a refused
+    rename still has to answer with the list: without it the row would sit showing a title nothing
+    stored."""
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("first message")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+
+        ws.send_text(json.dumps({"type": "rename", "id": active_id, "title": "Kauai", "replacing": "a stale title"}))
+        message = _drain_until(ws, "message")
+        after = _drain_until(ws, "conversations")
+
+    assert "renamed" in message["text"].lower()
+    assert next(i["title"] for i in after["items"] if i["id"] == active_id) == "first message"
+
+
+def test_ws_retitle_asks_the_model_and_repaints_the_sidebar_when_it_answers(tmp_path, monkeypatch):
+    import json
+
+    from starlette.testclient import TestClient
+
+    async def title(model, transcript):
+        return "Kauai snorkelling"
+
+    monkeypatch.setattr("kokua.core.titles.summarize_conversation_title", title)
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        ws.send_text("first message")
+        _drain_until(ws, "done")
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+
+        ws.send_text(json.dumps({"type": "retitle", "id": active_id}))
+        after = _drain_until(ws, "conversations")
+
+    assert next(i["title"] for i in after["items"] if i["id"] == active_id) == "Kauai snorkelling"
+
+
+def test_a_retitle_the_model_declines_leaves_the_socket_live(tmp_path):
+    """The suite-wide stub answers None, which is the endpoint-is-down path: no repaint, no error,
+    and the next control still answers."""
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["ok"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until(ws, "conversations")
+        active_id = next(i["id"] for i in convs["items"] if i["active"])
+        ws.send_text(json.dumps({"type": "retitle", "id": active_id}))
+        ws.send_text(json.dumps({"type": "get_tasks"}))
+        _drain_until(ws, "tasks")
+
+
 def test_ws_truncate_deletes_the_turn_and_everything_after_it(tmp_path):
     import json
 

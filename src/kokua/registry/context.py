@@ -63,6 +63,11 @@ class LiveState:
     # kokua.core.agents late. Left honestly untyped rather than worked around, unlike observer below.
     conversation_book: Optional[Any] = None
     turn_running: Optional[Callable[[str], bool]] = None
+    # Queues a conversation rename to be written once the calling turn's gate hold is released. A
+    # callable rather than the book's own ``retitle`` because a tool runs inside a turn and ``retitle``
+    # takes that conversation's turn slot, which invariant 1 in ``core/turns.py`` forbids taking twice
+    # on one task; the composition root owns the background-task bookkeeping that gets around it.
+    schedule_rename: Optional[Callable[[str, str], None]] = None
     # Cancels a scheduled task's in-flight firings, returning (how many, whether one was the run the call
     # came from). Assigned by the composition root, which owns the turn bookkeeping this reads.
     stop_task_runs: Optional[Callable[[str], tuple[int, bool]]] = None

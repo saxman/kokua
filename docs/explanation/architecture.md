@@ -370,7 +370,7 @@ this table exists rather than a naming convention alone:
 | `add_mcp_server`, `remove_mcp_server` | `toolsets/mcp.py` | `mcp` |
 | `read_config`, `update_config` | `toolsets/config.py` | `config` |
 | `schedule_task`, `list_scheduled_tasks`, `get_scheduled_task`, `update_scheduled_task`, `cancel_scheduled_task`, `enable_scheduled_task`, `disable_scheduled_task`, `run_scheduled_task`, `stop_scheduled_task` | `toolsets/scheduling.py` | `scheduling` |
-| `list_conversations`, `read_conversation`, `search_conversations` | `toolsets/conversations.py` | `conversations` |
+| `list_conversations`, `read_conversation`, `search_conversations`, `rename_conversation` | `toolsets/conversations.py` | `conversations` |
 | `list_capabilities`, `compose_subagent` | `toolsets/capabilities.py` | `capabilities` |
 | `benchmark_model` | `toolsets/benchmark.py` | `benchmark` |
 | `spawn_subagent` | AIMU `make_async_subagent_tool` | implied by a non-empty `delegates_to` |
@@ -400,8 +400,9 @@ the sidebar was showing prose written to steer a model.
 
 `toolsets/conversations.py` defines `list_conversations`, `read_conversation`, and
 `search_conversations` over `core/transcripts.py` (flattening, truncation, search) and
-`ConversationBook.resolve` (an id or a unique prefix). Two decisions in it are worth knowing before
-changing them.
+`ConversationBook.resolve` (an id or a unique prefix). It also defines `rename_conversation`, the one
+tool here that writes, covered under [Renaming a conversation](#renaming-a-conversation) below. Two
+decisions in it are worth knowing before changing them.
 
 The shipped config gives it to the entry agent and to no worker, deliberately: a worker shares no history
 and has no conversation identity, so "the user's other conversations" means nothing to it, and granting
@@ -440,9 +441,10 @@ Three things about that shape are deliberate. It is **in the background** becaus
 user is waiting for and a title is worth neither a round-trip on the end of their first turn nor an error
 they have to read: every failure path -- an endpoint that is down, a model string naming nothing, an
 answer that sanitizes to nothing -- returns None, and the placeholder stands. It is **guarded on the way
-in**: `retitle` writes only if the title it was built to replace is still there, so a conversation
-deleted while the model was writing is not resurrected by a store whose `get` answers a missing key with
-a fresh empty session, and a rename, if Kokua ever grows one, wins over a title in flight. And it takes **that conversation's
+in**: `retitle` checks that the conversation is still in the store, so one deleted while the model was
+writing is not resurrected by a `get` that answers a missing key with a fresh empty session, and it
+checks that the title it was built to replace is still there, so a rename that landed first wins over a
+title in flight. And it takes **that conversation's
 own turn slot** for the write, like `delete` and for the same bounded reason, because the store saves
 whole sessions: an unsynchronized read-modify-write would revert whatever the next turn persisted between
 the read and the write. Shutdown cancels a title still in flight rather than awaiting it, for the reason
@@ -454,6 +456,54 @@ no capability owns it: `Assistant._spawn_title` is the only reader. It is hot ra
 because that read happens per conversation, so a change genuinely applies without a restart, which is
 the test the model itself fails. There is no setting for *which* model writes the title, because the
 conversation already answers that.
+
+### Renaming a conversation
+
+A title can also be replaced on purpose, three ways, all of them ending at the same
+`ConversationBook.retitle` the generated title uses.
+
+**By hand.** The sidebar row's pencil swaps its title for an input (Enter and blur commit, Escape
+abandons) and sends a `rename` control carrying the new title *and* the one the page was showing.
+`Assistant.rename_conversation` clamps to 40 characters, refuses an empty title rather than clearing the
+one there, and passes the old title as `retitle`'s `replacing` guard: a row a generated title has already
+moved under loses to what is stored, and the page is told so and repainted. The page defers its own
+re-render while an edit is open, because until the input is committed the typed title exists nowhere
+else.
+
+**By asking the model.** The ✨ inside that same editor sends a `retitle` control, and
+`Assistant.regenerate_title`
+spawns `titles.summarize_conversation_title` in the background exactly as the automatic title is
+spawned. It differs from that one in what it reads and in who may ask. It reads the *whole* conversation
+rather than the opening message (`titles.condense_transcript`: the first entry always, the newest
+entries filling a 4000-character budget, an omission marker between), because a conversation renamed
+later has usually gone somewhere its first message did not predict, and re-reading only that message
+would hand back the title already showing. And it ignores `[assistant] generate_titles`, which governs
+the title nobody asked for. The control returns as soon as the call *starts*, never awaiting it: the web
+front end applies controls in arrival order on one task, so awaiting a local model here would queue
+every control behind it, `/stop` included. The sidebar is pushed however the call ends, including on a
+decline, because the row shows "naming" until a conversation list arrives and nothing else would ever
+clear it.
+
+That ✨ lives in the editor rather than beside the pencil for a measured reason, and the number is
+worth keeping. A sidebar row is 240px by default, its hover controls are invisible but still take
+clicks, and each one added eats the title: three controls left the title 130px, four leave it 93px,
+and five left it **56px**, which is about six characters before the ellipsis. At five, the row's own
+centre point was the duplicate button, so clicking a row to switch conversations copied it instead.
+Grouping the two ways of naming under one control is what keeps the row a row. The same arithmetic is
+why a sixth control here would need a menu rather than a place in the line.
+
+**By the assistant.** `rename_conversation` is a tool, and it is the one place in this repository where
+turn invariant 1 shows up as a visible design constraint rather than a rule to obey. A tool runs inside
+its turn, that turn holds its conversation's turn slot for its whole length, and `retitle` takes the same
+slot, so awaiting the write from inside the tool would wait on a lock the waiting task itself holds. The
+tool therefore hands the write to `Assistant.schedule_rename`, which queues it as a background task the
+way a title is queued; the gate's per-conversation lock is a plain `asyncio.Lock` with no owning task, so
+the queued write simply waits the turn out. Two consequences are stated rather than hidden. The tool's
+own reply says the rename lands when the turn finishes, since a `read_conversation` later in the same
+turn still shows the old title and a model told nothing would "correct" itself in a second call. And the
+queued write passes `replacing=None`: the only title it could read when queued is the one from before
+that turn's own `persist`, so comparing against it would refuse every rename asked for on a
+conversation's first turn. The existence check and the gate still apply.
 
 ### Branching a conversation
 

@@ -92,6 +92,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   is safe because that write is synchronous and reaches one scalar, and keeps the exclusive hold for a
   whole payload, where several keys really can be read half applied. The tests missed it because every
   one of them stubbed the hot-apply callable, so the hold was never taken.
+- **A conversation can also be renamed on purpose**, three ways, all ending at the same guarded write.
+  A sidebar row's pencil edits its title in place (Enter and blur commit, Escape abandons), sending the
+  title the page was showing along with the new one, so a row a generated title has already moved under
+  loses to what is stored and is repainted rather than silently overwriting it. The editor carries a ✨ that asks the
+  model instead, and unlike the automatic title that one reads the *whole* conversation, condensed to
+  keep both ends (the opening says what it was for, the tail says where it went), because a conversation
+  renamed later has usually gone somewhere its first message did not predict. It ignores
+  `generate_titles`, which governs the title nobody asked for. And `rename_conversation` gives the
+  assistant the same job. That last one is where turn invariant 1 becomes visible: a tool holds its
+  turn's gate slot and the write needs the same one, so the tool queues the write behind the turn and
+  says so in its reply, since a read later in that turn still shows the old name.
 - **`/stop`** cancels an in-flight reply and keeps the partial turn so the conversation continues (the
   web UI has a Stop button for the same). Built on AIMU's `aio.RunHandle`; reactive turns run as
   background tasks, so the channel keeps reading mid-turn -- which is also what lets a web approval
@@ -172,8 +183,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     messages are not warm. The disclosure triangle is the only glyph on the page; every block names its
     kind in words.
   - **Conversations** are listed in a sidebar, auto-titled from the first message, each row showing its
-    relative age, with new / select / delete (deleting the active one switches to the most recently
-    updated remaining conversation). The header strip names the conversation being viewed. The sidebar
+    relative age, with new / select / rename / rename-with-AI / delete (deleting the active one switches
+    to the most recently updated remaining conversation). The header strip names the conversation being viewed. The sidebar
     collapses to an icon rail and drag-resizes between 180 and 480px; the divider is keyboard-operable.
     Width, collapsed state, and theme are per-browser preferences applied before first paint, so there
     is no flash on load.
@@ -396,11 +407,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   session store is opened or any MCP server connected, so a bad config leaves nothing written and nothing
   connected. One agent shape backs this: `wire_agent` builds any agent from its declaration, selecting
   its toolsets once and feeding the same list to both its tools and its prompt.
-- **The assistant can look across your other conversations.** The `conversations` toolset, three
-  read-only tools:
+- **The assistant can look across your other conversations.** The `conversations` toolset, three reads
+  and one write:
   `list_conversations` (ids, last-active times, message counts, titles), `read_conversation` (one
-  transcript as plain text), and `search_conversations` (case-insensitive text across every saved
-  conversation, with snippets). So "what did we decide about the deployment last week?" is answerable,
+  transcript as plain text), `search_conversations` (case-insensitive text across every saved
+  conversation, with snippets), and `rename_conversation` (a title, and nothing else). So "what did we decide about the deployment last week?" is answerable,
   and context from a past thread can be carried into a `spawn_subagent` task. The shipped config gives it
   to the entry agent and to no worker, and a test pins that: a worker shares no history and has no
   conversation identity, so the capability would widen a spawn's blast radius for nothing.

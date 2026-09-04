@@ -183,7 +183,12 @@ async def test_a_toolset_name_two_providers_claim_refuses_to_start_as_a_config_e
 # tool the shipped entry agent holds fails the test below, and the table needs the same edit in that
 # commit.
 ENTRY_AGENT_TOOLS = {
-    "kokua toolsets/conversations.py": {"list_conversations", "read_conversation", "search_conversations"},
+    "kokua toolsets/conversations.py": {
+        "list_conversations",
+        "read_conversation",
+        "search_conversations",
+        "rename_conversation",
+    },
     "kokua toolsets/config.py": {"read_config", "update_config"},
     "kokua toolsets/mcp.py": {"add_mcp_server", "remove_mcp_server"},
     "kokua toolsets/capabilities.py": {"list_capabilities", "compose_subagent"},

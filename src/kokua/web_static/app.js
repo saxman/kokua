@@ -177,7 +177,105 @@ function nestedConversationIds() {
   return ids;
 }
 
+// The conversation whose title is being edited in place, or null. Held because a rename is the one
+// sidebar interaction with state the server does not have: until the input is committed, the typed
+// title exists nowhere else, so a `conversations` frame arriving mid-edit must not redraw over it.
+// `renderConversations` defers instead, and `endRename` runs the render it skipped.
+let renamingId = null;
+let renderDeferred = false;
+
+// Conversations whose title the model is currently writing. Cleared wholesale by the next
+// `conversations` frame, which is the answer: `Assistant._rewrite_title` pushes the list however the
+// call ends, a decline included, so no request can leave a row saying "naming" forever.
+const awaitingTitle = new Set();
+
+function endRename(rerender) {
+  renamingId = null;
+  if (rerender || renderDeferred) {
+    renderDeferred = false;
+    renderConversations();
+  }
+}
+
+// Swap a row's title for an input, and commit or abandon what is typed into it. Enter and blur both
+// commit, Escape abandons: the three behaviours a rename-in-place has everywhere else. The editor also
+// carries the ask-the-model button, rather than the row: five controls do not fit in a 240px row, and
+// at that width the title had 56px left, which is about six characters before the ellipsis.
+function startRename(titleEl, item) {
+  // Clicking one row's pencil while another row is being edited blurs that input first, which commits
+  // it and rebuilds the list, leaving this handler holding a title span that is no longer on the page.
+  // Editing it would strand `renamingId` set and freeze every later redraw.
+  if (!titleEl.isConnected) return;
+  renamingId = item.id;
+  const editor = document.createElement("span");
+  editor.className = "conv-edit";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "conv-rename-input";
+  input.value = item.title;
+  input.setAttribute("aria-label", "Conversation title");
+  // The row itself switches conversations on click, and an edit is not a switch.
+  editor.addEventListener("click", (e) => e.stopPropagation());
+  let settled = false;
+  const commit = () => {
+    if (settled) return;
+    settled = true;
+    const title = input.value.trim();
+    // An unchanged or emptied title is a cancelled rename: nothing is sent, and the row goes back to
+    // what the server last said it was called.
+    if (title && title !== item.title && ws.readyState === WebSocket.OPEN) {
+      // `replacing` is what this page was showing. The server refuses the write if that is no longer
+      // the stored title, so a row a generated title has already moved under does not clobber it.
+      ws.send(JSON.stringify({ type: "rename", id: item.id, title, replacing: item.title }));
+    }
+    endRename(true);
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commit();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      settled = true;
+      endRename(true);
+    }
+  });
+  input.addEventListener("blur", commit);
+
+  // Asks the model to name the conversation from the whole of what it now holds, which is worth more
+  // than the title it got from its opening message alone. It discards whatever is typed, so it closes
+  // the editor rather than pretending to still be editing, and the row says "naming" until the answer
+  // lands (seconds, on a local model).
+  const retitle = document.createElement("button");
+  retitle.type = "button";
+  retitle.className = "conv-retitle";
+  retitle.textContent = "\u2728";
+  retitle.title = "Ask the model to name this conversation";
+  retitle.setAttribute("aria-label", "Ask the model to name this conversation");
+  // Keeps the input from blurring, which would commit the edit this button is replacing.
+  retitle.addEventListener("mousedown", (e) => e.preventDefault());
+  retitle.addEventListener("click", () => {
+    settled = true;
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "retitle", id: item.id }));
+      awaitingTitle.add(item.id);
+    }
+    endRename(true);
+  });
+
+  editor.appendChild(input);
+  editor.appendChild(retitle);
+  titleEl.replaceWith(editor);
+  input.focus();
+  input.select();
+}
+
 function renderConversations() {
+  // See `renamingId`: a redraw during an edit would discard the only copy of what the user typed.
+  if (renamingId !== null) {
+    renderDeferred = true;
+    return;
+  }
   const nested = nestedConversationIds();
   convList.innerHTML = "";
   for (const item of lastConversations) {
@@ -188,7 +286,12 @@ function renderConversations() {
     text.className = "conv-text";
     const title = document.createElement("span");
     title.className = "conv-title";
-    title.textContent = item.title;
+    if (awaitingTitle.has(item.id)) {
+      title.classList.add("naming");
+      title.textContent = "naming\u2026";
+    } else {
+      title.textContent = item.title;
+    }
     const age = document.createElement("span");
     age.className = "conv-age";
     age.textContent = relativeTime(item.updated_at);
@@ -223,6 +326,17 @@ function renderConversations() {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "duplicate", id: item.id }));
     });
     li.appendChild(duplicate);
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "conv-rename";
+    rename.textContent = "\u270e";
+    rename.title = "Rename conversation";
+    rename.setAttribute("aria-label", "Rename conversation");  // the glyph is no accessible name
+    rename.addEventListener("click", (e) => {
+      e.stopPropagation();  // don't also trigger switch
+      startRename(title, item);
+    });
+    li.appendChild(rename);
     const del = document.createElement("button");
     del.type = "button";
     del.className = "conv-delete";
@@ -1248,6 +1362,7 @@ function handleFrame(event) {
     renderPlanReview(frame.plan, frame.critique);
   } else if (frame.type === "conversations") {
     lastConversations = frame.items;
+    awaitingTitle.clear();
     renderSidebar();
   } else if (frame.type === "tasks") {
     lastTasks = frame.items;

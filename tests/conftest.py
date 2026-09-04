@@ -57,9 +57,14 @@ def no_generated_titles(monkeypatch):
     say", which is the documented fallback path, so a test that does not care keeps the truncated
     placeholder ``derive_title`` already gave it. A test about generated titles patches this again
     with the answer it wants.
+
+    Both title calls are stubbed. The whole-conversation one is spawned by a rename rather than by a
+    turn, so it is reachable only from a test that asked for it, but stubbing one and not the other
+    would leave a real endpoint one ``retitle`` control away.
     """
 
     async def no_title(model, first_message):
         return None
 
     monkeypatch.setattr("kokua.core.titles.summarize_title", no_title)
+    monkeypatch.setattr("kokua.core.titles.summarize_conversation_title", no_title)

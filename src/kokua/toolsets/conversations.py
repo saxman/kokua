@@ -1,18 +1,22 @@
-"""The ``conversations`` toolset: read-only sight of the user's other conversations.
+"""The ``conversations`` toolset: sight of the user's other conversations, and their names.
 
 ``list_conversations``, ``read_conversation`` and ``search_conversations`` let the entry agent answer
 "what did we decide about X last week?" and carry context out of a past thread into a `spawn_subagent`
-task. They are entry-agent-only, like the other cross-cutting tools: a worker shares no history and has
-no conversation identity, so "the user's other conversations" only means something to the agent the user
-is talking to.
+task. ``rename_conversation`` is the one thing here that writes, and it writes exactly one field: what
+a conversation is called in the sidebar. All four are entry-agent-only, like the other cross-cutting
+tools: a worker shares no history and has no conversation identity, so "the user's other
+conversations" only means something to the agent the user is talking to.
 
 Everything here is presentation. The transcript reading, flattening, and searching are in
 ``core/transcripts.py``, and resolving an id or a unique prefix is ``ConversationBook.resolve``. What is
 left in this module is the tool schemas, the bounds a model may pass and how they are clamped, and the
 sentences it reads back -- including the two markers that keep a stored snapshot honest.
 
-``ToolsetContext`` carries the live ``ConversationBook`` and the assistant's ``turn_running`` off
-``LiveState``, which is what lets this module build the tools without importing ``core.assistant``.
+``ToolsetContext`` carries the live ``ConversationBook``, the assistant's ``turn_running``, and its
+``schedule_rename`` off ``LiveState``, which is what lets this module build the tools without importing
+``core.assistant``. The third of those is not a convenience: a rename cannot be written inline from a
+tool, because the write takes the turn slot the calling turn is already holding, and
+``Assistant.schedule_rename`` is what turns that deadlock into a write queued behind the turn.
 """
 
 from __future__ import annotations
@@ -46,6 +50,13 @@ ACTIVE_CONVERSATION_NOTE = (
 RUNNING_TURN_NOTE = "[... a turn is still running in this conversation; its messages are not saved yet ...]"
 NO_CONVERSATIONS = "No saved conversations."
 BLANK_QUERY = "Give some text to search for."
+BLANK_TITLE = "Give a title to rename the conversation to. An empty title would leave it unnamed."
+
+# Said on every rename, because the model would otherwise have no way to know. The write is queued
+# behind the turn making it (see ``Assistant.schedule_rename``), so a ``read_conversation`` or
+# ``list_conversations`` later in this same turn still reports the old name, and a model that took
+# silence for success would "correct" itself in a second call.
+RENAME_DEFERRED_NOTE = "It takes effect when this turn finishes, so it will still read as the old title until then."
 
 
 def _clamp(value, low: int, high: int, default: int) -> int:
@@ -67,8 +78,12 @@ def _title_of(session: Session) -> str:
     return session.metadata.get("title") or "New conversation"
 
 
-def make_conversation_tools(book: "ConversationBook", turn_running: Callable[[str], bool]) -> list[Callable]:
-    """Build the read-only cross-conversation tools bound to the live ``ConversationBook``.
+def make_conversation_tools(
+    book: "ConversationBook",
+    turn_running: Callable[[str], bool],
+    schedule_rename: Callable[[str, str], None],
+) -> list[Callable]:
+    """Build the cross-conversation tools bound to the live ``ConversationBook``.
 
     Every read goes through the book's *store*, never ``agent_for``. Reading is meant to be cheap and
     side-effect-free, and building an agent is neither: it allocates a model client, re-expands every
@@ -85,6 +100,10 @@ def make_conversation_tools(book: "ConversationBook", turn_running: Callable[[st
 
     Not touching the registry also means this factory is safe to build before
     ``ConversationBook.bind_registry`` -- which it is, since the book is constructed first.
+
+    ``rename_conversation`` is the exception to all of that, and takes nothing from the book but the id
+    resolution: the write itself is handed to ``schedule_rename`` rather than made here, because a tool
+    holds its turn's gate slot and the write needs the same one (invariant 1 in ``core/turns.py``).
     """
 
     def _unknown(conversation_id: str) -> str:
@@ -213,19 +232,47 @@ def make_conversation_tools(book: "ConversationBook", turn_running: Callable[[st
             blocks.append(f"({hidden} more matching conversations not shown; narrow the query or raise max_results.)")
         return "\n".join(preamble + blocks)
 
-    return [list_conversations, read_conversation, search_conversations]
+    @tool
+    async def rename_conversation(conversation_id: str, title: str) -> str:
+        """Rename one saved conversation, changing what it is called in the sidebar and nothing else.
+
+        Give an id from `list_conversations` or `search_conversations` (a unique leading fragment of at
+        least six characters also works). Keep the title short, at most about six words: it is read in a
+        narrow sidebar, and a longer one is cut off. Anything past 40 characters is dropped.
+
+        The rename is applied when this turn finishes, not immediately, so reading the conversation
+        again in this same turn will still show the old title. Do not call this a second time to
+        "fix" that.
+
+        Args:
+            conversation_id: The conversation to rename (full id, or a unique leading fragment).
+            title: The new title.
+        """
+        session = book.resolve(conversation_id)
+        if session is None:
+            return _unknown(conversation_id)
+        if not title.strip():
+            return BLANK_TITLE
+        was = _title_of(session)
+        schedule_rename(session.key, title)
+        return f"Renaming {session.key} from {was!r} to {title!r}. {RENAME_DEFERRED_NOTE}"
+
+    return [list_conversations, read_conversation, search_conversations, rename_conversation]
 
 
 CONVERSATIONS_GUIDANCE = (
     " You can see across the user's other chat conversations with `list_conversations`, "
-    "`read_conversation`, and `search_conversations`, which read their saved transcripts. They are "
-    "read-only, and this turn is not saved yet, so use your own context for the conversation you are in."
+    "`read_conversation`, and `search_conversations`, which read their saved transcripts. This turn is "
+    "not saved yet, so use your own context for the conversation you are in. `rename_conversation` is "
+    "the one of these that changes anything, and all it changes is a conversation's title."
 )
 
 TOOLSET = Toolset(
     name="conversations",
-    description="Read-only visibility across the user's other conversations.",
-    build=lambda ctx: make_conversation_tools(ctx.state.conversation_book, ctx.state.turn_running),
+    description="Visibility across the user's other conversations, and renaming them.",
+    build=lambda ctx: make_conversation_tools(
+        ctx.state.conversation_book, ctx.state.turn_running, ctx.state.schedule_rename
+    ),
     guidance=CONVERSATIONS_GUIDANCE,
     cross_cutting=True,
 )

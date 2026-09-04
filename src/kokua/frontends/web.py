@@ -67,6 +67,8 @@ _CONTROL_TYPES = (
     "branch",
     "truncate",
     "duplicate",
+    "rename",
+    "retitle",
     "settings",
     "get_settings",
     "get_tasks",
@@ -77,7 +79,7 @@ _CONTROL_TYPES = (
 
 def _parse_control(raw: str) -> Optional[dict]:
     """Return a control object ({"type": "new"/"select"/"delete"/"branch"/"truncate"/"duplicate"/
-    "settings"/"task"/"export"/...}), else None.
+    "rename"/"retitle"/"settings"/"task"/"export"/...}), else None.
 
     Anything that is not exactly such a JSON object is a normal channel message (chat, "/stop",
     approval "y"/"n") and is fed to the channel unchanged.
@@ -366,6 +368,39 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                             await channel.send("Sorry, that conversation could not be duplicated.")
                             continue
                         await channel.send_conversations(assistant.list_conversations())
+                        continue
+                    # A title is not part of a transcript, so both rename controls answer with the
+                    # sidebar alone and skip the history replay below, like "duplicate".
+                    if control["type"] == "rename":
+                        try:
+                            written = await assistant.rename_conversation(
+                                str(control.get("id", "")),
+                                str(control.get("title", "")),
+                                replacing=str(control.get("replacing", "")),
+                            )
+                        except Exception:
+                            logger.warning("Could not rename conversation", exc_info=True)
+                            await channel.send("Sorry, that conversation could not be renamed.")
+                            continue
+                        if not written:
+                            # Covers both refusals ``rename_conversation`` can make, because the page
+                            # can act on neither differently: a title that moved under a stale row, and
+                            # a conversation another tab deleted. Not worth a log line for the same
+                            # reason the branch control's ``ConversationNotFound`` is not.
+                            await channel.send(
+                                "That conversation was not renamed: it changed or was deleted since "
+                                "the sidebar last drew it."
+                            )
+                            # The sidebar goes out even when nothing was written. Until this frame the
+                            # typed title exists only in the page, so without it the row would sit
+                            # showing a name the store never took.
+                            await channel.send_conversations(assistant.list_conversations())
+                        continue
+                    # Returns as soon as the model call is *started*, not when it lands, so a local
+                    # model does not hold up every control queued behind this one. The new title
+                    # reaches the page as its own sidebar push whenever it arrives.
+                    if control["type"] == "retitle":
+                        assistant.regenerate_title(str(control.get("id", "")))
                         continue
                     # Task controls mostly touch only the scheduled-task registry, so like the settings
                     # controls they answer with a fresh task list and skip the history refresh.

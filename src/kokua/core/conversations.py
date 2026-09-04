@@ -584,30 +584,48 @@ class ConversationBook:
         self._store.save(session)
         return title_set
 
-    async def retitle(self, conversation_id: str, title: str, *, replacing: str) -> bool:
+    async def retitle(self, conversation_id: str, title: str, *, replacing: Optional[str]) -> bool:
         """Swap ``replacing`` for *title* on a conversation. Returns whether it wrote.
 
-        The write for a generated title (``core/titles.py``), which lands a moment after the
-        placeholder ``persist`` derived. Both guards are load-bearing, and each covers a race that
-        the seconds-long model call makes ordinary rather than theoretical:
+        The write for a generated title (``core/titles.py``), landing a moment after the placeholder
+        ``persist`` derived, and for a rename (``Assistant.rename_conversation``,
+        ``Assistant.regenerate_title``), landing whenever the user asked. Three guards, each covering
+        a race that a seconds-long model call and a page that redraws on its own make ordinary rather
+        than theoretical:
+
+        ``exists`` is the "is this still real" check, and it has to be its own question rather than
+        an inference from the title: ``store.get`` answers a missing key with a fresh empty
+        ``Session``, so a blind write would re-create the row a delete removed, holding a title and
+        nothing else. The title comparison used to stand in for this, which worked only because every
+        caller then passed a non-empty ``replacing``; a rename typed into an untitled conversation
+        passes ``""``, which is exactly what a deleted one reads as.
 
         ``replacing`` is the title this call was built to replace, so whatever is in that slot now
-        wins instead. Nothing renames a conversation today, so the case that actually happens is the
-        deleted one, and that one is a silent resurrection without this: ``store.get`` answers a
-        missing key with a fresh empty ``Session``, so a blind write would re-create the row the
-        delete removed, holding a title and nothing else. It is also the guard already standing
-        wherever a rename lands later.
+        wins instead. A sidebar row is a moment out of date by construction, so the title the page was
+        showing is what a rename typed against it has to match, or a generated title that landed in
+        between is silently thrown away. Read through ``or ""`` so an untitled conversation answers to
+        the ``""`` the page sends for it.
 
-        Held under this conversation's own turn slot, like :meth:`delete` and for the same bounded
-        reason (see ``core/turn_gate.py``): the store saves whole sessions, so a read-modify-write
-        racing the next turn's ``persist`` would revert that turn's messages. Being one
-        ``gate.turn`` makes this bound by invariant 1 in ``core/turns.py``, so the caller must not
+        ``replacing=None`` waives that second guard, and only that one. It is for the caller with no
+        title to compare against rather than the caller in a hurry: a rename queued behind a turn
+        (``Assistant.schedule_rename``) cannot read the title it is replacing before the write, because
+        the title it would read is the one from before that turn's ``persist`` derived or changed it,
+        and comparing against a value this call is waiting to become stale would refuse every rename
+        asked for on a conversation's first turn. ``exists`` and the gate still apply.
+
+        The gate is the third. Held under this conversation's own turn slot, like :meth:`delete` and
+        for the same bounded reason (see ``core/turn_gate.py``): the store saves whole sessions, so a
+        read-modify-write racing the next turn's ``persist`` would revert that turn's messages. Being
+        one ``gate.turn`` makes this bound by invariant 1 in ``core/turns.py``, so the caller must not
         already hold a turn: the title task runs outside the turn that spawned it, which is what
-        makes this safe *and* what makes it wait for that turn to finish.
+        makes this safe *and* what makes it wait for that turn to finish. It is also why a tool cannot
+        call this inline (see ``toolsets/conversations.py``).
         """
         async with self._gate.turn(conversation_id):
+            if not self.exists(conversation_id):
+                return False
             session = self._store.get(conversation_id)
-            if session.metadata.get("title") != replacing:
+            if replacing is not None and (session.metadata.get("title") or "") != replacing:
                 return False
             session.metadata["title"] = title
             self._store.save(session)

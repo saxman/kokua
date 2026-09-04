@@ -321,7 +321,7 @@ def test_send_and_stop_swap_places(page, live_server):
     expect(send).to_be_visible()  # ...and this conversation is idle, so it can be typed into
     expect(stop).to_be_hidden()
 
-    page.locator("#conv-list li").nth(1).click()  # back into the still-running conversation
+    page.locator("#conv-list li").nth(1).locator(".conv-title").click()  # back into the still-running one
     expect(stop).to_be_visible()  # the composer follows the conversation you are viewing
     expect(stop).to_be_hidden(timeout=10_000)  # ...and hands Send back when that turn ends
 
@@ -420,7 +420,9 @@ def test_switching_back_mid_turn_shows_the_turn_so_far_and_keeps_streaming(page,
 
     page.click("#new-conv")  # away, mid-reply; sidebar becomes [new, original]
     expect(page.locator(".bubble.assistant")).to_have_count(0)
-    page.locator("#conv-list li").nth(1).click()  # ...and back, while the turn is still in flight
+    # Aimed at the title, not the row's centre: the hover controls are invisible and still clickable,
+    # so the centre point belongs to whichever one happens to sit there.
+    page.locator("#conv-list li").nth(1).locator(".conv-title").click()  # ...and back, turn still in flight
 
     # Replayed from the catch-up record, not from the store: neither is persisted yet.
     expect(page.locator(".bubble.user", has_text="ping")).to_be_visible()
@@ -481,6 +483,89 @@ def test_sidebar_row_shows_the_conversation_age(page, live_server):
     expect(row.locator(".conv-age")).to_have_text("Aug 10")
 
 
+# --- Renaming a conversation ------------------------------------------------------------------------
+
+
+def test_renaming_a_conversation_in_place_commits_on_enter(page, live_server):
+    """The whole point of the inline editor: the row's title becomes an input, and Enter sends it. What
+    the server stored is what comes back, so the assertion is on the re-rendered row rather than on the
+    input's value."""
+    _open(page, live_server(delay=0.0, seed=_seed_tool_call("the page body")))
+    row = page.locator("#conv-list li").first
+    expect(row.locator(".conv-title")).to_have_text("seeded")
+
+    row.locator(".conv-rename").click()
+    editor = row.locator(".conv-rename-input")
+    expect(editor).to_be_visible()
+    editor.fill("Kauai snorkelling")
+    editor.press("Enter")
+
+    expect(row.locator(".conv-title")).to_have_text("Kauai snorkelling")
+    expect(row.locator(".conv-rename-input")).to_have_count(0)
+
+
+def test_escape_abandons_a_rename_and_leaves_the_title_alone(page, live_server):
+    _open(page, live_server(delay=0.0, seed=_seed_tool_call("the page body")))
+    row = page.locator("#conv-list li").first
+
+    row.locator(".conv-rename").click()
+    editor = row.locator(".conv-rename-input")
+    editor.fill("never sent")
+    editor.press("Escape")
+
+    expect(row.locator(".conv-title")).to_have_text("seeded")
+    expect(row.locator(".conv-rename-input")).to_have_count(0)
+
+
+def test_clicking_away_from_a_rename_commits_it(page, live_server):
+    """Blur commits, which is the behaviour of every rename-in-place a user has met. Worth its own
+    case because it is the one path where nothing the page can see says the edit is finished."""
+    _open(page, live_server(delay=0.0, seed=_seed_tool_call("the page body")))
+    row = page.locator("#conv-list li").first
+
+    row.locator(".conv-rename").click()
+    row.locator(".conv-rename-input").fill("Kauai snorkelling")
+    page.locator("#msg").click()
+
+    expect(row.locator(".conv-title")).to_have_text("Kauai snorkelling")
+
+
+def test_opening_the_rename_editor_does_not_switch_conversations(page, live_server):
+    """The row switches conversations on click and the pencil sits inside it, so without
+    stopPropagation the edit would arrive on a conversation the user had just been moved off."""
+    seed = _seed_tool_call("the page body")
+    _open(page, live_server(delay=0.0, seed=seed))
+    page.click("#new-conv")  # a second row, and the active one is now the new conversation
+    expect(page.locator("#conv-list li")).to_have_count(2)
+    # Located by position, not by its text: once the edit opens, the title is an input's *value* and
+    # a has_text filter would stop matching the very row under test.
+    seeded = page.locator("#conv-list li").nth(1)
+    expect(seeded.locator(".conv-title")).to_have_text("seeded")
+    assert "active" not in (seeded.get_attribute("class") or "")
+
+    seeded.locator(".conv-rename").click()
+
+    expect(seeded.locator(".conv-rename-input")).to_be_visible()
+    assert "active" not in (seeded.get_attribute("class") or "")
+
+
+def test_asking_the_model_for_a_title_closes_the_editor_and_leaves_no_stuck_row(page, live_server):
+    """The editor hosts the ask-the-model button, and clicking it abandons the edit rather than
+    pretending to still be one. Under test the title call declines (no reachable endpoint), which is
+    the path that matters here: the row must come back to its real title rather than sit on the
+    placeholder the click put there, and it does because the server pushes the list however the call
+    ends."""
+    _open(page, live_server(delay=0.0, seed=_seed_tool_call("the page body")))
+    row = page.locator("#conv-list li").first
+
+    row.locator(".conv-rename").click()
+    row.locator(".conv-rename-input").fill("typed but abandoned")
+    row.locator(".conv-retitle").click()
+
+    expect(row.locator(".conv-rename-input")).to_have_count(0)
+    expect(row.locator(".conv-title")).to_have_text("seeded")
+
+
 # --- Theme control --------------------------------------------------------------------------------
 
 
@@ -535,7 +620,7 @@ def test_working_indicator_on_switch_into_running(page, live_server):
 
     working = page.locator(".working-inline")
     expect(working).to_have_count(0)  # the fresh conversation is idle
-    page.locator("#conv-list li").nth(1).click()  # back into the original, still-running conversation
+    page.locator("#conv-list li").nth(1).locator(".conv-title").click()  # back into the original
     expect(working).to_be_visible()
 
     expect(working).to_have_count(0, timeout=10_000)  # clears once the turn completes

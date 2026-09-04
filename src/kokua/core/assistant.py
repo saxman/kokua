@@ -40,7 +40,7 @@ from kokua.core import conversation_commands
 from kokua.core.conversations import UNTITLED, ConversationBook, TurnInFlight
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
-from kokua.core.messages import first_user_text
+from kokua.core.messages import TITLE_MAX, first_user_text
 from kokua.core.subagents import SubagentReporter
 from kokua.core import titles
 from kokua.mcp.auth import OAuthSettings
@@ -251,6 +251,7 @@ class Assistant:
             proactive=assistant._proactive,
             conversation_book=assistant._book,
             turn_running=assistant.turn_running,
+            schedule_rename=assistant.schedule_rename,
             stop_task_runs=assistant.stop_task_runs,
             tool_approval=assistant._approve,
             reapply_config=assistant._settings.apply_one,
@@ -471,6 +472,71 @@ class Assistant:
             self._human.abandon_all()
         await self._book.delete(conversation_id, cancel_turn=self._cancel_turn)
 
+    async def rename_conversation(self, conversation_id: str, title: str, *, replacing: Optional[str]) -> bool:
+        """Give a conversation a title someone asked for. Returns whether it wrote.
+
+        *replacing* is the title the caller was showing when the rename was asked for, and it is what
+        makes this safe to do from a sidebar that may be a moment out of date: a generated title that
+        landed in between, or a conversation deleted in between, wins over the row the user was
+        looking at. Pass None for a caller with no such title to compare against, which
+        ``ConversationBook.retitle`` documents along with both races.
+
+        An empty title writes nothing rather than clearing the one there. A cleared input is a
+        cancelled rename in every editor a user has met, and a conversation with no title at all is
+        already reachable by other means (``truncate`` drops one when no user turn survives).
+        """
+        title = " ".join(title.split())[:TITLE_MAX]
+        if not title:
+            return False
+        written = await self._book.retitle(conversation_id, title, replacing=replacing)
+        if written:
+            await self._maybe_push_conversations()
+        return written
+
+    def regenerate_title(self, conversation_id: str) -> None:
+        """Start rewriting a conversation's title from the whole of what it now holds.
+
+        Returns immediately, for the reason ``truncate_conversation`` gives for refusing rather than
+        waiting: the web front end applies controls in arrival order on one task, so awaiting a local
+        model here would leave every control behind it, ``/stop`` included, queued for the length of
+        the call. The new title reaches the page the way a generated one does, by repainting the
+        sidebar when it lands.
+
+        Unlike ``_spawn_title`` this does not consult ``[assistant] generate_titles``. That setting
+        governs the title nobody asked for; this one was asked for, and a user who turned the
+        automatic titles off has not thereby declined the button they just pressed.
+        """
+        self._track_title(self._rewrite_title(conversation_id))
+
+    def schedule_rename(self, conversation_id: str, title: str) -> None:
+        """Queue a rename to be written after the calling turn releases its gate hold.
+
+        What the ``rename_conversation`` tool calls, and the reason it exists rather than the tool
+        awaiting ``rename_conversation`` directly. A tool runs inside its turn, the turn holds that
+        conversation's turn slot for its whole length, and ``ConversationBook.retitle`` takes the same
+        slot: awaiting it from inside the turn would wait on a lock the awaiting task itself holds.
+        Handing the write to a separate task turns that deadlock into an ordinary wait, since the gate's
+        per-conversation lock is an ``asyncio.Lock`` with no owning task. Invariant 1 in
+        ``core/turns.py`` is the rule, and ``_spawn_title`` is the precedent.
+
+        The consequence the tool has to state out loud is the timing: the write lands after the turn,
+        so a ``read_conversation`` later in the same turn still shows the old title.
+
+        Written with no title to replace (``replacing=None``), unlike the two renames above, because
+        there is no honest value to pass: the only title readable when this is queued is the one from
+        before the turn's own ``persist``, and on a conversation's first turn that is the placeholder
+        ``persist`` is about to derive over. So a rename asked for during a turn wins over the title
+        that turn produced, which is the order the user asked for them in.
+        """
+        self._track_title(self._deferred_rename(conversation_id, title))
+
+    async def _deferred_rename(self, conversation_id: str, title: str) -> None:
+        """Write a queued rename. Catches everything, for the reason ``_write_title`` documents."""
+        try:
+            await self.rename_conversation(conversation_id, title, replacing=None)
+        except Exception:
+            logger.warning("Could not rename a conversation; keeping its current title", exc_info=True)
+
     def stop_task_runs(self, task_id: str) -> tuple[int, bool]:
         """Cancel every in-flight firing of ``task_id``; returns (how many were cancelled, whether one
         of them was the run this call is being made from).
@@ -549,7 +615,15 @@ class Assistant:
         """
         if not self._config.generate_titles:
             return
-        task = asyncio.create_task(self._write_title(conversation_id))
+        self._track_title(self._write_title(conversation_id))
+
+    def _track_title(self, coroutine) -> None:
+        """Run a title writer in the background, held so shutdown can cancel it.
+
+        The set is what keeps the task from being garbage collected mid-flight and what shutdown
+        cancels rather than awaits (see `run`), so every title writer goes through here.
+        """
+        task = asyncio.create_task(coroutine)
         self._title_tasks.add(task)
         task.add_done_callback(self._title_tasks.discard)
 
@@ -576,6 +650,35 @@ class Assistant:
             logger.warning(
                 "Could not title a conversation; keeping the one derived from its first message", exc_info=True
             )
+
+    async def _rewrite_title(self, conversation_id: str) -> None:
+        """Ask the model to retitle `conversation_id` from its whole transcript, and show the answer.
+
+        Catches everything for the reason `_write_title` does: nothing awaits this either. The
+        conversation that no longer exists needs no branch of its own, because `ConversationBook.get`
+        answers a missing key with an empty session, which condenses to an empty transcript, which
+        `titles.summarize_conversation_title` declines without a model call.
+
+        The sidebar goes out however this ends, which is the one thing that differs from `_write_title`
+        and the reason for the nested `finally`. A generated title nobody asked for can decline in
+        silence; this one was asked for by a button, and the page holds that button disabled until a
+        conversation list arrives. A model that declined has to be as visible as one that answered, or
+        the control never comes back.
+        """
+        try:
+            try:
+                session = self._book.get(conversation_id)
+                current = session.metadata.get("title") or ""
+                transcript = titles.condense_transcript(session.messages)
+                title = await titles.summarize_conversation_title(
+                    self._config.model_for(self._config.entry_agent), transcript
+                )
+                if title and title != current:
+                    await self._book.retitle(conversation_id, title, replacing=current)
+            finally:
+                await self._maybe_push_conversations()
+        except Exception:
+            logger.warning("Could not rewrite a conversation's title; keeping the current one", exc_info=True)
 
     async def run(self) -> None:
         """Serve the channel and run the scheduler concurrently until the channel closes."""

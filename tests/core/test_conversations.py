@@ -12,6 +12,7 @@ from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY
 
 from kokua.core.assistant import Assistant
 from kokua.core.conversations import ConversationNotFound, TurnInFlight, TurnNotFound
+from kokua.core.messages import TITLE_MAX
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
 from tests.helpers import BlockingModelClient, MockAsyncModelClient, settle_titles
 
@@ -755,6 +756,263 @@ async def test_titles_can_be_turned_off_at_runtime(tmp_path, monkeypatch):
 
     assert calls == []
     assert "generate_titles = false" in assistant._config.config_path.read_text(encoding="utf-8")
+
+
+# --- renaming: by hand from the sidebar, and by asking the model for a better one -----------------
+
+
+def _fixed_conversation_title(title: str, seen: list = None):
+    """A whole-conversation title writer that answers *title* whatever transcript it is shown."""
+
+    async def write(model, transcript):
+        if seen is not None:
+            seen.append(transcript)
+        return title
+
+    return write
+
+
+async def _one_turn(assistant, text="plan my trip to Kauai", reply="Sure."):
+    await assistant._handle(ChannelMessage(text=text, channel="fake"), conversation_id=assistant._active_id)
+    await settle_titles(assistant)
+
+
+async def test_a_conversation_can_be_renamed_by_hand(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    await _one_turn(assistant)
+    conversation_id = assistant._active_id
+
+    written = await assistant.rename_conversation(
+        conversation_id, "Kauai snorkelling", replacing="plan my trip to Kauai"
+    )
+
+    assert written is True
+    assert assistant._store.get(conversation_id).metadata["title"] == "Kauai snorkelling"
+
+
+async def test_a_rename_loses_to_a_title_that_changed_underneath(tmp_path):
+    """The sidebar sends the title it was showing, so a row the page has not caught up with (a
+    generated title that landed, a delete) does not overwrite what is there now."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    await _one_turn(assistant)
+    conversation_id = assistant._active_id
+
+    written = await assistant.rename_conversation(conversation_id, "Kauai snorkelling", replacing="a stale title")
+
+    assert written is False
+    assert assistant._store.get(conversation_id).metadata["title"] == "plan my trip to Kauai"
+
+
+async def test_a_rename_is_clamped_to_the_length_the_sidebar_shows(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    await _one_turn(assistant)
+    conversation_id = assistant._active_id
+
+    await assistant.rename_conversation(conversation_id, "n" * 200, replacing="plan my trip to Kauai")
+
+    assert assistant._store.get(conversation_id).metadata["title"] == "n" * TITLE_MAX
+
+
+async def test_an_empty_rename_writes_nothing(tmp_path):
+    """A cleared input is a cancelled rename, not a request for an untitled conversation."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    await _one_turn(assistant)
+    conversation_id = assistant._active_id
+
+    written = await assistant.rename_conversation(conversation_id, "   ", replacing="plan my trip to Kauai")
+
+    assert written is False
+    assert assistant._store.get(conversation_id).metadata["title"] == "plan my trip to Kauai"
+
+
+async def test_regenerating_a_title_shows_the_model_the_whole_conversation(tmp_path, monkeypatch):
+    seen: list = []
+    monkeypatch.setattr(
+        "kokua.core.titles.summarize_conversation_title", _fixed_conversation_title("Kauai snorkelling", seen)
+    )
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["Sure."]))
+    await _one_turn(assistant)
+    conversation_id = assistant._active_id
+
+    assistant.regenerate_title(conversation_id)
+    await settle_titles(assistant)
+
+    assert assistant._store.get(conversation_id).metadata["title"] == "Kauai snorkelling"
+    assert "plan my trip to Kauai" in seen[0]
+    assert "Sure." in seen[0]
+
+
+async def test_regenerating_a_title_repaints_the_sidebar(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "kokua.core.titles.summarize_conversation_title", _fixed_conversation_title("Kauai snorkelling")
+    )
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["Sure."]))
+    await _one_turn(assistant)
+    channel.conversation_pushes.clear()
+
+    assistant.regenerate_title(assistant._active_id)
+    await settle_titles(assistant)
+
+    assert channel.conversation_pushes
+    assert channel.conversation_pushes[-1][0]["title"] == "Kauai snorkelling"
+
+
+async def test_regenerating_a_title_does_not_block_the_caller(tmp_path, monkeypatch):
+    """The web front end applies controls on one task, so awaiting a model call here would leave every
+    control behind it queued for the length of that call."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow(model, transcript):
+        started.set()
+        await release.wait()
+        return "Kauai snorkelling"
+
+    monkeypatch.setattr("kokua.core.titles.summarize_conversation_title", slow)
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["Sure."]))
+    await _one_turn(assistant)
+    conversation_id = assistant._active_id
+
+    assistant.regenerate_title(conversation_id)
+    await started.wait()
+    assert assistant._store.get(conversation_id).metadata["title"] == "plan my trip to Kauai"
+
+    release.set()
+    await settle_titles(assistant)
+    assert assistant._store.get(conversation_id).metadata["title"] == "Kauai snorkelling"
+
+
+async def test_regenerating_a_title_still_works_when_automatic_titles_are_off(tmp_path, monkeypatch):
+    """``[assistant].generate_titles`` governs the title nobody asked for. This one was asked for."""
+    monkeypatch.setattr(
+        "kokua.core.titles.summarize_conversation_title", _fixed_conversation_title("Kauai snorkelling")
+    )
+    assistant = await Assistant.create(
+        _config(tmp_path, generate_titles=False), FakeChannel(), client=MockAsyncModelClient(["Sure."])
+    )
+    await _one_turn(assistant)
+    conversation_id = assistant._active_id
+
+    assistant.regenerate_title(conversation_id)
+    await settle_titles(assistant)
+
+    assert assistant._store.get(conversation_id).metadata["title"] == "Kauai snorkelling"
+
+
+async def test_a_regenerated_title_repaints_the_sidebar_even_when_the_model_declines(tmp_path, monkeypatch):
+    """The page disables its rename-with-AI button until a conversation list arrives, so a decline has
+    to answer as loudly as an answer does or the control never comes back."""
+
+    async def no_title(model, transcript):
+        return None
+
+    monkeypatch.setattr("kokua.core.titles.summarize_conversation_title", no_title)
+    channel = _ConvCapturingChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["Sure."]))
+    await _one_turn(assistant)
+    channel.conversation_pushes.clear()
+
+    assistant.regenerate_title(assistant._active_id)
+    await settle_titles(assistant)
+
+    assert channel.conversation_pushes
+
+
+async def test_a_regenerated_title_the_model_declines_leaves_the_old_one(tmp_path, monkeypatch):
+    async def no_title(model, transcript):
+        return None
+
+    monkeypatch.setattr("kokua.core.titles.summarize_conversation_title", no_title)
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["Sure."]))
+    await _one_turn(assistant)
+    conversation_id = assistant._active_id
+
+    assistant.regenerate_title(conversation_id)
+    await settle_titles(assistant)
+
+    assert assistant._store.get(conversation_id).metadata["title"] == "plan my trip to Kauai"
+
+
+async def test_an_error_regenerating_a_title_does_not_escape_its_task(tmp_path, monkeypatch):
+    """Nothing awaits this task, so an error would surface only as an unretrieved exception on the
+    event loop (invariant 6 in ``core/turns.py``)."""
+    monkeypatch.setattr(
+        "kokua.core.titles.summarize_conversation_title", _fixed_conversation_title("Kauai snorkelling")
+    )
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["Sure."]))
+    await _one_turn(assistant)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("the store is gone")
+
+    monkeypatch.setattr(assistant._book, "retitle", boom)
+
+    assistant.regenerate_title(assistant._active_id)
+    await settle_titles(assistant)
+
+    assert assistant._store.get(assistant._active_id).metadata["title"] == "plan my trip to Kauai"
+
+
+async def test_a_scheduled_rename_lands_after_the_turn_that_asked_for_it(tmp_path):
+    """The whole reason ``schedule_rename`` exists. The rename tool runs inside a turn, and the write
+    takes the turn slot that turn is holding, so writing inline would wait on a lock the waiting task
+    itself holds. Queued instead, it waits out the turn and then lands."""
+    client = BlockingModelClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=lambda cid: client)
+    conversation_id = assistant._active_id
+
+    turn = asyncio.create_task(
+        assistant._handle(ChannelMessage(text="plan my trip to Kauai", channel="fake"), conversation_id=conversation_id)
+    )
+    await asyncio.wait_for(client.started.wait(), timeout=5)
+    try:
+        assistant.schedule_rename(conversation_id, "Kauai snorkelling")
+        await asyncio.sleep(0)  # let the queued write reach the gate and block there
+        assert "title" not in assistant._store.get(conversation_id).metadata
+    finally:
+        client.release.set()
+    await asyncio.wait_for(turn, timeout=5)
+    await asyncio.wait_for(settle_titles(assistant), timeout=5)
+
+    assert assistant._store.get(conversation_id).metadata["title"] == "Kauai snorkelling"
+
+
+async def test_a_scheduled_rename_beats_the_title_the_turn_derives(tmp_path):
+    """The title being replaced is read when the write runs, not when it was queued, so a rename asked
+    for on a conversation's very first turn is not lost to the placeholder ``persist`` derives."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["Sure."]))
+    conversation_id = assistant._active_id
+
+    assistant.schedule_rename(conversation_id, "Kauai snorkelling")
+    await _one_turn(assistant)
+
+    assert assistant._store.get(conversation_id).metadata["title"] == "Kauai snorkelling"
+
+
+async def test_an_error_in_a_scheduled_rename_does_not_escape_its_task(tmp_path, monkeypatch):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["Sure."]))
+    await _one_turn(assistant)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("the store is gone")
+
+    monkeypatch.setattr(assistant._book, "retitle", boom)
+
+    assistant.schedule_rename(assistant._active_id, "Kauai snorkelling")
+    await settle_titles(assistant)
+
+    assert assistant._store.get(assistant._active_id).metadata["title"] == "plan my trip to Kauai"
+
+
+async def test_regenerating_a_title_for_a_conversation_that_is_gone_is_quiet(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "kokua.core.titles.summarize_conversation_title", _fixed_conversation_title("Kauai snorkelling")
+    )
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["Sure."]))
+
+    assistant.regenerate_title("no-such-conversation")
+    await settle_titles(assistant)
 
 
 # A parent transcript with two complete turns. Turn one runs a tool, so its copy has to carry the

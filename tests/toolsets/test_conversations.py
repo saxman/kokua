@@ -44,8 +44,10 @@ def _book(tmp_path, *sessions: Session, adopt=True) -> ConversationBook:
     return book
 
 
-def _tools(book: ConversationBook, running=()) -> dict:
-    tools = make_conversation_tools(book, lambda conversation_id: conversation_id in running)
+def _tools(book: ConversationBook, running=(), schedule_rename=None) -> dict:
+    tools = make_conversation_tools(
+        book, lambda conversation_id: conversation_id in running, schedule_rename or (lambda cid, title: None)
+    )
     return {fn.__name__: fn for fn in tools}
 
 
@@ -304,8 +306,8 @@ async def test_search_and_read_agree_through_the_wired_tools(tmp_path):
     assert assistant._active_id in await tools["list_conversations"]()
 
 
-def test_the_toolset_builds_the_three_read_only_tools(tmp_path):
-    """Read-only is the whole shape of this capability: three tools, none of which writes."""
+def test_the_toolset_builds_its_four_tools(tmp_path):
+    """Three reads and exactly one write, so the one thing this capability can change stays countable."""
     from kokua.config.schema import AssistantConfig
     from kokua.registry import LiveState, ToolsetContext
     from kokua.toolsets.conversations import TOOLSET
@@ -314,11 +316,14 @@ def test_the_toolset_builds_the_three_read_only_tools(tmp_path):
         pass
 
     state = LiveState(
-        config=AssistantConfig(data_dir=tmp_path), conversation_book=FakeBook(), turn_running=lambda cid: False
+        config=AssistantConfig(data_dir=tmp_path),
+        conversation_book=FakeBook(),
+        turn_running=lambda cid: False,
+        schedule_rename=lambda cid, title: None,
     )
     names = {fn.__name__ for fn in TOOLSET.build(ToolsetContext(state=state, agent=object(), agent_name="assistant"))}
 
-    assert names == {"list_conversations", "read_conversation", "search_conversations"}
+    assert names == {"list_conversations", "read_conversation", "search_conversations", "rename_conversation"}
 
 
 def test_the_guidance_names_the_cross_conversation_tools():
@@ -326,5 +331,66 @@ def test_the_guidance_names_the_cross_conversation_tools():
     about tools it does not have."""
     from kokua.toolsets.conversations import TOOLSET
 
-    for name in ("list_conversations", "read_conversation", "search_conversations"):
+    for name in ("list_conversations", "read_conversation", "search_conversations", "rename_conversation"):
         assert name in TOOLSET.guidance
+
+
+# --- rename_conversation ---------------------------------------------------------------------------
+
+
+async def test_rename_schedules_the_write_and_names_the_conversation_it_renamed(tmp_path):
+    scheduled: list = []
+    book = _book(tmp_path, _session("aaaaaaaa1", title="Oldest"))
+
+    answer = await _tools(book, schedule_rename=lambda cid, title: scheduled.append((cid, title)))[
+        "rename_conversation"
+    ]("aaaaaaaa1", "Kauai snorkelling")
+
+    assert scheduled == [("aaaaaaaa1", "Kauai snorkelling")]
+    assert "Kauai snorkelling" in answer
+    assert "Oldest" in answer
+
+
+async def test_rename_accepts_an_id_prefix_and_schedules_the_full_id(tmp_path):
+    scheduled: list = []
+    book = _book(tmp_path, _session("aaaaaaaa1", title="Oldest"))
+
+    await _tools(book, schedule_rename=lambda cid, title: scheduled.append((cid, title)))["rename_conversation"](
+        "aaaaaa", "Kauai"
+    )
+
+    assert scheduled == [("aaaaaaaa1", "Kauai")]
+
+
+async def test_rename_of_an_unknown_conversation_schedules_nothing(tmp_path):
+    scheduled: list = []
+    book = _book(tmp_path, _session("aaaaaaaa1", title="Oldest"))
+
+    answer = await _tools(book, schedule_rename=lambda cid, title: scheduled.append((cid, title)))[
+        "rename_conversation"
+    ]("zzzzzzzz9", "Kauai")
+
+    assert scheduled == []
+    assert "list_conversations" in answer
+
+
+async def test_rename_to_nothing_is_refused_rather_than_clearing_the_title(tmp_path):
+    scheduled: list = []
+    book = _book(tmp_path, _session("aaaaaaaa1", title="Oldest"))
+
+    answer = await _tools(book, schedule_rename=lambda cid, title: scheduled.append((cid, title)))[
+        "rename_conversation"
+    ]("aaaaaaaa1", "   ")
+
+    assert scheduled == []
+    assert "title" in answer.lower()
+
+
+async def test_rename_says_the_write_lands_after_the_turn(tmp_path):
+    """The tool cannot write inline (turn invariant 1), so the model is told the timing rather than
+    left to assume a read straight afterwards would show it."""
+    book = _book(tmp_path, _session("aaaaaaaa1", title="Oldest"))
+
+    answer = await _tools(book)["rename_conversation"]("aaaaaaaa1", "Kauai")
+
+    assert "turn" in answer.lower()

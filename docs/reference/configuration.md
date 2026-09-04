@@ -395,10 +395,12 @@ tool, give its server a `[[mcp.server]]` table here and name that server in an a
 a tool from a toolset nothing declares, name that toolset in an agent's `tools`. Both are known from the
 next start.
 
-Two names worth considering adding, both ungated by default: `read_conversation` and
-`search_conversations`. A saved transcript is untrusted text, since a worker may have pasted web content
-into it, so an injection landing in one conversation can influence another. They are ungated by default
-because gating a read would make an unattended scheduled run that reads history fail silently.
+Three names worth considering adding, all ungated by default: `read_conversation`,
+`search_conversations`, and `rename_conversation`. A saved transcript is untrusted text, since a worker
+may have pasted web content into it, so an injection landing in one conversation can influence another.
+The two reads are ungated by default because gating a read would make an unattended scheduled run that
+reads history fail silently. The rename writes, but it writes one field: the worst an injection gets from
+it is a conversation misleadingly named in the sidebar, with no message touched and nothing lost.
 
 ### `locked_config_keys`
 
