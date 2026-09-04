@@ -97,6 +97,27 @@ def turn_end(messages: list[dict], user_index: int) -> Optional[int]:
     return len(messages)
 
 
+def _metadata_before(metadata: dict, key: str, cut: int) -> dict:
+    """The entries of a turn-keyed metadata map whose index survives a prefix cut at ``cut``.
+
+    Shared by :meth:`ConversationBook.branch` and :meth:`ConversationBook.truncate`, which both keep
+    ``messages[:cut]`` (a new conversation's whole transcript there, this conversation's remainder
+    here) and so both need the same answer to "which turn-indexed records survive with it". A prefix
+    cut leaves every surviving index exactly where it was, so a turn-keyed map is filtered rather than
+    remapped; that stops being true the moment anything changes what index 0 of a stored transcript is.
+
+    ``index.isdigit()`` guards against a key this map was never meant to hold: every real entry is
+    written as ``str(user_index)`` by ``record_turn_provenance``/``record_workflow_metadata``, so a
+    non-digit key would only appear from a hand-edited or foreign session file, and comparing it to
+    ``cut`` would raise rather than simply being excluded.
+
+    Callers differ only in what they do with the result: :meth:`branch` deep-copies it into a fresh
+    session and sets it only when non-empty; :meth:`truncate` mutates its own session's map in place
+    and removes it entirely when nothing survives. Both dispositions stay at the call site.
+    """
+    return {index: value for index, value in metadata.get(key, {}).items() if index.isdigit() and int(index) < cut}
+
+
 def _now() -> str:
     return datetime.now().isoformat()
 
@@ -322,6 +343,10 @@ class ConversationBook:
         reason, and because the duplication is text (images are already content-addressed references,
         which a copy shares rather than duplicates).
 
+        The mirror image of :meth:`truncate`, named from the other side of one boundary: this keeps
+        ``messages[:turn_end(...)]`` in a *new* conversation, and truncate keeps ``messages[:user_index]``
+        in *this* one. A reader who has followed either should know they are looking at the other.
+
         Read from the store, never from ``agent_for``, for the reason ``toolsets/conversations.py``
         gives: building an agent is neither cheap nor side-effect-free, and a running turn mutates the
         live message list in place while the store holds a snapshot written once per turn. A turn in
@@ -351,11 +376,7 @@ class ConversationBook:
         session.messages = [dict(message) for message in parent.messages[:cut]]
         session.metadata["branched_from"] = {"conversation_id": conversation_id, "message_index": user_index}
         for key in TURN_KEYED_METADATA:
-            kept = {
-                index: value
-                for index, value in parent.metadata.get(key, {}).items()
-                if index.isdigit() and int(index) < cut
-            }
+            kept = _metadata_before(parent.metadata, key, cut)
             if kept:
                 session.metadata[key] = copy.deepcopy(kept)
         # `task_id` is deliberately not inherited: a branch of a scheduled run is the user's
@@ -381,9 +402,10 @@ class ConversationBook:
         through ``turn_end`` rather than an inline index check, so "there is a turn here" means the same
         thing to a branch, to a truncation, and to the control a front end offers for either.
 
-        The per-turn metadata maps are **filtered, not remapped**, for the same reason a branch's are: a
-        prefix cut leaves every surviving index where it was. A map left with nothing is removed rather
-        than stored empty, so a tidied conversation reads like one that never had that kind of record.
+        The per-turn metadata maps are filtered through :func:`_metadata_before`, the same helper
+        :meth:`branch` uses; a map left with nothing is removed rather than stored empty, so a tidied
+        conversation reads like one that never had that kind of record. See that function for why the
+        filter, not a remap, is what a prefix cut needs.
 
         The title is dropped when no user turn survives, which makes an emptied conversation
         indistinguishable from a fresh one: the sidebar shows it as untitled, and the next turn's
@@ -406,24 +428,29 @@ class ConversationBook:
         ``Assistant.truncate_conversation``, for reasons that are about the user rather than about
         correctness; see that method.
 
+        The ``exists`` check is made *inside* that same hold, not before it, even though entering the
+        hold is itself an ``await``. A check made before the hold answers a question about the moment
+        before the wait, not the moment after it: a concurrent :meth:`delete` (retention pruning off the
+        socket task reaches one the same way a user's own delete does) can complete while this call is
+        waiting to enter the gate, and a stale "yes" would then read a just-vacated key as an unsaved
+        turn, raising :class:`TurnNotFound` where the caller was promised :class:`ConversationNotFound`.
+        ``retitle`` already makes its own "is this still real" check inside its hold for the identical
+        reason, which is the precedent this follows.
+
         The cached agent is dropped, not discarded: see ``AgentRegistry.drop_agent`` for why taking the
         lock with it would be a concurrency bug. It rebuilds from the shortened store on next access, so
         the deleted turns leave the model's context as well as the sidebar.
         """
-        if not self.exists(conversation_id):
-            raise ConversationNotFound(f"Conversation {conversation_id} is not in the store.")
         async with self._gate.turn(conversation_id):
+            if not self.exists(conversation_id):
+                raise ConversationNotFound(f"Conversation {conversation_id} is not in the store.")
             session = self._store.get(conversation_id)
             if turn_end(session.messages, user_index) is None:
                 raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")
             removed = len(session.messages) - user_index
             session.messages = session.messages[:user_index]
             for key in TURN_KEYED_METADATA:
-                kept = {
-                    index: value
-                    for index, value in session.metadata.get(key, {}).items()
-                    if index.isdigit() and int(index) < user_index
-                }
+                kept = _metadata_before(session.metadata, key, user_index)
                 if kept:
                     session.metadata[key] = kept
                 else:
