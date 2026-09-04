@@ -46,11 +46,34 @@ TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usa
 
 
 class TurnNotFound(Exception):
-    """A branch named a turn the stored transcript does not have.
+    """An operation named a turn the stored transcript does not have.
 
-    Raised rather than branching at some nearby point, because the caller asked for one exchange and
-    silently giving it another is the failure a user cannot see. The case that happens is a turn whose
-    ``persist`` has not landed yet.
+    Raised by branching and by truncation rather than acting at some nearby point, because the caller
+    asked for one exchange and silently giving it another is the failure a user cannot see. The case
+    that happens is a turn whose ``persist`` has not landed yet; a page holding an index from before an
+    earlier truncation is the other.
+    """
+
+
+class ConversationNotFound(Exception):
+    """An operation named a conversation the store does not have.
+
+    Kept distinct from :class:`TurnNotFound` because the two want different sentences: a conversation
+    that is gone is nothing the user can act on, while a turn that is not stored yet becomes actionable
+    a moment later. Telling them apart needs ``exists``, since ``store.get`` answers a missing key with
+    a fresh empty ``Session``, which has no user turn at any index and would otherwise be reported as an
+    unsaved turn.
+    """
+
+
+class TurnInFlight(Exception):
+    """A destructive edit was asked for on a conversation whose turn is still running.
+
+    Raised by ``Assistant.truncate_conversation`` rather than by the book: the tracker that knows which
+    conversations have a turn in flight belongs to the assistant, while the book holds only the gate,
+    which can wait for a turn but cannot report that one exists. Declared here with the other refusals
+    of the same operation, so a caller catching them finds them together and the front end words them in
+    one place.
     """
 
 
@@ -341,6 +364,75 @@ class ConversationBook:
         self._store.save(session)
         self._activate(session.key, revert_to=previous_id)
         return session.key
+
+    async def truncate(self, conversation_id: str, user_index: int) -> int:
+        """Delete the turn opened at ``user_index`` and every turn after it. Returns messages removed.
+
+        The mirror image of :meth:`branch`, named from the other side of one boundary: a branch keeps
+        ``messages[:turn_end(...)]`` in a *new* conversation, and this keeps ``messages[:user_index]`` in
+        *this* one. A reader who has followed either should know they are looking at the other. What is
+        deleted is whole turns: the named turn's user message, its reasoning, its tool calls and the
+        results answering them, its answer, and its recorded cards.
+
+        A turn boundary is the only cut a transcript survives. Everything before a message the user
+        actually sent is complete turns, so the remainder can never end between an assistant message
+        holding ``tool_calls`` and the ``tool`` messages answering them, which a provider rejects on the
+        conversation's next request rather than here, where it can still be reported. Validity is asked
+        through ``turn_end`` rather than an inline index check, so "there is a turn here" means the same
+        thing to a branch, to a truncation, and to the control a front end offers for either.
+
+        The per-turn metadata maps are **filtered, not remapped**, for the same reason a branch's are: a
+        prefix cut leaves every surviving index where it was. A map left with nothing is removed rather
+        than stored empty, so a tidied conversation reads like one that never had that kind of record.
+
+        The title is dropped when no user turn survives, which makes an emptied conversation
+        indistinguishable from a fresh one: the sidebar shows it as untitled, and the next turn's
+        ``persist`` derives a placeholder that ``Assistant._spawn_title`` replaces. Keeping the old title
+        would leave the conversation named after a turn that is gone. Note the system message survives a
+        cut at the first turn (AIMU seeds it as part of that turn), so "emptied" is about user turns
+        rather than about the list being empty.
+
+        ``updated_at`` is deliberately *not* bumped, unlike :meth:`persist` and like :meth:`retitle`.
+        The timestamp orders the sidebar by when a conversation last had activity in it, and deleting
+        turns is an edit of a record rather than activity in it; bumping it would shuffle every
+        conversation the user tidies to the top of the list.
+
+        Held under this conversation's own turn slot, like :meth:`delete` and :meth:`retitle`: the store
+        saves whole sessions, so a read-modify-write racing a turn's ``persist`` would revert one of
+        them. That hold is also why an interleaving is impossible rather than merely unlikely, since a
+        turn holds the same slot across its own persist. Being one ``gate.turn`` makes this bound by
+        invariant 1 in ``core/turns.py``, so a caller already holding a turn must not reach here. A
+        conversation with a turn actually in flight is refused a layer up, in
+        ``Assistant.truncate_conversation``, for reasons that are about the user rather than about
+        correctness; see that method.
+
+        The cached agent is dropped, not discarded: see ``AgentRegistry.drop_agent`` for why taking the
+        lock with it would be a concurrency bug. It rebuilds from the shortened store on next access, so
+        the deleted turns leave the model's context as well as the sidebar.
+        """
+        if not self.exists(conversation_id):
+            raise ConversationNotFound(f"Conversation {conversation_id} is not in the store.")
+        async with self._gate.turn(conversation_id):
+            session = self._store.get(conversation_id)
+            if turn_end(session.messages, user_index) is None:
+                raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")
+            removed = len(session.messages) - user_index
+            session.messages = session.messages[:user_index]
+            for key in TURN_KEYED_METADATA:
+                kept = {
+                    index: value
+                    for index, value in session.metadata.get(key, {}).items()
+                    if index.isdigit() and int(index) < user_index
+                }
+                if kept:
+                    session.metadata[key] = kept
+                else:
+                    session.metadata.pop(key, None)
+            if not any(is_user_turn(message) for message in session.messages):
+                session.metadata.pop("title", None)
+            self._store.save(session)
+            self._registry.drop_agent(conversation_id)
+            return removed
 
     async def delete(self, conversation_id: str, *, cancel_turn: Callable[[str], None]) -> bool:
         """Delete a conversation, switching away from it if it was the active one.

@@ -64,6 +64,22 @@ class AgentRegistry:
         self._locks.pop(conversation_id, None)
         self._pins.pop(conversation_id, None)
 
+    def drop_agent(self, conversation_id: str) -> None:
+        """Forget a conversation's cached agent, keeping its lock and pins (e.g. after a truncation).
+
+        The narrow half of :meth:`discard`, and the distinction is load-bearing. An edit that shortens
+        a conversation's stored transcript has to invalidate the agent built from the longer one, but it
+        makes that edit while *holding* this conversation's turn slot, which is the lock handed out by
+        :meth:`lock`. Removing the lock there would leave a turn queued on the old object while the next
+        turn takes a fresh one, so two turns would run concurrently on one agent's message list.
+        `discard` can afford that because nothing runs on a deleted conversation again; a truncated one
+        is a conversation the user carries on in.
+
+        The agent rebuilds on next access, from the store, which is what keeps the store the single
+        answer to what a conversation contains.
+        """
+        self._agents.pop(conversation_id, None)
+
     def live_agents(self) -> list[Any]:
         """The currently-cached agent instances (for fan-out of global mutations)."""
         return list(self._agents.values())

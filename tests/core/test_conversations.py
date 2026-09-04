@@ -11,7 +11,7 @@ from aimu.aio.channels.base import ChannelMessage
 from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY
 
 from kokua.core.assistant import Assistant
-from kokua.core.conversations import TurnNotFound
+from kokua.core.conversations import ConversationNotFound, TurnNotFound
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
 from tests.helpers import BlockingModelClient, MockAsyncModelClient, settle_titles
 
@@ -935,3 +935,135 @@ async def test_branch_conversation_reverts_active_id_on_build_failure(tmp_path):
     # still lingers in the store, unused but harmless, the same best-effort revert new_conversation
     # documents.
     assert assistant._active_id == original_id
+
+
+async def test_truncate_removes_the_named_turn_and_everything_after_it(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    removed = await assistant._book.truncate(parent.key, 5)
+
+    assert removed == 2
+    # Turn one survives whole, its tool call and the result answering it included: that pairing is
+    # what a provider validates on the conversation's next request.
+    assert [m.get("content") for m in assistant._store.get(parent.key).messages] == [
+        "you are kokua",
+        "first question",
+        "",
+        "12:00",
+        "first answer",
+    ]
+
+
+async def test_truncate_leaves_the_conversation_where_it_was(tmp_path):
+    """Same id, same active pointer: unlike branch and delete, the view does not move."""
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    await assistant._book.truncate(parent.key, 5)
+
+    assert assistant._active_id == parent.key
+    assert parent.key in assistant._store.list_keys()
+    kept = assistant._store.get(parent.key)
+    assert kept.metadata["title"] == "Kauai trip"
+    # Not bumped, unlike `persist` and like `retitle`: the sidebar orders by when a conversation last
+    # had activity in it, and tidying a record is not activity in it.
+    assert kept.metadata["updated_at"] == parent.metadata["updated_at"]
+
+
+async def test_truncating_the_first_turn_empties_the_conversation_and_drops_its_title(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    removed = await assistant._book.truncate(parent.key, 1)
+
+    kept = assistant._store.get(parent.key)
+    assert removed == 6
+    # The system message is not a turn and stays behind: AIMU seeds it as part of a conversation's
+    # first turn, so "emptied" means no user message is left, not that the list is empty.
+    assert [m.get("role") for m in kept.messages] == ["system"]
+    # Untitled again, so the sidebar reads it as a fresh conversation and the next turn derives a
+    # title from what is actually in it.
+    assert "title" not in kept.metadata
+
+
+async def test_truncate_keeps_only_the_metadata_of_the_turns_it_kept(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(
+        tmp_path,
+        usage={"1": {"calls": 1}, "5": {"calls": 2}},
+        model={"1": "ollama:gemma", "5": "ollama:gemma"},
+        subagent={"5": [{"task": "check the ferry times"}]},
+    )
+
+    await assistant._book.truncate(parent.key, 5)
+
+    kept = assistant._store.get(parent.key).metadata
+    # Filtered, not remapped: a prefix cut leaves every surviving index where it was.
+    assert kept["usage"] == {"1": {"calls": 1}}
+    assert kept["model"] == {"1": "ollama:gemma"}
+    assert "subagent" not in kept
+
+
+async def test_truncate_rebuilds_the_agent_from_the_shortened_transcript(tmp_path):
+    """The store is the single answer to what a conversation holds, so the built agent has to go."""
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    before = assistant._book.agent
+
+    await assistant._book.truncate(parent.key, 5)
+
+    after = assistant._book.agent
+    assert after is not before
+    # `agent.restore` (the path `build()` rebuilds through) strips every stored `system` message,
+    # since the client tracks its own system prompt separately and re-prepends it per call; the
+    # rebuilt agent's message list never carries one, whatever the store holds.
+    assert [m.get("content") for m in after.model_client.messages] == [
+        "first question",
+        "",
+        "12:00",
+        "first answer",
+    ]
+
+
+async def test_truncate_keeps_the_conversations_turn_lock(tmp_path):
+    """`discard` would take the lock with the agent, and this holds that lock while it writes."""
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    lock = assistant._registry.lock(parent.key)
+
+    await assistant._book.truncate(parent.key, 5)
+
+    assert assistant._registry.lock(parent.key) is lock
+
+
+async def test_truncate_refuses_an_index_that_is_not_a_user_turn(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    for index in (2, 99, -1):  # an assistant message, past the end, and below the start
+        with pytest.raises(TurnNotFound):
+            await assistant._book.truncate(parent.key, index)
+
+    assert assistant._store.get(parent.key).messages == BRANCH_MESSAGES  # nothing partially applied
+
+
+async def test_truncate_refuses_a_conversation_the_store_does_not_have(tmp_path):
+    """A distinct error from `TurnNotFound`, and it takes the `exists` check to get one.
+
+    `store.get` answers a missing key with a fresh empty `Session`, which has no user turn at any
+    index, so without that check a deleted conversation would be reported as an unsaved turn.
+    """
+    assistant, _ = await _assistant_with_branchable_parent(tmp_path)
+
+    with pytest.raises(ConversationNotFound):
+        await assistant._book.truncate("deadbeefdeadbeef", 1)
+
+
+async def test_a_turn_after_a_truncation_continues_from_the_shortened_transcript(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["third answer"]))
+    conversation = assistant._session
+    conversation.messages = [dict(message) for message in BRANCH_MESSAGES]
+    conversation.metadata["title"] = "Kauai trip"
+    assistant._store.save(conversation)
+
+    await assistant._book.truncate(conversation.key, 5)
+    await assistant._handle(ChannelMessage(text="third question", channel="fake"), conversation_id=conversation.key)
+
+    contents = [m.get("content") for m in assistant._store.get(conversation.key).messages]
+    assert "second question" not in contents  # the deleted turn is not in the model's context either
+    assert "third question" in contents
+    assert "third answer" in contents

@@ -98,3 +98,46 @@ def test_live_agents_returns_cached_instances():
     a1 = registry.get("c1")
     a2 = registry.get("c2")
     assert set(registry.live_agents()) == {a1, a2}
+
+
+def test_drop_agent_forgets_the_agent_and_keeps_the_lock():
+    """The difference from `discard`, and the whole reason this exists.
+
+    A truncation drops a conversation's agent while holding that conversation's turn slot, which is
+    the lock this registry hands the gate. Taking the lock away mid-hold would let a turn queued on
+    the old lock and a later turn taking a fresh one run at the same time, on one message list.
+    """
+    registry, built = _registry()
+    lock = registry.lock("c1")
+    registry.get("c1")
+
+    registry.drop_agent("c1")
+
+    assert registry.lock("c1") is lock
+    registry.get("c1")
+    assert built == ["c1", "c1"]  # rebuilt, so the store is what it comes back from
+
+
+def test_drop_agent_keeps_a_pin_so_eviction_accounting_survives():
+    """`discard` clears the pin count too, and that count is reference-counted.
+
+    A pin is paired with an `unpin` its holder will still call, so clearing it here would release a
+    guard the holder believes it is holding. Asserted through eviction rather than by reading the
+    counter, so the test says what the pin is for: at cap 1, a pinned conversation and an unpinned one
+    both stay, and only a pin that survived the drop produces that.
+    """
+    registry, _ = _registry(cap=1)
+    registry.get("c1")
+    registry.pin("c1")
+
+    registry.drop_agent("c1")
+
+    registry.get("c1")  # rebuilt, and still pinned
+    registry.get("c2")
+    assert registry.cached_ids() == ["c1", "c2"]
+
+
+def test_drop_agent_is_quiet_about_a_conversation_it_never_built():
+    registry, built = _registry()
+    registry.drop_agent("never-seen")  # no KeyError
+    assert built == []
