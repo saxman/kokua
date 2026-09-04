@@ -37,7 +37,7 @@ from kokua.core.build import (
 )
 from kokua.config import AssistantConfig
 from kokua.core import conversation_commands
-from kokua.core.conversations import UNTITLED, ConversationBook
+from kokua.core.conversations import UNTITLED, ConversationBook, TurnInFlight
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
 from kokua.core.messages import first_user_text
@@ -419,6 +419,28 @@ class Assistant:
         """
         self._human.abandon_all()
         return self._book.branch(conversation_id, message_index)
+
+    async def truncate_conversation(self, conversation_id: str, message_index: int) -> int:
+        """Delete a turn and everything after it from a conversation; returns messages removed.
+
+        Refuses while that conversation has a turn in flight, and the reason is worth stating because
+        the tempting one is false. A turn holds this conversation's turn slot across its own ``persist``
+        (see ``core/turns.py``), and ``ConversationBook.truncate`` takes the same slot, so a truncation
+        can only land before a turn starts or after its save: it can never be silently undone by one.
+        What the refusal buys is a bounded wait and an unsurprised user. The web front end applies
+        controls on the one task reading its socket, so waiting out a local model's turn wedges every
+        control in the UI, which is the same wedge that moved ``delete`` off the gate's exclusive hold;
+        and a deletion that applied minutes later would take a turn that arrived in between with it,
+        which is not what the user was looking at when they asked.
+
+        Unlike the conversation operations around it, this abandons no pending approval and switches no
+        conversation. A pending question belongs to a turn in flight, which this refuses outright, and
+        the conversation being edited is the one already in view.
+        """
+        lock = self._registry.lock(conversation_id)
+        if lock.locked():
+            raise TurnInFlight(f"Conversation {conversation_id} has a turn in flight.")
+        return await self._book.truncate(conversation_id, message_index)
 
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation, switching away from it if it was the one being viewed."""

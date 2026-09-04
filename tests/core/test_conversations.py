@@ -11,7 +11,7 @@ from aimu.aio.channels.base import ChannelMessage
 from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY
 
 from kokua.core.assistant import Assistant
-from kokua.core.conversations import ConversationNotFound, TurnNotFound
+from kokua.core.conversations import ConversationNotFound, TurnInFlight, TurnNotFound
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
 from tests.helpers import BlockingModelClient, MockAsyncModelClient, settle_titles
 
@@ -1067,3 +1067,68 @@ async def test_a_turn_after_a_truncation_continues_from_the_shortened_transcript
     assert "second question" not in contents  # the deleted turn is not in the model's context either
     assert "third question" in contents
     assert "third answer" in contents
+
+
+async def test_truncate_conversation_reports_what_it_removed(tmp_path):
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    assert await assistant.truncate_conversation(parent.key, 5) == 2
+
+
+async def test_truncate_conversation_refuses_while_that_conversation_has_a_turn_running(tmp_path):
+    """Refused outright rather than queued behind the turn.
+
+    Not a correctness guard: the gate hold inside the book already makes an interleaving impossible.
+    It is a bounded wait, since the web front end applies controls on the one task reading its socket,
+    and it keeps a deletion from applying minutes later and silently taking a turn that arrived in the
+    meantime with it.
+    """
+    client = BlockingModelClient()
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+    conversation_id = assistant._active_id
+
+    turn = asyncio.create_task(
+        assistant._handle(ChannelMessage(text="a long job", channel="fake"), conversation_id=conversation_id)
+    )
+    await asyncio.wait_for(client.started.wait(), timeout=5)
+
+    try:
+        with pytest.raises(TurnInFlight):
+            # A wait_for so a refusal that turned into a queue fails the test instead of hanging it.
+            await asyncio.wait_for(assistant.truncate_conversation(conversation_id, 1), timeout=5)
+    finally:
+        client.release.set()
+        await turn
+
+    # The turn ran to completion and kept its transcript: the refusal cut nothing.
+    assert any(m.get("content") == "a long job" for m in assistant._store.get(conversation_id).messages)
+
+
+async def test_truncate_conversation_allows_a_turn_running_elsewhere(tmp_path):
+    """The refusal is per conversation, like the turn slot it stands in for."""
+    clients: dict = {}
+
+    def factory(conversation_id):
+        client = BlockingModelClient() if not clients else MockAsyncModelClient(["ok"])
+        clients[conversation_id] = client
+        return client
+
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    busy_id = assistant._active_id
+    blocking = clients[busy_id]
+    await assistant.new_conversation()
+    tidy_id = assistant._active_id
+    tidy = assistant._store.get(tidy_id)
+    tidy.messages = [dict(message) for message in BRANCH_MESSAGES]
+    assistant._store.save(tidy)
+
+    turn = asyncio.create_task(
+        assistant._handle(ChannelMessage(text="a long job", channel="fake"), conversation_id=busy_id)
+    )
+    await asyncio.wait_for(blocking.started.wait(), timeout=5)
+
+    try:
+        assert await asyncio.wait_for(assistant.truncate_conversation(tidy_id, 5), timeout=5) == 2
+    finally:
+        blocking.release.set()
+        await turn
