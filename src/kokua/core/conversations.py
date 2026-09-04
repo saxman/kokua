@@ -490,15 +490,17 @@ class ConversationBook:
 
         Held under this conversation's own turn slot rather than the gate's exclusive hold. The writer
         drains every in-flight turn before it proceeds, so a delete used to wait out a turn on an
-        unrelated conversation, and the web front end awaits this call on the single task reading its
-        socket: one long turn elsewhere therefore froze every control in the UI, including the ``/stop``
-        that would have released it. What the hold has to cover is narrower than the writer anyway. This
-        conversation's own turn must be off its agent and message list before the store record and the
-        registry entry go, and ``cancel_turn`` above has already asked that turn to stop. So the wait is
-        bounded by this conversation's own work: the cancellation landing, plus any turn already queued on
-        it, which the per-conversation lock hands the slot to first (it is FIFO, so a queued turn is
-        drained ahead of this delete exactly as the writer used to drain it). A reader still keeps a
-        settings apply out, since that runs as the writer and so cannot overlap one.
+        unrelated conversation. The web front end applies controls in arrival order on a single task, so
+        that wait queued every other control behind it, ``/stop`` included; the socket is read on a
+        separate task, which makes that a delay rather than a wedge (see ``frontends/web.py``), but it
+        was still the queueing cost that moved this off the exclusive hold. What the hold has to cover is
+        narrower than the writer anyway. This conversation's own turn must be off its agent and message
+        list before the store record and the registry entry go, and ``cancel_turn`` above has already
+        asked that turn to stop. So the wait is bounded by this conversation's own work: the
+        cancellation landing, plus any turn already queued on it, which the per-conversation lock hands
+        the slot to first (it is FIFO, so a queued turn is drained ahead of this delete exactly as the
+        writer used to drain it). A reader still keeps a settings apply out, since that runs as the
+        writer and so cannot overlap one.
 
         Being one ``gate.turn`` makes this bound by invariant 1 (see ``core/turns.py``): a caller already
         holding a turn must not reach here, which is why ``TurnRunner._prune_task_conversations`` is

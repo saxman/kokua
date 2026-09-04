@@ -1625,24 +1625,35 @@ form.addEventListener("submit", (e) => {
   // always what was typed. A message carrying anything besides its text goes as an input frame, which
   // never takes the /plan wrapper: an image turn has never been plannable, and the picker is disabled
   // whenever Plan is on, so a frame and a wrapper can never both be wanted.
-  const asFrame = attached.length > 0 || thinking !== null;
+  // `thinking` is tested for truthiness here, the same way the frame body below decides whether to
+  // set `frame.thinking`: a future reasoning-effort option with a falsy non-null value must not go as
+  // a frame with no `thinking` key while also silently keeping the /plan wrapper this line exists to
+  // withhold from it.
+  const asFrame = attached.length > 0 || !!thinking;
   const outgoing = !asFrame && planNext && !/^\/plan(\s|$)/i.test(text) ? "/plan " + text : text;
-  // The queue is positional, so its two failure directions are not equally bad. Withholding an entry
-  // for a message that does run a turn is the bad one: that turn's `turn_saved` consumes some earlier
-  // bubble's entry instead, so a "delete this turn and everything after it" control ends up deleting
-  // from a turn later than the one it sits on, which is a destructive control pointed at the wrong
-  // target. Enqueuing one for a message that runs no turn only strands the entry at the head, shifting
-  // later controls by one turn until the next repaint clears the queue. So this suppresses exactly the
-  // words the server reserves (`Assistant._serve_channel`), read the way it reads them: /stop and /diag
-  // are matched against the whole message, the conversation commands tolerate whitespace after the
-  // slash and run with or without an argument, and a workflow command with no task is answered with a
-  // usage line. Everything else is enqueued, including an unrecognized "/"-word, which the server
-  // deliberately runs as an ordinary turn so that "/usr/local/bin is missing" reaches the model.
+  // Enqueuing an entry for text that turns out to run no turn is the case this predicate exists to
+  // close off, the same one the queue's own declaration comment calls worse (see `pendingTurnBubbles`
+  // above): nothing ever consumes that entry, so it strands at the head, and the *next* turn's
+  // `turn_saved` takes the stale entry instead of its own, stamping an older bubble with a newer turn's
+  // index and shifting every control after it by one turn until a repaint clears the queue. Withholding
+  // an entry for a message that does run a turn fails the other way, and only once a second message is
+  // already queued behind it: that turn's own `turn_saved` then consumes the *next* bubble's entry
+  // instead, so a later bubble is stamped with this earlier turn's index and its control deletes more
+  // than that bubble implies. This predicate cannot cause that, since it only suppresses text it can
+  // positively match to a word the server reserves (`Assistant._serve_channel`), read the way it reads
+  // them: /stop and /diag are matched against the whole message, the conversation commands tolerate
+  // whitespace after the slash and run with or without an argument, and a workflow command with no task
+  // is answered with a usage line. Everything else is enqueued, including an unrecognized "/"-word,
+  // which the server deliberately runs as an ordinary turn so that "/usr/local/bin is missing" reaches
+  // the model.
   //
-  // One case stays wrong and cannot be decided here: a "/word" naming a workflow command that an
-  // installed toolset offers but the entry agent does not declare is answered with no turn, and the
-  // page has no way to know which words those are. It strands an entry, shifting later controls until
-  // the next repaint.
+  // Two cases stay wrong and cannot be decided here, both in the stranding direction above rather than
+  // the destructive one. A "/word" naming a workflow command that an installed toolset offers but the
+  // entry agent does not declare is answered with no turn, and the page has no way to know which words
+  // those are. So is a composer message sent while a tool call is waiting on approval:
+  // `HumanGate.resolve_reply` consumes it and no turn runs, in the approval-reply branch of
+  // `Assistant._serve_channel`, but the page leaves the composer live during an approval, so typing
+  // "y" strands an entry the same way. Each shifts later controls until the next repaint.
   const answeredAsCommand =
     /^\/(stop|diag)$/i.test(outgoing) ||
     /^\/\s*(new|conversations|switch)(\s|$)/i.test(outgoing) ||
