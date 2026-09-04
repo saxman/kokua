@@ -283,16 +283,6 @@ class TurnRunner:
         # cancellation and error paths below record under the index a completed turn would use; -1
         # means the turn committed no user message, and recording no-ops.
         user_index = -1
-        turn_complete = asyncio.Event()
-
-        async def _turn_marker():
-            await turn_complete.wait()
-
-        handle = RunHandle.start(_turn_marker())
-        self._tracker.add(
-            conversation_id,
-            TurnInfo(handle=handle, started=started, preview=msg.text[:120], task_id=None),
-        )
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
@@ -384,8 +374,6 @@ class TurnRunner:
             # whose record would otherwise linger and replay a phantom user bubble on the next switch-in.
             self._ui.end_catch_up(conversation_id)
             self._book.unpin(conversation_id)
-            turn_complete.set()
-            self._tracker.remove_if(conversation_id, handle)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
 
     def _workflow_context(self, agent, msg: ChannelMessage, workflow) -> WorkflowContext:
