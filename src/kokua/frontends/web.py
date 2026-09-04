@@ -427,19 +427,24 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                         try:
                             await assistant.truncate_conversation(str(control.get("id", "")), index)
                         except TurnInFlight:
-                            # Actionable, so it says what to do: the user can stop the turn and retry.
+                            # Actionable, so it says what to do, without naming an affordance: the Stop
+                            # button and /stop are the same act, and only one of them is on this page.
                             await channel.send(
                                 "A turn is still running in that conversation, so nothing was deleted. "
-                                "Stop it with /stop, then try again."
+                                "Stop the turn first, then try again."
                             )
                             continue
                         except ConversationNotFound:
                             await channel.send("That conversation is gone, so there was nothing to delete from.")
                             continue
                         except TurnNotFound:
-                            # Not worth a log line, like the branch control's: a page holding an index
-                            # from before an earlier deletion, or a turn whose save has not landed.
-                            await channel.send("That turn isn't saved yet, so there was nothing to delete.")
+                            # Not worth a log line, like the branch control's. Worded for all three
+                            # causes rather than the pending-save one: an index from before an earlier
+                            # deletion, and one naming a loop-injected message, name a turn that is gone
+                            # rather than one on its way, and inviting a retry for those is pointless.
+                            await channel.send(
+                                "That turn isn't in the saved conversation, so there was nothing to delete."
+                            )
                             continue
                     await _sync_view(channel, assistant)
 

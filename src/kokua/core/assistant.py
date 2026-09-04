@@ -423,15 +423,29 @@ class Assistant:
     async def truncate_conversation(self, conversation_id: str, message_index: int) -> int:
         """Delete a turn and everything after it from a conversation; returns messages removed.
 
-        Refuses while that conversation has a turn in flight, and the reason is worth stating because
-        the tempting one is false. A turn holds this conversation's turn slot across its own ``persist``
-        (see ``core/turns.py``), and ``ConversationBook.truncate`` takes the same slot, so a truncation
-        can only land before a turn starts or after its save: it can never be silently undone by one.
-        What the refusal buys is a bounded wait and an unsurprised user. The web front end applies
-        controls on the one task reading its socket, so waiting out a local model's turn wedges every
-        control in the UI, which is the same wedge that moved ``delete`` off the gate's exclusive hold;
-        and a deletion that applied minutes later would take a turn that arrived in between with it,
-        which is not what the user was looking at when they asked.
+        Refuses while that conversation has a turn in flight, and what the refusal is for is worth
+        stating in two halves, because one tempting summary of it is false and another is incomplete.
+
+        The false one first: a turn holds this conversation's turn slot across its own ``persist`` (see
+        ``core/turns.py``), and ``ConversationBook.truncate`` takes the same slot, so a truncation can
+        only land before a turn starts or after its save. It can never be silently undone by a turn's
+        save, and a later reader must not "fix" the refusal by leaning on that.
+
+        What the refusal actually buys is a bounded wait, an unsurprised user, and one thing the hold
+        does not cover. The web front end applies controls on the one task reading its socket, so waiting
+        out a local model's turn wedges every control in the UI, ``/stop`` included, which is the same
+        wedge that moved ``delete`` off the gate's exclusive hold; and a deletion that applied minutes
+        later would take a turn that arrived in between with it, which is not what the user was looking
+        at when they asked. Beyond the user's experience, though, ``TurnRunner.reactive`` fetches its
+        agent before taking the gate, so a turn queued behind a truncation holds a reference to the agent
+        the truncation then drops. It runs to completion on that orphaned agent and streams an answer
+        that ``ConversationBook.persist`` discards, because persist re-fetches the agent and snapshots the
+        rebuilt one. Refusing keeps that turn from being started behind a cut in the first place. See
+        ``TODO.md`` for the deeper fix, which belongs to the turn runner rather than here.
+
+        ``turn_running`` is handed to the book so the same question is re-asked inside the gate hold: the
+        check here is made before an ``await``, and a turn already in flight when it ran could otherwise
+        slip through the window between the check and the hold.
 
         Unlike the conversation operations around it, this abandons no pending approval and switches no
         conversation. A pending question belongs to a turn in flight, which this refuses outright, and
@@ -439,7 +453,7 @@ class Assistant:
         """
         if self.turn_running(conversation_id):
             raise TurnInFlight(f"Conversation {conversation_id} has a turn in flight.")
-        return await self._book.truncate(conversation_id, message_index)
+        return await self._book.truncate(conversation_id, message_index, turn_running=self.turn_running)
 
     async def delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation, switching away from it if it was the one being viewed."""

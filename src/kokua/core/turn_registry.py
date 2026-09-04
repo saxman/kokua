@@ -32,20 +32,23 @@ class TurnTracker:
     a turn submitted while another is still running on that conversation replaces the entry without
     ending the turn it replaced, so that map is not the list of what is in flight. Shutdown needs the
     list, since it closes the session store and a turn still running when that happens dies part way
-    through the provenance record it makes on its way down.
+    through the provenance record it makes on its way down, and so does ``running``, whose callers are
+    asking whether anything at all is touching a conversation before they mutate it.
     """
 
     def __init__(self):
         self._turns: dict[str, TurnInfo] = {}
-        # A list compared by identity rather than a set, so nothing here depends on ``RunHandle`` being
-        # hashable. It is a foreign type, its hashability is incidental to being a plain class, and a
-        # set would turn a change to it into a runtime failure at the moment a turn starts. At most a
-        # handful of turns are ever in flight, so the linear removal below costs nothing.
-        self._live: list[RunHandle] = []
+        # A list of ``(conversation id, handle)`` pairs, compared by identity rather than keyed in a set
+        # or a dict, so nothing here depends on ``RunHandle`` being hashable. It is a foreign type, its
+        # hashability is incidental to being a plain class, and a set would turn a change to it into a
+        # runtime failure at the moment a turn starts. The conversation rides alongside each handle so
+        # ``running`` can ask "is anything in flight here" of the same list shutdown reads. At most a
+        # handful of turns are ever in flight, so the linear scans below cost nothing.
+        self._live: list[tuple[str, RunHandle]] = []
 
     def add(self, conversation_id: str, info: TurnInfo) -> None:
         self._turns[conversation_id] = info
-        self._live.append(info.handle)
+        self._live.append((conversation_id, info.handle))
 
     def get(self, conversation_id: str) -> Optional[TurnInfo]:
         return self._turns.get(conversation_id)
@@ -61,14 +64,27 @@ class TurnTracker:
         The live list drops the handle unconditionally, keyed by the handle rather than by the
         conversation, precisely because a displaced turn no longer matches the entry. Leaving it behind
         would make shutdown wait on a turn that has already ended."""
-        self._live = [live for live in self._live if live is not handle]
+        self._live = [(cid, live) for cid, live in self._live if live is not handle]
         info = self._turns.get(conversation_id)
         if info is not None and info.handle is handle:
             del self._turns[conversation_id]
 
     def running(self, conversation_id: str) -> bool:
-        info = self._turns.get(conversation_id)
-        return info is not None and not info.handle.done
+        """Whether any turn is still in flight on ``conversation_id``, displaced ones included.
+
+        Read off the live list rather than the one-per-conversation entry, because a displaced turn (one
+        whose entry a later turn on the same conversation replaced) is still running while the entry no
+        longer names it. A caller asking this is asking whether it is safe to mutate the conversation
+        right now, and the honest answer covers every turn touching it, not just the newest: with the
+        entry as the source, a newer turn finishing first clears it and reports the older turn's
+        conversation as idle, so a destructive edit meant to be refused instead parks on the gate behind
+        that turn.
+
+        ``turn_elapsed`` still reads the entry, so in that displaced state a front end can be told a turn
+        is running while having no start time to count from. That is the smaller wrong answer of the two:
+        a missing clock beside an honest "still running" beats a wedged UI.
+        """
+        return any(cid == conversation_id and not handle.done for cid, handle in self._live)
 
     def all(self) -> list[tuple[str, "TurnInfo"]]:
         return list(self._turns.items())
@@ -80,7 +96,7 @@ class TurnTracker:
         This is what shutdown cancels and waits for. Reading ``all()`` there instead would miss a
         displaced turn, which the event loop then cancels after the session store has closed, and the
         record it makes while unwinding raises out of a task nobody is watching."""
-        return [handle for handle in self._live if not handle.done]
+        return [handle for _, handle in self._live if not handle.done]
 
     def for_task(self, task_id: str) -> list[tuple[str, "TurnInfo"]]:
         """Every still-running turn that is a firing of ``task_id``, as ``(conversation id, info)``.

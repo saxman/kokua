@@ -69,11 +69,12 @@ class ConversationNotFound(Exception):
 class TurnInFlight(Exception):
     """A destructive edit was asked for on a conversation whose turn is still running.
 
-    Raised by ``Assistant.truncate_conversation`` rather than by the book: the tracker that knows which
+    Raised first by ``Assistant.truncate_conversation``, because the tracker that knows which
     conversations have a turn in flight belongs to the assistant, while the book holds only the gate,
-    which can wait for a turn but cannot report that one exists. Declared here with the other refusals
-    of the same operation, so a caller catching them finds them together and the front end words them in
-    one place.
+    which can wait for a turn but cannot report that one exists. The book raises it too, from inside its
+    hold, but only through the predicate that method injects, for the same reason. Declared here with
+    the other refusals of the same operation, so a caller catching them finds them together and the
+    front end words them in one place.
     """
 
 
@@ -112,8 +113,8 @@ def _metadata_before(metadata: dict, key: str, cut: int) -> dict:
     ``cut`` would raise rather than simply being excluded.
 
     Callers differ only in what they do with the result: :meth:`branch` deep-copies it into a fresh
-    session and sets it only when non-empty; :meth:`truncate` mutates its own session's map in place
-    and removes it entirely when nothing survives. Both dispositions stay at the call site.
+    session and sets it only when non-empty; :meth:`truncate` rebinds its own session's key to the
+    filtered map and removes the key entirely when nothing survives. Both dispositions stay at the call site.
     """
     return {index: value for index, value in metadata.get(key, {}).items() if index.isdigit() and int(index) < cut}
 
@@ -386,7 +387,9 @@ class ConversationBook:
         self._activate(session.key, revert_to=previous_id)
         return session.key
 
-    async def truncate(self, conversation_id: str, user_index: int) -> int:
+    async def truncate(
+        self, conversation_id: str, user_index: int, *, turn_running: Optional[Callable[[str], bool]] = None
+    ) -> int:
         """Delete the turn opened at ``user_index`` and every turn after it. Returns messages removed.
 
         The mirror image of :meth:`branch`, named from the other side of one boundary: a branch keeps
@@ -421,12 +424,20 @@ class ConversationBook:
 
         Held under this conversation's own turn slot, like :meth:`delete` and :meth:`retitle`: the store
         saves whole sessions, so a read-modify-write racing a turn's ``persist`` would revert one of
-        them. That hold is also why an interleaving is impossible rather than merely unlikely, since a
-        turn holds the same slot across its own persist. Being one ``gate.turn`` makes this bound by
+        them. That hold is why the cut can never be interleaved with a turn's own save, since a turn
+        holds the same slot across its ``persist``. Being one ``gate.turn`` makes this bound by
         invariant 1 in ``core/turns.py``, so a caller already holding a turn must not reach here. A
         conversation with a turn actually in flight is refused a layer up, in
-        ``Assistant.truncate_conversation``, for reasons that are about the user rather than about
-        correctness; see that method.
+        ``Assistant.truncate_conversation``; see that method for what the refusal covers that the hold
+        does not.
+
+        ``turn_running`` re-asks that refusal question *inside* the hold, so a turn already in flight when
+        the caller's check ran cannot slip through the window between the check and the hold. It is
+        injected rather than looked up here because the two halves live in different places: the book
+        holds the gate, and the tracker that knows which conversations have a turn in flight belongs to
+        the assistant, which this layer must not import upward to reach. Left as None (a caller with no
+        tracker to ask, which every test of the book alone is) the hold is the only guard, exactly as
+        before.
 
         The ``exists`` check is made *inside* that same hold, not before it, even though entering the
         hold is itself an ``await``. A check made before the hold answers a question about the moment
@@ -444,6 +455,8 @@ class ConversationBook:
         async with self._gate.turn(conversation_id):
             if not self.exists(conversation_id):
                 raise ConversationNotFound(f"Conversation {conversation_id} is not in the store.")
+            if turn_running is not None and turn_running(conversation_id):
+                raise TurnInFlight(f"Conversation {conversation_id} has a turn in flight.")
             session = self._store.get(conversation_id)
             if turn_end(session.messages, user_index) is None:
                 raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")

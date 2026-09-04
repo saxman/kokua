@@ -1033,12 +1033,17 @@ async def test_truncate_keeps_the_conversations_turn_lock(tmp_path):
 
 async def test_truncate_refuses_an_index_that_is_not_a_user_turn(tmp_path):
     assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+    # A loop-injected nudge carries the `user` role but sits *inside* a turn, so cutting at it would
+    # strand the assistant message holding `tool_calls` before it without the results answering them.
+    parent.messages.insert(4, {"role": "user", "content": "continue", PROVENANCE_KEY: PROVENANCE_CONTINUATION})
+    assistant._store.save(parent)
+    expected = list(parent.messages)
 
-    for index in (2, 99, -1):  # an assistant message, past the end, and below the start
+    for index in (2, 4, 99, -1):  # an assistant message, an injected nudge, past the end, below the start
         with pytest.raises(TurnNotFound):
             await assistant._book.truncate(parent.key, index)
 
-    assert assistant._store.get(parent.key).messages == BRANCH_MESSAGES  # nothing partially applied
+    assert assistant._store.get(parent.key).messages == expected  # nothing partially applied
 
 
 async def test_truncate_refuses_a_conversation_the_store_does_not_have(tmp_path):
@@ -1051,6 +1056,21 @@ async def test_truncate_refuses_a_conversation_the_store_does_not_have(tmp_path)
 
     with pytest.raises(ConversationNotFound):
         await assistant._book.truncate("deadbeefdeadbeef", 1)
+
+
+async def test_truncate_re_asks_about_a_running_turn_once_it_holds_the_slot(tmp_path):
+    """The caller's refusal check is made before an await, so the book asks again inside its hold.
+
+    Without the re-check, a turn already in flight when that check ran could still slip through the
+    window between the check and the gate. The predicate is injected because the tracker that can answer
+    belongs to the assistant, and this layer must not import upward to reach it.
+    """
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path)
+
+    with pytest.raises(TurnInFlight):
+        await assistant._book.truncate(parent.key, 5, turn_running=lambda _: True)
+
+    assert assistant._store.get(parent.key).messages == BRANCH_MESSAGES  # nothing was cut
 
 
 async def test_a_turn_after_a_truncation_continues_from_the_shortened_transcript(tmp_path):
@@ -1078,10 +1098,15 @@ async def test_truncate_conversation_reports_what_it_removed(tmp_path):
 async def test_truncate_conversation_refuses_while_that_conversation_has_a_turn_running(tmp_path):
     """Refused outright rather than queued behind the turn.
 
-    Not a correctness guard: the gate hold inside the book already makes an interleaving impossible.
-    It is a bounded wait, since the web front end applies controls on the one task reading its socket,
+    Mostly a bounded wait, since the web front end applies controls on the one task reading its socket,
     and it keeps a deletion from applying minutes later and silently taking a turn that arrived in the
-    meantime with it.
+    meantime with it. Partly correctness too: a turn queued behind the cut would run on the agent the
+    truncation dropped and have its answer discarded by `persist`.
+
+    Its counterpart is `test_truncate_conversation_waits_for_a_non_turn_gate_holder_rather_than_refusing`,
+    which pins the *mechanism* this one only exercises: the refusal asks the turn tracker rather than the
+    gate slot. Neither is redundant with the other, and deleting that one would leave nothing saying a
+    title write or a delete must be waited out instead of reported as a running turn.
     """
     import time
 

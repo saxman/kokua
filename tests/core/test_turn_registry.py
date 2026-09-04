@@ -27,6 +27,28 @@ def test_running_false_when_handle_done():
     assert tracker.running("c1") is False
 
 
+def test_running_still_reports_a_turn_whose_entry_a_later_one_replaced():
+    """A displaced turn is still running, and a caller about to mutate the conversation must be told so.
+
+    Reading the one-per-conversation entry answers False here, because the newer turn owns the entry and
+    its own done-callback clears it. A destructive edit that trusted that answer would pass its refusal
+    check and then park on the gate behind the turn still running.
+    """
+    tracker = TurnTracker()
+    first = TurnInfo(handle=_handle(), started=1.0, preview="first")
+    second = TurnInfo(handle=_handle(), started=2.0, preview="second")
+
+    tracker.add("c1", first)
+    tracker.add("c1", second)
+    tracker.remove_if("c1", second.handle)  # the newer turn finishes first, taking the entry with it
+
+    assert tracker.get("c1") is None
+    assert tracker.running("c1") is True
+
+    tracker.remove_if("c1", first.handle)
+    assert tracker.running("c1") is False
+
+
 def test_all_reports_every_tracked_conversation():
     tracker = TurnTracker()
     tracker.add("c1", TurnInfo(handle=_handle(), started=1.0, preview="a"))

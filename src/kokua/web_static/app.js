@@ -524,11 +524,14 @@ let liveLastAnswer = null;
 // worse than losing the control, because the index is a valid turn boundary the server will honour, so
 // the user would click delete on one message and lose that one and the message before it.
 //
-// One case this does not cover: a proactive run in the conversation being viewed, landing its own
-// `turn_saved` while the user has a bubble waiting here, consumes that entry and stamps it with the
-// proactive turn's index instead. Narrower than the case above (it needs a proactive turn in the very
-// conversation the user just sent to), and a reload repairs it, since the replay path derives indices
-// from the server rather than from this queue.
+// Two residual cases, in opposite directions. A proactive run in the conversation being viewed, landing
+// its own `turn_saved` while the user has a bubble waiting here, consumes that entry and stamps it with
+// the proactive turn's index instead; it needs a proactive turn in the very conversation the user just
+// sent to. The other is worse and is why nothing is enqueued for text the server answers as a command:
+// an entry that is never consumed (a turn that never reaches its save) sits at the head forever, so the
+// *next* turn's `turn_saved` takes the stale entry and stamps the older bubble with the newer turn's
+// index, leaving every control on the page shifted by one turn from then on. Both are repaired by any
+// repaint, since the replay path derives indices from the server rather than from this queue.
 let pendingTurnBubbles = [];
 
 // Render/update a sub-agent card as a foldable block. Two producers share this frame type: a
@@ -1617,7 +1620,12 @@ form.addEventListener("submit", (e) => {
     const bubble = addImageBubble(item.dataUrl, "user", now);  // echo attachments locally
     if (!opening) opening = bubble;
   }
-  if (opening) {
+  // Text the server answers as a command runs no turn and so never sends a `turn_saved`. Enqueuing a
+  // bubble for one strands the entry at the head of the queue, where it shifts every later turn's
+  // control by one (see the queue's declaration); leaving it out costs at most a missing control on a
+  // bubble that has no turn to delete anyway. `/plan` is the exception: it does run a turn.
+  const runsATurn = !text.startsWith("/") || /^\/plan(\s|$)/i.test(text);
+  if (opening && runsATurn) {
     const active = lastConversations.find((item) => item.active);
     if (active) pendingTurnBubbles.push({ bubble: opening, conversationId: active.id });
   }

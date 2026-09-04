@@ -173,3 +173,18 @@ every route that drops such a reference and has to be safe against sharing (the 
 content-addressed, so two conversations can hold the same hash, and an export or a `/images` URL a user
 saved can outlive both). Decide between a sweep at startup, a reference count, and leaving it alone with
 the growth documented.
+
+## 17. A turn fetches its agent before taking the gate, so a truncation can orphan it
+`TurnRunner.reactive` calls `agent_for` and then takes `gate.turn`. A turn that queues on that gate
+behind `ConversationBook.truncate` is holding a reference to the agent the truncation drops, so it runs
+to completion on an orphaned agent, streams an answer to the user, and has that answer thrown away:
+`ConversationBook.persist` re-fetches the agent from the registry and snapshots the rebuilt one. Its
+`_record_provenance` has by then written `model` and `usage` entries keyed to an index the stored
+transcript no longer has, leaving orphan metadata behind as well. Not reachable from the browser today:
+the web front end applies controls on the single task that reads its socket, so a truncation and a
+message cannot be in flight together from one page, and a proactive firing fetches its agent inside the
+gate. `Assistant.truncate_conversation`'s running-turn refusal, re-checked inside the book's hold, is
+what keeps the window shut from the other side. The fix is in the turn runner rather than at either of
+those call sites: re-fetch the agent inside the hold (or pin and revalidate it across the wait) so a turn
+always runs on the agent the conversation has when it actually starts. That is a change to
+invariant-governed code, so it wants its own pass over the invariants at the top of `core/turns.py`.

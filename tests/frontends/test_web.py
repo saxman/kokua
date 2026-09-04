@@ -1093,6 +1093,35 @@ def test_ws_truncate_at_an_unknown_turn_says_so_and_changes_nothing(tmp_path):
     assert seen_types == ["message"]
 
 
+def test_ws_truncate_in_a_conversation_that_is_gone_says_so_and_changes_nothing(tmp_path):
+    """A distinct sentence from the unknown-turn one, and no repaint behind it.
+
+    A resync here would be the front end agreeing that something changed, when the deletion never
+    happened. Proved the same way as the unknown-turn case: two identical requests, with everything
+    between the two replies collected.
+    """
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client_factory=lambda cid: MockAsyncModelClient(["reply one"]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        _drain_until(ws, "conversations")
+        request = json.dumps({"type": "truncate", "id": "deadbeefdeadbeef", "message_index": 1})
+        ws.send_text(request)
+        refusal = _drain_until(ws, "message")
+        ws.send_text(request)
+        seen_types = []
+        while True:
+            frame = ws.receive_json()
+            seen_types.append(frame["type"])
+            if frame["type"] == "message":
+                break
+
+    assert "gone" in refusal["text"].lower()
+    assert seen_types == ["message"]
+
+
 def test_ws_sends_settings_on_connect(tmp_path):
     from starlette.testclient import TestClient
 
@@ -2068,6 +2097,49 @@ async def test_a_blocked_control_still_releases_the_connection_on_disconnect(tmp
         await asyncio.wait_for(app(_ws_scope(), second.receive, second.send), timeout=5)
         refusals = [f for f in second.frames() if "busy in another tab" in str(f.get("text", ""))]
         assert not refusals, "a reload after the disconnect was refused as busy"
+    finally:
+        blocking.release.set()
+        serving.cancel()
+        await asyncio.gather(serving, return_exceptions=True)
+
+
+async def test_ws_truncate_while_a_turn_runs_says_so_and_changes_nothing(tmp_path):
+    """The refusal has to reach the page, and nothing may repaint behind it.
+
+    A resync would replace the transcript of the very turn still streaming into it, and would tell the
+    user something changed when nothing was deleted. Driven through ``_AsgiSocket`` rather than
+    ``TestClient`` because the turn has to still be in flight while the control is applied, which needs
+    the two fed to one live connection.
+    """
+    import json
+
+    blocking = BlockingModelClient()
+    app = build_app(_config(tmp_path), client=blocking)
+    sock = _AsgiSocket([{"type": "websocket.connect"}, {"type": "websocket.receive", "text": "a long job"}])
+    serving = asyncio.create_task(app(_ws_scope(), sock.receive, sock.send))
+    try:
+        await asyncio.wait_for(blocking.started.wait(), timeout=5)  # the turn is now really in flight
+        conversation_id = next(
+            item["id"]
+            for frame in sock.frames()
+            if frame["type"] == "conversations"
+            for item in frame["items"]
+            if item["active"]
+        )
+        mark = len(sock.frames())
+        # Sent twice, and everything between the two replies is collected: draining to the first
+        # `message` alone would pass whether or not a `_sync_view` followed it.
+        request = json.dumps({"type": "truncate", "id": conversation_id, "message_index": 1})
+        sock.feed({"type": "websocket.receive", "text": request})
+        sock.feed({"type": "websocket.receive", "text": request})
+        for _ in range(500):
+            after = sock.frames()[mark:]
+            if len([f for f in after if f["type"] == "message"]) == 2:
+                break
+            await asyncio.sleep(0.01)
+
+        assert [f["type"] for f in after] == ["message", "message"], after
+        assert "still running" in after[0]["text"].lower()
     finally:
         blocking.release.set()
         serving.cancel()
