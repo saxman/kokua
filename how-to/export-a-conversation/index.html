@@ -1612,28 +1612,44 @@ part worth understanding.</p>
 <p><strong>A path, not the transcript.</strong> The tool answers with a file path on purpose. AIMU's <code>fs</code> group offers
 <code>read_file(path, max_lines)</code> and no offset, so a file can be read from its first line and nowhere else,
 and a tool that returned the Markdown directly would spend the asking conversation's whole context on
-one run's tool output. So a long export is meant to be handed to a sub-agent: the assistant passes the
-path and your question to a worker whose fresh context absorbs the file, and only the findings come
-back. <code>config.example.toml</code> ships <code>[agents.analyst]</code> for exactly this, and the assistant's guidance
-tells it to delegate rather than read once the file is past a few hundred lines. A short export it will
-usually just read itself, which is the right call: a delegation costs a spawn.</p>
+one run's tool output. So a long export is meant to be handed to a sub-agent whose fresh context
+absorbs the file, returning only the findings, and the assistant's guidance tells it to delegate rather
+than read once the file is past a few hundred lines. A short export it will usually just read itself,
+which is the right call: a delegation costs a spawn.</p>
+<p><strong>Or ask for an evaluation, and skip the export.</strong> <code>config.example.toml</code> ships
+<code>[agents.introspector]</code>, a sub-agent whose subject is a conversation and whose job is judging one
+against criteria you give:</p>
+<blockquote>
+<p>Evaluate yesterday's conversation about the deployment. I care about whether it verified its claims
+before acting, and whether it delegated work it should have done itself.</p>
+</blockquote>
+<p>That worker holds the conversation tools itself, so the whole job is one delegation: it finds the
+conversation, exports it, reads the file, and reports per criterion, quoting the transcript lines each
+judgment rests on. Nothing but its report enters your conversation. Three things it is instructed to be
+strict about: a criterion the transcript cannot settle is reported as unassessable rather than guessed
+at, a truncated read is reported as covering only part of the run, and if you give no criteria it
+evaluates against whether the run reached what you asked for, what it spent, and where it went wrong,
+saying up front that it chose them.</p>
 <p><strong>Ask for <code>full</code> detail when the tool result is the thing you are debugging.</strong> The tool takes the same
 cap <code>--full</code> lifts, so "export it with the full tool output" gets you a file with nothing cut.</p>
-<p><strong>What it cannot do yet.</strong> If the export is longer than the analyst's own context, the read stops part
-way and the analysis covers only the beginning of the run. The analyst is instructed to say so rather
-than answer as if it had read the whole thing, so you get "I saw the first N lines" instead of a
-confident partial answer, but the underlying fix (paging into a file) is not there yet: it needs an
+<p><strong>What it cannot do yet.</strong> If the export is longer than the introspector's own context, the read stops
+part way and the analysis covers only the beginning of the run. It is instructed to say so rather than
+answer as if it had read the whole thing, so you get "I saw the first N lines" instead of a confident
+partial answer, but the underlying fix (paging into a file) is not there yet: it needs an
 <code>offset</code> on AIMU's <code>read_file</code>, which is item 19 in <code>TODO.md</code>. For a very long run, <code>kokua export</code> plus
 your own editor is still the more reliable read.</p>
 <p><strong>The current conversation is a blind spot, and it says so.</strong> The export renders the <em>stored</em>
 transcript, and the turn you are in right now is not stored until it finishes. Exporting the
 conversation you are talking in gets you everything up to this turn, and the answer says as much; the
 same goes for a conversation whose reply is still streaming somewhere else.</p>
-<p><strong>This grants a delegate that reads files.</strong> <code>[agents.analyst]</code> declares <code>fs</code>, which grants read of any
-file on the machine and not only of an export. That is the same reach <code>[agents.coder]</code> already ships
-with, and like every capability here it is a line in your <code>config.toml</code>: delete the agent and its name
-from <code>[agents.assistant].delegates_to</code> if you would rather not have it, and the export tool still works
-(the assistant will read the file itself, or hand you the path).</p>
+<p><strong>This grants a delegate two kinds of reach.</strong> <code>[agents.introspector]</code> declares <code>fs</code>, which grants read
+of any file on the machine and not only of an export, and <code>conversations</code>, which lets it read (and
+rename) any saved conversation rather than only the one you asked about. The first is the same reach
+<code>[agents.coder]</code> already ships with; the second matters because a transcript is untrusted text, so an
+injection sitting in one conversation could steer a worker that was spawned from another. Like every
+capability here both are lines in your <code>config.toml</code>: delete the agent and its name from
+<code>[agents.assistant].delegates_to</code> if you would rather not have them, and asking the assistant to export
+still works (it will read the file itself, or hand you the path).</p>
 <h2 id="the-store-mid-write">The store, mid-write<a class="headerlink" href="#the-store-mid-write" title="Permanent link">&para;</a></h2>
 <p>TinyDB (the session store's format) rewrites its whole file on every save, so an export that races
 the assistant's own write can land on a partial file. Rather than parse whatever arrived, <code>kokua

@@ -2161,10 +2161,10 @@ The pre-release development history is in the git log.</p>
   it. AIMU's <code>fs</code> group is <code>list_directory</code> and <code>read_file(path, max_lines)</code>, with no offset and no
   search, so returning the Markdown itself would spend the asking conversation's whole context on one
   run's tool output, in the one context that cannot afford it. A path can be handed onward instead:
-  <code>config.example.toml</code> ships <code>[agents.analyst]</code>, a delegate declaring <code>fs</code>, and the tool's answer
+  <code>config.example.toml</code> ships <code>[agents.introspector]</code>, a delegate declaring <code>fs</code>, and the tool's answer
   advises delegating once the file passes <code>DELEGATE_ABOVE_LINES</code>, so a long transcript is spent against
   a worker's fresh context and only the findings come back. What it does not do is slice: an export
-  larger than the analyst's context is read from its top and no further, which the analyst is
+  larger than the introspector's context is read from its top and no further, which the introspector is
   instructed to report as a partial read rather than answer through. The fix is an <code>offset</code> on AIMU's
   <code>read_file</code> (<code>TODO.md</code> item 19).</p>
 <p>The write is bounded by construction, not by validation: the directory is
@@ -2173,6 +2173,33 @@ The pre-release development history is in the git log.</p>
   rather than accumulating. What it leaves there is a full transcript in the clear, in the folder
   <code>/download/{name}</code> serves unauthenticated, which is the reason to consider naming it in
   <code>[security] confirm_tools</code> even though it changes no conversation.
+- <strong>One worker reads history, because it is the one with a conversation as its subject.</strong>
+  <code>[agents.introspector]</code> declares <code>conversations</code> alongside <code>fs</code>, which makes evaluating a run a single
+  delegation rather than two: it finds the conversation, exports it, reads the file, and reports against
+  the criteria it was given, quoting the transcript lines each judgment rests on. The search results,
+  the transcript, and the file all stay out of the asking conversation's context, and its instructions
+  hold it to three honesty rules that mirror the export's own: a criterion the transcript cannot settle
+  is reported unassessable rather than guessed, a truncated read is reported as covering part of the
+  run, and with no criteria given it names the rubric it chose, since a worker cannot ask.</p>
+<p>That is a narrowing of the old rule, not an exception to it. Reading the user's other conversations is
+  meaningless to an agent with no relationship to any of them, which is why <code>researcher</code> and <code>coder</code>
+  hold none of it, and <code>test_only_the_introspector_reads_history_among_the_shipped_workers</code> pins both
+  halves. The reach it does grant is worth stating: <code>conversations</code> lets that worker read (and rename)
+  any saved conversation, not only its subject, and a transcript is untrusted text, so an injection in
+  one conversation could steer a worker spawned from another.</p>
+<p><strong>Granting the toolset to a second reader exposed a sentence that had been relying on there being
+  one.</strong> <code>read_conversation</code> and <code>export_conversation</code> describe the active conversation as "the
+  conversation you are in", telling the reader to use its own context for the turn not yet saved. Both
+  clauses are false for a worker, which is in no conversation and holds no transcript, and the request
+  that trips it (evaluate the conversation the user is sitting in) is the likeliest one there is, so a
+  worker would have been sent to context with nothing in it. <code>make_conversation_tools</code> now takes
+  <code>is_entry_agent</code>, derived in <code>TOOLSET.build</code> from <code>ctx.agent_name == ctx.config.entry_agent</code>, and
+  picks <code>DELEGATING_CONVERSATION_NOTE</code> instead: this is the conversation that delegated to you, and the
+  turn that spawned you is not saved yet, so what you can read stops just before it. A flag rather than
+  two toolsets, since everything else the tools do is identical. <code>list_conversations</code>' account of the
+  <code>(current)</code> marker was fixed in place for the same reason, having told the reader not to read that
+  conversation back, which is right for the agent holding it in context and would have talked a worker
+  out of its only subject.
 - <strong>Agent tools are findable, and are only presentation.</strong> Every module defining an <code>@aimu.tool</code> is a
   toolset module, so <code>grep -rl '@tool' src/kokua/</code> finds only files under <code>toolsets/</code>. Kokua's own five
   (<code>capabilities.py</code>, <code>config.py</code>, <code>conversations.py</code>, <code>mcp.py</code>, <code>scheduling.py</code>) each wrap one

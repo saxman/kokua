@@ -1589,7 +1589,7 @@ model filled in, lives in <code>aimu.tools.builtin</code>:</p>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="sd">            the time in. Omit for the local timezone.</span>
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="sd">    """</span>
 </span></code></pre></div>
-<p>That is the general case, not an exception. Twelve of the 32 tools the shipped assistant holds are
+<p>That is the general case, not an exception. Twelve of the 33 tools the shipped assistant holds are
 AIMU's rather than Kokua's, more than a third, and more once skills are installed, since AIMU injects a
 tool per skill script on top of that set. <a href="../../explanation/architecture/#how-an-agents-tools-resolve">How an agent's tools
 resolve</a> carries the full inventory, and a
@@ -1630,7 +1630,7 @@ mechanism in full.</p>
 <li><a href="../../how-to/set-up-toolsets/">Set up a toolset</a>: writing one of these, end to end, including the
   <code>pyproject.toml</code> entry that registers it.</li>
 <li><a href="../../explanation/architecture/#how-an-agents-tools-resolve">How an agent's tools resolve</a>: the full
-  inventory of what the shipped assistant holds, and which twelve of the thirty-one come from AIMU.</li>
+  inventory of what the shipped assistant holds, and which twelve of the 33 tools come from AIMU.</li>
 <li>AIMU: <a href="https://saxman.info/aimu/how-to/add-custom-tool/">Add a custom tool</a> for the <code>@tool</code> decorator,
   <a href="https://saxman.info/aimu/reference/api/tools/">the tools API reference</a> for what the decorator
   supports, and <a href="https://saxman.info/aimu/how-to/use-mcp-tools/">Use MCP tools</a> for tools that live in
