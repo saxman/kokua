@@ -85,13 +85,20 @@ body.resizing { user-select: none; }
 #conv-list .conv-title { font-size: 0.88em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #conv-list li.active .conv-title { font-weight: 600; }
 .conv-age { font-size: 0.72em; color: var(--fg-faint); }
-/* Every control on a sidebar row, a chat row's four and a scheduled task's three alike. They are
-   the same affordance in the same rail, so they are declared once here rather than twice in
-   agreement, and the tasks section below adds only what genuinely differs (how each cluster is
-   revealed). Quiet on purpose: a row's height is set by its title and age lines, not by these, so a
-   size well under the title's costs no space and asks for no attention until you hover. */
+/* Every quiet glyph control the page has: a chat row's four, a scheduled task's three, and the branch
+   and delete pair on a transcript turn. They are the same affordance wherever the row is, so they are
+   declared once here rather than three times in agreement, and each section below adds only what
+   genuinely differs (how a cluster is revealed, and the glyph's size in the transcript, where it sits
+   beside a caption rather than a title). Quiet on purpose: a row's height is set by its own text, not
+   by these, so a size well under it costs no space and asks for no attention until you hover.
+
+   The transcript's pair is declared here despite living far from this rail, because "one kind of row
+   control, one rule" is worth more than proximity: the alternative is the same chip written twice and
+   free to drift. `.bubble-branch` / `.bubble-truncate` are picked up again in the transcript section,
+   which is where a reader looking for them will start. */
 #conv-list .conv-rename, #conv-list .conv-duplicate, #conv-list .conv-export, #conv-list .conv-delete,
-.task-actions button, .task-conv-delete { border: none; background: none; color: var(--fg-faint);
+.task-actions button, .task-conv-delete, .bubble-branch, .bubble-truncate {
+  border: none; background: none; color: var(--fg-faint);
   cursor: pointer; font-size: var(--sidebar-icon); line-height: 1; padding: 3px 5px;
   border-radius: 4px; }
 /* Hovered, the glyph brightens and lifts off the row onto a chip of the page's own background. The
@@ -100,11 +107,13 @@ body.resizing { user-select: none; }
    buttons do the reverse and chip in --surface, since they sit on --bg rather than on a hovered row. */
 #conv-list .conv-rename:hover, #conv-list .conv-duplicate:hover, #conv-list .conv-export:hover,
 #conv-list .conv-delete:hover, .task-actions button:hover,
-.task-conv-delete:hover { color: var(--fg); background: var(--bg); }
+.task-conv-delete:hover, .bubble-branch:hover,
+.bubble-truncate:hover { color: var(--fg); background: var(--bg); }
 /* Destructive, so the colour says so while the chip stays. This has to follow the rule above to win
-   for a chat row's delete, whose selector it ties on specificity; the task row's outranks it. */
+   for a chat row's delete and for a turn's, whose selectors it ties on specificity; the task row's
+   outranks it. */
 #conv-list .conv-delete:hover, .task-actions .task-delete:hover,
-.task-conv-delete:hover { color: var(--danger); }
+.task-conv-delete:hover, .bubble-truncate:hover { color: var(--danger); }
 /* The one real difference between the two clusters: a chat row reveals its controls one button at a
    time, where a task row reveals them as a cluster (see `.task-actions`), which is what lets a
    running task hold its Stop visible without hover. */
@@ -482,17 +491,20 @@ button.secondary, .notification-banner button { background: none; border-color: 
    gap back. */
 .notice > .bubble-meta { margin-top: 2px; }
 .bubble:hover .bubble-ts, .fold-header:hover > .fold-ts { opacity: 1; }
-/* Quiet until the bubble is hovered, like the timestamp beside it, because it is an affordance you
-   look for rather than one you should keep noticing, except to a keyboard user tabbing through the
+/* A turn's two controls are the sidebar row control the page already has, chip and all, declared with
+   the chat rows' controls up in the conversation-list section: one kind of row control, one rule. Two
+   things differ here and are all this adds.
+
+   The glyph is larger than a sidebar row's, because the cluster it sits in is led by a 0.7em caption
+   rather than by a title, and a 0.9em glyph beside a title is not the same size beside that.
+
+   And it is quiet until the bubble is hovered, like that caption, because it is an affordance you look
+   for rather than one you should keep noticing. Except to a keyboard user tabbing through the
    transcript, for whom :focus-visible has to reveal it the way hover does for a pointer. */
-.bubble-branch, .bubble-truncate { border: none; background: none; padding: 0; color: var(--fg-faint);
-  font-size: 1.15em; line-height: 1.2; cursor: pointer; opacity: 0; transition: opacity 0.12s; }
+.bubble-branch, .bubble-truncate { font-size: 1.15em; line-height: 1.2;
+  opacity: 0; transition: opacity 0.12s; }
 .bubble:hover .bubble-branch, .bubble-branch:focus-visible,
 .bubble:hover .bubble-truncate, .bubble-truncate:focus-visible { opacity: 1; }
-.bubble-branch:hover { color: var(--accent); }
-/* Destructive, so its hover colour says so rather than matching the branch control beside it. The
-   same `--danger` the sidebar's delete controls use, declared in both the light and dark blocks. */
-.bubble-truncate:hover { color: var(--danger); }
 .attach-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 8px; }
 .attach-previews .chip { position: relative; }
 .attach-previews img { height: 56px; border-radius: 8px; border: 1px solid var(--border); display: block; }

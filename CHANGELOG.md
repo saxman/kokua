@@ -283,7 +283,10 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     edge of the row, on the block's first line, so the captions form one column down the page. On a
     foldable it rides the always-visible header, so it shows collapsed or expanded; on a regular bubble
     it rides a cluster that also carries the turn's branch and delete controls, which sit to its left
-    rather than beyond it, so the column holds even on the one block that carries all three. That cluster is a flex
+    rather than beyond it, so the column holds even on the one block that carries all three. Those two
+    are the same quiet glyph control a sidebar row carries and take the same hover: the glyph brightens
+    and lifts onto a chip of the page's own background, destructive in `--danger`, declared in one rule
+    with the sidebar's rather than a second one that agrees until someone edits it. That cluster is a flex
     track beside the content rather than a float or a positioned corner, which is what lets it sit on
     the first line at all: content wraps *before* a track, so however long an answer runs it can never
     end up underneath the caption. Ephemeral chrome (approval prompts, banners) is not stamped, and a

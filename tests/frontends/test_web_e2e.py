@@ -433,6 +433,39 @@ def test_prose_and_machine_rows_share_a_column_and_a_caption_edge(page, live_ser
     assert body["x"] + body["width"] <= sent["x"] + 1, "content runs under the caption"
 
 
+def test_a_turn_control_hovers_like_a_sidebar_row_control(page, live_server):
+    """A turn's branch and delete controls are the row control the sidebar already has, chip and all:
+    hovered, the glyph brightens and lifts off the row onto a chip of the page's own background.
+
+    Compared against a sidebar row's own control rather than against literal colours, because the claim
+    is that there is one treatment and not two that happen to agree today. A literal-colour assertion
+    would keep passing through exactly the drift this is here to catch."""
+    _open(page, live_server(delay=0.0))
+    page.fill("#msg", "ping")
+    page.click("#send")
+    expect(page.locator(".bubble.assistant .bubble-ts")).to_be_visible(timeout=10_000)
+
+    props = ["backgroundColor", "color", "borderRadius", "paddingTop", "paddingLeft"]
+
+    def hovered(locator):
+        locator.hover()
+        return locator.evaluate(
+            "(el, props) => { const s = getComputedStyle(el); return props.map((p) => s[p]); }", props
+        )
+
+    sidebar = hovered(page.locator("#conv-list .conv-delete").first)
+    turn = hovered(page.locator(".bubble-truncate").first)
+    assert turn == sidebar, f"turn control {turn} does not match sidebar control {sidebar}"
+    # Not the default transparent: the chip is the visible half of the treatment.
+    assert turn[0] not in ("rgba(0, 0, 0, 0)", "transparent"), f"hovered chip has no background: {turn[0]}"
+
+    # The constructive control of the pair takes the same chip and the page's plain foreground, where
+    # the destructive one says so in a colour of its own.
+    branch = hovered(page.locator(".bubble-branch").first)
+    assert branch[0] == turn[0], "the pair do not share a chip"
+    assert branch[1] != turn[1], "the destructive control's colour does not distinguish it"
+
+
 TAIL = "And here is the rest of it."
 
 
