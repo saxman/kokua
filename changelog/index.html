@@ -1895,16 +1895,37 @@ The pre-release development history is in the git log.</p>
   UI, bound to <code>127.0.0.1:8000</code> by default. The page is three files: <code>index.html</code> for the markup,
   <code>app.css</code>, and <code>app.js</code>, served from the same static-asset allowlist as the vendored libraries.</li>
 <li><strong>A flat transcript, not a chat.</strong> One left-aligned column: the user's turn is marked with a <code>&gt;</code>
-    rather than filled, prose takes a 76ch measure, and machine events are dim monochrome one-line rows
-    set apart by a kind word and an indent. Tables and code blocks run wider than the prose measure,
-    since they are scanned rather than read.</li>
+    rather than filled, and machine events are dim monochrome one-line rows set apart by a kind word
+    and the smaller type they are set in. Every block takes the same indent and the same measure,
+    prose and machine event alike, so left and right edges line up down the page and the hover fill,
+    the wrap point, and the caption column are one width whatever kind of block you point at. The
+    measure is wider than prose alone would want, which is the price of the alignment: a tool call
+    needs room for its arguments, and a narrower cap would put a card's metric a long way from the
+    call it describes. Expanded, a block's body is set off by a rule down its
+    left, so an open block reads as open from the margin rather than only from its header's triangle,
+    and its content is bounded: on an indent alone a disclosed body ran flush into the next block's
+    header. Nested blocks set off one level in (a tool's output, a sub-agent card's own thinking), so
+    depth reads as depth without drawing a second border inside the first, and nothing has to toggle
+    the rule, since a collapsed body is not drawn at all. Tables and code blocks run wider than that
+    measure, since they are scanned rather than read. Pointing at a block fills it in the same
+    colour a hovered row in the sidebar takes, so the block under the pointer is marked and the
+    caption and turn controls that appear on it (below) read as belonging to that block rather than
+    to the turn around it. A foldable fills its header line only: an expanded sub-agent card runs
+    pages tall, and filling the card would draw one slab over a page of content and light it up from
+    anywhere inside it, including from a nested block that fills on its own. The approval prompt and
+    the centered system notices keep the backgrounds they have.</li>
 <li><strong>Colour means one thing.</strong> Twelve semantic tokens, of which the warm pair marks only a decision
     waiting on you: a tool approval or a plan review. Tool calls, sub-agent cards, and proactive
     messages are not warm. The disclosure triangle is the only glyph on the page; every block names its
     kind in words.</li>
 <li><strong>Conversations</strong> are listed in a sidebar, auto-titled from the first message, each row showing its
     relative age, with new / select / rename / rename-with-AI / delete (deleting the active one switches
-    to the most recently updated remaining conversation). The header strip names the conversation being viewed. The sidebar
+    to the most recently updated remaining conversation). The header strip names the conversation being viewed. The list
+    sits under a foldable <strong>Conversations</strong> title carrying the count of rows it shows, which is the rows
+    themselves rather than every conversation the server sent: a task's own firings are listed under that
+    task, so a count read off the frame would say 3 beside a section showing 1. The title row is the same
+    furniture the tasks section wears (one <code>.section-*</code> rule set, one <code>wireFoldableSection</code> helper over two
+    storage keys), and the two folds are independent and remembered per browser. The sidebar
     collapses to an icon rail and drag-resizes between 180 and 480px; the divider is keyboard-operable.
     Width, collapsed state, and theme are per-browser preferences applied before first paint, so there
     is no flash on load.</li>
@@ -1978,8 +1999,18 @@ The pre-release development history is in the git log.</p>
     the card too, naming which one it was and quoting the prompt, so a worker that hit the round cap
     reads as an explained outcome rather than an answer that came back thinner for no visible reason.</li>
 <li><strong>Rows carry a localized datetime caption</strong>, revealed on hover (full precision in its tooltip) so
-    the transcript is not dated line by line. On a foldable it rides the always-visible header, so it
-    shows collapsed or expanded. Ephemeral chrome (notices, approval prompts, banners) is not stamped.
+    the transcript is not dated line by line. Every kind of block carries it the same way: at the right
+    edge of the row, on the block's first line, so the captions form one column down the page. On a
+    foldable it rides the always-visible header, so it shows collapsed or expanded; on a regular bubble
+    it rides a cluster that also carries the turn's branch and delete controls, which sit to its left
+    rather than beyond it, so the column holds even on the one block that carries all three. Those two
+    are the same quiet glyph control a sidebar row carries and take the same hover: the glyph brightens
+    and lifts onto a chip of the page's own background, destructive in <code>--danger</code>, declared in one rule
+    with the sidebar's rather than a second one that agrees until someone edits it. That cluster is a flex
+    track beside the content rather than a float or a positioned corner, which is what lets it sit on
+    the first line at all: content wraps <em>before</em> a track, so however long an answer runs it can never
+    end up underneath the caption. Ephemeral chrome (approval prompts, banners) is not stamped, and a
+    centered system notice keeps its caption below its text, having no right edge to align to.
     Messages persisted before timestamps existed render without a caption.</li>
 <li><strong>A loop marker names which injection it was, live and on reload.</strong> The loop injects two kinds of
     turn that say opposite things to the model: a continuation nudge after an empty turn ("keep
@@ -2013,7 +2044,12 @@ The pre-release development history is in the git log.</p>
 <li><strong>A dropped socket reconnects on its own.</strong> Restarting Kokua under an open browser used to leave a
     page that said "Disconnected." and could only be recovered by reloading. The page now retries with
     backoff (500ms doubling to a 10s ceiling, indefinitely) and shows one notice for the whole outage
-    rather than one per attempt. Almost none of the work is on the client: the server already resyncs its
+    rather than one per attempt. That notice counts down to its next attempt ("Reconnecting in 7s...")
+    and carries a <strong>Retry now</strong> button, so at the 10s ceiling a wait reads as a wait rather than as a
+    page that has stopped trying, and a reader who knows the server is back does not have to sit it out.
+    A manual retry deliberately does not reset the backoff, which only a connection that succeeded does,
+    so clicking repeatedly at a server that is still down cannot drive it back to the base 500ms interval.
+    Almost none of the work is on the client: the server already resyncs its
     whole view on every connection (conversations, history, settings, tasks) and the <code>history</code> frame
     replaces the transcript, so a reconnected page repaints rather than appending a second copy of what it
     already showed. What a reconnect does not restore is a turn that was in flight when the socket

@@ -3167,6 +3167,17 @@ say where that turn now lives in the store, so a bubble already on screen can gr
 attempt, so restarting Kokua under an open browser does not leave a page whose only recovery is a reload.
 <code>ws.onclose</code> retries with backoff, 500ms doubling to a 10s ceiling and then retrying indefinitely, and
 shows one notice for the whole outage rather than one per attempt.</p>
+<p>That one notice is live rather than static, because at a 10s ceiling an unchanging "Reconnecting..." is
+indistinguishable from a page that has given up. Its label is rewritten in place on a 250ms tick (faster
+than the second it counts in, so a tick lands near each rounded boundary instead of drifting against the
+deadline and skipping numbers): a countdown while an attempt is pending, and the bare wording while one is
+actually open. The seconds are rounded <em>up</em>, since the first wait is 500ms and would otherwise read "in
+0s" for its whole life, which says the attempt has already been made. Beside the label sits a <strong>Retry now</strong>
+button, and both it and the expiring timer call the same <code>attemptReconnect</code>, so an impatient reader takes
+exactly the path the backoff would have. What the click does not do is reset the backoff: <code>ws.onopen</code> is
+what resets it, on a connection that actually succeeded, so a manual attempt that fails falls back onto the
+schedule it was already on rather than restarting at 500ms and letting a held mouse hammer a server that is
+genuinely down.</p>
 <p>Almost none of the work is on the client, because the server was already written for this: it resyncs its
 entire view on every connection (<code>_sync_view</code> sends the conversation list and the active conversation's
 history, followed by the settings and the tasks), and the page's <code>history</code> handler clears the transcript
@@ -3208,9 +3219,12 @@ fence with no closer runs to the end of the input.</p>
 <p>Two things are deliberately <em>not</em> reparsed. <code>typesetMath</code> is deferred to <code>finalizeStreaming</code>, because
 KaTeX is the expensive half of the render and a half-typed <code>$x^</code> is noise rather than math, so
 mid-stream an expression stands as the source the model wrote. And <code>finalizeStreaming</code> cancels the
-pending timer before it stamps the bubble: a tick landing after the stamp would reset <code>innerHTML</code> and
-drop the caption. The <code>history</code> replay path cancels it too, since it drops the bubble reference the
-tick would have written into.</p>
+pending timer before it renders: a tick landing afterwards would reparse the buffer into a body that
+has already been typeset, undoing <code>typesetMath</code> and leaving the answer's math as source text. The
+caption is not at risk from that tick, because it lives in a sibling of the body a render writes into
+(see <code>bubbleBody</code>), which is also what lets it sit on the block's first line rather than below the
+content. The <code>history</code> replay path cancels the timer too, since it drops the bubble reference the tick
+would have written into.</p>
 <h3 id="saying-a-turn-is-under-way">Saying a turn is under way<a class="headerlink" href="#saying-a-turn-is-under-way" title="Permanent link">&para;</a></h3>
 <p>A sent message used to leave the transcript unchanged until the first frame of the reply landed.
 <code>.working-inline</code> fills that gap: a dim row at the foot of the log carrying a spinner and the turn's
