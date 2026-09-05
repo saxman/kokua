@@ -248,9 +248,6 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .thinking, .loop { font-size: 0.85em; }
 .tool { font-family: ui-monospace, monospace; font-size: 0.82em; }
 .subagent, .plan { font-size: 0.9em; }
-/* A card's body is set off by a rule rather than a box, so nesting reads as depth without drawing a
-   second border inside the first. */
-.subagent > .fold-body, .plan > .fold-body { border-left: 1px solid var(--border); padding-left: 12px; }
 .tool > .fold-body > .tool-output { max-width: none; margin: 4px 0 0; padding: 0; }
 .tool-output .output-text { display: block; max-height: 24em; overflow: auto; }
 .tool-output .output-more { display: block; margin-top: 4px; padding: 1px 6px; font: inherit;
@@ -303,7 +300,19 @@ header { display: flex; align-items: center; justify-content: space-between; gap
    empty row and the reasoning looks like it never happened. */
 .fold-label.no-payload .fold-kind { color: var(--fg-dim); font-size: 1em; }
 .sa-error .fold-kind { color: inherit; margin-right: 8px; }
-.foldable .fold-body { margin-top: 4px; }
+/* An open block's body is set off by a rule down its left, so the block reads as open from the
+   margin and its content is bounded: without it an expanded body sits at the same indent as the next
+   block's header, and where one block ends and the next begins has to be worked out from the words.
+   The triangle in the header says the same thing in one character; this says it for the whole height
+   of what was disclosed, which is the part a reader scanning a long turn is actually looking for.
+
+   It is set off by a rule rather than a box so that nesting reads as depth without drawing a second
+   border inside the first: a sub-agent card's own blocks are these same components one level in, and
+   an expanded tool holds its output block the same way.
+
+   No toggling is needed to keep this honest. A collapsed body is `display: none` (next rule), so the
+   rule can only ever be drawn on a body that is open. */
+.foldable > .fold-body { border-left: 1px solid var(--border); padding-left: 12px; margin-top: 4px; }
 .foldable.collapsed .fold-body { display: none; }
 /* Markdown-rendered bubbles: real block elements, so drop the plain-text pre-wrap. */
 .md { white-space: normal; }

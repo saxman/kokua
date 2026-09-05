@@ -176,8 +176,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   `app.css`, and `app.js`, served from the same static-asset allowlist as the vendored libraries.
   - **A flat transcript, not a chat.** One left-aligned column: the user's turn is marked with a `>`
     rather than filled, prose takes a 76ch measure, and machine events are dim monochrome one-line rows
-    set apart by a kind word and an indent. Tables and code blocks run wider than the prose measure,
-    since they are scanned rather than read.
+    set apart by a kind word and an indent. Expanded, a block's body is set off by a rule down its
+    left, so an open block reads as open from the margin rather than only from its header's triangle,
+    and its content is bounded: on an indent alone a disclosed body ran flush into the next block's
+    header. Nested blocks set off one level in (a tool's output, a sub-agent card's own thinking), so
+    depth reads as depth without drawing a second border inside the first, and nothing has to toggle
+    the rule, since a collapsed body is not drawn at all. Tables and code blocks run wider than the
+    prose measure, since they are scanned rather than read.
   - **Colour means one thing.** Twelve semantic tokens, of which the warm pair marks only a decision
     waiting on you: a tool approval or a plan review. Tool calls, sub-agent cards, and proactive
     messages are not warm. The disclosure triangle is the only glyph on the page; every block names its

@@ -1432,6 +1432,48 @@ def test_a_blank_answer_segment_opens_no_bubble(page, live_server):
     expect(page.locator(".bubble.assistant")).to_have_count(1)
 
 
+def test_an_expanded_block_is_marked_by_a_rule_down_its_left(page, live_server):
+    """A disclosed body carries a left rule, and a folded one carries nothing to carry it.
+
+    The triangle in the header states the same thing in one character at one point; the rule states
+    it for the whole height of what was disclosed, which is what a reader scanning a long turn is
+    looking for. It is asserted on the computed style rather than by eye because the rule reaches
+    every foldable through one selector, and the thing that would break it silently is another rule
+    resetting `border-left` on one kind of block: the block would still open, and only its margin
+    would stop saying so.
+
+    The nesting is asserted too. An expanded tool holds its output block, whose own body is set off
+    one level in, and a rule that leaked through a descendant selector instead of a child one would
+    draw the outer bar twice at the same depth."""
+    _open(page, live_server(delay=0.0, thinking="Call the tool first.", tool_response="21:15"))
+    page.fill("#msg", "what time is it?")
+    page.click("#send")
+
+    thinking = page.locator(".bubble.thinking")
+    expect(thinking).to_have_count(1, timeout=10_000)
+    body = thinking.locator("> .fold-body")
+    # Collapsed: display:none, so there is no rule to see, whatever the border says.
+    expect(body).to_be_hidden()
+
+    thinking.locator("> .fold-header").click()
+    expect(body).to_be_visible()
+    assert body.evaluate("(el) => getComputedStyle(el).borderLeftStyle") == "solid"
+    assert body.evaluate("(el) => parseFloat(getComputedStyle(el).borderLeftWidth)") == 1
+
+    tool = page.locator(".bubble.tool")
+    tool.locator("> .fold-header").click()
+    output = tool.locator(".tool-output")
+    expect(output).to_be_visible()
+    output.locator("> .fold-header").click()
+
+    outer = tool.locator("> .fold-body")
+    inner = output.locator("> .fold-body")
+    expect(inner).to_be_visible()
+    assert inner.evaluate("(el) => parseFloat(getComputedStyle(el).borderLeftWidth)") == 1
+    # The inner rule sits to the right of the outer one: depth, not a doubled bar at one indent.
+    assert inner.bounding_box()["x"] > outer.bounding_box()["x"]
+
+
 def test_a_replayed_blank_answer_segment_is_no_bubble(page, live_server):
     """The same turn on reload. The blank segment is persisted as the tool-call message's content, so
     a page that skips it live and replays it anyway would show the empty bubble again on switch-in."""
