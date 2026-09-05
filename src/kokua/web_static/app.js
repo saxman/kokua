@@ -885,7 +885,11 @@ function addBranchControl(el, messageIndex, conversationId) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "bubble-branch";
-  btn.textContent = "↱";
+  // U+2387, a line splitting away from the line it was on, which is what a branch does to a
+  // transcript. Escaped rather than pasted because the shape it draws is font-dependent, so the
+  // codepoint is the durable statement of which glyph was asked for; the title and aria-label below
+  // carry the meaning either way, for a browser whose fonts do not cover it as much as for a reader.
+  btn.textContent = "\u2387";
   btn.title = "Branch a new conversation including this exchange";
   btn.setAttribute("aria-label", "Branch a new conversation including this exchange");
   btn.addEventListener("click", () => {

@@ -42,7 +42,8 @@ body {
 }
 #app { display: flex; flex: 1; min-height: 0; }
 /* --row-measure caps a machine-event row; prose takes the narrower 76ch measure (see .assistant). */
-:root { --sidebar-width: 240px; --sidebar-rail: 48px; --row-measure: 58rem; }
+:root { --sidebar-width: 240px; --sidebar-rail: 48px; --row-measure: 58rem;
+  --sidebar-icon: 0.9em; }
 /* The sidebar shares the canvas background and is separated by a hairline, so it reads as part of the
    same surface rather than as its own slab. */
 /* The sidebar itself does not scroll: #conv-list and #tasks each own a scroll region, so a long task
@@ -80,13 +81,16 @@ body.resizing { user-select: none; }
 #conv-list .conv-title { font-size: 0.88em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #conv-list li.active .conv-title { font-weight: 600; }
 .conv-age { font-size: 0.72em; color: var(--fg-faint); }
-/* One metrics rule for all four row controls, matching `.task-actions button` below: a chat row's
-   controls and a scheduled task's are the same affordance in the same sidebar, so a size that drifts
-   between them is a bug, and four copies of these declarations is how it would drift. Only the hover
-   colour differs per control, which is what the rules after this one say. */
+/* One metrics rule for all four row controls, sized by the same `--sidebar-icon` as
+   `.task-actions button` below: a chat row's controls and a scheduled task's are the same affordance
+   in the same sidebar, so they read as one set, and a shared token is what keeps them one set rather
+   than two numbers that happen to agree. Quiet on purpose: the row's height is set by its title and
+   age lines, not by these, so a size well under the title's costs no space and asks for no attention
+   until you hover. Only the hover colour differs per control, which is what the rules after this
+   one say. */
 #conv-list .conv-rename, #conv-list .conv-duplicate, #conv-list .conv-export, #conv-list .conv-delete {
   flex: none; border: none; background: none; color: var(--fg-faint); cursor: pointer;
-  font-size: 1.1em; line-height: 1; padding: 3px 5px; opacity: 0; }
+  font-size: var(--sidebar-icon); line-height: 1; padding: 3px 5px; opacity: 0; }
 #conv-list li:hover .conv-rename, #conv-list li:hover .conv-duplicate,
 #conv-list li:hover .conv-export, #conv-list li:hover .conv-delete { opacity: 1; }
 #conv-list .conv-rename:hover, #conv-list .conv-duplicate:hover,
@@ -142,7 +146,7 @@ body.resizing { user-select: none; }
    control you have to hover to discover is no use for interrupting something already under way. */
 .task-row:hover .task-actions, .task-actions:focus-within, .task-row.running .task-actions { opacity: 1; }
 .task-actions button { border: none; background: none; color: var(--fg-faint); cursor: pointer;
-  font-size: 1.1em; line-height: 1; padding: 3px 5px; border-radius: 4px; }
+  font-size: var(--sidebar-icon); line-height: 1; padding: 3px 5px; border-radius: 4px; }
 .task-actions button:hover { color: var(--fg); background: var(--bg); }
 .task-actions .task-delete:hover { color: var(--danger); }
 /* A task's own conversations, indented under it. Same click-to-switch behavior as a chat row. */
