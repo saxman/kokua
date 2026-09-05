@@ -81,21 +81,33 @@ body.resizing { user-select: none; }
 #conv-list .conv-title { font-size: 0.88em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #conv-list li.active .conv-title { font-weight: 600; }
 .conv-age { font-size: 0.72em; color: var(--fg-faint); }
-/* One metrics rule for all four row controls, sized by the same `--sidebar-icon` as
-   `.task-actions button` below: a chat row's controls and a scheduled task's are the same affordance
-   in the same sidebar, so they read as one set, and a shared token is what keeps them one set rather
-   than two numbers that happen to agree. Quiet on purpose: the row's height is set by its title and
-   age lines, not by these, so a size well under the title's costs no space and asks for no attention
-   until you hover. Only the hover colour differs per control, which is what the rules after this
-   one say. */
+/* Every control on a sidebar row, a chat row's four and a scheduled task's three alike. They are
+   the same affordance in the same rail, so they are declared once here rather than twice in
+   agreement, and the tasks section below adds only what genuinely differs (how each cluster is
+   revealed). Quiet on purpose: a row's height is set by its title and age lines, not by these, so a
+   size well under the title's costs no space and asks for no attention until you hover. */
+#conv-list .conv-rename, #conv-list .conv-duplicate, #conv-list .conv-export, #conv-list .conv-delete,
+.task-actions button, .task-conv-delete { border: none; background: none; color: var(--fg-faint);
+  cursor: pointer; font-size: var(--sidebar-icon); line-height: 1; padding: 3px 5px;
+  border-radius: 4px; }
+/* Hovered, the glyph brightens and lifts off the row onto a chip of the page's own background. The
+   chip is a strong cut-out in dark mode and a faint one in light, because --bg and --surface are one
+   shade apart there; the colour shift is what carries it in that theme. Note the header's own
+   buttons do the reverse and chip in --surface, since they sit on --bg rather than on a hovered row. */
+#conv-list .conv-rename:hover, #conv-list .conv-duplicate:hover, #conv-list .conv-export:hover,
+#conv-list .conv-delete:hover, .task-actions button:hover,
+.task-conv-delete:hover { color: var(--fg); background: var(--bg); }
+/* Destructive, so the colour says so while the chip stays. This has to follow the rule above to win
+   for a chat row's delete, whose selector it ties on specificity; the task row's outranks it. */
+#conv-list .conv-delete:hover, .task-actions .task-delete:hover,
+.task-conv-delete:hover { color: var(--danger); }
+/* The one real difference between the two clusters: a chat row reveals its controls one button at a
+   time, where a task row reveals them as a cluster (see `.task-actions`), which is what lets a
+   running task hold its Stop visible without hover. */
 #conv-list .conv-rename, #conv-list .conv-duplicate, #conv-list .conv-export, #conv-list .conv-delete {
-  flex: none; border: none; background: none; color: var(--fg-faint); cursor: pointer;
-  font-size: var(--sidebar-icon); line-height: 1; padding: 3px 5px; opacity: 0; }
+  flex: none; opacity: 0; }
 #conv-list li:hover .conv-rename, #conv-list li:hover .conv-duplicate,
 #conv-list li:hover .conv-export, #conv-list li:hover .conv-delete { opacity: 1; }
-#conv-list .conv-rename:hover, #conv-list .conv-duplicate:hover,
-#conv-list .conv-export:hover { color: var(--accent); }
-#conv-list .conv-delete:hover { color: var(--danger); }
 /* The title while the model is writing one. Dim and italic so a row mid-rename is not mistaken for a
    conversation actually named "naming". */
 #conv-list .conv-title.naming { color: var(--fg-faint); font-style: italic; }
@@ -145,10 +157,8 @@ body.resizing { user-select: none; }
 /* A running task keeps its actions visible: Stop is only offered while a firing is in flight, and a
    control you have to hover to discover is no use for interrupting something already under way. */
 .task-row:hover .task-actions, .task-actions:focus-within, .task-row.running .task-actions { opacity: 1; }
-.task-actions button { border: none; background: none; color: var(--fg-faint); cursor: pointer;
-  font-size: var(--sidebar-icon); line-height: 1; padding: 3px 5px; border-radius: 4px; }
-.task-actions button:hover { color: var(--fg); background: var(--bg); }
-.task-actions .task-delete:hover { color: var(--danger); }
+/* The buttons themselves, resting and hovered, are declared with the chat rows' controls up in the
+   conversation-list section: one kind of row control, one rule. */
 /* A task's own conversations, indented under it. Same click-to-switch behavior as a chat row. */
 .task-conv { display: flex; align-items: center; gap: 5px; padding: 3px 8px 3px 18px; border-radius: 6px;
   cursor: pointer; border-left: 2px solid transparent; font-size: 0.82em; color: var(--fg-dim); }
@@ -156,10 +166,8 @@ body.resizing { user-select: none; }
 /* Grows so the delete button is pushed to the row's right edge, as it is on a chat row. */
 .task-conv-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .task-conv:hover { background: var(--surface); color: var(--fg); }
-.task-conv-delete { flex: none; border: none; background: none; color: var(--fg-faint); cursor: pointer;
-  font-size: 1.25em; line-height: 1; padding: 2px 5px; opacity: 0; }
+.task-conv-delete { flex: none; opacity: 0; }
 .task-conv:hover .task-conv-delete { opacity: 1; }
-.task-conv-delete:hover { color: var(--danger); }
 .task-conv.active { background: var(--surface); border-left-color: var(--accent); color: var(--fg);
   font-weight: 600; cursor: default; }
 /* A thin strip naming the conversation being viewed, rather than a dark bar naming the application. */
