@@ -1038,6 +1038,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#have-the-assistant-analyze-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Have the assistant analyze a conversation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-store-mid-write" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1449,6 +1460,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#have-the-assistant-analyze-a-conversation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Have the assistant analyze a conversation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-store-mid-write" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1498,10 +1520,11 @@ artifact you keep afterwards, to diff against another run, paste into a review, 
 terminal is gone.</p>
 <p>It reads the conversation straight out of the session store and writes the file; nothing else. No
 model client, no agent, no front end, so it works even with the model server down.</p>
-<p>There are two routes to the same content, written to different files: the <code>kokua export</code> command
-below, and a download button in the web UI's sidebar (see <a href="#from-the-web-ui">From the web UI</a>). Both
-call the same renderer, so the two files read identically; only their names differ (see each route's
-section below).</p>
+<p>There are three routes to the same content, written to different files: the <code>kokua export</code> command
+below, a download button in the web UI's sidebar (see <a href="#from-the-web-ui">From the web UI</a>), and
+asking the assistant to export one so it can analyze it (see <a href="#have-the-assistant-analyze-a-conversation">Have the assistant analyze a
+conversation</a>). All three call the same renderer, so the
+files read identically; only their names differ (see each route's section below).</p>
 <h2 id="the-command">The command<a class="headerlink" href="#the-command" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kokua<span class="w"> </span><span class="nb">export</span><span class="w">                       </span><span class="c1"># the most recently updated conversation</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kokua<span class="w"> </span><span class="nb">export</span><span class="w"> </span>abcdef01<span class="w">              </span><span class="c1"># a full id, or a unique leading fragment of one</span>
@@ -1567,14 +1590,50 @@ connection, so a plain HTTP handler would have no live session store to read fro
 an <code>"export"</code> control over the same socket every other sidebar action uses, and the server answers by
 writing the file and pointing the page at the existing <code>/download/{name}</code> route (the one that already
 serves generated PDFs and other artifacts) rather than opening a second way to fetch a file.</p>
-<p><strong>The web route cannot lift the truncation cap.</strong> <code>--full</code> is a command-line flag; the web download
-always exports with <code>DEFAULT_MAX_PAYLOAD_CHARS</code> in effect, so a browser-only user can never see an
-untruncated tool payload. Use <code>kokua export --full</code> from the command line if you need one.</p>
+<p><strong>The download button cannot lift the truncation cap.</strong> <code>--full</code> is a command-line flag, and the
+sidebar's button always exports with <code>DEFAULT_MAX_PAYLOAD_CHARS</code> in effect. A browser-only user is not
+stuck, though: asking the assistant to export the conversation runs the tool below, which does take
+the flag. Or use <code>kokua export --full</code> from the command line.</p>
 <p><strong>Data at rest.</strong> A full transcript, once exported, persists indefinitely under <code>downloads_path</code> and
 is served by <code>/download/{name}</code> over plain HTTP with no authentication. The path-traversal guards on
 that route are sound and the default <code>[web] host</code> is loopback-only, but <code>host</code> is a setting a user can
 change, and a conversation is often the most sensitive thing Kokua holds. Treat an exported file, and
 the host it is served from, accordingly.</p>
+<h2 id="have-the-assistant-analyze-a-conversation">Have the assistant analyze a conversation<a class="headerlink" href="#have-the-assistant-analyze-a-conversation" title="Permanent link">&para;</a></h2>
+<p>The same export is a tool the assistant holds, <code>export_conversation</code>, which is how you get an answer
+about a run rather than a file about it. Ask in plain words:</p>
+<blockquote>
+<p>Something went wrong in the conversation about the flight prices yesterday. Which tool call failed,
+and what did it return?</p>
+</blockquote>
+<p>The assistant finds the conversation (<code>list_conversations</code> or <code>search_conversations</code>), exports it, and
+gets back a path plus how long the file is. What happens next depends on the length, and that is the
+part worth understanding.</p>
+<p><strong>A path, not the transcript.</strong> The tool answers with a file path on purpose. AIMU's <code>fs</code> group offers
+<code>read_file(path, max_lines)</code> and no offset, so a file can be read from its first line and nowhere else,
+and a tool that returned the Markdown directly would spend the asking conversation's whole context on
+one run's tool output. So a long export is meant to be handed to a sub-agent: the assistant passes the
+path and your question to a worker whose fresh context absorbs the file, and only the findings come
+back. <code>config.example.toml</code> ships <code>[agents.analyst]</code> for exactly this, and the assistant's guidance
+tells it to delegate rather than read once the file is past a few hundred lines. A short export it will
+usually just read itself, which is the right call: a delegation costs a spawn.</p>
+<p><strong>Ask for <code>full</code> detail when the tool result is the thing you are debugging.</strong> The tool takes the same
+cap <code>--full</code> lifts, so "export it with the full tool output" gets you a file with nothing cut.</p>
+<p><strong>What it cannot do yet.</strong> If the export is longer than the analyst's own context, the read stops part
+way and the analysis covers only the beginning of the run. The analyst is instructed to say so rather
+than answer as if it had read the whole thing, so you get "I saw the first N lines" instead of a
+confident partial answer, but the underlying fix (paging into a file) is not there yet: it needs an
+<code>offset</code> on AIMU's <code>read_file</code>, which is item 19 in <code>TODO.md</code>. For a very long run, <code>kokua export</code> plus
+your own editor is still the more reliable read.</p>
+<p><strong>The current conversation is a blind spot, and it says so.</strong> The export renders the <em>stored</em>
+transcript, and the turn you are in right now is not stored until it finishes. Exporting the
+conversation you are talking in gets you everything up to this turn, and the answer says as much; the
+same goes for a conversation whose reply is still streaming somewhere else.</p>
+<p><strong>This grants a delegate that reads files.</strong> <code>[agents.analyst]</code> declares <code>fs</code>, which grants read of any
+file on the machine and not only of an export. That is the same reach <code>[agents.coder]</code> already ships
+with, and like every capability here it is a line in your <code>config.toml</code>: delete the agent and its name
+from <code>[agents.assistant].delegates_to</code> if you would rather not have it, and the export tool still works
+(the assistant will read the file itself, or hand you the path).</p>
 <h2 id="the-store-mid-write">The store, mid-write<a class="headerlink" href="#the-store-mid-write" title="Permanent link">&para;</a></h2>
 <p>TinyDB (the session store's format) rewrites its whole file on every save, so an export that races
 the assistant's own write can land on a partial file. Rather than parse whatever arrived, <code>kokua

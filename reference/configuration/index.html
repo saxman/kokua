@@ -2881,12 +2881,16 @@ refused, which will look wrong if you were deliberately gating ahead of the conn
 tool, give its server a <code>[[mcp.server]]</code> table here and name that server in an agent's <code>tools</code>; to gate
 a tool from a toolset nothing declares, name that toolset in an agent's <code>tools</code>. Both are known from the
 next start.</p>
-<p>Three names worth considering adding, all ungated by default: <code>read_conversation</code>,
-<code>search_conversations</code>, and <code>rename_conversation</code>. A saved transcript is untrusted text, since a worker
-may have pasted web content into it, so an injection landing in one conversation can influence another.
-The two reads are ungated by default because gating a read would make an unattended scheduled run that
-reads history fail silently. The rename writes, but it writes one field: the worst an injection gets from
-it is a conversation misleadingly named in the sidebar, with no message touched and nothing lost.</p>
+<p>Four names worth considering adding, all ungated by default: <code>read_conversation</code>,
+<code>search_conversations</code>, <code>rename_conversation</code>, and <code>export_conversation</code>. A saved transcript is
+untrusted text, since a worker may have pasted web content into it, so an injection landing in one
+conversation can influence another. The two reads are ungated by default because gating a read would
+make an unattended scheduled run that reads history fail silently. The rename writes, but it writes one
+field: the worst an injection gets from it is a conversation misleadingly named in the sidebar, with no
+message touched and nothing lost. The export is the one whose reason to gate is not about the
+conversation at all: it changes nothing and can only write inside <code>downloads_path</code> under a name taken
+from the conversation's own id, but what it writes there is a whole transcript in the clear, in a folder
+<code>/download/{name}</code> serves unauthenticated. Gate it if that folder is the part you are protecting.</p>
 <h3 id="locked_config_keys"><code>locked_config_keys</code><a class="headerlink" href="#locked_config_keys" title="Permanent link">&para;</a></h3>
 <p>A list of patterns naming which keys <code>update_config</code> refuses. Default:
 <code>["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*",

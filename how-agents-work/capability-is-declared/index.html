@@ -1586,7 +1586,7 @@ the transcript above is that block's behavior:</p>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"The assistant the user talks to."</span>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"You are a personal assistant running on the user's own machine. Be concise and helpful."</span>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"memory"</span><span class="p">,</span><span class="w"> </span><span class="s2">"documents"</span><span class="p">,</span><span class="w"> </span><span class="s2">"skills"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config"</span><span class="p">,</span><span class="w"> </span><span class="s2">"mcp"</span><span class="p">,</span><span class="w"> </span><span class="s2">"scheduling"</span><span class="p">,</span><span class="w"> </span><span class="s2">"conversations"</span><span class="p">,</span><span class="w"> </span><span class="s2">"planning"</span><span class="p">,</span><span class="w"> </span><span class="s2">"capabilities"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">,</span><span class="w"> </span><span class="s2">"benchmark"</span><span class="p">]</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">delegates_to</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"researcher"</span><span class="p">,</span><span class="w"> </span><span class="s2">"coder"</span><span class="p">]</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">delegates_to</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"researcher"</span><span class="p">,</span><span class="w"> </span><span class="s2">"coder"</span><span class="p">,</span><span class="w"> </span><span class="s2">"analyst"</span><span class="p">]</span>
 </span></code></pre></div>
 <p>Eleven names, no <code>fs</code>, no <code>compute</code>, no <code>web</code>. Every name is resolved against a registry built at
 startup, and an unknown one stops the process rather than shrinking the list:
@@ -1678,7 +1678,7 @@ descriptions are re-sent on every round of every turn. Declaring a capability yo
   and <a href="../../explanation/architecture/#agents-and-delegation">Architecture: agents and delegation</a> for
   how a declaration becomes a built agent.</li>
 <li><a href="../../explanation/architecture/#the-shipped-entry-agents-inventory">The shipped entry agent's
-  inventory</a>: all 31 tools and where
+  inventory</a>: all 32 tools and where
   each comes from.</li>
 <li><a href="../../reference/configuration/">Configuration reference</a>: every key in the tables above.</li>
 </ul>

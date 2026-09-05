@@ -2128,10 +2128,11 @@ The pre-release development history is in the git log.</p>
   connected. One agent shape backs this: <code>wire_agent</code> builds any agent from its declaration, selecting
   its toolsets once and feeding the same list to both its tools and its prompt.</li>
 <li><strong>The assistant can look across your other conversations.</strong> The <code>conversations</code> toolset, three reads
-  and one write:
+  and two tools that write:
   <code>list_conversations</code> (ids, last-active times, message counts, titles), <code>read_conversation</code> (one
   transcript as plain text), <code>search_conversations</code> (case-insensitive text across every saved
-  conversation, with snippets), and <code>rename_conversation</code> (a title, and nothing else). So "what did we decide about the deployment last week?" is answerable,
+  conversation, with snippets), <code>rename_conversation</code> (a title, and nothing else), and
+  <code>export_conversation</code> (a Markdown file, and no change to any conversation). So "what did we decide about the deployment last week?" is answerable,
   and context from a past thread can be carried into a <code>spawn_subagent</code> task. The shipped config gives it
   to the entry agent and to no worker, and a test pins that: a worker shares no history and has no
   conversation identity, so the capability would widen a spawn's blast radius for nothing.</li>
@@ -2147,6 +2148,31 @@ The pre-release development history is in the git log.</p>
   fit, the <em>oldest</em> messages are dropped behind a count, so a read always ends with the most recent
   message. Search matches the phrase first and falls back to all-of-these-words within one message,
   saying which it used.
+- <strong>The assistant can analyze how another conversation ran, not just what was said in it.</strong>
+  <code>export_conversation</code> renders one saved conversation to the same Markdown <code>kokua export</code> writes, over
+  the same <code>render_markdown</code>, and answers with the file's path, line count, and size. That keeps
+  everything the reading tools drop: the reasoning, every tool call with its arguments and its result,
+  sub-agent activity, each turn's model and reasoning effort, what it cost, and why a turn stopped when
+  it stopped short. So "which tool call failed in yesterday's flight-price conversation, and what did it
+  return?" is answerable, which <code>read_conversation</code> could never do at any <code>max_chars</code>. A <code>full</code>
+  parameter lifts the payload cap, the same one <code>kokua export --full</code> lifts, for when the exact text of
+  a long tool result is the thing being debugged.</p>
+<p>It answers with a path rather than the document, and that is the design rather than a limitation of
+  it. AIMU's <code>fs</code> group is <code>list_directory</code> and <code>read_file(path, max_lines)</code>, with no offset and no
+  search, so returning the Markdown itself would spend the asking conversation's whole context on one
+  run's tool output, in the one context that cannot afford it. A path can be handed onward instead:
+  <code>config.example.toml</code> ships <code>[agents.analyst]</code>, a delegate declaring <code>fs</code>, and the tool's answer
+  advises delegating once the file passes <code>DELEGATE_ABOVE_LINES</code>, so a long transcript is spent against
+  a worker's fresh context and only the findings come back. What it does not do is slice: an export
+  larger than the analyst's context is read from its top and no further, which the analyst is
+  instructed to report as a partial read rather than answer through. The fix is an <code>offset</code> on AIMU's
+  <code>read_file</code> (<code>TODO.md</code> item 19).</p>
+<p>The write is bounded by construction, not by validation: the directory is
+  <code>AssistantConfig.downloads_path</code> and the filename is the resolved session's key, so no argument the
+  model passes reaches the filesystem, and exporting the same conversation twice replaces one file
+  rather than accumulating. What it leaves there is a full transcript in the clear, in the folder
+  <code>/download/{name}</code> serves unauthenticated, which is the reason to consider naming it in
+  <code>[security] confirm_tools</code> even though it changes no conversation.
 - <strong>Agent tools are findable, and are only presentation.</strong> Every module defining an <code>@aimu.tool</code> is a
   toolset module, so <code>grep -rl '@tool' src/kokua/</code> finds only files under <code>toolsets/</code>. Kokua's own five
   (<code>capabilities.py</code>, <code>config.py</code>, <code>conversations.py</code>, <code>mcp.py</code>, <code>scheduling.py</code>) each wrap one
@@ -2845,7 +2871,9 @@ notice on startup.</p>
   is untrusted text, so an injection that lands in one conversation can influence what the assistant
   does in another. The three read tools are ungated by default, since they only read and gating them
   would make an unattended scheduled run that reads history fail silently; add <code>read_conversation</code> and
-  <code>search_conversations</code> to <code>[security] confirm_tools</code> to change that.</li>
+  <code>search_conversations</code> to <code>[security] confirm_tools</code> to change that. <code>export_conversation</code> is ungated
+  for a different reason: it changes no conversation, and the reason to gate it is what it leaves behind
+  rather than what it reads, a whole transcript in the clear under <code>data/downloads/</code>.</li>
 </ul>
 <h3 id="diagnostics-and-error-reporting">Diagnostics and error reporting<a class="headerlink" href="#diagnostics-and-error-reporting" title="Permanent link">&para;</a></h3>
 <ul>
