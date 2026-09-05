@@ -382,6 +382,57 @@ def test_transcript_is_one_flat_column_with_hover_timestamps(page, live_server):
     expect(caption).not_to_have_css("opacity", "0")
 
 
+def test_prose_and_machine_rows_share_a_column_and_a_caption_edge(page, live_server):
+    """One treatment for every kind of block: a prose bubble and a tool card share both edges, and the
+    caption a prose bubble carries sits in the same right-hand column, on the block's first line, as
+    the caption riding a card's header.
+
+    Read off `bounding_box` rather than off the declarations, because the two are laid out by different
+    mechanisms (a flex track inside a bubble, a flex track inside a fold header) and matching CSS would
+    not prove matching geometry. The message is long enough to wrap, which is what makes the vertical
+    assertion bite: on a one-line block "first line" and "below the content" are the same place.
+
+    Captions sit at zero opacity until hovered, which `bounding_box` reads through: opacity does not
+    affect layout, so no hover is needed here."""
+    _open(page, live_server(delay=0.0, tail="And here is what it said.", tool_between="the page body"))
+    page.fill("#msg", "please wrap this line onto several of them " * 12)
+    page.click("#send")
+
+    tool = page.locator("#log > .bubble.tool").first
+    assistant = page.locator(".bubble.assistant").first
+    answer_caption = assistant.locator(".bubble-ts")
+    expect(tool).to_be_visible(timeout=10_000)
+    expect(answer_caption).to_be_visible(timeout=10_000)
+
+    prose, machine = assistant.bounding_box(), tool.bounding_box()
+    assert abs(prose["x"] - machine["x"]) < 2, "prose and machine rows start at different left edges"
+    right = (prose["x"] + prose["width"], machine["x"] + machine["width"])
+    assert abs(right[0] - right[1]) < 2, f"right edges differ: {right}"
+
+    # The caption column: every caption ends where a fold header's does, including the one on the turn
+    # that also carries the branch and delete controls, which sit to its left rather than beyond it.
+    user = page.locator(".bubble.user")
+    header = tool.locator(".fold-ts").bounding_box()
+    edge = header["x"] + header["width"]
+    sent = user.locator(".bubble-ts").bounding_box()
+    for name, box in (("answer", answer_caption.bounding_box()), ("user turn", sent)):
+        assert abs((box["x"] + box["width"]) - edge) < 2, f"{name} caption is out of the column"
+    # Rightmost in the cluster, which is a visual order (`order: 1`) and not the DOM's: the caption is
+    # appended when the block is drawn and the controls only once the turn ends.
+    controls = user.locator(".bubble-branch, .bubble-truncate")
+    assert controls.count() == 2
+    for i in range(2):
+        c = controls.nth(i).bounding_box()
+        assert c["x"] + c["width"] < sent["x"], "a turn control sits beyond the caption"
+
+    # On the wrapped user turn's first line, not under its last, and clear of the text it sits beside.
+    box = user.bounding_box()
+    assert box["height"] > sent["height"] * 3, "message did not wrap; the check below proves nothing"
+    assert sent["y"] - box["y"] < sent["height"], "caption is not on the first line"
+    body = user.locator(".bubble-body").bounding_box()
+    assert body["x"] + body["width"] <= sent["x"] + 1, "content runs under the caption"
+
+
 TAIL = "And here is the rest of it."
 
 

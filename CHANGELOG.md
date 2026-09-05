@@ -175,14 +175,19 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   UI, bound to `127.0.0.1:8000` by default. The page is three files: `index.html` for the markup,
   `app.css`, and `app.js`, served from the same static-asset allowlist as the vendored libraries.
   - **A flat transcript, not a chat.** One left-aligned column: the user's turn is marked with a `>`
-    rather than filled, prose takes a 76ch measure, and machine events are dim monochrome one-line rows
-    set apart by a kind word and an indent. Expanded, a block's body is set off by a rule down its
+    rather than filled, and machine events are dim monochrome one-line rows set apart by a kind word
+    and the smaller type they are set in. Every block takes the same indent and the same measure,
+    prose and machine event alike, so left and right edges line up down the page and the hover fill,
+    the wrap point, and the caption column are one width whatever kind of block you point at. The
+    measure is wider than prose alone would want, which is the price of the alignment: a tool call
+    needs room for its arguments, and a narrower cap would put a card's metric a long way from the
+    call it describes. Expanded, a block's body is set off by a rule down its
     left, so an open block reads as open from the margin rather than only from its header's triangle,
     and its content is bounded: on an indent alone a disclosed body ran flush into the next block's
     header. Nested blocks set off one level in (a tool's output, a sub-agent card's own thinking), so
     depth reads as depth without drawing a second border inside the first, and nothing has to toggle
-    the rule, since a collapsed body is not drawn at all. Tables and code blocks run wider than the
-    prose measure, since they are scanned rather than read. Pointing at a block fills it in the same
+    the rule, since a collapsed body is not drawn at all. Tables and code blocks run wider than that
+    measure, since they are scanned rather than read. Pointing at a block fills it in the same
     colour a hovered row in the sidebar takes, so the block under the pointer is marked and the
     caption and turn controls that appear on it (below) read as belonging to that block rather than
     to the turn around it. A foldable fills its header line only: an expanded sub-agent card runs
@@ -274,8 +279,15 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     the card too, naming which one it was and quoting the prompt, so a worker that hit the round cap
     reads as an explained outcome rather than an answer that came back thinner for no visible reason.
   - **Rows carry a localized datetime caption**, revealed on hover (full precision in its tooltip) so
-    the transcript is not dated line by line. On a foldable it rides the always-visible header, so it
-    shows collapsed or expanded. Ephemeral chrome (notices, approval prompts, banners) is not stamped.
+    the transcript is not dated line by line. Every kind of block carries it the same way: at the right
+    edge of the row, on the block's first line, so the captions form one column down the page. On a
+    foldable it rides the always-visible header, so it shows collapsed or expanded; on a regular bubble
+    it rides a cluster that also carries the turn's branch and delete controls, which sit to its left
+    rather than beyond it, so the column holds even on the one block that carries all three. That cluster is a flex
+    track beside the content rather than a float or a positioned corner, which is what lets it sit on
+    the first line at all: content wraps *before* a track, so however long an answer runs it can never
+    end up underneath the caption. Ephemeral chrome (approval prompts, banners) is not stamped, and a
+    centered system notice keeps its caption below its text, having no right edge to align to.
     Messages persisted before timestamps existed render without a caption.
   - **A loop marker names which injection it was, live and on reload.** The loop injects two kinds of
     turn that say opposite things to the model: a continuation nudge after an empty turn ("keep

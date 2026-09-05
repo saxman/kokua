@@ -1186,9 +1186,12 @@ fence with no closer runs to the end of the input.
 Two things are deliberately *not* reparsed. `typesetMath` is deferred to `finalizeStreaming`, because
 KaTeX is the expensive half of the render and a half-typed `$x^` is noise rather than math, so
 mid-stream an expression stands as the source the model wrote. And `finalizeStreaming` cancels the
-pending timer before it stamps the bubble: a tick landing after the stamp would reset `innerHTML` and
-drop the caption. The `history` replay path cancels it too, since it drops the bubble reference the
-tick would have written into.
+pending timer before it renders: a tick landing afterwards would reparse the buffer into a body that
+has already been typeset, undoing `typesetMath` and leaving the answer's math as source text. The
+caption is not at risk from that tick, because it lives in a sibling of the body a render writes into
+(see `bubbleBody`), which is also what lets it sit on the block's first line rather than below the
+content. The `history` replay path cancels the timer too, since it drops the bubble reference the tick
+would have written into.
 
 ### Saying a turn is under way
 

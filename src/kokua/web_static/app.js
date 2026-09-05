@@ -834,13 +834,13 @@ function tsParts(value) {
     full: d.toLocaleString(),
   };
 }
-// The trailing row a finished bubble grows: its datetime caption and, once the turn it ends is
-// known, its branch control. Both are plain flow content appended after the bubble's own content,
-// not positioned relative to a corner, so a control never lands over wrapped text: it always sits
-// after however many lines the answer took, which is also just where a reader looks for the caption
-// already there. Returns the existing row on a second call, so the caption and the control (added at
-// different times: the caption when the bubble is stamped, the control once the turn ends) land in
-// the same row rather than each growing their own.
+// The cluster a finished bubble grows: its datetime caption and, once the turn it ends is known, its
+// branch and delete controls. It is the bubble's last flex track, so it rides the block's first line
+// at the right edge, in the column a foldable's `.fold-ts` occupies; because a flex track is laid out
+// beside the content rather than over it, however long the answer runs it wraps before the caption
+// instead of underneath it. Returns the existing row on a second call, so the caption and the controls
+// (added at different times: the caption when the bubble is stamped, the controls once the turn ends)
+// land in the same row rather than each growing their own.
 //
 // Tracked in a WeakMap keyed by the bubble element, NOT looked up by `el.querySelector(".bubble-meta")`:
 // do not "simplify" this back to one. An assistant bubble's own content is untrusted (model or tool
@@ -860,18 +860,38 @@ function bubbleMetaRow(el) {
     row.className = "bubble-meta";
     el.appendChild(row);
     bubbleMetaRows.set(el, row);
-  } else if (row.parentNode !== el) {
-    // renderStreaming/finalizeStreaming replace a streaming bubble's innerHTML wholesale, which
-    // detaches a row created before that write while leaving this map still pointing at it. Not
-    // reachable today (a bubble is only stamped or given a control after its content is done
-    // changing), but re-appending here means a future call ordering degrades to a moved row instead
-    // of a silently invisible one.
-    el.appendChild(row);
   }
   return row;
 }
-// Caption a regular bubble with its datetime (below the content, in the trailing row). No-op when
-// value is absent.
+// A bubble is a flex row of the same parts a foldable header has, and this is the middle one: the
+// wrapper holding everything the block actually says. Content goes here rather than straight into the
+// bubble so the datetime caption and the turn's controls can be a flex track beside it (see
+// `bubbleMetaRow`), which is what puts them on the block's first line at its right edge without ever
+// landing over wrapped text.
+//
+// This is also what makes a content write safe. renderStreaming and finalizeStreaming replace the
+// whole of what they render into, and what they render into is now this wrapper: the caption is a
+// sibling, so a late render tick can no longer detach it.
+//
+// WeakMap-tracked, for the same reason and with the same warning as the meta row above: do not
+// "simplify" this into `el.querySelector(".bubble-body")`.
+const bubbleBodies = new WeakMap();
+function bubbleBody(el) {
+  let body = bubbleBodies.get(el);
+  if (!body) {
+    body = document.createElement("div");
+    body.className = "bubble-body";
+    // Before the meta row, when there is one, so the caption stays the row's last track. Only
+    // reachable if a block is stamped before it has content, which nothing does today.
+    const meta = bubbleMetaRows.get(el);
+    if (meta && meta.parentNode === el) el.insertBefore(body, meta);
+    else el.appendChild(body);
+    bubbleBodies.set(el, body);
+  }
+  return body;
+}
+// Caption a regular bubble with its datetime, in the meta cluster on the block's first line (below
+// the content on a notice, which is not a flex row). No-op when value is absent.
 function stampBubble(el, value) {
   const t = tsParts(value);
   if (!t) return;
@@ -957,15 +977,15 @@ function addBubble(cls, text, ts) {
   const el = document.createElement("div");
   el.className = "bubble " + cls;
   // The user's turn is marked, not filled: a flat transcript has no sides to alternate between, so
-  // the glyph is what says who is speaking. Appended as a text node rather than assigned to
-  // textContent, which would wipe the marker.
+  // the glyph is what says who is speaking. A sibling of the body rather than part of it, so it is
+  // the row's first flex track and the text wraps to its right instead of under it.
   if (cls === "user") {
     const marker = document.createElement("span");
     marker.className = "row-marker";
     marker.textContent = ">";
     el.appendChild(marker);
   }
-  el.appendChild(document.createTextNode(text || ""));
+  bubbleBody(el).textContent = text || "";
   stampBubble(el, ts);
   appendToLog(el);
   autoscroll();
@@ -1064,7 +1084,7 @@ function addImageBubble(src, cls, ts) {
   const img = document.createElement("img");
   img.src = src;
   img.alt = "image";
-  el.appendChild(img);
+  bubbleBody(el).appendChild(img);
   stampBubble(el, ts);
   appendToLog(el);
   autoscroll();
@@ -1131,11 +1151,12 @@ let streamRenderTimer = null;
 function renderStreaming() {
   streamRenderTimer = null;
   if (!streamingBubble) return;
+  const body = bubbleBody(streamingBubble);
   const html = renderMarkdown(streamingText);
-  if (html === null) streamingBubble.textContent = streamingText;
+  if (html === null) body.textContent = streamingText;
   else {
-    streamingBubble.classList.add("md");
-    streamingBubble.innerHTML = html;
+    body.classList.add("md");
+    body.innerHTML = html;
   }
   autoscroll();
 }
@@ -1151,12 +1172,14 @@ function cancelStreamRender() {
 
 function addMarkdownBubble(cls, text, ts) {
   const el = document.createElement("div");
-  el.className = "bubble md " + cls;
+  el.className = "bubble " + cls;
+  const body = bubbleBody(el);
   const html = renderMarkdown(text);
-  if (html === null) el.textContent = text || "";
+  if (html === null) body.textContent = text || "";
   else {
-    el.innerHTML = html;
-    typesetMath(el);
+    body.classList.add("md");
+    body.innerHTML = html;
+    typesetMath(body);
   }
   stampBubble(el, ts);
   appendToLog(el);
@@ -1168,17 +1191,19 @@ function addMarkdownBubble(cls, text, ts) {
 // state. Shared by the `done` terminator and the `phase` divider (verbose trace), where each phase
 // closes the previous phase's bubble so the next call's output starts a fresh one.
 function finalizeStreaming() {
-  // Cancel first: a tick landing after the stamp below would reset innerHTML and drop the caption.
+  // Cancel first: a tick landing after this returns would reparse the buffer into a body that has
+  // already been typeset, undoing typesetMath and leaving the answer's math as source text. The
+  // caption is safe either way, being a sibling of the body rather than inside it.
   cancelStreamRender();
   if (streamingBubble) {
+    const body = bubbleBody(streamingBubble);
     const html = renderMarkdown(streamingText);
     if (html !== null) {
-      streamingBubble.classList.add("md");
-      streamingBubble.innerHTML = html;
-      typesetMath(streamingBubble);
+      body.classList.add("md");
+      body.innerHTML = html;
+      typesetMath(body);
     }
-    // A live answer has no server timestamp; stamp it with the completion time (setting innerHTML
-    // above cleared the bubble, so this appends after the rendered content).
+    // A live answer has no server timestamp; stamp it with the completion time.
     stampBubble(streamingBubble, new Date());
   }
   streamingBubble = null;
@@ -1607,7 +1632,9 @@ function showReconnectNotice() {
     reconnectButton = document.createElement("button");
     reconnectButton.textContent = "Retry now";
     reconnectButton.addEventListener("click", attemptReconnect);
-    reconnectNotice.append(reconnectLabel, reconnectButton);
+    // Into the body, not the bubble: appended straight to the bubble they would follow the body
+    // block and break the one-line notice onto two.
+    bubbleBody(reconnectNotice).append(reconnectLabel, reconnectButton);
   }
   reconnectButton.disabled = false;
 }

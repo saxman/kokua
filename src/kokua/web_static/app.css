@@ -226,16 +226,38 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .bubble:hover:not(.foldable, .approval, .notice), .foldable > .fold-header:hover {
   background: var(--surface); border-radius: 6px; box-shadow: 0 0 0 3px var(--surface); }
 
-/* A prose measure, left-aligned. Full-bleed text on a wide monitor is unreadable; machine-event rows,
-   tables, and code blocks escape the cap because they are scanned rather than read.
+/* One column, for prose and machine event alike: every block in the transcript takes the same indent
+   and the same cap (see .thinking/.tool below), so left and right edges line up down the page and the
+   hover fill, the wrap point, and the caption column are the same width whatever kind of block you
+   point at. Tables and code blocks still escape the cap, because they are scanned rather than read.
+
+   The cost is stated so nobody has to rediscover it: --row-measure is far wider than the ~75-character
+   line prose is easiest to read at, so a wrapped paragraph here is harder work than it was under the
+   76ch measure this replaced. That is the trade the alignment was worth making.
+
    Full-strength text is stated, not inherited, so a block reads the same nested inside a sub-agent
-   card (whose own text is dimmed) as it does at the top level. */
-.user, .assistant, .proactive { max-width: 76ch; color: var(--fg); }
-.user { margin-top: 22px; display: flex; gap: 8px; }
+   card (whose own text is dimmed) as it does at the top level.
+
+   Each is a flex row of the same three parts a foldable header has (see .foldable .fold-header): an
+   optional marker, the content, and the meta cluster carrying the datetime caption and the turn's
+   controls. Baseline alignment puts that cluster on the block's first line; being a flex track rather
+   than a float or a corner is what keeps wrapped content from ever running under it.
+
+   A foldable is excluded from the flex row, as it is from the hover fill above, and for a sharper
+   reason: a sub-agent card's answer block is a foldable carrying `.assistant` (see addFoldable), and a
+   flex container there would lay its header *beside* its body instead of above it. The measure and the
+   indent still apply, since those are the same for every kind of block. */
+.user, .assistant, .proactive { max-width: var(--row-measure); margin-left: 14px; color: var(--fg); }
+.user:not(.foldable), .assistant:not(.foldable), .proactive:not(.foldable) {
+  display: flex; align-items: baseline; gap: 8px; }
+.bubble-body { flex: 1; min-width: 0; }
+.user { margin-top: 22px; }
 .row-marker { flex: none; color: var(--fg-faint); user-select: none; }
 .assistant { margin-top: 10px; }
-.proactive::before { content: "proactive"; display: block; font-size: 0.72em; text-transform: uppercase;
-  letter-spacing: 0.06em; color: var(--fg-faint); margin-bottom: 2px; }
+/* On the body, not the block: as a flex item of the block it would sit beside the content instead of
+   labelling it from above. */
+.proactive > .bubble-body::before { content: "proactive"; display: block; font-size: 0.72em;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faint); margin-bottom: 2px; }
 .notice { align-self: center; font-size: 0.85em; color: var(--fg-dim); margin: 12px 0; }
 /* The reconnect notice's "Retry now", sized to the notice's own small dim text rather than to the
    composer's buttons: a full-size accent button in a centered dim line reads as the page's primary
@@ -261,10 +283,15 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 /* Machine events: dim monochrome rows told apart by their kind word and their indent, not by a fill
    or a border. This is where the amber went.
 
-   Wider than the prose measure, since a call with its arguments needs the room, but still capped: the
-   metric is right-aligned within the row, and on a full-width row it would sit a thousand pixels from
-   the call it describes. The cap is in rem, not ch, so the monospace tool row and the sans-serif
-   sub-agent row land at the same width and their metrics form one column rather than a ragged edge. */
+   Capped rather than full-bleed: the metric and the caption are right-aligned within the row, and on a
+   full-width row they would sit a thousand pixels from the call they describe. The cap is in rem, not
+   ch, so the monospace tool row and the sans-serif sub-agent row land at the same width and their
+   metrics form one column rather than a ragged edge -- which is also why the prose blocks above take
+   this same measure rather than one of their own.
+
+   The indent is shared with those prose blocks too, so it no longer distinguishes a machine event from
+   an answer. What tells them apart is what always did the work: the kind word, the dimmed colour, and
+   the smaller type set below. */
 .loop, .thinking, .tool, .subagent, .plan { color: var(--fg-dim); margin: 1px 0 1px 14px;
   max-width: var(--row-measure); }
 .thinking, .loop { font-size: 0.85em; }
@@ -336,7 +363,10 @@ header { display: flex; align-items: center; justify-content: space-between; gap
    rule can only ever be drawn on a body that is open. */
 .foldable > .fold-body { border-left: 1px solid var(--border); padding-left: 12px; margin-top: 4px; }
 .foldable.collapsed .fold-body { display: none; }
-/* Markdown-rendered bubbles: real block elements, so drop the plain-text pre-wrap. */
+/* Rendered markdown: real block elements, so drop the plain-text pre-wrap. The class sits on the
+   `.bubble-body` wrapper rather than on the bubble, because the child selectors below have to reach
+   the first and last markdown block: on the bubble they would match the wrapper itself, and a leading
+   heading would keep the margin these rules exist to remove. */
 .md { white-space: normal; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
@@ -358,7 +388,7 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .md input[type="checkbox"] { margin-right: 0.4em; }
 .md li { list-style-position: outside; }
 .md li.task-list-item { list-style: none; margin-left: -1.1em; }
-/* Tables and code are scanned, not read, so they escape the prose measure rather than scrolling
+/* Tables and code are scanned, not read, so they escape the transcript's measure rather than scrolling
    sideways inside a needlessly narrow column. */
 .md pre, .md table { max-width: none; }
 
@@ -407,14 +437,19 @@ button:disabled { opacity: 0.5; cursor: default; }
 button.secondary, .notification-banner button { background: none; border-color: var(--border);
   color: var(--fg-dim); }
 /* An inline image, in the composer preview row or a chat bubble. `fit-content` so the hover fill
-   hugs the picture instead of trailing across the prose measure the block would otherwise stretch
-   to; the resting layout is unchanged, since the box is left-aligned either way. */
+   hugs the picture instead of trailing across the measure the block would otherwise stretch to; the
+   resting layout is unchanged, since the box is left-aligned either way.
+
+   `flex-start` rather than the baseline alignment its prose siblings take: an `img` is inline-level and
+   its baseline is its bottom margin edge, so baseline alignment would drop the caption to the foot of
+   the picture instead of the top line it sits on for every other kind of block. */
 .bubble.image { padding: 0; background: transparent; border: none; overflow: hidden;
-  width: fit-content; }
+  width: fit-content; align-items: flex-start; }
 .bubble.image img { max-width: 100%; border-radius: 12px; display: block; }
-/* Append-time datetime caption, revealed on hover rather than printed under every block. On a regular
-   bubble it sits below the content; on a foldable it rides the always-visible header line (so it shows
-   whether the block is collapsed or expanded).
+/* Append-time datetime caption, revealed on hover rather than printed under every block. Every kind of
+   block carries it on its first line at the row's right edge: a foldable's rides the always-visible
+   header (so it shows whether the block is collapsed or expanded), and a regular bubble's rides the
+   meta cluster below.
 
    This must stay `opacity`, never `display: none` or `visibility: hidden`: the e2e suite asserts the
    caption is visible, and Playwright's visibility check ignores opacity but not those two. Tidying
@@ -423,11 +458,29 @@ button.secondary, .notification-banner button { background: none; border-color: 
   font-family: -apple-system, system-ui, sans-serif; text-transform: none; letter-spacing: 0;
   opacity: 0; transition: opacity 120ms ease; }
 .fold-ts { flex: none; margin-left: 8px; }
-/* The trailing row a finished bubble grows: its datetime caption and, once the turn it ends is known,
-   its branch control. Both are ordinary flow content appended after however many lines the bubble's
-   own content wrapped to, rather than positioned relative to a corner, so neither ever sits over
-   wrapped text and the control always reads as coming after the answer, not over its first line. */
-.bubble-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-top: 2px; }
+/* The cluster a finished bubble grows: its datetime caption and, once the turn it ends is known, its
+   branch and delete controls. One row rather than one element each, so the pair cannot drift apart and
+   both arrive in the place the caption already taught the reader to look.
+
+   It is the block's last flex track, which is what puts it on the first line at the right edge, in the
+   column a foldable's `.fold-ts` occupies. A track and not a float or an absolutely positioned corner:
+   content wraps *before* a flex track, so however long the answer's first line runs it can never end
+   up underneath the caption. `flex: none` so the cluster keeps its intrinsic width and the body is the
+   only part that gives.
+
+   `.notice` keeps the old placement (see the `flex-wrap` fallback below), since a centered system line
+   has no right edge to align to. */
+.bubble-meta { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+/* Last in the cluster whatever order it was appended in, so the caption is flush with the row's right
+   edge and every caption on the page forms one column, the way a foldable's `.fold-ts` does. It is
+   stamped before the turn's controls exist (the caption when the block is drawn, the controls once the
+   turn ends), so DOM order cannot express this and `order` is what does. Nothing is lost by the
+   mismatch: the caption is not focusable, and the two controls keep their relative order, so tab order
+   still reaches them constructive before destructive. */
+.bubble-meta > .bubble-ts { order: 1; }
+/* A notice is not a flex row, so its meta lands below the text as ordinary flow content and wants the
+   gap back. */
+.notice > .bubble-meta { margin-top: 2px; }
 .bubble:hover .bubble-ts, .fold-header:hover > .fold-ts { opacity: 1; }
 /* Quiet until the bubble is hovered, like the timestamp beside it, because it is an affordance you
    look for rather than one you should keep noticing, except to a keyboard user tabbing through the
