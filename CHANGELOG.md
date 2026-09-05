@@ -293,7 +293,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   - **A dropped socket reconnects on its own.** Restarting Kokua under an open browser used to leave a
     page that said "Disconnected." and could only be recovered by reloading. The page now retries with
     backoff (500ms doubling to a 10s ceiling, indefinitely) and shows one notice for the whole outage
-    rather than one per attempt. Almost none of the work is on the client: the server already resyncs its
+    rather than one per attempt. That notice counts down to its next attempt ("Reconnecting in 7s...")
+    and carries a **Retry now** button, so at the 10s ceiling a wait reads as a wait rather than as a
+    page that has stopped trying, and a reader who knows the server is back does not have to sit it out.
+    A manual retry deliberately does not reset the backoff, which only a connection that succeeded does,
+    so clicking repeatedly at a server that is still down cannot drive it back to the base 500ms interval.
+    Almost none of the work is on the client: the server already resyncs its
     whole view on every connection (conversations, history, settings, tasks) and the `history` frame
     replaces the transcript, so a reconnected page repaints rather than appending a second copy of what it
     already showed. What a reconnect does not restore is a turn that was in flight when the socket

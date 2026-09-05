@@ -41,6 +41,10 @@ pytestmark = pytest.mark.e2e
 
 REPLY = "Hello from the assistant."
 
+# The reconnect notice while a retry is pending. The seconds are the point: a bare "Reconnecting"
+# matches the in-flight label too, which is not what these tests are asserting.
+COUNTDOWN = re.compile(r"Reconnecting in \d+s")
+
 
 class _SlowClient(MockAsyncModelClient):
     """A mock model client that streams its reply immediately, then holds the turn open for `delay`.
@@ -1494,6 +1498,47 @@ def test_the_page_reconnects_after_the_server_restarts(page, restartable_server)
     page.click("#send")
     expect(page.locator(".bubble.user", has_text="after the restart")).to_be_visible()
     expect(page.locator(".bubble.assistant", has_text=REPLY)).to_have_count(2, timeout=10_000)
+
+
+def test_the_reconnect_notice_counts_down_to_its_next_attempt(page, restartable_server):
+    """A retry the reader can see coming, rather than an indefinite "Reconnecting...".
+
+    The backoff runs to a 10s ceiling, which is long enough that a static label reads as a stall. The
+    notice is still one notice for the whole outage: the countdown rewrites its label in place, so a
+    long restart does not fill the transcript with a line per attempt."""
+    start, stop = restartable_server
+    _open(page, start())
+
+    stop()
+    notice = page.locator(".bubble.notice", has_text="Disconnected")
+    expect(notice).to_contain_text(COUNTDOWN, timeout=15_000)
+    expect(notice.locator("button")).to_have_text("Retry now")
+    expect(page.locator(".bubble.notice")).to_have_count(1)
+
+
+def test_a_manual_retry_beats_the_pending_backoff(page, restartable_server):
+    """ "Retry now" connects on the click rather than waiting out a wait that has grown to 10s.
+
+    The assertion is a race the click has to win: the test waits until the countdown reads at least
+    six seconds, so a reconnect inside four proves the button did it and not the timer firing
+    underneath. `pageerror` is collected because the countdown is the page's first repeating timer
+    that outlives its own element -- one that kept ticking after `ws.onopen` dropped the notice would
+    throw here rather than fail an assertion."""
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    start, stop = restartable_server
+    _open(page, start())
+
+    stop()
+    notice = page.locator(".bubble.notice", has_text="Disconnected")
+    expect(notice).to_contain_text(re.compile(r"Reconnecting in (?:[6-9]|1\d)s"), timeout=30_000)
+
+    start()
+    notice.locator("button").click()
+    expect(page.locator("#msg")).to_be_enabled(timeout=4_000)
+    expect(page.locator(".bubble.notice")).to_have_count(0)
+    page.wait_for_timeout(1_500)  # long enough for a leaked countdown tick to fire
+    assert errors == []
 
 
 def test_a_refused_second_tab_does_not_retry(page, live_server):

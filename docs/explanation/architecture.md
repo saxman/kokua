@@ -1127,6 +1127,18 @@ attempt, so restarting Kokua under an open browser does not leave a page whose o
 `ws.onclose` retries with backoff, 500ms doubling to a 10s ceiling and then retrying indefinitely, and
 shows one notice for the whole outage rather than one per attempt.
 
+That one notice is live rather than static, because at a 10s ceiling an unchanging "Reconnecting..." is
+indistinguishable from a page that has given up. Its label is rewritten in place on a 250ms tick (faster
+than the second it counts in, so a tick lands near each rounded boundary instead of drifting against the
+deadline and skipping numbers): a countdown while an attempt is pending, and the bare wording while one is
+actually open. The seconds are rounded *up*, since the first wait is 500ms and would otherwise read "in
+0s" for its whole life, which says the attempt has already been made. Beside the label sits a **Retry now**
+button, and both it and the expiring timer call the same `attemptReconnect`, so an impatient reader takes
+exactly the path the backoff would have. What the click does not do is reset the backoff: `ws.onopen` is
+what resets it, on a connection that actually succeeded, so a manual attempt that fails falls back onto the
+schedule it was already on rather than restarting at 500ms and letting a held mouse hammer a server that is
+genuinely down.
+
 Almost none of the work is on the client, because the server was already written for this: it resyncs its
 entire view on every connection (`_sync_view` sends the conversation list and the active conversation's
 history, followed by the settings and the tasks), and the page's `history` handler clears the transcript

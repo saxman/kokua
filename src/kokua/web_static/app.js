@@ -1559,8 +1559,16 @@ function renderPlanReview(planText, critique) {
 // what was persisted, not to the live stream it was watching.
 const RECONNECT_DELAY_MS = 500;
 const RECONNECT_DELAY_MAX_MS = 10000;
+// Faster than the second it counts in, so a tick lands close to each rounded boundary. On a 1000ms
+// interval the label drifts against the deadline it is computed from and skips numbers.
+const RECONNECT_TICK_MS = 250;
 let reconnectDelay = RECONNECT_DELAY_MS;
 let reconnectNotice = null;
+let reconnectLabel = null;
+let reconnectButton = null;
+let reconnectTimeout = null;
+let reconnectCountdown = null;
+let reconnectAt = 0;
 
 // The two flags below separate the ways a socket can close, because only one of them is worth
 // retrying. A server that is not up yet closes having sent nothing, which is the ordinary restart
@@ -1571,6 +1579,63 @@ let reconnectNotice = null;
 let synced = false;
 let frameReceived = false;
 
+// One notice for the whole outage, however many attempts it takes, so a long restart does not fill
+// the transcript with its own retries. Its label is rewritten in place rather than reprinted: a
+// countdown while an attempt is pending, the bare wording while one is open. At a ceiling of ten
+// seconds a static "Reconnecting..." reads as a page that has given up, and the reader has no way to
+// tell a wait from a hang.
+function showReconnectNotice() {
+  if (!reconnectNotice) {
+    reconnectNotice = notice("");
+    reconnectLabel = document.createElement("span");
+    reconnectButton = document.createElement("button");
+    reconnectButton.textContent = "Retry now";
+    reconnectButton.addEventListener("click", attemptReconnect);
+    reconnectNotice.append(reconnectLabel, reconnectButton);
+  }
+  reconnectButton.disabled = false;
+}
+
+function dropReconnectNotice() {
+  clearReconnectTimers();
+  if (reconnectNotice) reconnectNotice.remove();
+  reconnectNotice = reconnectLabel = reconnectButton = null;
+}
+
+function clearReconnectTimers() {
+  clearTimeout(reconnectTimeout);
+  clearInterval(reconnectCountdown);
+  reconnectTimeout = reconnectCountdown = null;
+}
+
+function scheduleReconnect() {
+  showReconnectNotice();
+  reconnectAt = Date.now() + reconnectDelay;
+  reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_DELAY_MAX_MS);
+  reconnectTimeout = setTimeout(attemptReconnect, reconnectAt - Date.now());
+  reconnectCountdown = setInterval(paintReconnectLabel, RECONNECT_TICK_MS);
+  paintReconnectLabel();
+}
+
+// Rounded up, because the first wait is 500ms and would otherwise spend its whole life reading
+// "in 0s", which says the attempt has already been made.
+function paintReconnectLabel() {
+  const seconds = Math.max(0, Math.ceil((reconnectAt - Date.now()) / 1000));
+  reconnectLabel.textContent = `Disconnected. Reconnecting in ${seconds}s...`;
+}
+
+// Both the timer's expiry and the button's click land here, so an impatient reader takes exactly the
+// path the backoff would have. What the click deliberately does not do is reset the backoff:
+// `ws.onopen` resets it, on a connection that actually succeeded, so a manual attempt that fails
+// falls back onto the schedule it was already on instead of restarting at 500ms and letting a held
+// mouse hammer a server that is genuinely down.
+function attemptReconnect() {
+  clearReconnectTimers();
+  reconnectLabel.textContent = "Disconnected. Reconnecting...";
+  reconnectButton.disabled = true;
+  connect();
+}
+
 function connect() {
   synced = false;
   frameReceived = false;
@@ -1578,9 +1643,10 @@ function connect() {
   ws.onmessage = handleFrame;
   ws.onopen = () => {
     reconnectDelay = RECONNECT_DELAY_MS;
+    clearReconnectTimers();
     if (reconnectNotice) {
       reconnectNotice.remove();
-      reconnectNotice = null;
+      reconnectNotice = reconnectLabel = reconnectButton = null;
     }
     input.disabled = false;
     sendBtn.disabled = false;
@@ -1592,14 +1658,13 @@ function connect() {
     setProcessing(false);
     setWorking(null);
     if (frameReceived && !synced) {
+      // A refusal ends the outage the retries were for, so its notice goes with them: left in place
+      // it would sit above the explanation still counting down to an attempt nothing will make.
+      dropReconnectNotice();
       notice("Disconnected. Reload the page to reconnect.");
       return;
     }
-    // One notice for the whole outage, however many attempts it takes, so a long restart does not
-    // fill the transcript with its own retries.
-    if (!reconnectNotice) reconnectNotice = notice("Disconnected. Reconnecting...");
-    setTimeout(connect, reconnectDelay);
-    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_DELAY_MAX_MS);
+    scheduleReconnect();
   };
 }
 
