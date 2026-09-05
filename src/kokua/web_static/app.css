@@ -66,13 +66,17 @@ body {
 :root[data-sidebar-collapsed="true"] #sidebar-top { flex-direction: column; height: auto; gap: 8px; }
 :root[data-sidebar-collapsed="true"] #wordmark,
 :root[data-sidebar-collapsed="true"] #tasks,
-:root[data-sidebar-collapsed="true"] #conv-list { display: none; }
+:root[data-sidebar-collapsed="true"] #conversations { display: none; }
 body.resizing { user-select: none; }
-/* `flex: 0 1 auto`, not `1 1 auto`: the list takes the height it needs and no more, so the tasks
+/* `flex: 0 1 auto`, not `1 1 auto`: the section takes the height it needs and no more, so the tasks
    section sits directly under it instead of being pushed to the bottom of the sidebar by the free
-   space. It still shrinks and scrolls first when the two together overflow. */
+   space. It still shrinks and scrolls first when the two together overflow, which is why the header
+   is `flex: none` (see `.section-head`) and the scrolling belongs to the list inside. */
+#conversations { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
 #conv-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px;
   flex: 0 1 auto; min-height: 0; overflow-y: auto; }
+/* A folded section's list is `hidden`, which a `display: flex` rule would otherwise override. */
+#conv-list[hidden] { display: none; }
 #conv-list li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px;
   cursor: pointer; border-left: 2px solid transparent; }
 #conv-list li:hover { background: var(--surface); }
@@ -121,19 +125,26 @@ body.resizing { user-select: none; }
   cursor: pointer; font-size: 1em; line-height: 1; padding: 0 2px; }
 #conv-list .conv-retitle:hover { color: var(--accent); }
 
+/* --- Sidebar section furniture ---------------------------------------------------------------- */
+/* A section's title row: a fold toggle carrying a caret, a name, and a count, plus whatever else
+   that particular section needs beside it (only the tasks refresh, so far). Declared by class
+   because both sections wear the same furniture, and a title row that drifted between them would
+   read as two kinds of thing in one rail. `flex: none` keeps the header out of the scroll, so a
+   section that shrinks loses list rows rather than its own name. */
+.section-head { display: flex; align-items: center; gap: 4px; flex: none; }
+.section-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: none;
+  border: none; cursor: pointer; padding: 4px 6px; border-radius: 6px; color: var(--fg-faint);
+  font-size: 0.8em; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.section-toggle:hover, #tasks-refresh:hover { background: var(--surface); color: var(--fg); }
+.section-toggle .caret { font-size: 0.9em; transition: transform 0.12s ease; }
+.section-toggle[aria-expanded="false"] .caret { transform: rotate(-90deg); }
+.section-count { color: var(--fg-faint); font-weight: 400; }
+
 /* --- Scheduled tasks section ---------------------------------------------------------------- */
 /* Capped at 45% of the sidebar and scrolling internally: the conversation list keeps the rest. */
 #tasks { flex: none; max-height: 45%; display: flex; flex-direction: column; min-height: 0;
   border-top: 1px solid var(--border); padding-top: 8px; }
 #tasks.hidden { display: none; }
-#tasks-head { display: flex; align-items: center; gap: 4px; flex: none; }
-#tasks-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: none;
-  border: none; cursor: pointer; padding: 4px 6px; border-radius: 6px; color: var(--fg-faint);
-  font-size: 0.8em; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
-#tasks-toggle:hover, #tasks-refresh:hover { background: var(--surface); color: var(--fg); }
-#tasks-toggle .caret { font-size: 0.9em; transition: transform 0.12s ease; }
-#tasks-toggle[aria-expanded="false"] .caret { transform: rotate(-90deg); }
-#tasks-count { color: var(--fg-faint); font-weight: 400; }
 #tasks-refresh { flex: none; background: none; border: none; color: var(--fg-faint); cursor: pointer;
   font-size: 1.1em; line-height: 1; padding: 4px 7px; border-radius: 6px; }
 #task-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column;

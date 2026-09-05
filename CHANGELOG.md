@@ -184,7 +184,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     kind in words.
   - **Conversations** are listed in a sidebar, auto-titled from the first message, each row showing its
     relative age, with new / select / rename / rename-with-AI / delete (deleting the active one switches
-    to the most recently updated remaining conversation). The header strip names the conversation being viewed. The sidebar
+    to the most recently updated remaining conversation). The header strip names the conversation being viewed. The list
+    sits under a foldable **Conversations** title carrying the count of rows it shows, which is the rows
+    themselves rather than every conversation the server sent: a task's own firings are listed under that
+    task, so a count read off the frame would say 3 beside a section showing 1. The title row is the same
+    furniture the tasks section wears (one `.section-*` rule set, one `wireFoldableSection` helper over two
+    storage keys), and the two folds are independent and remembered per browser. The sidebar
     collapses to an icon rail and drag-resizes between 180 and 480px; the divider is keyboard-operable.
     Width, collapsed state, and theme are per-browser preferences applied before first paint, so there
     is no flash on load.

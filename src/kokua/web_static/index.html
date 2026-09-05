@@ -43,14 +43,27 @@
         </button>
         <button id="sidebar-toggle" type="button" aria-expanded="true" title="Collapse sidebar">«</button>
       </div>
-      <ul id="conv-list"></ul>
+      <!-- The conversations you started. Unlike the tasks section below it this one is never hidden:
+           there is always a conversation open, so an empty list would mean the page had not loaded
+           rather than that you have nothing here. -->
+      <section id="conversations">
+        <div class="section-head">
+          <button id="conversations-toggle" class="section-toggle" type="button" aria-expanded="true"
+                  aria-controls="conv-list">
+            <span class="caret" aria-hidden="true">▾</span><span class="section-label">Conversations</span>
+            <span id="conversations-count" class="section-count"></span>
+          </button>
+        </div>
+        <ul id="conv-list"></ul>
+      </section>
       <!-- Scheduled tasks, with each task's own conversations nested under it. Hidden entirely while
            there are no tasks, so it costs nothing for a user who never schedules one. -->
       <section id="tasks" class="hidden">
-        <div id="tasks-head">
-          <button id="tasks-toggle" type="button" aria-expanded="true" aria-controls="task-list">
-            <span class="caret" aria-hidden="true">▾</span><span class="tasks-label">Tasks</span>
-            <span id="tasks-count"></span>
+        <div class="section-head">
+          <button id="tasks-toggle" class="section-toggle" type="button" aria-expanded="true"
+                  aria-controls="task-list">
+            <span class="caret" aria-hidden="true">▾</span><span class="section-label">Tasks</span>
+            <span id="tasks-count" class="section-count"></span>
           </button>
           <button id="tasks-refresh" type="button" title="Refresh tasks">⟳</button>
         </div>

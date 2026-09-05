@@ -9,6 +9,8 @@ const attachBtn = document.getElementById("attach-btn");
 const imageInput = document.getElementById("image-input");
 const attachPreviews = document.getElementById("attach-previews");
 const convList = document.getElementById("conv-list");
+const conversationsToggle = document.getElementById("conversations-toggle");
+const conversationsCount = document.getElementById("conversations-count");
 const newConvBtn = document.getElementById("new-conv");
 const tasksSection = document.getElementById("tasks");
 const tasksToggle = document.getElementById("tasks-toggle");
@@ -278,8 +280,10 @@ function renderConversations() {
   }
   const nested = nestedConversationIds();
   convList.innerHTML = "";
+  let shown = 0;
   for (const item of lastConversations) {
     if (nested.has(item.id)) continue;  // shown under its task instead
+    shown += 1;
     const li = document.createElement("li");
     // Title over age in their own column, so the delete button stays at the row's right edge.
     const text = document.createElement("span");
@@ -350,6 +354,9 @@ function renderConversations() {
     li.appendChild(del);
     convList.appendChild(li);
   }
+  // Blank rather than "0" at zero, as the tasks count is: a section with nothing in it says so by
+  // being empty, and a lone zero beside the title reads like a value that failed to load.
+  conversationsCount.textContent = shown ? String(shown) : "";
   // The header names what you are looking at, which is the one thing the old dark bar's
   // "Kokua, local, single user" could not tell you. Read from every conversation, not just the
   // unnested ones, so viewing a task's conversation still names it.
@@ -505,18 +512,24 @@ function renderSidebar() {
   renderTasks();
 }
 
-// Collapsed state persists like the sidebar's own, so the section stays how the user left it.
-function setTasksExpanded(expanded) {
-  tasksToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-  taskList.hidden = !expanded;
+// Wire a sidebar section's title row to the list under it. Collapsed state persists like the
+// sidebar's own, so a section stays how the user left it, and `aria-expanded` on the toggle is both
+// the accessible state and the page's own record of it, which is why nothing else tracks it.
+// `storageKey` records *collapsed*, not expanded, so a browser that has never seen the section reads
+// null and gets the expanded default.
+function wireFoldableSection(toggle, body, storageKey) {
+  const setExpanded = (expanded) => {
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    body.hidden = !expanded;
+    try {
+      localStorage.setItem(storageKey, expanded ? "false" : "true");
+    } catch (e) {}
+  };
+  toggle.addEventListener("click", () => setExpanded(toggle.getAttribute("aria-expanded") !== "true"));
   try {
-    localStorage.setItem("tasks-collapsed", expanded ? "false" : "true");
+    if (localStorage.getItem(storageKey) === "true") setExpanded(false);
   } catch (e) {}
 }
-
-tasksToggle.addEventListener("click", () => {
-  setTasksExpanded(tasksToggle.getAttribute("aria-expanded") !== "true");
-});
 // A task the model schedules or cancels mid-chat does not push a new task frame, so this is how the
 // section catches up without a reload. A firing's new conversation needs no refresh: it arrives on the
 // conversations frame and nests client-side.
@@ -524,9 +537,8 @@ tasksRefresh.addEventListener("click", () => {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "get_tasks" }));
 });
 
-try {
-  if (localStorage.getItem("tasks-collapsed") === "true") setTasksExpanded(false);
-} catch (e) {}
+wireFoldableSection(conversationsToggle, convList, "conversations-collapsed");
+wireFoldableSection(tasksToggle, taskList, "tasks-collapsed");
 
 // --- Theme -------------------------------------------------------------------------------
 // Theme is a per-browser preference (localStorage), applied pre-paint by the head script; the

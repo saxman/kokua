@@ -454,6 +454,7 @@ def test_sidebar_collapse_resize_persist(page, live_server):
     page.click("#sidebar-toggle")  # collapse to the rail
     expect(root).to_have_attribute("data-sidebar-collapsed", "true")
     expect(page.locator("#conv-list")).to_be_hidden()
+    expect(page.locator("#conversations-toggle")).to_be_hidden()  # the section's title row goes too
     assert sidebar.bounding_box()["width"] < 120
 
     page.reload()  # collapsed state persists across reloads
@@ -1244,6 +1245,33 @@ def test_tasks_section_collapses_and_remembers_it(page, live_server):
     page.wait_for_selector("#conv-list li")
     expect(page.locator("#tasks")).to_be_visible()
     expect(page.locator("#task-list")).to_be_hidden()  # the choice survived the reload
+
+
+def test_the_conversations_section_counts_what_it_lists_and_folds_on_its_own(page, live_server):
+    """The count is the rows the section shows, not every conversation the server sent.
+
+    The seed plants three conversations, two of them a task's own firings, which are listed under
+    that task rather than in this list; a count taken from the frame would say 3 beside a section
+    showing 1. The fold is exercised alongside the tasks section's because they are wired by one
+    helper over two storage keys, which is exactly the arrangement where one fold could move the
+    other and nothing would notice."""
+    url = live_server(delay=0.0, seed=_seed_task_and_conversations)
+    _open(page, url)
+    expect(page.locator("#conv-list li")).to_have_count(1)
+    expect(page.locator("#task-list .task-conv")).to_have_count(2)
+    expect(page.locator("#conversations-count")).to_have_text("1")
+
+    page.click("#conversations-toggle")
+    expect(page.locator("#conv-list")).to_be_hidden()
+    expect(page.locator("#task-list")).to_be_visible()  # folding one leaves the other alone
+
+    page.reload()
+    page.wait_for_selector("#tasks")
+    expect(page.locator("#conv-list")).to_be_hidden()  # the choice survived the reload
+    expect(page.locator("#task-list")).to_be_visible()
+
+    page.click("#conversations-toggle")
+    expect(page.locator("#conv-list")).to_be_visible()
 
 
 def test_a_running_task_offers_stop_in_place_of_run_now(page, live_server):
