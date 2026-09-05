@@ -169,7 +169,7 @@ model filled in, lives in `aimu.tools.builtin`:
     """
 ```
 
-That is the general case, not an exception. Twelve of the 32 tools the shipped assistant holds are
+That is the general case, not an exception. Twelve of the 33 tools the shipped assistant holds are
 AIMU's rather than Kokua's, more than a third, and more once skills are installed, since AIMU injects a
 tool per skill script on top of that set. [How an agent's tools
 resolve](../explanation/architecture.md#how-an-agents-tools-resolve) carries the full inventory, and a
@@ -216,7 +216,7 @@ mechanism in full.
 - [Set up a toolset](../how-to/set-up-toolsets.md): writing one of these, end to end, including the
   `pyproject.toml` entry that registers it.
 - [How an agent's tools resolve](../explanation/architecture.md#how-an-agents-tools-resolve): the full
-  inventory of what the shipped assistant holds, and which twelve of the thirty-one come from AIMU.
+  inventory of what the shipped assistant holds, and which twelve of the 33 tools come from AIMU.
 - AIMU: [Add a custom tool](https://saxman.info/aimu/how-to/add-custom-tool/) for the `@tool` decorator,
   [the tools API reference](https://saxman.info/aimu/reference/api/tools/) for what the decorator
   supports, and [Use MCP tools](https://saxman.info/aimu/how-to/use-mcp-tools/) for tools that live in

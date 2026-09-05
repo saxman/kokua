@@ -275,6 +275,6 @@ descriptions are re-sent on every round of every turn. Declaring a capability yo
   and [Architecture: agents and delegation](../explanation/architecture.md#agents-and-delegation) for
   how a declaration becomes a built agent.
 - [The shipped entry agent's
-  inventory](../explanation/architecture.md#the-shipped-entry-agents-inventory): all 32 tools and where
+  inventory](../explanation/architecture.md#the-shipped-entry-agents-inventory): all 33 tools and where
   each comes from.
 - [Configuration reference](../reference/configuration.md): every key in the tables above.

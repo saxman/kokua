@@ -189,3 +189,50 @@ def test_every_catalogue_page_is_listed_in_the_index():
     problems = [f"{name} exists but is not listed in the index" for name in sorted(on_disk - listed)]
     problems += [f"{name} is listed in the index but does not exist" for name in sorted(listed - on_disk)]
     assert not problems, "docs/how-agents-work/index.md and the pages beside it disagree:\n" + "\n".join(problems)
+
+
+# The prose that counts the shipped entry agent's tools, as opposed to the table that lists them.
+# `docs/` plus the two root files the site includes verbatim, plus CLAUDE.md, which is not published
+# but carries the same number and drifted with the others.
+TOOL_COUNT = re.compile(r"\b(\d+) tools\b")
+
+
+def _prose_tool_counts() -> dict[str, list[int]]:
+    """Every "<n> tools" in the documentation, by file."""
+    found: dict[str, list[int]] = {}
+    files = [REPO_ROOT / "CLAUDE.md", REPO_ROOT / "README.md", *sorted(DOCS_DIR.rglob("*.md"))]
+    for path in files:
+        counts = [int(n) for n in TOOL_COUNT.findall(path.read_text())]
+        if counts:
+            found[str(path.relative_to(REPO_ROOT))] = counts
+    return found
+
+
+def test_the_documented_tool_count_matches_the_pinned_inventory():
+    """Prose saying "N tools" has to agree with the inventory `tests/core/test_build.py` pins.
+
+    The table in `docs/explanation/architecture.md` was already covered: adding a tool fails
+    `test_entry_agent_toolset_is_exactly_the_documented_inventory` until that table is updated. The
+    *number*, repeated in six places across five files, was covered by nothing, and on 2026-09-04 it
+    went wrong twice in one day. One session added `rename_conversation`, updated the table, and left
+    every count at 31. A second session added `export_conversation` on top, correctly incremented what
+    it saw, and published 32 for an inventory that held 33.
+
+    Both mistakes are invisible to a reader and to `mkdocs build --strict`, which validates links and
+    not arithmetic. Counting from the same dicts the inventory test asserts against is what makes the
+    number follow the table instead of tracking it by hand.
+    """
+    from tests.core.test_build import ENTRY_AGENT_TOOLS, STORE_TOOLS, _expected
+
+    expected = len(_expected(ENTRY_AGENT_TOOLS, STORE_TOOLS))
+    wrong = [
+        f"{path} says {count} tools"
+        for path, counts in _prose_tool_counts().items()
+        for count in counts
+        if count != expected
+    ]
+    assert not wrong, (
+        f"The shipped entry agent holds {expected} tools, but the documentation disagrees:\n"
+        + "\n".join(wrong)
+        + "\n(update the prose, and the inventory table in docs/explanation/architecture.md, together)"
+    )
