@@ -1474,6 +1474,66 @@ def test_an_expanded_block_is_marked_by_a_rule_down_its_left(page, live_server):
     assert inner.bounding_box()["x"] > outer.bounding_box()["x"]
 
 
+def _surface_fill(page) -> str:
+    """The computed colour of `--surface`, resolved by the page rather than written in here, so the
+    theme tokens stay the one place the fill is defined and a token change is not a test change."""
+    return page.evaluate(
+        "() => { const probe = document.createElement('div');"
+        " probe.style.background = 'var(--surface)'; document.body.append(probe);"
+        " const fill = getComputedStyle(probe).backgroundColor; probe.remove(); return fill; }"
+    )
+
+
+def _background(locator) -> str:
+    return locator.evaluate("(el) => getComputedStyle(el).backgroundColor")
+
+
+def test_a_hovered_block_takes_the_sidebar_rows_fill(page, live_server):
+    """Pointing at a block in the transcript marks it the way pointing at a row in the chat list
+    does, which is what says the timestamp and branch controls that appear belong to *that* block.
+
+    A foldable fills its header line only, and the assertion that its container does not fill is the
+    load-bearing half: an expanded sub-agent card runs pages tall, and one rule on the container
+    instead of the header would turn the whole card into a slab and light it up from anywhere inside
+    it. Asserted on the computed colour because the resting state is transparent, so a fill that
+    stopped arriving would leave the page looking exactly as it did before hover was ever added."""
+    _open(page, live_server(delay=0.0, thinking="Call the tool first.", tool_response="21:15"))
+    page.fill("#msg", "what time is it?")
+    page.click("#send")
+
+    fill = _surface_fill(page)
+    answer = page.locator(".bubble.assistant", has_text=REPLY)
+    expect(answer).to_be_visible(timeout=10_000)
+    assert _background(answer) != fill
+    answer.hover()
+    assert _background(answer) == fill
+
+    thinking = page.locator(".bubble.thinking")
+    header = thinking.locator("> .fold-header")
+    header.hover()
+    assert _background(header) == fill
+    assert _background(thinking) != fill
+
+
+def test_hovering_inside_an_open_block_leaves_the_block_unfilled(page, live_server):
+    """The other side of the header-only rule, and the reason it is written that way: a disclosed
+    body holds the nested blocks of a sub-agent card, each of which fills on its own. If the fill sat
+    on the container, hovering a nested block would fill the card underneath it too, and a reader
+    could not tell which of the two the pointer was on."""
+    _open(page, live_server(delay=0.0, thinking="Call the tool first.", tool_response="21:15"))
+    page.fill("#msg", "what time is it?")
+    page.click("#send")
+
+    thinking = page.locator(".bubble.thinking")
+    expect(thinking).to_have_count(1, timeout=10_000)
+    thinking.locator("> .fold-header").click()
+    body = thinking.locator("> .fold-body")
+    expect(body).to_be_visible()
+
+    body.hover()
+    assert _background(thinking) != _surface_fill(page)
+
+
 def test_a_replayed_blank_answer_segment_is_no_bubble(page, live_server):
     """The same turn on reload. The blank segment is persisted as the tool-call message's content, so
     a page that skips it live and replays it anyway would show the empty bubble again on switch-in."""

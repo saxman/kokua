@@ -182,7 +182,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     header. Nested blocks set off one level in (a tool's output, a sub-agent card's own thinking), so
     depth reads as depth without drawing a second border inside the first, and nothing has to toggle
     the rule, since a collapsed body is not drawn at all. Tables and code blocks run wider than the
-    prose measure, since they are scanned rather than read.
+    prose measure, since they are scanned rather than read. Pointing at a block fills it in the same
+    colour a hovered row in the sidebar takes, so the block under the pointer is marked and the
+    caption and turn controls that appear on it (below) read as belonging to that block rather than
+    to the turn around it. A foldable fills its header line only: an expanded sub-agent card runs
+    pages tall, and filling the card would draw one slab over a page of content and light it up from
+    anywhere inside it, including from a nested block that fills on its own. The approval prompt and
+    the centered system notices keep the backgrounds they have.
   - **Colour means one thing.** Twelve semantic tokens, of which the warm pair marks only a decision
     waiting on you: a tool approval or a plan review. Tool calls, sub-agent cards, and proactive
     messages are not warm. The disclosure triangle is the only glyph on the page; every block names its

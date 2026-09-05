@@ -204,6 +204,28 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .bubble { max-width: none; padding: 0; border: none; border-radius: 0; background: none;
   white-space: pre-wrap; line-height: 1.55; margin: 2px 0; }
 
+/* Pointing at a block fills it, the way pointing at a row in the chat list does (`#conv-list
+   li:hover`, the same `--surface`): the transcript marks the block under the pointer, and the
+   timestamp and branch controls that appear on it (see `.bubble:hover .bubble-ts` below) read as
+   belonging to that block rather than to the turn around it.
+
+   A foldable fills its header line, not its whole box, and is excluded from the first selector so
+   the two cannot both fire (hovering a header hovers its container too). An expanded sub-agent card
+   runs pages tall, so a fill on the container would draw one slab over a page of content and light
+   that slab up from anywhere inside it, including from a nested block that fills on its own.
+
+   The shadow is the fill's padding, and it is a shadow rather than `padding` because the blocks
+   carry none: every kind sets its own margins to build the transcript's rhythm (2px inside a turn,
+   22px between two), so paying for a gutter in padding would mean walking that arithmetic back one
+   kind at a time, and doing it on hover alone would shift the text under the pointer. A spread
+   paints outside the box for free, and cannot cover the neighbour it overlaps: block backgrounds
+   are painted before any inline text, so the row above keeps its words whatever the spread does.
+
+   Two blocks keep the background they have: `.approval` is the page's one warm surface, and
+   `.notice` is a centered system line rather than a row you can point at and act on. */
+.bubble:hover:not(.foldable, .approval, .notice), .foldable > .fold-header:hover {
+  background: var(--surface); border-radius: 6px; box-shadow: 0 0 0 3px var(--surface); }
+
 /* A prose measure, left-aligned. Full-bleed text on a wide monitor is unreadable; machine-event rows,
    tables, and code blocks escape the cap because they are scanned rather than read.
    Full-strength text is stated, not inherited, so a block reads the same nested inside a sub-agent
@@ -384,8 +406,11 @@ button:disabled { opacity: 0.5; cursor: default; }
 #stop:hover { color: var(--fg); border-color: var(--fg-dim); }
 button.secondary, .notification-banner button { background: none; border-color: var(--border);
   color: var(--fg-dim); }
-/* An inline image, in the composer preview row or a chat bubble. */
-.bubble.image { padding: 0; background: transparent; border: none; overflow: hidden; }
+/* An inline image, in the composer preview row or a chat bubble. `fit-content` so the hover fill
+   hugs the picture instead of trailing across the prose measure the block would otherwise stretch
+   to; the resting layout is unchanged, since the box is left-aligned either way. */
+.bubble.image { padding: 0; background: transparent; border: none; overflow: hidden;
+  width: fit-content; }
 .bubble.image img { max-width: 100%; border-radius: 12px; display: block; }
 /* Append-time datetime caption, revealed on hover rather than printed under every block. On a regular
    bubble it sits below the content; on a foldable it rides the always-visible header line (so it shows
