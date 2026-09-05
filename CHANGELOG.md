@@ -442,10 +442,10 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   it. AIMU's `fs` group is `list_directory` and `read_file(path, max_lines)`, with no offset and no
   search, so returning the Markdown itself would spend the asking conversation's whole context on one
   run's tool output, in the one context that cannot afford it. A path can be handed onward instead:
-  `config.example.toml` ships `[agents.analyst]`, a delegate declaring `fs`, and the tool's answer
+  `config.example.toml` ships `[agents.introspector]`, a delegate declaring `fs`, and the tool's answer
   advises delegating once the file passes `DELEGATE_ABOVE_LINES`, so a long transcript is spent against
   a worker's fresh context and only the findings come back. What it does not do is slice: an export
-  larger than the analyst's context is read from its top and no further, which the analyst is
+  larger than the introspector's context is read from its top and no further, which the introspector is
   instructed to report as a partial read rather than answer through. The fix is an `offset` on AIMU's
   `read_file` (`TODO.md` item 19).
 
@@ -455,6 +455,35 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   rather than accumulating. What it leaves there is a full transcript in the clear, in the folder
   `/download/{name}` serves unauthenticated, which is the reason to consider naming it in
   `[security] confirm_tools` even though it changes no conversation.
+- **One worker reads history, because it is the one with a conversation as its subject.**
+  `[agents.introspector]` declares `conversations` alongside `fs`, which makes evaluating a run a single
+  delegation rather than two: it finds the conversation, exports it, reads the file, and reports against
+  the criteria it was given, quoting the transcript lines each judgment rests on. The search results,
+  the transcript, and the file all stay out of the asking conversation's context, and its instructions
+  hold it to three honesty rules that mirror the export's own: a criterion the transcript cannot settle
+  is reported unassessable rather than guessed, a truncated read is reported as covering part of the
+  run, and with no criteria given it names the rubric it chose, since a worker cannot ask.
+
+  That is a narrowing of the old rule, not an exception to it. Reading the user's other conversations is
+  meaningless to an agent with no relationship to any of them, which is why `researcher` and `coder`
+  hold none of it, and `test_only_the_introspector_reads_history_among_the_shipped_workers` pins both
+  halves. The reach it does grant is worth stating: `conversations` lets that worker read (and rename)
+  any saved conversation, not only its subject, and a transcript is untrusted text, so an injection in
+  one conversation could steer a worker spawned from another.
+
+  **Granting the toolset to a second reader exposed a sentence that had been relying on there being
+  one.** `read_conversation` and `export_conversation` describe the active conversation as "the
+  conversation you are in", telling the reader to use its own context for the turn not yet saved. Both
+  clauses are false for a worker, which is in no conversation and holds no transcript, and the request
+  that trips it (evaluate the conversation the user is sitting in) is the likeliest one there is, so a
+  worker would have been sent to context with nothing in it. `make_conversation_tools` now takes
+  `is_entry_agent`, derived in `TOOLSET.build` from `ctx.agent_name == ctx.config.entry_agent`, and
+  picks `DELEGATING_CONVERSATION_NOTE` instead: this is the conversation that delegated to you, and the
+  turn that spawned you is not saved yet, so what you can read stops just before it. A flag rather than
+  two toolsets, since everything else the tools do is identical. `list_conversations`' account of the
+  `(current)` marker was fixed in place for the same reason, having told the reader not to read that
+  conversation back, which is right for the agent holding it in context and would have talked a worker
+  out of its only subject.
 - **Agent tools are findable, and are only presentation.** Every module defining an `@aimu.tool` is a
   toolset module, so `grep -rl '@tool' src/kokua/` finds only files under `toolsets/`. Kokua's own five
   (`capabilities.py`, `config.py`, `conversations.py`, `mcp.py`, `scheduling.py`) each wrap one

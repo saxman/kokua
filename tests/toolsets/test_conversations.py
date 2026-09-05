@@ -16,6 +16,7 @@ from kokua.core.assistant import Assistant
 from kokua.toolsets.conversations import (
     ACTIVE_CONVERSATION_NOTE,
     BLANK_QUERY,
+    DELEGATING_CONVERSATION_NOTE,
     LARGE_EXPORT_NOTE,
     MAX_CONTEXT_CHARS,
     NO_CONVERSATIONS,
@@ -46,12 +47,13 @@ def _book(tmp_path, *sessions: Session, adopt=True) -> ConversationBook:
     return book
 
 
-def _tools(book: ConversationBook, running=(), schedule_rename=None, downloads_path=None) -> dict:
+def _tools(book: ConversationBook, running=(), schedule_rename=None, downloads_path=None, is_entry_agent=True) -> dict:
     tools = make_conversation_tools(
         book,
         lambda conversation_id: conversation_id in running,
         schedule_rename or (lambda cid, title: None),
         downloads_path or Path("/nonexistent-downloads"),
+        is_entry_agent,
     )
     return {fn.__name__: fn for fn in tools}
 
@@ -176,6 +178,46 @@ async def test_read_of_the_active_conversation_warns_the_current_turn_is_unsaved
     read_conversation = _tools(book)["read_conversation"]
     assert ACTIVE_CONVERSATION_NOTE in await read_conversation("active01")
     assert ACTIVE_CONVERSATION_NOTE not in await read_conversation("older002")
+
+
+async def test_a_worker_reading_the_users_conversation_is_not_told_it_is_its_own(tmp_path):
+    """The entry agent's note says "use your own context for anything said in this turn", which is
+    false twice over for a delegated agent: it is not in that conversation and holds none of it. A
+    worker spawned to evaluate the conversation the user is sitting in would be talked out of reading
+    the only turn that matters, so it gets the statement that is true for it instead."""
+    book = _book(tmp_path, _session("active01", messages=[_said("user", "hi")]))
+
+    output = await _tools(book, is_entry_agent=False)["read_conversation"]("active01")
+
+    assert book.active_id == "active01"
+    assert ACTIVE_CONVERSATION_NOTE not in output
+    assert DELEGATING_CONVERSATION_NOTE in output
+
+
+async def test_a_worker_reading_an_unrelated_conversation_gets_neither_note(tmp_path):
+    book = _book(
+        tmp_path,
+        _session("active01", updated_at="2026-08-11T08:00:00", messages=[_said("user", "hi")]),
+        _session("older002", updated_at="2026-08-09T08:00:00", messages=[_said("user", "hi")]),
+    )
+
+    output = await _tools(book, is_entry_agent=False)["read_conversation"]("older002")
+
+    assert ACTIVE_CONVERSATION_NOTE not in output
+    assert DELEGATING_CONVERSATION_NOTE not in output
+
+
+async def test_the_export_answer_carries_the_same_note_the_reader_does(tmp_path):
+    """Both tools report the same fact about the same conversation, so a worker that exports the
+    conversation it was spawned from must not read the entry agent's wording there either."""
+    book = _book(tmp_path, _session("active01", messages=[_said("user", "hi")]))
+    downloads = tmp_path / "downloads"
+
+    entry = await _tools(book, downloads_path=downloads)["export_conversation"]("active01")
+    worker = await _tools(book, downloads_path=downloads, is_entry_agent=False)["export_conversation"]("active01")
+
+    assert ACTIVE_CONVERSATION_NOTE in entry and DELEGATING_CONVERSATION_NOTE not in entry
+    assert DELEGATING_CONVERSATION_NOTE in worker and ACTIVE_CONVERSATION_NOTE not in worker
 
 
 async def test_read_flags_a_running_turn_as_the_last_line(tmp_path):

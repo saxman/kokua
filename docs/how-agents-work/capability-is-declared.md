@@ -164,7 +164,7 @@ the transcript above is that block's behavior:
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark"]
-delegates_to = ["researcher", "coder", "analyst"]
+delegates_to = ["researcher", "coder", "introspector"]
 ```
 
 Eleven names, no `fs`, no `compute`, no `web`. Every name is resolved against a registry built at

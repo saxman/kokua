@@ -261,8 +261,8 @@ At least one agent is therefore required, and `Assistant.create` refuses a confi
 What the *shipped* config declares is a lean entry agent: `kokua config init` gives
 `[agents.assistant]` the cross-cutting toolsets (memory, documents, skills, config, `mcp`,
 scheduling, conversations, `planning`, `capabilities`, the clock) and no domain toolset, delegating web
-work to `researcher`, filesystem and compute work to `coder`, and reading a long file to `analyst` (the
-delegate `export_conversation` is meant to be paired with; see [Analyzing another
+work to `researcher`, filesystem and compute work to `coder`, and evaluating a past conversation to
+`introspector` (the delegate `export_conversation` is meant to be paired with; see [Analyzing another
 conversation](#analyzing-another-conversation)). There is deliberately no catch-all role
 alongside them: a task neither specialist covers is what `compose_subagent` is for, and a `generalist`
 declared next to it would claim the same slot more cheaply and win. That keeps the always-on agent's
@@ -408,11 +408,30 @@ conversation](#renaming-a-conversation) below, and `export_conversation`, covere
 another conversation](#analyzing-another-conversation). Two decisions in it are worth knowing before
 changing them.
 
-The shipped config gives it to the entry agent and to no worker, deliberately: a worker shares no history
-and has no conversation identity, so "the user's other conversations" means nothing to it, and granting
-the capability would widen a spawn's blast radius for no gain. When a worker needs history, the entry
-agent reads first and puts the text into the spawn's task. Nothing in the code forbids declaring
-`conversations` on a worker; a test pins that no shipped worker does.
+The rule is about conversation *identity*, not about workers, and the difference took a second worker
+to become visible. Reading "the user's other conversations" means nothing to an agent with no
+relationship to any of them, and granting it would widen a spawn's blast radius for no gain, so
+`researcher` and `coder` hold none of it and the entry agent reads first and puts the text into the
+spawn's task. But an agent spawned to *evaluate* a conversation has a conversation as its subject, and
+for it history is the whole job: the shipped `introspector` declares `conversations` for that reason,
+and `test_only_the_introspector_reads_history_among_the_shipped_workers` pins both halves, since the
+failure worth catching is the toolset spreading to a worker with no such subject.
+
+Granting it to a second kind of reader is what exposed a sentence that had been quietly relying on
+there being one. `read_conversation` and `export_conversation` append a note when the conversation
+being read is the active one, and it said: *this is the conversation you are in, so use your own
+context for anything said in this turn*. Both clauses are false for a worker, which is in no
+conversation and holds no transcript, and the request that trips it (evaluate the conversation the user
+is sitting in) is the likeliest one there is, so a worker would have been told to consult context with
+nothing in it. `make_conversation_tools` therefore takes `is_entry_agent`, which `TOOLSET.build`
+derives from `ctx.agent_name == ctx.config.entry_agent`, and picks between that note and
+`DELEGATING_CONVERSATION_NOTE`, which says what is true of a worker instead: this is the conversation
+that delegated to you, and the turn that spawned you is not saved yet, so what you can read stops just
+before it. It is a flag rather than two toolsets because everything else the tools do is identical, and
+a flag rather than a docstring per agent because a tool schema should stay a literal a reader can find.
+The same reasoning fixed `list_conversations`' description of the `(current)` marker in place instead:
+it had told the reader not to read that conversation back, which is right for the agent holding it in
+context and would have talked a worker out of the only conversation it was spawned for.
 
 Every read goes through the store, never `ConversationBook.agent_for`. Building an agent to read it
 would allocate a model client, re-expand every stored image, mutate the LRU registry (so reading twenty
@@ -444,19 +463,26 @@ understanding: AIMU's `fs` group is `list_directory` and `read_file(path, max_li
 no search, so a file is readable from its first line downward and nowhere else. A tool that returned the
 Markdown itself would put a run's entire tool output into the context of the conversation asking about
 it, which is the one context that cannot afford it. Handing back a path lets the answer go to a
-sub-agent instead: the entry agent exports, spawns a worker that declares `fs`, and gives it the path
-plus the question, so the transcript is spent against a fresh context and only the findings come back.
-`config.example.toml` ships `[agents.analyst]` as that worker, and
-`test_the_shipped_analyst_can_read_the_export_the_assistant_hands_it` pins the pairing, since a path is
-a dead end unless something the entry agent can reach reads files.
+sub-agent instead, so the transcript is spent against a fresh context and only the findings come back.
+`config.example.toml` ships `[agents.introspector]` as that worker, and
+`test_the_shipped_introspector_can_both_export_a_conversation_and_read_the_export` pins the pairing,
+since either half alone leaves the delegation a dead end: the export is the only route to the reasoning
+and the tool calls, and `read_file` is the only thing that turns a path into something to evaluate.
+
+Because that worker holds `conversations` itself, the whole job is one delegation rather than two. The
+entry agent does not have to find and export the conversation before handing it over: "evaluate the
+conversation about the flight prices against these criteria" is a single spawn, and the search results,
+the transcript, and the file all stay out of the asking conversation's context. The entry agent keeps
+its own `export_conversation` for the other request, the one where you want the file rather than an
+answer.
 
 Three consequences to know before changing it. The answer reports the file's line count and size and
 advises delegating past `DELEGATE_ABOVE_LINES`, because a model cannot see how big a file is before
 reading it, and the advice is a sentence rather than a refusal: the tool does not know what the model
-has to delegate to. Nothing slices, so an export larger than the analyst's context is read from its top
-and no further; the analyst's own instructions tell it to report a truncated read as truncated, which
-converts a silent partial answer into a stated one, and the real fix is an `offset` on AIMU's
-`read_file` (item 19 in `TODO.md`). And the write is bounded by construction rather than by validation:
+has to delegate to. Nothing slices, so an export larger than the introspector's context is read from
+its top and no further; the introspector's own instructions tell it to report a truncated read as
+truncated, which converts a silent partial answer into a stated one, and the real fix is an `offset` on
+AIMU's `read_file` (item 19 in `TODO.md`). And the write is bounded by construction rather than by validation:
 the directory comes from `AssistantConfig.downloads_path` and the filename from the resolved session's
 key, so no argument the model passes reaches the filesystem, which is why exporting the same
 conversation twice replaces one file instead of accumulating.

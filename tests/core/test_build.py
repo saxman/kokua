@@ -279,12 +279,19 @@ async def test_create_registers_the_conversation_tools(tmp_path):
     assert CONVERSATION_TOOL_NAMES <= {getattr(fn, "__name__", None) for fn in assistant._agent.tools}
 
 
-def test_conversation_tools_do_not_reach_the_shipped_workers(tmp_path):
-    """Reading other conversations is meaningless to a worker (it shares no history and has no
-    conversation identity), so no shipped worker declares that toolset."""
+def test_only_the_introspector_reads_history_among_the_shipped_workers(tmp_path):
+    """The rule is about conversation identity, not about workers. Reading the user's other
+    conversations is meaningless to a worker that has no relationship to any of them, which is every
+    shipped worker except the one spawned to evaluate a conversation: `introspector` is handed a
+    conversation as its subject, so history is its whole subject matter. Pinning both halves is the
+    point, since the interesting failure is the toolset spreading to workers that have no such
+    subject."""
     specs = _specs(_config(tmp_path))
     assert specs  # the shipped entry agent delegates, so this is not vacuous
+    assert CONVERSATION_TOOL_NAMES <= {fn.__name__ for fn in specs["introspector"]["tools"]}
     for name, spec in specs.items():
+        if name == "introspector":
+            continue
         assert CONVERSATION_TOOL_NAMES.isdisjoint({fn.__name__ for fn in spec["tools"]}), name
 
 

@@ -123,19 +123,33 @@ part worth understanding.
 **A path, not the transcript.** The tool answers with a file path on purpose. AIMU's `fs` group offers
 `read_file(path, max_lines)` and no offset, so a file can be read from its first line and nowhere else,
 and a tool that returned the Markdown directly would spend the asking conversation's whole context on
-one run's tool output. So a long export is meant to be handed to a sub-agent: the assistant passes the
-path and your question to a worker whose fresh context absorbs the file, and only the findings come
-back. `config.example.toml` ships `[agents.analyst]` for exactly this, and the assistant's guidance
-tells it to delegate rather than read once the file is past a few hundred lines. A short export it will
-usually just read itself, which is the right call: a delegation costs a spawn.
+one run's tool output. So a long export is meant to be handed to a sub-agent whose fresh context
+absorbs the file, returning only the findings, and the assistant's guidance tells it to delegate rather
+than read once the file is past a few hundred lines. A short export it will usually just read itself,
+which is the right call: a delegation costs a spawn.
+
+**Or ask for an evaluation, and skip the export.** `config.example.toml` ships
+`[agents.introspector]`, a sub-agent whose subject is a conversation and whose job is judging one
+against criteria you give:
+
+> Evaluate yesterday's conversation about the deployment. I care about whether it verified its claims
+> before acting, and whether it delegated work it should have done itself.
+
+That worker holds the conversation tools itself, so the whole job is one delegation: it finds the
+conversation, exports it, reads the file, and reports per criterion, quoting the transcript lines each
+judgment rests on. Nothing but its report enters your conversation. Three things it is instructed to be
+strict about: a criterion the transcript cannot settle is reported as unassessable rather than guessed
+at, a truncated read is reported as covering only part of the run, and if you give no criteria it
+evaluates against whether the run reached what you asked for, what it spent, and where it went wrong,
+saying up front that it chose them.
 
 **Ask for `full` detail when the tool result is the thing you are debugging.** The tool takes the same
 cap `--full` lifts, so "export it with the full tool output" gets you a file with nothing cut.
 
-**What it cannot do yet.** If the export is longer than the analyst's own context, the read stops part
-way and the analysis covers only the beginning of the run. The analyst is instructed to say so rather
-than answer as if it had read the whole thing, so you get "I saw the first N lines" instead of a
-confident partial answer, but the underlying fix (paging into a file) is not there yet: it needs an
+**What it cannot do yet.** If the export is longer than the introspector's own context, the read stops
+part way and the analysis covers only the beginning of the run. It is instructed to say so rather than
+answer as if it had read the whole thing, so you get "I saw the first N lines" instead of a confident
+partial answer, but the underlying fix (paging into a file) is not there yet: it needs an
 `offset` on AIMU's `read_file`, which is item 19 in `TODO.md`. For a very long run, `kokua export` plus
 your own editor is still the more reliable read.
 
@@ -144,11 +158,14 @@ transcript, and the turn you are in right now is not stored until it finishes. E
 conversation you are talking in gets you everything up to this turn, and the answer says as much; the
 same goes for a conversation whose reply is still streaming somewhere else.
 
-**This grants a delegate that reads files.** `[agents.analyst]` declares `fs`, which grants read of any
-file on the machine and not only of an export. That is the same reach `[agents.coder]` already ships
-with, and like every capability here it is a line in your `config.toml`: delete the agent and its name
-from `[agents.assistant].delegates_to` if you would rather not have it, and the export tool still works
-(the assistant will read the file itself, or hand you the path).
+**This grants a delegate two kinds of reach.** `[agents.introspector]` declares `fs`, which grants read
+of any file on the machine and not only of an export, and `conversations`, which lets it read (and
+rename) any saved conversation rather than only the one you asked about. The first is the same reach
+`[agents.coder]` already ships with; the second matters because a transcript is untrusted text, so an
+injection sitting in one conversation could steer a worker that was spawned from another. Like every
+capability here both are lines in your `config.toml`: delete the agent and its name from
+`[agents.assistant].delegates_to` if you would rather not have them, and asking the assistant to export
+still works (it will read the file itself, or hand you the path).
 
 ## The store, mid-write
 

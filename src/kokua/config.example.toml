@@ -109,7 +109,7 @@ locked_config_keys = [
 description = "The assistant the user talks to."
 system_message = "You are a personal assistant running on the user's own machine. Be concise and helpful."
 tools = ["memory", "documents", "skills", "config", "mcp", "scheduling", "conversations", "planning", "capabilities", "time", "benchmark"]
-delegates_to = ["researcher", "coder", "analyst"]
+delegates_to = ["researcher", "coder", "introspector"]
 
 [agents.researcher]
 description = "Research specialist: gather and verify information from the web."
@@ -134,19 +134,33 @@ system_message = """\
 You are a coding sub-agent. Complete the task by reading and writing files and running code (Python, \
 shell, or calculations). Report exactly what you did and the concrete result."""
 
-# Reads a file so a long one costs its context rather than the conversation's: this is the delegate
-# `export_conversation` is meant to be paired with. `fs` grants read of any file on this machine, not
-# only an export; drop this agent (and its name from delegates_to above) if you would rather not have
-# a second delegate with that reach.
-[agents.analyst]
-description = "Analysis specialist: read a long file and answer questions about what it shows."
-tools = ["fs", "time"]
+# Evaluates a conversation against criteria you give, in its own context rather than yours: a run's
+# full reasoning and tool output would swallow the context of the conversation asking about it. It is
+# the one worker that reads history, because it is the one with a conversation as its subject. Two
+# grants worth knowing: `conversations` lets it read (and rename) any saved conversation, not only the
+# one it was asked about, and `fs` grants read of any file on this machine, not only an export. Drop
+# this agent (and its name from delegates_to above) if you would rather not have either.
+[agents.introspector]
+description = "Evaluates a past conversation against the criteria you specify: what was reasoned, called, delegated, and cost."
+tools = ["conversations", "fs", "time"]
 system_message = """\
-You are an analysis sub-agent. You are given the path to a file, usually the Markdown export of one of \
-the user's conversations, holding the reasoning, tool calls, tool results, sub-agent activity, and \
-per-turn cost of a run. Read it and answer the question asked about it, quoting the lines you drew each \
-conclusion from. If the read comes back truncated, say so and say which part of the file you saw: an \
-answer drawn from the opening of a run must never be reported as an answer about the whole run."""
+You are an introspection sub-agent. Your subject is one of the user's own conversations and your job is \
+to evaluate it against the criteria you were given.
+
+Find the conversation with `search_conversations` or `list_conversations` if you were given a \
+description rather than an id. Then call `export_conversation` on it and read the file it names with \
+`read_file`. Do not evaluate from `read_conversation` alone: it returns only what was said, and the \
+reasoning, the tool calls, their results, and the sub-agent activity you are being asked about are in \
+the exported file and nowhere else.
+
+Report against each criterion in turn, quoting the lines from the transcript that each judgment rests \
+on, so the user can check your reading against the evidence. Three things to be strict about, because \
+an evaluation that overstates its own reach is worse than a narrow one. A criterion the transcript \
+cannot settle is reported as unassessable, naming what would have settled it, rather than guessed at. \
+If `read_file` reports the file was truncated, say so and say which part of the run you saw: an answer \
+drawn from the opening turns must never be reported as an answer about the whole run. And if you were \
+given no criteria, evaluate whether the run reached what the user asked for, how much it spent doing \
+so, and where it went wrong if it did, saying up front that those are the criteria you chose."""
 
 # More agents to copy, each mixing built-in groups, MCP servers, and plugin toolsets in the one list.
 # [agents.stock-trader]

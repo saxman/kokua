@@ -55,9 +55,19 @@ DEFAULT_SEARCH_RESULTS, MAX_SEARCH_RESULTS = 20, 50
 DEFAULT_CONTEXT_CHARS, MAX_CONTEXT_CHARS = 100, 400
 SNIPPETS_PER_CONVERSATION = 2
 
+# The same fact about the same conversation, said to the two agents that can be reading it. Which one
+# applies is not cosmetic: the entry agent is *in* the active conversation and holds this turn in its
+# context, and a worker is in none of them and holds nothing, so telling a worker to fall back on its
+# own context would send it to a place with no transcript in it. A worker spawned to evaluate the
+# conversation the user is sitting in is the likeliest case of all, which is why the wrong wording here
+# would misfire on the common path rather than an edge.
 ACTIVE_CONVERSATION_NOTE = (
     "This is the conversation you are in. Its current turn is not saved yet, so use your own context "
     "for anything said in this turn."
+)
+DELEGATING_CONVERSATION_NOTE = (
+    "This is the conversation that delegated to you. The turn that spawned you is not saved yet, so "
+    "what you can read here stops just before it; the task you were given is what you have of that turn."
 )
 RUNNING_TURN_NOTE = "[... a turn is still running in this conversation; its messages are not saved yet ...]"
 NO_CONVERSATIONS = "No saved conversations."
@@ -113,6 +123,7 @@ def make_conversation_tools(
     turn_running: Callable[[str], bool],
     schedule_rename: Callable[[str, str], None],
     downloads_path: Path,
+    is_entry_agent: bool,
 ) -> list[Callable]:
     """Build the cross-conversation tools bound to the live ``ConversationBook``.
 
@@ -141,6 +152,13 @@ def make_conversation_tools(
     rather than reading it off the config keeps the one thing this factory writes outside the store
     visible in its signature, and the name coming from the store rather than from the model is what
     makes a path the model chose unreachable: there is no argument here that reaches the filesystem.
+
+    ``is_entry_agent`` decides which sentence the active conversation is described with, and it is the
+    only thing in here that differs between two agents holding the same capability. The entry agent is
+    in that conversation; a worker holding this toolset (the shipped ``introspector``) was spawned *by*
+    it and holds none of its transcript, so the two need statements that are each true of one of them.
+    A flag rather than two toolsets because everything else these tools do is identical, and a flag
+    rather than a docstring per agent because a tool schema is a literal a reader can find.
     """
 
     def _unknown(conversation_id: str) -> str:
@@ -153,17 +171,28 @@ def make_conversation_tools(
         marks = " (current)" if session.key == book.active_id else ""
         return marks + (" (turn in progress)" if turn_running(session.key) else "")
 
+    def _active_note(session: Session) -> list[str]:
+        """The note for the conversation the user is in, in the words true of whoever is reading it.
+
+        A list rather than an optional string so both callers can splice it into the lines they are
+        already assembling, and so "no note at all" needs no branch at the call site.
+        """
+        if session.key != book.active_id:
+            return []
+        return [ACTIVE_CONVERSATION_NOTE if is_entry_agent else DELEGATING_CONVERSATION_NOTE]
+
     @tool
     async def list_conversations(limit: int = DEFAULT_LIST_LIMIT) -> str:
         """List the user's saved chat conversations, most recently active first.
 
         Each line gives the conversation id, when it was last active, how many messages it holds, and its
-        title (derived from its first user message). The conversation you are talking in right now is
-        marked "(current)" -- its transcript is already in your context, so do not read it back. One
-        marked "(turn in progress)" has a reply still being generated, so its saved transcript stops
-        short of that turn. Pass an id to `read_conversation`, or use `search_conversations` to find one
-        by what was said in it. These are chat threads, not scheduled tasks; see `list_scheduled_tasks`
-        for those.
+        title (derived from its first user message). "(current)" marks the conversation the user is in
+        right now: if you are the agent talking to them, its transcript is already in your context and
+        there is no need to read it back, and if you were delegated a task about it, read it like any
+        other. One marked "(turn in progress)" has a reply still being generated, so its saved
+        transcript stops short of that turn. Pass an id to `read_conversation`, or use
+        `search_conversations` to find one by what was said in it. These are chat threads, not scheduled
+        tasks; see `list_scheduled_tasks` for those.
 
         Args:
             limit: How many conversations to list, newest first. Defaults to 30, capped at 200.
@@ -206,8 +235,7 @@ def make_conversation_tools(
             f"Conversation {session.key} -- {_title_of(session)} "
             f"({len(lines)} messages, last active {short_time(session.metadata.get('updated_at'))})"
         ]
-        if session.key == book.active_id:
-            header.append(ACTIVE_CONVERSATION_NOTE)
+        header.extend(_active_note(session))
         if not lines:
             return "\n".join(header + ["(no messages)"])
         kept, dropped = truncate_lines(lines, _clamp(max_chars, MIN_READ_CHARS, MAX_READ_CHARS, DEFAULT_READ_CHARS))
@@ -338,8 +366,7 @@ def make_conversation_tools(
         ]
         if lines > DELEGATE_ABOVE_LINES:
             answer.append(LARGE_EXPORT_NOTE)
-        if session.key == book.active_id:
-            answer.append(ACTIVE_CONVERSATION_NOTE)
+        answer.extend(_active_note(session))
         # Last, because the turn it is talking about is newer than anything in the file.
         if turn_running(session.key):
             answer.append(RUNNING_TURN_NOTE)
@@ -366,6 +393,7 @@ TOOLSET = Toolset(
         ctx.state.turn_running,
         ctx.state.schedule_rename,
         ctx.config.downloads_path,
+        ctx.agent_name == ctx.config.entry_agent,
     ),
     guidance=CONVERSATIONS_GUIDANCE,
     cross_cutting=True,
