@@ -198,9 +198,16 @@ TOOL_COUNT = re.compile(r"\b(\d+) tools\b")
 
 
 def _prose_tool_counts() -> dict[str, list[int]]:
-    """Every "<n> tools" in the documentation, by file."""
+    """Every "<n> tools" in the published documentation, by file.
+
+    ``PUBLISHED_PAGES`` rather than a bare ``rglob``, for the reason it exists: ``docs/superpowers/``
+    is gitignored design history, and a spec recording the inventory as it stood in August is correct
+    about August. Scanning it fails for whoever has those files locally and cannot fail in CI, where
+    they do not exist, so the check would be a false alarm on one machine and silent on the one that
+    matters.
+    """
     found: dict[str, list[int]] = {}
-    files = [REPO_ROOT / "CLAUDE.md", REPO_ROOT / "README.md", *sorted(DOCS_DIR.rglob("*.md"))]
+    files = [REPO_ROOT / "CLAUDE.md", REPO_ROOT / "README.md", *PUBLISHED_PAGES]
     for path in files:
         counts = [int(n) for n in TOOL_COUNT.findall(path.read_text())]
         if counts:
