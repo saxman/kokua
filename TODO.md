@@ -137,18 +137,6 @@ which one owns it. Decide those three together, or leave the fallback and the fl
 Related: a `/switch` during a firing already points `/stop` at the wrong conversation, noted under
 invariant 7 in `core/turns.py`.
 
-## 13. `agents.*` writes silently drop a per-key converter's own checks
-`toolsets/config.py`'s cold-schema comprehension rebuilds every `agents.*` entry from `AGENT_SCHEMA` as
-`(target, types, label, agent_write)`, replacing each entry's fourth element (its per-key converter)
-wholesale instead of composing with it. Any check that lived only in that converter, and that
-`validate_agents`'s dry run does not repeat, is silently dropped on the write path. `max_iterations` is
-the first `agents.*` key where this costs anything, because its validity (an integer of 1 or more) is
-enforced only at parse time, in `config/file.py`, and nowhere `validate_agents` looks. The result:
-`update_config("agents.<name>", "max_iterations", "0")` is accepted, and the config it writes is refused
-at the next startup. Fix by composing `agent_write` with the discarded per-key converter rather than
-replacing it, or by moving the range check somewhere `validate_agents` reaches. This shape will silently
-cost the next range-checked `agents.*` key too, not just this one.
-
 ## 14. Reach conversation branching and truncation from the terminal
 The web UI forks a conversation at a turn (`ConversationBook.branch`, a control on each turn's
 answer) and deletes a turn and everything after it (`ConversationBook.truncate`, a control on each
