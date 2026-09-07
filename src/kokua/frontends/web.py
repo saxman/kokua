@@ -277,13 +277,29 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             await channel.send(str(e))
             await websocket.close()
             return
-        # Show the conversation list, the active conversation's history, the current settings, and the
-        # scheduled tasks on (re)connect, so a client's sidebar, chat, and settings view are all populated.
+        # Sent BEFORE `start()`, which is the point of the split: the conversation list, the active
+        # conversation's history and the current settings all read the store and the config, so they are
+        # ready in well under a second, while `start()` waits on every remote MCP server's handshake.
+        # Painting them first is what turns a reload from several seconds of empty sidebar into an
+        # immediate one, with the page showing that it is still starting until `send_ready` below.
         await _sync_view(channel, assistant)
         await channel.send_settings(assistant.current_settings())
-        # Unguarded, unlike the two `list_tasks` calls in the loop below: `Assistant.create` just armed
-        # every task from the same file, so a config this could not parse would already have left above.
+        try:
+            await assistant.start()
+        except (ModelClientError, ConfigError) as e:
+            # The same two user mistakes as above, in the half of boot that resolves a model and builds
+            # the tools an approval gate is checked against, so they surface here now. Reported the same
+            # way for the same reason, and the page has already been told nothing about being ready.
+            await channel.send(str(e))
+            await websocket.close()
+            return
+        # After `start()`, and one frame rather than two: `arm_all` retires a past-due one-shot as it
+        # arms, so a list sent before it can be wrong with nothing to correct it. Unguarded, because
+        # `arm_all` just read the same file successfully.
         await channel.send_tasks(assistant.list_tasks())
+        # Last, so the page can treat it as "everything the connect sequence was going to send has
+        # arrived" and stop showing itself as starting.
+        await channel.send_ready()
 
         async def pump() -> None:
             """Read the socket in this task and apply what arrives in another, in arrival order.

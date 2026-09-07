@@ -40,6 +40,44 @@ class _FakeWS:
         self.closed += 1
 
 
+# Enough for the whole connect sequence (conversations, history, working, settings, tasks, ready) with
+# room to spare, and far short of waiting forever for a frame the server may not send.
+_FRAME_LIMIT = 12
+
+
+def _drain_until_limit(ws, type_, limit=_FRAME_LIMIT):
+    """Receive at most `limit` frames looking for one of the given type.
+
+    Bounded, unlike `_drain_until`: a test asserting a frame the server does not send yet would
+    otherwise block the suite instead of failing it.
+    """
+    for _ in range(limit):
+        frame = ws.receive_json()
+        if frame["type"] == type_:
+            return frame
+    raise AssertionError(f"no {type_} frame in the first {limit} frames")
+
+
+class _FakeMCPClient:
+    """A connected MCP client that reports a fixed tool list. Stands in for `aio.MCPClient`."""
+
+    def __init__(self, tool_names=()):
+        self._tool_names = list(tool_names)
+
+    async def as_tools(self):
+        def named(name):
+            def fn():
+                return None
+
+            fn.__name__ = name
+            return fn
+
+        return [named(name) for name in self._tool_names]
+
+    async def aclose(self):
+        return None
+
+
 def _config(tmp_path, **overrides) -> AssistantConfig:
     base = {
         "data_dir": tmp_path,
@@ -896,6 +934,77 @@ def test_ws_connect_sends_conversations(tmp_path):
     assert any(item.get("active") for item in convs["items"])
 
 
+def test_ws_sends_the_conversation_list_before_connecting_mcp(tmp_path, monkeypatch):
+    """The whole point of the split: the sidebar does not wait on a remote handshake.
+
+    `connect_mcp` blocks here until the test has already read the conversation list off the socket, so
+    this can only pass if that frame is sent before the connect is attempted. A `threading.Event` and
+    not an `asyncio.Event` because TestClient runs the app in its own thread with its own loop, and
+    the frames it has already sent are queued for this one to read.
+    """
+    import threading
+
+    from starlette.testclient import TestClient
+
+    from kokua.config import MCPServerConfig
+    from kokua.mcp import servers
+
+    gate = threading.Event()
+
+    async def fake_connect(url, **kw):
+        gate.wait(timeout=10)
+        return _FakeMCPClient(["remote_tool"]), "none"
+
+    monkeypatch.setattr(servers, "connect_mcp", fake_connect)
+    cfg = _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://svc/mcp", name="svc")])
+    app = build_app(cfg, client=MockAsyncModelClient([]))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until_limit(ws, "conversations")
+        assert convs["items"]
+        gate.set()
+        _drain_until_limit(ws, "ready")
+
+
+def test_ws_connect_ends_with_ready_after_the_sidebar(tmp_path):
+    """`ready` is the marker the page hangs its "still starting" state on, so it has to come last."""
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
+    seen = []
+    with TestClient(app).websocket_connect("/ws") as ws:
+        for _ in range(_FRAME_LIMIT):
+            seen.append(ws.receive_json()["type"])
+            if seen[-1] == "ready":
+                break
+
+    assert seen[-1] == "ready"
+    assert seen.index("conversations") < seen.index("ready")
+    assert seen.index("history") < seen.index("ready")
+    assert seen.index("settings") < seen.index("ready")
+    assert seen.index("tasks") < seen.index("ready")
+
+
+def test_ws_reports_a_start_failure_to_the_browser_and_closes(tmp_path):
+    """A gate naming no real tool is a `start()` error now rather than a `create()` one, and it still
+    has to arrive as words: a page whose socket merely closed can say only "Disconnected"."""
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    app = build_app(_config(tmp_path, confirm_tools=["execute_pythn"]), client=MockAsyncModelClient([]))
+    frames = []
+    with TestClient(app).websocket_connect("/ws") as ws:
+        try:
+            while True:
+                frames.append(ws.receive_json())
+        except WebSocketDisconnect:
+            pass
+
+    texts = [f.get("text", "") for f in frames if f["type"] == "message"]
+    assert any("execute_pythn" in text for text in texts)
+    assert not any(f["type"] == "ready" for f in frames)
+
+
 def test_ws_new_then_select_round_trip(tmp_path):
     import json
 
@@ -1044,7 +1153,7 @@ def test_the_duplicate_control_refreshes_the_sidebar_but_not_the_history(tmp_pat
     with TestClient(app).websocket_connect("/ws") as ws:
         convs = _drain_until(ws, "conversations")
         active_id = next(i["id"] for i in convs["items"] if i["active"])
-        _drain_until(ws, "tasks")  # the rest of the connect-time push: history, settings, tasks
+        _drain_until(ws, "ready")  # the rest of the connect-time push: history, settings, tasks, ready
         ws.send_text(json.dumps({"type": "duplicate", "id": active_id}))
         ws.send_text(json.dumps({"type": "get_tasks"}))
         frames = []
@@ -1105,7 +1214,7 @@ def test_the_rename_control_refreshes_the_sidebar_but_not_the_history(tmp_path):
     with TestClient(app).websocket_connect("/ws") as ws:
         convs = _drain_until(ws, "conversations")
         active_id = next(i["id"] for i in convs["items"] if i["active"])
-        _drain_until(ws, "tasks")
+        _drain_until(ws, "ready")  # the rest of the connect-time push: history, settings, tasks, ready
         ws.send_text(json.dumps({"type": "rename", "id": active_id, "title": "Kauai", "replacing": ""}))
         ws.send_text(json.dumps({"type": "get_tasks"}))
         frames = []
