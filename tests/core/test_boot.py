@@ -104,6 +104,42 @@ async def test_start_twice_connects_once(tmp_path, monkeypatch):
     assert len(assistant._mcp_servers) == 1
 
 
+async def test_a_failed_start_does_not_retry(tmp_path, monkeypatch):
+    """`_started` is set before the body runs, so a failed start is terminal rather than retryable.
+
+    A bad `confirm_tools` entry is a config mistake the user has to fix, not a transient worth retrying:
+    `validate_confirm_tools` runs after the MCP reconnect, so the connect has already happened by the
+    time the error is raised. If a second `start()` retried, it would reach `reconnect_mcp_servers`
+    again and append the same server to `_mcp_servers` a second time, since a fresh connection is not
+    deduplicated against one already in the list.
+    """
+    from kokua.mcp import servers
+
+    calls = []
+
+    async def fake_connect(url, **kw):
+        calls.append(url)
+        return _FakeClient(["remote_tool"]), "none"
+
+    monkeypatch.setattr(servers, "connect_mcp", fake_connect)
+    cfg = _config(
+        tmp_path,
+        mcp_servers=[MCPServerConfig(url="https://svc/mcp", name="svc")],
+        confirm_tools=["execute_pythn"],
+    )
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    with pytest.raises(ConfigError):
+        await assistant.start()
+
+    assert calls == ["https://svc/mcp"]  # the connect already happened before the gate check failed
+
+    await assistant.start()  # does not raise again, and does not retry the connect
+
+    assert calls == ["https://svc/mcp"]
+    assert len(assistant._mcp_servers) == 1
+
+
 async def test_create_builds_no_agent_and_start_does(tmp_path):
     """A built agent means a resolved model, which on a real config is a further second of startup."""
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))

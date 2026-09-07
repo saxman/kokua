@@ -181,9 +181,9 @@ class Assistant:
         """Build the assistant from local state: the registry validated, no agent built, no server reached.
 
         The registry and its command map are built and validated first, before anything else touches
-        state (opening the session store, connecting to a server), so an unknown toolset name, a
-        missing entry agent, or a delegation cycle fails naming the offending value, with nothing
-        written and nothing connected.
+        state: opening the session store here, and connecting to a remote server later, in
+        :meth:`start`. An unknown toolset name, a missing entry agent, or a delegation cycle therefore
+        fails naming the offending value before either half of boot writes or connects anything.
 
         Returns an assistant that has read every local source it needs and reached no network. The
         remote half of boot (MCP servers, the entry agent's model) is :meth:`start`, which `run`
@@ -196,9 +196,10 @@ class Assistant:
         from kokua.core.agents import build_command_map, undeclared_workflow_commands, validated_registry
 
         # Built and validated before anything else in this method, because everything else touches
-        # something: the next statements open a session store (which mints and persists an empty session)
-        # and connect to remote servers. An unknown toolset name, a missing entry agent, or a delegation
-        # cycle therefore fails naming the offending value, with nothing written and nothing connected.
+        # something: the next statements open a session store (which mints and persists an empty
+        # session); connecting to a remote server is later still, in start(). An unknown toolset name, a
+        # missing entry agent, or a delegation cycle therefore fails naming the offending value, before
+        # either half of boot writes or connects anything.
         registry = validated_registry(config)
         # Built here rather than in __init__ because it needs the validated registry, and here rather
         # than after the store is opened so a collision fails before anything is written.
