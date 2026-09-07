@@ -191,6 +191,13 @@ async def test_web_channel_send_settings_emits_frame():
     assert ws.frames == [{"type": "settings", "values": values}]
 
 
+async def test_web_channel_send_ready_emits_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_ready()
+    assert ws.frames == [{"type": "ready"}]
+
+
 async def test_web_channel_stream_activity_shows_an_injected_round_and_withholds_the_answer():
     """`stream_activity` maps chunks itself rather than reusing the base loop, so the branch has to
     exist in both places or a planned turn shows no boundary while an ordinary one does."""
