@@ -102,6 +102,7 @@ async def test_startup_mcp_servers_wire_tools(tmp_path, monkeypatch):
         FakeChannel(),
         client=MockAsyncModelClient([]),
     )
+    await assistant.start()
     names = _worker_tools(assistant)
     assert {"remote_search", "remote_fetch"} <= names
     assert len(assistant._mcp_servers) == 1
@@ -283,6 +284,7 @@ async def test_runtime_added_server_persists_and_reconnects(tmp_path, monkeypatc
     cfg = _config(tmp_path)
 
     a1 = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    await a1.start()
     add_mcp = next(t for t in a1._agent.tools if t.__name__ == "add_mcp_server")
     await add_mcp(url="https://svc/mcp")
     a1._store.close()
@@ -291,6 +293,7 @@ async def test_runtime_added_server_persists_and_reconnects(tmp_path, monkeypatc
 
     # Simulate a restart: a fresh Assistant reconnects from config.toml without re-adding.
     a2 = await Assistant.create(_restart_config(tmp_path, cfg), FakeChannel(), client=MockAsyncModelClient([]))
+    await a2.start()
     assert "remote_search" in _worker_tools(a2)
     assert [conn.url for conn in a2._mcp_servers] == ["https://svc/mcp"]
 
@@ -310,6 +313,7 @@ async def test_oauth_server_persists_and_reconnects_with_provider(tmp_path, monk
     cfg = _config(tmp_path)
 
     a1 = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    await a1.start()
     add_mcp = next(t for t in a1._agent.tools if t.__name__ == "add_mcp_server")
     await add_mcp(url="https://svc/mcp")
     a1._store.close()
@@ -326,6 +330,7 @@ async def test_oauth_server_persists_and_reconnects_with_provider(tmp_path, monk
 
     monkeypatch.setattr(aio.MCPClient, "connect", fake_connect2)
     a2 = await Assistant.create(_restart_config(tmp_path, cfg), FakeChannel(), client=MockAsyncModelClient([]))
+    await a2.start()
     assert "remote_trade" in _worker_tools(a2)
     assert any(isinstance(auth, ChatOAuth) for auth in seen)  # reconnected via the OAuth provider
 
@@ -398,6 +403,7 @@ async def test_connecting_a_startup_declared_server_reaches_workers_in_the_same_
     assistant = await Assistant.create(
         _config(tmp_path, **_using("svc", "https://svc/mcp")), FakeChannel(), client=MockAsyncModelClient([])
     )
+    await assistant.start()
     agent = assistant._agent
     assert "get_portfolio" not in delegates[-1]  # not connected yet
 
@@ -415,6 +421,7 @@ async def test_add_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypatch,
     _offline_until_connected(monkeypatch, "remote_ping")
     cfg = _config(tmp_path, **_using("broker", "https://example/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    await assistant.start()
     first = assistant._active_id
     await assistant.new_conversation()
     await assistant.select_conversation(first)
@@ -434,6 +441,7 @@ async def test_remove_mcp_server_fans_out_to_all_live_agents(tmp_path, monkeypat
     _offline_until_connected(monkeypatch, "remote_ping")
     cfg = _config(tmp_path, **_using("broker", "https://example/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    await assistant.start()
     first = assistant._active_id
     await assistant.new_conversation()
     await assistant.select_conversation(first)
@@ -486,6 +494,7 @@ async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeyp
     _offline_until_connected(monkeypatch, "remote_ping")
     cfg = _config(tmp_path, **_using("broker", "https://example/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    await assistant.start()
 
     add_tool = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_tool("https://example/mcp")

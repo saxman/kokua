@@ -202,7 +202,7 @@ async def test_new_conversation_agent_gets_an_untouched_client(tmp_path):
     assert assistant._registry.get(new_id).model_client.default_generate_kwargs == {}
 
 
-async def test_create_wraps_unbuildable_client_as_model_client_error(tmp_path, monkeypatch):
+async def test_start_wraps_unbuildable_client_as_model_client_error(tmp_path, monkeypatch):
     import kokua.core.assistant as assistant_mod
     from kokua.core.assistant import ModelClientError
 
@@ -211,7 +211,8 @@ async def test_create_wraps_unbuildable_client_as_model_client_error(tmp_path, m
 
     monkeypatch.setattr(assistant_mod.aio, "client", boom)
     with pytest.raises(ModelClientError, match="no default could be resolved"):
-        await Assistant.create(_config(tmp_path), FakeChannel())
+        assistant = await Assistant.create(_config(tmp_path), FakeChannel())
+        await assistant.start()
 
 
 async def test_the_model_is_not_a_runtime_setting(tmp_path):

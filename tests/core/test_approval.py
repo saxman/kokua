@@ -213,19 +213,24 @@ async def test_the_shipped_gates_all_name_tools_that_exist(tmp_path):
     nothing, or the default install would not start."""
     config = _config(tmp_path)
     assert config.confirm_tools == AssistantConfig().confirm_tools
-    await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
 
 
 async def test_an_empty_gate_list_is_still_valid(tmp_path):
     """[] is the documented way to turn approval off, so it has to stay a legal value."""
-    await Assistant.create(_config(tmp_path, confirm_tools=[]), FakeChannel(), client=MockAsyncModelClient([]))
+    assistant = await Assistant.create(
+        _config(tmp_path, confirm_tools=[]), FakeChannel(), client=MockAsyncModelClient([])
+    )
+    await assistant.start()
 
 
 async def test_a_misspelled_gate_fails_startup_and_suggests_the_real_name(tmp_path):
     with pytest.raises(ConfigError) as error:
-        await Assistant.create(
+        assistant = await Assistant.create(
             _config(tmp_path, confirm_tools=["execute_pythn"]), FakeChannel(), client=MockAsyncModelClient([])
         )
+        await assistant.start()
     message = str(error.value)
     assert "execute_pythn" in message
     assert "execute_python" in message  # the close match, offered so the fix does not need a hunt
@@ -236,11 +241,12 @@ async def test_every_unmatched_gate_is_named_not_only_the_first(tmp_path):
     """One restart per typo is the failure mode this avoids: a user fixing a list of four wants all the
     bad entries in the first error."""
     with pytest.raises(ConfigError) as error:
-        await Assistant.create(
+        assistant = await Assistant.create(
             _config(tmp_path, confirm_tools=["execute_pythn", "totally_made_up_tool"]),
             FakeChannel(),
             client=MockAsyncModelClient([]),
         )
+        await assistant.start()
     message = str(error.value)
     assert "execute_pythn" in message and "totally_made_up_tool" in message
 
@@ -284,5 +290,6 @@ async def test_the_confirm_tools_flag_is_checked_by_the_same_rule(tmp_path):
 
     config = resolve_config(build_arg_parser().parse_args(["--confirm-tools", "update_confg"]))
     with pytest.raises(ConfigError) as error:
-        await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+        assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+        await assistant.start()
     assert "update_confg" in str(error.value) and "update_config" in str(error.value)
