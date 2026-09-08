@@ -47,12 +47,20 @@ def _book(tmp_path, *sessions: Session, adopt=True) -> ConversationBook:
     return book
 
 
-def _tools(book: ConversationBook, running=(), schedule_rename=None, downloads_path=None, is_entry_agent=True) -> dict:
+def _tools(
+    book: ConversationBook,
+    running=(),
+    schedule_rename=None,
+    downloads_path=None,
+    payloads_path=None,
+    is_entry_agent=True,
+) -> dict:
     tools = make_conversation_tools(
         book,
         lambda conversation_id: conversation_id in running,
         schedule_rename or (lambda cid, title: None),
         downloads_path or Path("/nonexistent-downloads"),
+        payloads_path or Path("/nonexistent-payloads"),
         is_entry_agent,
     )
     return {fn.__name__: fn for fn in tools}
@@ -244,6 +252,51 @@ async def test_the_export_answer_carries_the_same_note_the_reader_does(tmp_path)
 
     assert ACTIVE_CONVERSATION_NOTE in entry and DELEGATING_CONVERSATION_NOTE not in entry
     assert DELEGATING_CONVERSATION_NOTE in worker and ACTIVE_CONVERSATION_NOTE not in worker
+
+
+async def test_full_export_reads_a_spilled_sub_agent_response_back_off_disk(tmp_path):
+    """The tool must pass its own payloads_path through to render_markdown, not just downloads_path:
+    without it, a full=True export of a spilled sub-agent tool response could only ever show the
+    RESPONSE_PREVIEW_CHARS preview core/subagents.py already capped it to."""
+    from kokua import payloads
+
+    full_text = "q" * 9000
+    payloads_dir = tmp_path / "payloads"
+    reference = payloads.save_text(payloads_dir, full_text)
+    session = _session(
+        "active01",
+        messages=[
+            _said("user", "go"),
+            _said("assistant", "done"),
+        ],
+    )
+    session.metadata["subagent"] = {
+        "0": [
+            {"id": "s1", "role": "worker", "task": "fetch", "status": "running"},
+            {
+                "id": "s1",
+                "append": {
+                    "kind": "tool",
+                    "name": "fetch_url",
+                    "arguments": "{}",
+                    "response": full_text[:4000],
+                    "response_ref": reference,
+                    "response_bytes": len(full_text),
+                },
+            },
+            {"id": "s1", "status": "done"},
+        ]
+    }
+    book = _book(tmp_path, session)
+    downloads = tmp_path / "downloads"
+
+    answer = await _tools(book, downloads_path=downloads, payloads_path=payloads_dir)["export_conversation"](
+        "active01", full=True
+    )
+
+    destination = downloads / "active01.md"
+    assert str(destination) in answer
+    assert full_text in destination.read_text(encoding="utf-8")
 
 
 async def test_read_flags_a_running_turn_as_the_last_line(tmp_path):

@@ -123,6 +123,7 @@ def make_conversation_tools(
     turn_running: Callable[[str], bool],
     schedule_rename: Callable[[str, str], None],
     downloads_path: Path,
+    payloads_path: Path,
     is_entry_agent: bool,
 ) -> list[Callable]:
     """Build the cross-conversation tools bound to the live ``ConversationBook``.
@@ -152,6 +153,9 @@ def make_conversation_tools(
     rather than reading it off the config keeps the one thing this factory writes outside the store
     visible in its signature, and the name coming from the store rather than from the model is what
     makes a path the model chose unreachable: there is no argument here that reaches the filesystem.
+    ``payloads_path`` is the same kind of argument for a read rather than a write: with ``full=True``
+    it is where ``render_markdown`` reads a spilled sub-agent tool response back from, so the export
+    can show the whole thing instead of the preview ``core/subagents.py`` capped it to.
 
     ``is_entry_agent`` decides which sentence the active conversation is described with, and it is the
     only thing in here that differs between two agents holding the same capability. The entry agent is
@@ -347,7 +351,11 @@ def make_conversation_tools(
         session = book.resolve(conversation_id)
         if session is None:
             return _unknown(conversation_id)
-        markdown = render_markdown(session, max_payload_chars=None if full else DEFAULT_MAX_PAYLOAD_CHARS)
+        markdown = render_markdown(
+            session,
+            max_payload_chars=None if full else DEFAULT_MAX_PAYLOAD_CHARS,
+            payloads_path=payloads_path,
+        )
         # The web front end's download route serves this directory and 404s rather than creating it,
         # so a fresh $KOKUA_HOME may never have had anything written here.
         downloads_path.mkdir(parents=True, exist_ok=True)
@@ -394,6 +402,7 @@ TOOLSET = Toolset(
         ctx.state.turn_running,
         ctx.state.schedule_rename,
         ctx.config.downloads_path,
+        ctx.config.payloads_path,
         ctx.agent_name == ctx.config.entry_agent,
     ),
     guidance=CONVERSATIONS_GUIDANCE,

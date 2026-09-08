@@ -274,9 +274,14 @@ class ConversationBook:
         """Every stored conversation with its messages, most-recently-updated first.
 
         Costs one store read per conversation, so this is for the one caller that genuinely needs
-        message text: the agent's cross-conversation search. Everything asking about titles,
-        timestamps, or task ownership belongs on :meth:`summaries` instead, and everything asking
-        about ids belongs on the store's ``list_keys``.
+        message text: ``search_conversations``, which has to read what was actually said to match a
+        query against it. Everything asking about titles, timestamps, or task ownership belongs on
+        :meth:`summaries` instead; everything asking about ids belongs on the store's ``list_keys``
+        (:meth:`matching_ids` wraps that for a caller explaining a ``resolve`` refusal); and a caller
+        that wants one particular conversation's messages, once it already knows which, calls
+        :meth:`get` rather than scanning every stored session to find it (see :meth:`most_recent_or_new`
+        and ``cli.py``'s ``_resolve_export_session`` for the shape: :meth:`summaries` picks the
+        conversation, then exactly one :meth:`get` fetches its messages).
         """
         sessions = [self._store.get(key) for key in self._store.list_keys()]
         sessions.sort(key=lambda session: session.metadata.get("updated_at", ""), reverse=True)
