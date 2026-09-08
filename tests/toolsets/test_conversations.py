@@ -47,12 +47,20 @@ def _book(tmp_path, *sessions: Session, adopt=True) -> ConversationBook:
     return book
 
 
-def _tools(book: ConversationBook, running=(), schedule_rename=None, downloads_path=None, is_entry_agent=True) -> dict:
+def _tools(
+    book: ConversationBook,
+    running=(),
+    schedule_rename=None,
+    downloads_path=None,
+    payloads_path=None,
+    is_entry_agent=True,
+) -> dict:
     tools = make_conversation_tools(
         book,
         lambda conversation_id: conversation_id in running,
         schedule_rename or (lambda cid, title: None),
         downloads_path or Path("/nonexistent-downloads"),
+        payloads_path or Path("/nonexistent-payloads"),
         is_entry_agent,
     )
     return {fn.__name__: fn for fn in tools}
@@ -81,7 +89,7 @@ async def test_list_newest_first_with_counts_and_marks(tmp_path):
     lines = output.splitlines()
 
     assert [line.split()[1] for line in lines] == ["cccccccc3", "bbbbbbbb2", "aaaaaaaa1"]
-    assert "2 messages" in lines[1]
+    assert "2 stored messages" in lines[1]
     assert "(current)" in lines[0] and book.active_id == "cccccccc3"  # newest is adopted at startup
     assert "(current)" not in lines[1] and "(current)" not in lines[2]
     assert "(turn in progress)" in lines[2]
@@ -107,6 +115,32 @@ async def test_list_limit_clamped_and_reports_hidden(tmp_path):
 async def test_list_untitled_conversation_shows_the_placeholder(tmp_path):
     output = await _tools(_book(tmp_path, _session("c1")))["list_conversations"]()
     assert "New conversation" in output
+
+
+async def test_list_reports_the_raw_stored_count_not_the_readable_one(tmp_path):
+    """``list_conversations`` reads ``summary.message_count``, the raw stored count, not
+    ``len(readable_messages(...))``: a system message and a tool result each count here but neither
+    counts as something a person said or read, so the two numbers can diverge a lot on a real
+    conversation. Pinning the raw number (and the "stored messages" wording next to it) is what keeps
+    that divergence from silently drifting back to the smaller, misleading count.
+    """
+    book = _book(
+        tmp_path,
+        _session(
+            "divergent1",
+            title="Has tool calls",
+            messages=[
+                _said("system", "guidance"),
+                _said("user", "hi"),
+                {"role": "tool", "tool_call_id": "c1", "content": "flight data"},
+                _said("assistant", "hello"),
+            ],
+        ),
+    )
+    output = await _tools(book)["list_conversations"]()
+
+    assert "4 stored messages" in output  # the raw count: readable_messages would report 2
+    assert "2 stored messages" not in output
 
 
 # --- read_conversation -----------------------------------------------------------------------------
@@ -218,6 +252,51 @@ async def test_the_export_answer_carries_the_same_note_the_reader_does(tmp_path)
 
     assert ACTIVE_CONVERSATION_NOTE in entry and DELEGATING_CONVERSATION_NOTE not in entry
     assert DELEGATING_CONVERSATION_NOTE in worker and ACTIVE_CONVERSATION_NOTE not in worker
+
+
+async def test_full_export_reads_a_spilled_sub_agent_response_back_off_disk(tmp_path):
+    """The tool must pass its own payloads_path through to render_markdown, not just downloads_path:
+    without it, a full=True export of a spilled sub-agent tool response could only ever show the
+    RESPONSE_PREVIEW_CHARS preview core/subagents.py already capped it to."""
+    from kokua import payloads
+
+    full_text = "q" * 9000
+    payloads_dir = tmp_path / "payloads"
+    reference = payloads.save_text(payloads_dir, full_text)
+    session = _session(
+        "active01",
+        messages=[
+            _said("user", "go"),
+            _said("assistant", "done"),
+        ],
+    )
+    session.metadata["subagent"] = {
+        "0": [
+            {"id": "s1", "role": "worker", "task": "fetch", "status": "running"},
+            {
+                "id": "s1",
+                "append": {
+                    "kind": "tool",
+                    "name": "fetch_url",
+                    "arguments": "{}",
+                    "response": full_text[:4000],
+                    "response_ref": reference,
+                    "response_bytes": len(full_text),
+                },
+            },
+            {"id": "s1", "status": "done"},
+        ]
+    }
+    book = _book(tmp_path, session)
+    downloads = tmp_path / "downloads"
+
+    answer = await _tools(book, downloads_path=downloads, payloads_path=payloads_dir)["export_conversation"](
+        "active01", full=True
+    )
+
+    destination = downloads / "active01.md"
+    assert str(destination) in answer
+    assert full_text in destination.read_text(encoding="utf-8")
 
 
 async def test_read_flags_a_running_turn_as_the_last_line(tmp_path):

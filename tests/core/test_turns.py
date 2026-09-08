@@ -32,7 +32,7 @@ async def test_assistant_handles_message(tmp_path):
     await assistant._handle(ChannelMessage(text="do a thing", channel="fake"), conversation_id=assistant._active_id)
 
     assert channel.sent == ["Sure, done."]
-    assert assistant.history  # persisted at least the turn
+    assert assistant.history_view()[0]  # persisted at least the turn
 
 
 async def test_assistant_proactive_message(tmp_path):
@@ -1514,7 +1514,8 @@ async def test_a_failed_firing_persists_the_partial_transcript_it_produced(tmp_p
 
     await assistant._proactive("scan the transcripts", task_name="digest", task_id="t1")
 
-    session = assistant._book.sessions_for_task("t1")[0]
+    summary = assistant._book.sessions_for_task("t1")[0]
+    session = assistant._book.get(summary.key)
     assert [m.get("content") for m in session.messages if m.get("role") == "user"] == ["scan the transcripts"]
     assert session.metadata["updated_at"] > session.metadata["created_at"]
 
@@ -1556,7 +1557,8 @@ async def test_a_failed_firing_tags_its_partial_messages_as_proactive(tmp_path):
 
     await assistant._proactive("scan the transcripts", task_name="digest", task_id="t1")
 
-    session = assistant._book.sessions_for_task("t1")[0]
+    summary = assistant._book.sessions_for_task("t1")[0]
+    session = assistant._book.get(summary.key)
     assert session.messages
     assert all(m.get(PROVENANCE_KEY) == PROVENANCE_PROACTIVE for m in session.messages)
 

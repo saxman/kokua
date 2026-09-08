@@ -757,7 +757,12 @@ function appendSubagentEntry(card, entry) {
   }
   if (entry.kind === "tool") {
     card.answer = null;
-    renderTool(entry.name, entry.arguments, undefined, { parent: card.body, response: entry.response });
+    renderTool(entry.name, entry.arguments, undefined, {
+      parent: card.body,
+      response: entry.response,
+      responseRef: entry.response_ref,
+      responseBytes: entry.response_bytes,
+    });
     return;
   }
   if (entry.kind === "error") {
@@ -1236,11 +1241,26 @@ function toolLine(name, args) {
 // become a multi-megabyte text node just because someone opened its card.
 const OUTPUT_CLAMP = 4000;
 
+// A response_bytes count as "N KB"/"N MB" for the expand control's label. A payload file only
+// exists past RESPONSE_PREVIEW_CHARS (core/subagents.py), so this never needs to say "bytes".
+function formatPayloadSize(bytes) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 // What a tool call returned, as its own nested foldable below the arguments, so the arguments stay
 // scannable when the card is opened. Populated on first expand, and clamped to OUTPUT_CLAMP with a
 // button for the rest. Plain text only, never markdown: a tool result is untrusted input.
-function renderToolOutput(parent, response) {
+//
+// A sub-agent's response can also carry `responseRef`/`responseBytes` (see core/subagents.py):
+// `response` is then already clamped to OUTPUT_CLAMP server-side, spilled there rather than merely
+// truncated for display, so the "show all" button below never applies to it. Its own control fetches
+// the payload on demand instead, once, and leaves the preview in place if the fetch fails, since the
+// file is never garbage collected but a user can clear the folder by hand.
+function renderToolOutput(parent, response, opts) {
   const size = response.length.toLocaleString();
+  const responseRef = opts && opts.responseRef;
+  const responseBytes = opts && opts.responseBytes;
   // Not also `.tool`: that would make `.bubble.tool` match a card and its own output. The monospace
   // type and colour are inherited properties, so they arrive from the enclosing card regardless.
   addFoldable("tool-output", { kind: "output", metric: `${size} chars` }, {
@@ -1250,6 +1270,33 @@ function renderToolOutput(parent, response) {
       text.className = "output-text";
       text.textContent = response.slice(0, OUTPUT_CLAMP);
       body.appendChild(text);
+      if (responseRef) {
+        const expand = document.createElement("button");
+        expand.type = "button";
+        expand.className = "output-more";
+        expand.textContent = `Show full response (${formatPayloadSize(responseBytes)})`;
+        let fetched = false;
+        expand.addEventListener("click", () => {
+          if (fetched) return;
+          fetched = true;
+          expand.disabled = true;
+          fetch(responseRef)
+            .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+            .then((full) => {
+              text.textContent = full;
+              expand.remove();
+            })
+            .catch(() => {
+              // The preview already on screen stands; only the control changes, to a note rather
+              // than a second button, since retrying would hit the same missing or unreadable file.
+              expand.textContent = "could not load full response";
+              expand.disabled = true;
+              expand.classList.add("output-error");
+            });
+        });
+        body.appendChild(expand);
+        return;
+      }
       if (response.length <= OUTPUT_CLAMP) return;
       const more = document.createElement("button");
       more.type = "button";
@@ -1274,11 +1321,20 @@ function renderTool(name, args, ts, opts) {
   // has anything to show, and an "output (0 chars)" row on every such card would be noise.
   const response = opts && opts.response;
   const returned = typeof response === "string" && response;
-  const metric = returned ? `${response.length.toLocaleString()} chars` : "";
+  // A spilled response's `response` is already clamped to the preview cap, so its true size is
+  // `responseBytes` (see core/subagents.py); without this, a multi-megabyte result reads as
+  // "4,000 chars" in the collapsed row and the truth only appears once the card is opened and
+  // expanded.
+  const metric = returned ? `${(opts.responseBytes ?? response.length).toLocaleString()} chars` : "";
   const parts = { kind: "tool", payload: toolLine(name, args), metric };
   const f = addFoldable("tool", parts, { parent: opts && opts.parent }, ts);
   f.body.appendChild(document.createTextNode(toolArgs(args)));
-  if (returned) renderToolOutput(f.body, response);
+  if (returned) {
+    renderToolOutput(f.body, response, {
+      responseRef: opts && opts.responseRef,
+      responseBytes: opts && opts.responseBytes,
+    });
+  }
   return f;
 }
 // The kind word each injection wears. AIMU raises the loop's counter for a tool round too, and this

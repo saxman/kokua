@@ -23,7 +23,7 @@ from starlette.responses import FileResponse, HTMLResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from kokua import images
+from kokua import images, payloads
 from kokua.core.assistant import Assistant, ModelClientError
 from kokua.core.conversations import ID_PREFIX_MIN, ConversationNotFound, TurnInFlight, TurnNotFound
 from kokua.core.messages import derive_title
@@ -131,7 +131,7 @@ async def _sync_view(channel: WebChannel, assistant: Assistant) -> None:
     """
     channel.active_conversation_id = assistant.active_id
     await channel.send_conversations(assistant.list_conversations())
-    await channel.send_history(assistant.history, assistant.history_metadata)
+    await channel.send_history(*assistant.history_view())
     elapsed = assistant.turn_elapsed(assistant.active_id)
     if elapsed is not None:
         await channel.send_working(elapsed)
@@ -246,6 +246,19 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
         if not path.is_file():
             return Response(status_code=404)
         return FileResponse(path)
+
+    async def payload(request):
+        # Serve a stored oversized sub-agent tool response, fetched only when a reader expands a
+        # card. Routed through payloads.reference_to_path rather than a basename check of its own:
+        # that function is the allowlist (a name is legitimate only if it is exactly the sha256
+        # save_text could have produced), documented as the check made once for every caller, so this
+        # route holding a second, separate traversal guard would be the one caller not actually using
+        # it despite claiming to.
+        name = request.path_params["name"]
+        path = payloads.reference_to_path(config.payloads_path, payloads.ROUTE_PREFIX + name)
+        if path is None or not path.is_file():
+            return Response(status_code=404)
+        return FileResponse(path, media_type="text/plain; charset=utf-8")
 
     async def ws_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
@@ -537,6 +550,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             Route("/", index),
             Route("/download/{name:str}", download),  # generated files (e.g. markdown_to_pdf PDFs)
             Route("/images/{name:str}", image),  # uploaded + generated images
+            Route("/payloads/{name:str}", payload),  # oversized sub-agent tool responses
             Route("/fonts/{name:str}", static_font),  # vendored KaTeX woff2 fonts
             Route("/{name:str}", static_asset),  # vendored marked / purify / katex js + css
             WebSocketRoute("/ws", ws_endpoint),

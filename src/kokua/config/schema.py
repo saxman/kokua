@@ -326,6 +326,14 @@ class AssistantConfig:
         return self.data_dir / "images"
 
     @property
+    def payloads_path(self) -> Path:
+        """Oversized sub-agent tool responses the web UI serves at /payloads. Sessions store a short
+        ``/payloads/<name>`` reference plus a preview, never the whole response, so ``sessions.json``
+        stays small; see ``payloads.py``. Kept out of ``documents_path`` because the DocumentStore
+        scans that folder as UTF-8 text at startup and these are not documents the user wrote."""
+        return self.data_dir / "payloads"
+
+    @property
     def logs_path(self) -> Path:
         """Directory for the rotating diagnostic log (kokua.log). See logging_setup.configure_logging."""
         return self.data_dir / "logs"

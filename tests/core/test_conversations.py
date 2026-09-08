@@ -40,11 +40,34 @@ async def test_turn_persists_to_active_session_with_title(tmp_path):
     assert stored.metadata["title"] == "plan my trip to Kauai"
 
 
-async def test_history_returns_active_session_messages(tmp_path):
+async def test_history_view_returns_active_session_messages_and_metadata(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
     await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
-    assert assistant.history == assistant._session.messages
-    assert any(m.get("content") == "hello" for m in assistant.history)
+    messages, metadata = assistant.history_view()
+    assert messages == assistant._session.messages
+    assert metadata == assistant._session.metadata
+    assert any(m.get("content") == "hello" for m in messages)
+
+
+async def test_history_view_reads_the_session_once(tmp_path, monkeypatch):
+    """One repaint costs one store read.
+
+    `history` and `history_metadata` used to fetch the session separately, which both doubled the
+    cost and left two independent snapshots with nothing saying they must be read together.
+    """
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    reads = []
+    original_get = assistant._store.get
+    monkeypatch.setattr(assistant._store, "get", lambda key: (reads.append(key), original_get(key))[1])
+
+    messages, metadata = assistant.history_view()
+
+    assert reads == [assistant._active_id]
+    assert any(m.get("content") == "hello" for m in messages)
+    assert metadata["title"]
+    assert not hasattr(assistant, "history_metadata")
 
 
 async def test_fresh_start_has_empty_active_session(tmp_path):
@@ -356,8 +379,8 @@ async def test_list_projects_task_id_and_leaves_it_none_for_a_chat(tmp_path):
     assert by_id[assistant._active_id]["task_id"] is None
 
 
-async def test_sessions_backs_list_and_shares_its_ordering(tmp_path):
-    """``sessions()`` is the single store-walk-and-order seam; ``list()`` is a projection of it, so the
+async def test_summaries_backs_list_and_shares_its_ordering(tmp_path):
+    """``summaries()`` is the single store-walk-and-order seam; ``list()`` is a projection of it, so the
     two can never disagree about recency."""
     assistant = await Assistant.create(
         _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["a"])
@@ -367,8 +390,38 @@ async def test_sessions_backs_list_and_shares_its_ordering(tmp_path):
     await assistant._handle(ChannelMessage(text="second chat", channel="fake"), conversation_id=assistant._active_id)
 
     book = assistant._book
-    assert [session.key for session in book.sessions()] == [item["id"] for item in book.list()]
-    assert len(book.sessions()) == 2
+    assert [summary.key for summary in book.summaries()] == [item["id"] for item in book.list()]
+    assert len(book.summaries()) == 2
+
+
+async def test_listing_conversations_does_not_read_transcripts(tmp_path, monkeypatch):
+    """The sidebar's question is about metadata, so it costs no transcript reads.
+
+    On a 56.8 MB store this was 4,790 ms per switch: one whole-file parse per stored conversation to
+    render a list of titles.
+    """
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    book = assistant._book
+    book.create()
+    book.create()
+
+    reads = []
+    original_get = book._store.get
+    monkeypatch.setattr(book._store, "get", lambda key: (reads.append(key), original_get(key))[1])
+
+    listed = book.list()
+
+    assert len(listed) == 3
+    assert reads == []
+    assert [item["id"] for item in listed] == [s.key for s in book.summaries()]
+
+
+async def test_summaries_are_most_recently_updated_first(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    book = assistant._book
+    newest = book.create()
+
+    assert book.summaries()[0].key == newest
 
 
 def test_resolve_accepts_a_unique_prefix_but_not_an_ambiguous_or_short_one(tmp_path):
@@ -1543,3 +1596,28 @@ async def test_truncate_conversation_waits_for_a_non_turn_gate_holder_rather_tha
         release.set()
     assert await asyncio.wait_for(truncating, timeout=5) == 2
     await holder
+
+
+async def test_key_lookups_do_not_read_whole_sessions(tmp_path, monkeypatch):
+    """`resolve` and `matching_ids` answer from keys alone.
+
+    Both questions are about ids, and reading every stored transcript to answer them is what made a
+    conversation switch cost seconds on a large store.
+    """
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    book = assistant._book
+    first = book.active_id
+    second = book.create()
+
+    reads = []
+    original_get = book._store.get
+    monkeypatch.setattr(book._store, "get", lambda key: (reads.append(key), original_get(key))[1])
+
+    assert book.matching_ids(second[:8]) == [second]
+    assert reads == []
+
+    resolved = book.resolve(second[:8])
+    assert resolved is not None and resolved.key == second
+    assert reads == [second]
+
+    assert book.resolve(first) is not None

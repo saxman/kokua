@@ -3,17 +3,31 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 
 from aimu.models import StreamChunk, StreamingContentType
 
+from kokua import payloads
 from kokua.channels.ui import ChannelUI
-from kokua.core.subagents import SubagentReporter, subagent_events
+from kokua.core.subagents import RESPONSE_PREVIEW_CHARS, SubagentReporter, subagent_events
 from tests.channels import SubagentCapturingChannel
 
+# No existing reporter test produces a response over RESPONSE_PREVIEW_CHARS, so nothing is ever
+# written here. Deliberately a path that does not exist: a test that starts spilling without passing
+# its own tmp_path should fail loudly rather than quietly writing into the system temp directory.
+_UNUSED_PAYLOADS_PATH = Path(tempfile.gettempdir()) / "kokua-test-payloads-never-written"
 
-def _reporter(model_for=lambda agent_type: None, thinking_for=lambda agent_type: None):
+
+def _reporter(model_for=lambda agent_type: None, thinking_for=lambda agent_type: None, payloads_path=None):
     channel = SubagentCapturingChannel()
-    return SubagentReporter(ChannelUI(channel), model_for=model_for, thinking_for=thinking_for), channel
+    reporter = SubagentReporter(
+        ChannelUI(channel),
+        model_for=model_for,
+        thinking_for=thinking_for,
+        payloads_path=payloads_path or _UNUSED_PAYLOADS_PATH,
+    )
+    return reporter, channel
 
 
 def _collect():
@@ -100,6 +114,143 @@ async def test_a_nested_tool_entry_carries_what_the_call_returned():
     await reporter.spawned("r-1", "researcher", "find X")
     await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "https://example.com"}, "<html>X</html>"))
     assert channel.subagent_frames[-1]["append"]["response"] == "<html>X</html>"
+
+
+async def test_oversized_tool_response_is_recorded_as_preview_and_reference(tmp_path):
+    """A megabyte of tool output does not go into session metadata.
+
+    One PDF fetched as text put 7.8 MB into a single recorded card, and 51.9 MB of a 56.8 MB session
+    file was this one field.
+    """
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+    response = "x" * (RESPONSE_PREVIEW_CHARS * 3)
+
+    await reporter.spawned("researcher-abc", "researcher", "read the PDF")
+    await reporter.chunk("researcher-abc", _tool_call("get_webpage", {"url": "u"}, response))
+
+    append = events[-1]["append"]
+    assert append["kind"] == "tool"
+    assert append["name"] == "get_webpage"
+    assert append["arguments"] == {"url": "u"}
+    assert append["response"] == response[:RESPONSE_PREVIEW_CHARS]
+    assert append["response_bytes"] == len(response)
+    assert payloads.read_text(payloads_path, append["response_ref"]) == response
+
+
+async def test_small_tool_response_is_recorded_inline(tmp_path):
+    """Below the threshold nothing changes, so an ordinary card is untouched and nothing is written."""
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+
+    await reporter.spawned("researcher-abc", "researcher", "look it up")
+    await reporter.chunk("researcher-abc", _tool_call("search", {"q": "kauai"}, "a short answer"))
+
+    append = events[-1]["append"]
+    assert append["response"] == "a short answer"
+    assert "response_ref" not in append
+    assert "response_bytes" not in append
+    assert not payloads_path.exists()
+
+
+async def test_live_frame_and_recorded_event_are_identical(tmp_path):
+    """A card must not change when the user switches away and back.
+
+    The frame sent live and the entry replayed from metadata come from one dict, so capping at the
+    recording point rather than in send_history is what keeps them the same.
+    """
+    reporter, channel = _reporter(payloads_path=tmp_path / "payloads")
+    events = _collect()
+    response = "y" * (RESPONSE_PREVIEW_CHARS * 2)
+
+    await reporter.spawned("researcher-abc", "researcher", "read the PDF")
+    await reporter.chunk("researcher-abc", _tool_call("get_webpage", {"url": "u"}, response))
+
+    assert channel.subagent_frames[-1] == events[-1]
+
+
+async def test_oversized_response_with_a_lone_surrogate_falls_back_to_inline(tmp_path):
+    """A tool result decoded upstream with errors="surrogateescape" (a binary file fetched as text is
+    the likely source) can carry lone surrogates that strict UTF-8 cannot encode, so save_text raises.
+    Recording runs on a live turn's path, so the fallback is to keep the response inline rather than
+    let the exception end the turn; the card is oversized but the turn is not lost.
+    """
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+    response = ("x" * (RESPONSE_PREVIEW_CHARS * 3)) + "\udcff"
+
+    await reporter.spawned("researcher-abc", "researcher", "read the file")
+    await reporter.chunk("researcher-abc", _tool_call("get_webpage", {"url": "u"}, response))
+
+    append = events[-1]["append"]
+    assert append["response"] == response
+    assert "response_ref" not in append
+    assert "response_bytes" not in append
+    assert not payloads_path.exists()
+
+
+async def test_a_response_of_exactly_the_threshold_stays_inline(tmp_path):
+    """The boundary itself, not just something safely past it. ``<=`` is what makes a response of
+    exactly RESPONSE_PREVIEW_CHARS keep today's shape; a suite that only ever tries sizes well past the
+    cap would stay green if that were quietly changed to ``<``, and every response of exactly the cap
+    would start spilling with nothing to catch it."""
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+    response = "x" * RESPONSE_PREVIEW_CHARS
+
+    await reporter.spawned("researcher-abc", "researcher", "look it up")
+    await reporter.chunk("researcher-abc", _tool_call("search", {"q": "kauai"}, response))
+
+    append = events[-1]["append"]
+    assert append["response"] == response
+    assert "response_ref" not in append
+    assert "response_bytes" not in append
+    assert not payloads_path.exists()
+
+
+async def test_one_character_past_the_threshold_spills(tmp_path):
+    """The other side of the same boundary: one character more than the threshold is enough to spill,
+    pinning the cap from both directions."""
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+    response = "x" * (RESPONSE_PREVIEW_CHARS + 1)
+
+    await reporter.spawned("researcher-abc", "researcher", "look it up")
+    await reporter.chunk("researcher-abc", _tool_call("search", {"q": "kauai"}, response))
+
+    append = events[-1]["append"]
+    assert append["response"] == response[:RESPONSE_PREVIEW_CHARS]
+    assert append["response_bytes"] == len(response)
+    assert payloads.read_text(payloads_path, append["response_ref"]) == response
+
+
+async def test_oversized_response_falls_back_to_inline_when_the_disk_write_fails(tmp_path, monkeypatch):
+    """Before this cap, the TOOL_CALLING branch never touched disk, so a live turn never depended on a
+    write succeeding. It does now, and a full disk, a permissions problem, or a payloads directory that
+    cannot be created are exactly the conditions under which a user least wants their turn to die, so
+    an OSError out of save_text gets the same inline fallback as the surrogate case."""
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+    response = "x" * (RESPONSE_PREVIEW_CHARS * 3)
+
+    def _raise(_payloads_path, _text):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(payloads, "save_text", _raise)
+
+    await reporter.spawned("researcher-abc", "researcher", "read the file")
+    await reporter.chunk("researcher-abc", _tool_call("get_webpage", {"url": "u"}, response))
+
+    append = events[-1]["append"]
+    assert append["response"] == response
+    assert "response_ref" not in append
+    assert "response_bytes" not in append
 
 
 async def test_generated_text_streams_chunk_by_chunk():
@@ -255,6 +406,7 @@ async def test_a_cancelled_spawn_records_before_it_tries_to_send():
         ChannelUI(_RefusingChannel()),
         model_for=lambda agent_type: None,
         thinking_for=lambda agent_type: None,
+        payloads_path=_UNUSED_PAYLOADS_PATH,
     )
     events = _collect()
     await reporter.finished("r-1", "partial", asyncio.CancelledError())

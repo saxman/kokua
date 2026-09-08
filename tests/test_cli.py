@@ -389,6 +389,43 @@ def test_export_to_stdout_with_a_dash(monkeypatch, tmp_path, capsys):
     assert "what is it" in out
 
 
+def test_export_full_reads_a_spilled_sub_agent_response_back_off_disk(monkeypatch, tmp_path, capsys):
+    """`_export` must pass `config.payloads_path` through to `render_markdown`: without it, `--full`
+    on a conversation carrying a spilled sub-agent tool response (core/subagents.py) could only ever
+    show the RESPONSE_PREVIEW_CHARS preview already stored in metadata, silently abridging what the
+    flag promises to keep whole."""
+    from kokua import payloads
+
+    full_text = "w" * 9000
+    reference = payloads.save_text(tmp_path / "data" / "payloads", full_text)
+    key = _seeded_home(
+        monkeypatch,
+        tmp_path,
+        [{"role": "user", "content": "go"}, {"role": "assistant", "content": "done"}],
+        metadata={
+            "subagent": {
+                "0": [
+                    {"id": "s1", "role": "worker", "task": "fetch", "status": "running"},
+                    {
+                        "id": "s1",
+                        "append": {
+                            "kind": "tool",
+                            "name": "fetch_url",
+                            "arguments": "{}",
+                            "response": full_text[:4000],
+                            "response_ref": reference,
+                            "response_bytes": len(full_text),
+                        },
+                    },
+                    {"id": "s1", "status": "done"},
+                ]
+            }
+        },
+    )
+    _run_main(monkeypatch, ["export", key, "--full", "-o", "-"], expect_exit=0)
+    assert full_text in capsys.readouterr().out
+
+
 def test_export_of_an_unknown_id_reports_it_and_exits_nonzero(monkeypatch, tmp_path, capsys):
     _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
     _run_main(monkeypatch, ["export", "999999999999"], expect_exit=2)

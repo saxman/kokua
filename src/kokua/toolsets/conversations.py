@@ -32,9 +32,9 @@ and ``Assistant.schedule_rename`` is what turns that deadlock into a write queue
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Union
 
-from aimu.sessions import Session
+from aimu.sessions import Session, SessionSummary
 from aimu.tools import tool
 
 from kokua.core.transcripts import flatten_transcript, readable_messages, search, short_time, truncate_lines
@@ -114,7 +114,7 @@ def _clamp(value, low: int, high: int, default: int) -> int:
     return min(number, high)
 
 
-def _title_of(session: Session) -> str:
+def _title_of(session: Union[Session, SessionSummary]) -> str:
     return session.metadata.get("title") or "New conversation"
 
 
@@ -123,6 +123,7 @@ def make_conversation_tools(
     turn_running: Callable[[str], bool],
     schedule_rename: Callable[[str, str], None],
     downloads_path: Path,
+    payloads_path: Path,
     is_entry_agent: bool,
 ) -> list[Callable]:
     """Build the cross-conversation tools bound to the live ``ConversationBook``.
@@ -152,6 +153,9 @@ def make_conversation_tools(
     rather than reading it off the config keeps the one thing this factory writes outside the store
     visible in its signature, and the name coming from the store rather than from the model is what
     makes a path the model chose unreachable: there is no argument here that reaches the filesystem.
+    ``payloads_path`` is the same kind of argument for a read rather than a write: with ``full=True``
+    it is where ``render_markdown`` reads a spilled sub-agent tool response back from, so the export
+    can show the whole thing instead of the preview ``core/subagents.py`` capped it to.
 
     ``is_entry_agent`` decides which sentence the active conversation is described with, and it is the
     only thing in here that differs between two agents holding the same capability. The entry agent is
@@ -167,7 +171,7 @@ def make_conversation_tools(
             "Call `list_conversations` or `search_conversations` for current ids."
         )
 
-    def _marks(session: Session) -> str:
+    def _marks(session: Union[Session, SessionSummary]) -> str:
         marks = " (current)" if session.key == book.active_id else ""
         return marks + (" (turn in progress)" if turn_running(session.key) else "")
 
@@ -185,28 +189,29 @@ def make_conversation_tools(
     async def list_conversations(limit: int = DEFAULT_LIST_LIMIT) -> str:
         """List the user's saved chat conversations, most recently active first.
 
-        Each line gives the conversation id, when it was last active, how many messages it holds, and its
-        title (derived from its first user message). "(current)" marks the conversation the user is in
-        right now: if you are the agent talking to them, its transcript is already in your context and
-        there is no need to read it back, and if you were delegated a task about it, read it like any
-        other. One marked "(turn in progress)" has a reply still being generated, so its saved
-        transcript stops short of that turn. Pass an id to `read_conversation`, or use
-        `search_conversations` to find one by what was said in it. These are chat threads, not scheduled
-        tasks; see `list_scheduled_tasks` for those.
+        Each line gives the conversation id, when it was last active, how many stored messages it holds,
+        and its title (derived from its first user message). The stored-message count includes tool
+        results and the loop's own injected turns, not just what a person said or read, so it runs higher
+        than a transcript's visible turn count. "(current)" marks the conversation the user is in right
+        now: if you are the agent talking to them, its transcript is already in your context and there is
+        no need to read it back, and if you were delegated a task about it, read it like any other. One
+        marked "(turn in progress)" has a reply still being generated, so its saved transcript stops short
+        of that turn. Pass an id to `read_conversation`, or use `search_conversations` to find one by what
+        was said in it. These are chat threads, not scheduled tasks; see `list_scheduled_tasks` for those.
 
         Args:
             limit: How many conversations to list, newest first. Defaults to 30, capped at 200.
         """
-        sessions = book.sessions()
-        if not sessions:
+        summaries = book.summaries()
+        if not summaries:
             return NO_CONVERSATIONS
-        shown = sessions[: _clamp(limit, 1, MAX_LIST_LIMIT, DEFAULT_LIST_LIMIT)]
+        shown = summaries[: _clamp(limit, 1, MAX_LIST_LIMIT, DEFAULT_LIST_LIMIT)]
         lines = [
-            f"- {session.key} | {short_time(session.metadata.get('updated_at'))} "
-            f"| {len(readable_messages(session.messages))} messages | {_title_of(session)}{_marks(session)}"
-            for session in shown
+            f"- {summary.key} | {short_time(summary.metadata.get('updated_at'))} "
+            f"| {summary.message_count} stored messages | {_title_of(summary)}{_marks(summary)}"
+            for summary in shown
         ]
-        hidden = len(sessions) - len(shown)
+        hidden = len(summaries) - len(shown)
         if hidden:
             lines.append(f"({hidden} older conversations not shown; raise limit to see them.)")
         return "\n".join(lines)
@@ -346,7 +351,11 @@ def make_conversation_tools(
         session = book.resolve(conversation_id)
         if session is None:
             return _unknown(conversation_id)
-        markdown = render_markdown(session, max_payload_chars=None if full else DEFAULT_MAX_PAYLOAD_CHARS)
+        markdown = render_markdown(
+            session,
+            max_payload_chars=None if full else DEFAULT_MAX_PAYLOAD_CHARS,
+            payloads_path=payloads_path,
+        )
         # The web front end's download route serves this directory and 404s rather than creating it,
         # so a fresh $KOKUA_HOME may never have had anything written here.
         downloads_path.mkdir(parents=True, exist_ok=True)
@@ -393,6 +402,7 @@ TOOLSET = Toolset(
         ctx.state.turn_running,
         ctx.state.schedule_rename,
         ctx.config.downloads_path,
+        ctx.config.payloads_path,
         ctx.agent_name == ctx.config.entry_agent,
     ),
     guidance=CONVERSATIONS_GUIDANCE,

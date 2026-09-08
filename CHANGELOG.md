@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -57,6 +57,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   ordinary message as the end of a turn, so a notice on either side of that gap is lost or leaves a
   live turn reading as idle. The three words are reserved from a workflow's command at startup, exactly
   as `/stop` and `/diag` already were.
+- **Listing conversations no longer reads their transcripts.** The sidebar, task ownership, and the
+  startup pointer only ever asked about a conversation's title, timestamp, and message count, but
+  `ConversationBook.sessions()` answered that by fetching every stored session in full: one whole-file
+  JSON parse per conversation, 4,790 ms on a 56.8 MB real store just to draw a list of titles. The new
+  `ConversationBook.summaries()` calls AIMU's `SessionStore.list_summaries()` instead, which
+  `TinyDBSessionStore` answers from its own table without building a `Session` at all, and `list()`,
+  `sessions_for_task()`, and `most_recent_or_new()` all moved onto it. `sessions()` survives for the one
+  caller that genuinely needs message text, the agent's cross-conversation search; the `list_conversations`
+  tool's message count is now the raw stored count (including tool results and the loop's own injected
+  turns) rather than the filtered, human-readable one, so its wording says "stored messages" to keep the
+  two from being confused. Needs `aimu>=0.29.0`; see "Diagnostics and error reporting" below.
 - **Per-conversation agents.** Each conversation owns its AIMU `SkillAgent` and model client, built
   lazily and held in a bounded LRU registry (`agent_cache_cap`, default 8). Memory and documents stay
   shared across conversations.
@@ -140,10 +151,15 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   front ends and the CLI can call it. Two rules keep it honest: a figure nobody reported prints as "not
   reported" rather than an invented zero, and a tool payload past
   `DEFAULT_MAX_PAYLOAD_CHARS` (4000 characters) is cut with a note saying how much was removed rather
-  than shown as if it were complete (`--full` lifts the cap). `kokua export [id-or-prefix] [-o path|-]
-  [--full]` reads the session store directly and writes the file: no `Assistant`, no model client, no
-  agent, so it works with the model server down. A read that races the daemon's own persist reports the
-  store as busy rather than parsing a torn file. See
+  than shown as if it were complete (`--full` lifts the cap). A sub-agent's tool response spilled to a
+  payload file (see "Payloads" below) is a third case the cap-and-note rule alone would miss: its
+  stored preview is already `RESPONSE_PREVIEW_CHARS`, the same value as the default cap, so it would
+  read as complete either way. It is therefore always noted, naming the real size and the reference,
+  and `--full` reads the payload file back and shows the whole thing rather than the preview, falling
+  back to the preview with an explicit note if the file is gone. `kokua export [id-or-prefix]
+  [-o path|-] [--full]` reads the session store directly and writes the file: no `Assistant`, no model
+  client, no agent, so it works with the model server down. A read that races the daemon's own persist
+  reports the store as busy rather than parsing a torn file. See
   [Export a conversation](https://saxman.info/kokua/how-to/export-a-conversation/).
 - **Branch a conversation at a turn.** Every turn in the web UI carries a branch control, on the
   message that opened it and beside the delete-from-here control:
@@ -278,6 +294,23 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     muted, and switching in later shows the work. A round the worker's own loop injected shows inside
     the card too, naming which one it was and quoting the prompt, so a worker that hit the round cap
     reads as an explained outcome rather than an answer that came back thinner for no visible reason.
+  - **An oversized tool response is recorded as a preview plus a reference, not held whole.** A PDF
+    fetched as text put 7.8 MB into a single recorded tool-call card, and 51.9 MB of one developer's
+    56.8 MB session file was this one field, re-parsed on every store read and replayed to the browser
+    on every conversation switch. `core/subagents.py` now caps what it keeps inline in a card at
+    `RESPONSE_PREVIEW_CHARS` (4,000 characters, a module constant rather than a config key: it is not
+    a security control and not a capability an agent declares). A response over that length is
+    recorded as the first `RESPONSE_PREVIEW_CHARS` characters, a `response_ref` (a `/payloads/<sha256>`
+    reference, see "Payloads" below), and `response_bytes` (the full length); the rest is written once
+    to `payloads_path`. The cap applies where the card is recorded, not where it is replayed, so a
+    reload never shows a card shaped differently than the one shown live. The card renders the preview
+    plus a "Show full response" control naming the size in KB or MB; activating it fetches the
+    reference and swaps the full text in for the preview, once, and a fetch that fails (the file was
+    cleared by hand; payloads are never garbage collected) leaves the preview in place with a short
+    note instead of a control that would only fail again. The row's own collapsed header states
+    `response_bytes` when the response was spilled, not the preview's own length, so a 7.8 MB result
+    reads as its real size before the card is even opened rather than as "4,000 chars" until it is
+    expanded twice.
   - **Rows carry a localized datetime caption**, revealed on hover (full precision in its tooltip) so
     the transcript is not dated line by line. Every kind of block carries it the same way: at the right
     edge of the row, on the block's first line, so the captions form one column down the page. On a
@@ -1167,6 +1200,38 @@ alone. The case that does cost something is a configured MCP server, which conne
   store stays small; the bytes are re-inlined as base64 only when a turn is sent to the model, since a
   localhost URL is not fetchable by the provider.
 
+### Payloads
+
+- `payloads.py` is the same content-addressed shape as `images.py`, for oversized text instead of
+  image bytes. A payload is written under `data/payloads/` named by the sha256 of its UTF-8 bytes (so
+  identical text is stored once), served at `GET /payloads/<sha256>`, and referenced from session
+  metadata as `/payloads/<sha256>` rather than held inline. The one caller today is the sub-agent
+  reporter (see "An oversized tool response..." under Conversations and turns, above); other oversized
+  text a future feature wants to keep out of `sessions.json` can reuse it the same way.
+- **`scripts/migrate_subagent_payloads.py`** is a one-off, deletable migration for a `sessions.json`
+  written before the cap above existed: it walks every stored sub-agent tool response, spills anything
+  over `RESPONSE_PREVIEW_CHARS` to a payload file, and rewrites the entry to the same shape the live
+  recorder now writes. `--dry-run` reports what would change without touching disk; a real run backs
+  up `sessions.json` before its first write and is idempotent, so re-running it (including after an
+  interruption) changes nothing further. A response the recorder itself could not encode (a lone
+  surrogate from decoded binary content) is left inline exactly as the live recorder leaves it, counted
+  in the report rather than raised, so one unreadable entry cannot abort a migration of the rest of a
+  user's history. `--prune-orphans` is a separate pass, run only on request and never in a dry run,
+  that deletes payload files no session references, and refuses a custom sessions-file argument since
+  it always deletes from the one configured payloads directory. A real run (including
+  `--prune-orphans`) requires `--confirm-kokua-stopped`: the script has no reliable way to detect a
+  running Kokua from outside it, and a live instance writing to the same files at the same time can
+  silently lose data that would not show up in the backup either, in two distinct ways, both named in
+  the script's own docstring and `--help`. The reclaimed-bytes figure in the report is the actual
+  JSON-encoded size delta (measured with the same `ensure_ascii=True` TinyDB's storage writes with),
+  not a character count, since a character removed from a response could have cost up to six bytes on
+  disk as a `\uXXXX` escape. The default `sessions.json` and payloads directory are resolved by loading
+  `config.toml` the way `kokua` itself does, so a configured `[paths] data_dir` is honored rather than
+  silently scanning the built-in default. A `sessions_file` argument that is not the configured file
+  needs `--payloads-dir` too for a real (non-dry-run) run, or it is refused: writing `response_ref`
+  values under the default payloads directory while migrating a different file would point every
+  migrated card at blobs the app reading its own configured file would never find.
+
 ### Security
 
 Kokua can author and run Python and shell scripts as **real subprocesses with your user privileges and
@@ -1209,7 +1274,7 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.28.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.29.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -1238,9 +1303,22 @@ notice on startup.
   `StreamingContentType.__members__` rather than a bare `in`, because `in` on an enum compares values on
   Python 3.12 and raises `TypeError` on 3.11, where the capability here is a member's name, not its
   value. 0.28.0's other capability, the `"max_iterations"` entry in `SUBAGENT_SPEC_KEYS` behind a
-  per-agent tool-loop cap, is the floor's job instead: that key set is closed and checked when a spawn
-  tool is built, so an AIMU predating 0.28.0 raises `ValueError` naming it at startup with or without a
-  probe, and the one slot goes to the capability that would otherwise fail silently.
+  per-agent tool-loop cap, was the floor's job instead: that key set is closed and checked when a spawn
+  tool is built, so an AIMU predating 0.28.0 raised `ValueError` naming it at startup with or without a
+  probe, and the one slot went to the capability that would otherwise fail silently. Today the floor is
+  0.29.0, and the probe returns to a plain name lookup, the third time (`resolve_default_text_model`,
+  then `ModelRefusalError`, now this): `aimu.sessions.SessionStore.list_summaries`, a session store's
+  own answer to "every stored conversation's title, timestamp, and message count, without its
+  messages", which is what `ConversationBook.summaries()` calls so the sidebar, task ownership, and the
+  startup pointer stop paying one whole-file parse per stored conversation just to draw a list of
+  titles (see "Conversations and turns" below). The one wrinkle on the usual name lookup: the symbol
+  lives on `SessionStore`, not at module scope, so the probe resolves the class first and looks the
+  method up there. What it cannot see is whether a concrete store still bothers to override the
+  default: the ABC's own `list_summaries` is correct but slow, `TinyDBSessionStore`'s override is what
+  makes it fast, and a name lookup on the ABC is satisfied by either, so a store that stopped
+  overriding it would still pass while paying the old cost in silence; `StreamingContentType.CONTINUING`
+  is the floor's job now, the same way every earlier probe surface became the floor's job once a newer
+  one took the slot.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
   halves of that one decision cannot drift.
