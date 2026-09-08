@@ -1209,7 +1209,15 @@ alone. The case that does cost something is a configured MCP server, which conne
   surrogate from decoded binary content) is left inline exactly as the live recorder leaves it, counted
   in the report rather than raised, so one unreadable entry cannot abort a migration of the rest of a
   user's history. `--prune-orphans` is a separate pass, run only on request and never in a dry run,
-  that deletes payload files no session references.
+  that deletes payload files no session references, and refuses a custom sessions-file argument since
+  it always deletes from the one configured payloads directory. A real run (including
+  `--prune-orphans`) requires `--confirm-kokua-stopped`: the script has no reliable way to detect a
+  running Kokua from outside it, and a live instance writing to the same files at the same time can
+  silently lose data that would not show up in the backup either, in two distinct ways, both named in
+  the script's own docstring and `--help`. The reclaimed-bytes figure in the report is the actual
+  JSON-encoded size delta (measured with the same `ensure_ascii=True` TinyDB's storage writes with),
+  not a character count, since a character removed from a response could have cost up to six bytes on
+  disk as a `\uXXXX` escape.
 
 ### Security
 

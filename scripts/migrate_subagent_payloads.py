@@ -17,14 +17,26 @@ backup before its first write, so the original is always recoverable. The migrat
 entry that already carries `response_ref` is left alone, so running the script again after it already
 succeeded (or after it was interrupted partway through) changes nothing further.
 
+**Stop Kokua before any real run, including `--prune-orphans`.** This script has no reliable way to
+detect a running instance from outside it, so it asks for `--confirm-kokua-stopped` instead of
+guessing, and refuses to write without it. Running alongside a live Kokua can lose data in two ways
+that would not show up anywhere, including in the backup: a payload the live recorder just wrote can
+be deleted by `--prune-orphans` before the session referencing it is next saved, since that window's
+blob exists on disk with nothing yet pointing at it; and `sessions.json` is rewritten whole on every
+save, not written to a new file and swapped in, so a save this script makes and a save Kokua makes at
+close to the same time can each silently overwrite the other's.
+
 `--prune-orphans` is a separate, optional pass that runs after the migration and deletes payload
 files no session references. It never runs in a dry run, since deleting files is exactly the kind of
-change a dry run promises not to make.
+change a dry run promises not to make, and it refuses a custom sessions-file argument, since it always
+prunes against the one configured payloads directory and a sessions file that is not the real one
+(a copy made to preview the migration, say) would make it delete blobs other, real sessions still use.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import shutil
 from collections.abc import Iterator
@@ -40,12 +52,19 @@ from kokua.core.subagents import RESPONSE_PREVIEW_CHARS
 
 logger = logging.getLogger(__name__)
 
+# Every sha256 hex digest is this long regardless of what it hashes, which is what lets a dry run
+# measure the byte cost of a `response_ref` field without ever computing or writing a real one.
+_SHA256_HEX_LENGTH = 64
+
 
 @dataclass
 class Report:
     """What one `migrate()` call did, printed by `main()` and asserted on by the tests."""
 
     sessions_scanned: int = 0
+    # Counts a session with at least one migrated entry regardless of `dry_run`: a dry run's whole
+    # purpose is to say what a real run would do, so this is the "would change" count in that mode
+    # and the "did change" count in the other, and a reader should not have to know which.
     sessions_changed: int = 0
     blobs_written: int = 0
     bytes_reclaimed: int = 0
@@ -60,7 +79,7 @@ class Report:
             f"Sessions scanned: {self.sessions_scanned}",
             f"Sessions changed: {self.sessions_changed}",
             f"Tool responses moved to payload files: {self.blobs_written}",
-            f"Bytes reclaimed from sessions.json (approximate, before JSON escaping): {self.bytes_reclaimed}",
+            f"Bytes reclaimed from sessions.json, as it is actually serialized to disk: {self.bytes_reclaimed}",
         ]
         if self.undecodable_skipped:
             lines.append(f"Left inline and unbounded (undecodable text, not an error): {self.undecodable_skipped}")
@@ -90,16 +109,30 @@ def _tool_appends(metadata: dict) -> Iterator[dict]:
                 yield append
 
 
+def _dry_run_reference_placeholder() -> str:
+    """A reference of the exact length `payloads.save_text` would return, without writing anything.
+
+    A dry run must not touch `payloads_path` at all, but the report still needs to account for the
+    `response_ref` field's contribution to the file's serialized size, and that contribution depends
+    only on the reference's length, never its content.
+    """
+    return payloads.ROUTE_PREFIX + "0" * _SHA256_HEX_LENGTH
+
+
 def _migrate_append(append: dict, payloads_path: Path, *, dry_run: bool, report: Report) -> bool:
-    """Spill one oversized response to a payload file, mutating `append` in place. True if changed.
+    """Spill one oversized response to a payload file, mutating `append` in place. True if migrated.
+
+    Mutates `append` even during a dry run. Nothing here is persisted unless the caller goes on to
+    call `store.save()`, so an in-memory-only mutation is invisible on disk, and it is what lets a
+    dry run measure the exact same JSON-encoded byte delta a real run would produce, rather than a
+    rough estimate of it.
 
     Already migrated (`response_ref` present) and small enough to stay inline both return False
     unchanged, which is what makes a session with nothing left to do produce no write at all.
 
     The encodability check calls `response.encode("utf-8")` directly rather than only discovering
     the failure inside `payloads.save_text`, so a dry run reports the same skip a real run would,
-    without ever creating `payloads_path` or writing a byte (the same reason the actual write below
-    is skipped whenever `dry_run` is set).
+    without ever creating `payloads_path` or writing a byte.
     """
     if "response_ref" in append:
         return False
@@ -123,14 +156,19 @@ def _migrate_append(append: dict, payloads_path: Path, *, dry_run: bool, report:
         report.undecodable_skipped += 1
         return False
 
-    report.blobs_written += 1
-    report.bytes_reclaimed += len(response) - RESPONSE_PREVIEW_CHARS
-    if dry_run:
-        return False
-    reference = payloads.save_text(payloads_path, response)
+    # Measured as the JSON-encoded size of this one append dict, before and after, with the same
+    # ensure_ascii=True that TinyDB's JSONStorage always writes with. A plain character count
+    # understates the real shrinkage: every non-ASCII or control character removed from `response`
+    # was costing up to six bytes on disk as a \uXXXX escape, not one.
+    before_size = len(json.dumps(append, ensure_ascii=True))
+    reference = _dry_run_reference_placeholder() if dry_run else payloads.save_text(payloads_path, response)
     append["response"] = response[:RESPONSE_PREVIEW_CHARS]
     append["response_ref"] = reference
     append["response_bytes"] = len(response)
+    after_size = len(json.dumps(append, ensure_ascii=True))
+
+    report.blobs_written += 1
+    report.bytes_reclaimed += before_size - after_size
     return True
 
 
@@ -149,10 +187,14 @@ def migrate(sessions_path: Path, payloads_path: Path, *, dry_run: bool) -> Repor
     before `TinyDBSessionStore` ever opens: TinyDB's JSON storage creates the file it is pointed at,
     so opening it even to read would itself be a write a dry run must not make.
 
-    The backup is taken lazily, right before the first real write (the first session whose scan
-    found something to change), not unconditionally at the top: a run that changes nothing (an
+    The backup is taken lazily, right before the first real write (the first session whose scan found
+    something to change), not unconditionally at the top: a run that changes nothing (an
     already-migrated file, or one with no oversized responses at all) makes no backup, because a
     backup nothing was ever written over is not one this script needs.
+
+    Calling this function directly, as the tests do, performs no safety check on whether Kokua is
+    running; that check belongs to `main()`, the one caller a person runs by hand, not to the function
+    a test calls in isolation against a throwaway directory.
     """
     report = Report()
     if not sessions_path.exists():
@@ -168,12 +210,15 @@ def migrate(sessions_path: Path, payloads_path: Path, *, dry_run: bool) -> Repor
             for append in _tool_appends(session.metadata):
                 if _migrate_append(append, payloads_path, dry_run=dry_run, report=report):
                     changed = True
-            if changed and not dry_run:
-                if not backed_up:
-                    _backup(sessions_path)
-                    backed_up = True
-                store.save(session)
-                report.sessions_changed += 1
+            if not changed:
+                continue
+            report.sessions_changed += 1
+            if dry_run:
+                continue
+            if not backed_up:
+                _backup(sessions_path)
+                backed_up = True
+            store.save(session)
     finally:
         store.close()
     return report
@@ -189,6 +234,14 @@ def prune_orphans(sessions_path: Path, payloads_path: Path) -> int:
     if not payloads_path.is_dir():
         return 0
 
+    # `_tool_appends` is the one place a `response_ref` is written today (see `core/subagents.py`),
+    # so it is also the one place this scan needs to look to know what is referenced. `payloads.py`
+    # itself is documented as reusable by any future feature with oversized text to keep out of
+    # `sessions.json`; if one arrives and stores its reference somewhere other than a `"tool"`
+    # append, this scan will not see it and will delete that feature's own live blobs. Whoever later
+    # deletes this script because every installation has run it should not mistake this function for
+    # a reusable "what does sessions.json reference" utility; it answers that question for exactly
+    # one writer.
     referenced: set[str] = set()
     if sessions_path.exists():
         store = TinyDBSessionStore(str(sessions_path))
@@ -237,10 +290,40 @@ def main() -> None:
         action="store_true",
         help=(
             "After migrating, delete payload files no session references. Runs as a separate pass "
-            "and never in a dry run, since deleting files is not something a dry run may do."
+            "and never in a dry run, since deleting files is not something a dry run may do. Refused "
+            "together with a custom sessions_file, since pruning always uses the configured payloads "
+            "directory and a sessions file that is not the real one would make it delete blobs other, "
+            "real sessions still use."
+        ),
+    )
+    parser.add_argument(
+        "--confirm-kokua-stopped",
+        action="store_true",
+        help=(
+            "Required before any real (non-dry-run) write, including --prune-orphans. This script "
+            "cannot reliably detect a running Kokua from outside it, so this flag is your statement "
+            "that you checked, not a check this script performs. Running a real migration or a prune "
+            "alongside a live Kokua can silently lose data, with nothing in the backup to show it: a "
+            "payload the live recorder just wrote can be pruned before the session referencing it is "
+            "next saved, and sessions.json is rewritten whole on every save rather than written to a "
+            "new file and swapped in, so a save this script makes and one Kokua makes at close to the "
+            "same time can each overwrite the other."
         ),
     )
     args = parser.parse_args()
+
+    if args.prune_orphans and args.sessions_file is not None:
+        parser.error(
+            "--prune-orphans cannot be combined with a custom sessions_file argument. It always "
+            "deletes from the configured payloads directory, so run it with no positional argument, "
+            "against the configured sessions file, once that file reflects every session that can "
+            "reference a payload there."
+        )
+    if not args.dry_run and not args.confirm_kokua_stopped:
+        parser.error(
+            "Refusing to write without --confirm-kokua-stopped. Stop Kokua first, then pass that "
+            "flag; see --help for the two specific ways a concurrent write can lose data."
+        )
 
     config = AssistantConfig()
     sessions_path = args.sessions_file if args.sessions_file is not None else config.sessions_path

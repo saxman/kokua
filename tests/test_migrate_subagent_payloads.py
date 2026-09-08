@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import sys
+
+import pytest
 from aimu.sessions import Session, TinyDBSessionStore
 
 from kokua import payloads
 from kokua.core.subagents import RESPONSE_PREVIEW_CHARS
-from scripts.migrate_subagent_payloads import migrate, prune_orphans
+from scripts.migrate_subagent_payloads import main, migrate, prune_orphans
 
 
 def _session_with_response(key: str, response: str) -> Session:
@@ -93,18 +96,30 @@ def test_dry_run_writes_nothing(tmp_path):
     assert sessions_path.read_bytes() == before
     assert not payloads_path.exists()
     assert report.blobs_written == 1
+    # A dry run's whole purpose is to say what a real run would do, so this counts the session that
+    # would change, not the (necessarily zero) number of sessions actually saved.
+    assert report.sessions_changed == 1
 
 
 def test_migrate_backs_up_before_writing(tmp_path):
+    """A backup taken after the first save would be worthless exactly when it is needed.
+
+    So this checks more than "a backup file exists": the backup's bytes must match the file as it
+    was *before* migration touched it, and must not match the file as it reads *after*, which is
+    what rules out a regression that backs up too late.
+    """
     sessions_path = tmp_path / "sessions.json"
     store = TinyDBSessionStore(str(sessions_path))
     store.save(_session_with_response("a", "x" * (RESPONSE_PREVIEW_CHARS * 3)))
     store.close()
+    before = sessions_path.read_bytes()
 
     migrate(sessions_path, tmp_path / "payloads", dry_run=False)
 
     backups = list(tmp_path.glob("sessions.json.backup-*"))
     assert len(backups) == 1
+    assert backups[0].read_bytes() == before
+    assert backups[0].read_bytes() != sessions_path.read_bytes()
 
 
 def test_dry_run_never_creates_a_backup(tmp_path):
@@ -184,3 +199,80 @@ def test_prune_orphans_removes_files_no_session_references(tmp_path):
     assert pruned == 1
     assert not orphan.exists()
     assert len(list(payloads_path.iterdir())) == 1
+
+
+def test_main_refuses_a_real_run_without_confirmation(tmp_path, monkeypatch, capsys):
+    """`migrate()` is safe to call directly (the tests above do), but `main()` is what a person runs
+    by hand, alongside whatever else is touching their real sessions.json, so it is the one place
+    that has to insist on the acknowledgement before writing anything."""
+    sessions_path = tmp_path / "sessions.json"
+    store = TinyDBSessionStore(str(sessions_path))
+    store.save(_session_with_response("a", "x" * (RESPONSE_PREVIEW_CHARS * 3)))
+    store.close()
+    before = sessions_path.read_bytes()
+
+    monkeypatch.setattr(sys, "argv", ["migrate_subagent_payloads.py", str(sessions_path)])
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert sessions_path.read_bytes() == before
+    assert "--confirm-kokua-stopped" in capsys.readouterr().err
+
+
+def test_main_allows_a_dry_run_without_confirmation(tmp_path, monkeypatch, capsys):
+    """The confirmation guards writes, not reports: a dry run is read-only regardless, so asking for
+    it there would just be friction with nothing behind it."""
+    sessions_path = tmp_path / "sessions.json"
+    store = TinyDBSessionStore(str(sessions_path))
+    store.save(_session_with_response("a", "x" * (RESPONSE_PREVIEW_CHARS * 3)))
+    store.close()
+
+    monkeypatch.setattr(sys, "argv", ["migrate_subagent_payloads.py", str(sessions_path), "--dry-run"])
+
+    main()
+
+    assert "Tool responses moved to payload files: 1" in capsys.readouterr().out
+
+
+def test_main_runs_a_real_migration_once_confirmed(tmp_path, monkeypatch, capsys):
+    sessions_path = tmp_path / "sessions.json"
+    store = TinyDBSessionStore(str(sessions_path))
+    store.save(_session_with_response("a", "x" * (RESPONSE_PREVIEW_CHARS * 3)))
+    store.close()
+
+    monkeypatch.setattr(sys, "argv", ["migrate_subagent_payloads.py", str(sessions_path), "--confirm-kokua-stopped"])
+
+    main()
+
+    assert "Tool responses moved to payload files: 1" in capsys.readouterr().out
+    store = TinyDBSessionStore(str(sessions_path))
+    assert "response_ref" in store.get("a").metadata["subagent"]["0"][0]["append"]
+    store.close()
+
+
+def test_main_refuses_prune_orphans_with_a_custom_sessions_file(tmp_path, monkeypatch, capsys):
+    """`--prune-orphans` always deletes from the one configured payloads directory. Pointing the
+    positional sessions_file argument somewhere else (a copy made to preview the migration, as the
+    README suggests) would make "referenced" mean "referenced by the copy," and delete blobs real,
+    untouched sessions still use."""
+    sessions_path = tmp_path / "sessions.json"
+    store = TinyDBSessionStore(str(sessions_path))
+    store.save(_session_with_response("a", "short"))
+    store.close()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "migrate_subagent_payloads.py",
+            str(sessions_path),
+            "--prune-orphans",
+            "--confirm-kokua-stopped",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert "--prune-orphans" in capsys.readouterr().err

@@ -273,6 +273,11 @@ written before the payload-file cap in `core/subagents.py` existed, moving each 
 tool response it already stored inline out to a payload file, matching what a current Kokua writes for
 a new one. It is safe to delete once every installation has run it once. Run `--dry-run` first to see
 what it would change before running it for real; it backs up `sessions.json` before its first write.
+**Stop Kokua before a real run (including `--prune-orphans`) and pass `--confirm-kokua-stopped`**: the
+script cannot reliably detect a running instance, and a live Kokua writing to the same files at the
+same time can silently lose data on either side, in a way the backup would not show (see the script's
+own module docstring and `--help` for the two specific failure modes). `--prune-orphans` also refuses
+a custom sessions-file argument, since it always deletes from the one configured payloads directory.
 
 The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`, `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
 
