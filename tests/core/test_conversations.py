@@ -1543,3 +1543,28 @@ async def test_truncate_conversation_waits_for_a_non_turn_gate_holder_rather_tha
         release.set()
     assert await asyncio.wait_for(truncating, timeout=5) == 2
     await holder
+
+
+async def test_key_lookups_do_not_read_whole_sessions(tmp_path, monkeypatch):
+    """`resolve` and `matching_ids` answer from keys alone.
+
+    Both questions are about ids, and reading every stored transcript to answer them is what made a
+    conversation switch cost seconds on a large store.
+    """
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    book = assistant._book
+    first = book.active_id
+    second = book.create()
+
+    reads = []
+    original_get = book._store.get
+    monkeypatch.setattr(book._store, "get", lambda key: (reads.append(key), original_get(key))[1])
+
+    assert book.matching_ids(second[:8]) == [second]
+    assert reads == []
+
+    resolved = book.resolve(second[:8])
+    assert resolved is not None and resolved.key == second
+    assert reads == [second]
+
+    assert book.resolve(first) is not None

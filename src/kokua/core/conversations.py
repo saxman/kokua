@@ -718,30 +718,36 @@ class ConversationBook:
         exists because a caller that saw a 32-hex id in a listing is apt to shorten it, and it is long
         enough that a prefix hit is not a coincidence.
 
+        Matched against ``list_keys`` and not ``sessions``: the question is about ids, and a store read
+        per stored conversation to answer it cost seconds on a large file. The exact-hit check is
+        inlined here rather than delegating to ``exists`` so the keys are read once instead of twice.
+
         Reads only the store, never ``agent_for``: resolving must stay cheap and side-effect-free, and
         building an agent is neither (see ``toolsets/conversations.py`` for the full reasoning).
         """
         wanted = _fragment(conversation_id)
         if not wanted:
             return None
-        if self.exists(wanted):
+        keys = self._store.list_keys()
+        if wanted in keys:
             return self.get(wanted)
         if len(wanted) < ID_PREFIX_MIN:
             return None
-        matches = [session for session in self.sessions() if session.key.startswith(wanted)]
-        return matches[0] if len(matches) == 1 else None
+        matches = [key for key in keys if key.startswith(wanted)]
+        return self.get(matches[0]) if len(matches) == 1 else None
 
     def matching_ids(self, fragment: str) -> list[str]:
         """Every conversation id starting with *fragment*, for a caller explaining a ``resolve`` refusal.
 
         Reads the fragment exactly as ``resolve`` does, so the explanation always describes the question
         that was actually asked, and applies no length floor: the point is to report what a fragment
-        ``resolve`` already rejected does match.
+        ``resolve`` already rejected does match. Reads ``list_keys`` for the same reason ``resolve``
+        does: the answer is a list of ids, and loading transcripts to produce it is pure waste.
         """
         wanted = _fragment(fragment)
         if not wanted:
             return []
-        return [session.key for session in self.sessions() if session.key.startswith(wanted)]
+        return [key for key in self._store.list_keys() if key.startswith(wanted)]
 
     def save(self, session: Session) -> None:
         self._store.save(session)
