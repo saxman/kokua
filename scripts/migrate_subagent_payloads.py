@@ -36,10 +36,16 @@ prunes against the one configured payloads directory and a sessions file that is
 
 **The configured `sessions.json` and payloads directory are resolved the way `kokua` itself resolves
 them,** by loading `config.toml` rather than only the built-in defaults, so `[paths] data_dir` is
-honored when a user has set it (see `_load_config`). A `sessions_file` argument pointing at a copy
-made to preview the migration is still fine for `--dry-run`; for a real run, pass `--payloads-dir` too
-in that case, or the blobs would be written to the configured directory while the copy being migrated
-is not the file the app ever reads them alongside.
+honored when a user has set it (see `_load_config`). `sessions_file` and `--payloads-dir` are a pair for
+a real run: override either one alone and the migration is refused, because the two are only ever safe
+together. Overriding `sessions_file` without `--payloads-dir` writes `response_ref` values under the
+*configured* payloads directory while migrating a *different* sessions file, so the app reading its own
+sessions file never finds those blobs. Overriding `--payloads-dir` without `sessions_file` writes the
+blobs to a directory that is not the one the app reads from, while `response_ref` values land in the
+*real* `sessions.json`, so the app looks for them in its own configured directory and finds nothing
+there either. Either mismatch ends with every migrated card reading "could not load full response"
+forever, with the original text recoverable only from the timestamped backup. `--dry-run` is exempt
+from this pairing requirement, since it never writes anything regardless of which paths were named.
 """
 
 from __future__ import annotations
@@ -311,7 +317,12 @@ def main() -> None:
         nargs="?",
         type=Path,
         default=None,
-        help="Path to sessions.json (default: the configured $KOKUA_HOME/data/sessions.json).",
+        help=(
+            "Path to sessions.json (default: the configured $KOKUA_HOME/data/sessions.json). For a "
+            "real (non-dry-run) migration, this and --payloads-dir must be given together or not at "
+            "all: overriding either one alone points response_ref values at the wrong directory, or "
+            "leaves migrated blobs in a directory the app never reads from."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -335,11 +346,9 @@ def main() -> None:
         default=None,
         help=(
             "Where payload files are written and read back from (default: the configured payloads "
-            "directory). Required whenever sessions_file is given and is not the configured "
-            "sessions.json itself, for a real (non-dry-run) migration: writing response_ref values "
-            "under the default directory while migrating a different sessions file would point every "
-            "migrated card at blobs the app reading that other file would never find, and the "
-            "original response text would then survive only in the timestamped backup."
+            "directory). For a real (non-dry-run) migration, this and sessions_file must be given "
+            "together or not at all: overriding this alone leaves the migrated blobs in a directory "
+            "the app, reading its own configured sessions file, never looks in."
         ),
     )
     parser.add_argument(
@@ -375,22 +384,24 @@ def main() -> None:
     sessions_path = args.sessions_file if args.sessions_file is not None else config.sessions_path
     payloads_path = args.payloads_dir if args.payloads_dir is not None else config.payloads_path
 
-    # A dry run only ever prints a report, so a sessions_file pointed somewhere other than the
-    # configured one costs nothing worse than a report about the wrong file. A real run is where the
-    # mismatch is destructive: response_ref values recorded under the *default* payloads directory
-    # while migrating a *different* sessions.json point at blobs the app reading that other file
-    # would never look for, so this is refused rather than silently doing the harmful thing.
-    if (
-        not args.dry_run
-        and args.sessions_file is not None
-        and args.payloads_dir is None
-        and sessions_path.expanduser().resolve() != config.sessions_path.resolve()
-    ):
+    # A dry run only ever prints a report, so overriding one of these without the other costs nothing
+    # worse than a report about the wrong pair. A real run is where a mismatch is destructive, and it
+    # is destructive in both directions, not just the one where sessions_file moves: whichever one is
+    # overridden alone, a real run ends up writing response_ref values that point at blobs living
+    # somewhere the app looking at its own configured sessions file will never find them, silently, on
+    # the user's only copy of that history. So the two are only ever safe to override as a pair.
+    sessions_overridden = sessions_path.expanduser().resolve() != config.sessions_path.resolve()
+    payloads_overridden = payloads_path.expanduser().resolve() != config.payloads_path.resolve()
+    if not args.dry_run and sessions_overridden != payloads_overridden:  # exactly one, not both
         parser.error(
-            "sessions_file is not the configured sessions.json, so writing response_ref values "
-            "under the default payloads directory would point them at blobs the app (reading its "
-            "own configured sessions file) would never find. Pass --payloads-dir to say where those "
-            "blobs should actually go, or drop sessions_file to run against the configured file."
+            "sessions_file and --payloads-dir must be overridden together, or not at all, for a real "
+            f"run. Resolved sessions file: {sessions_path.expanduser().resolve()} "
+            f"(configured: {config.sessions_path.resolve()}). Resolved payloads directory: "
+            f"{payloads_path.expanduser().resolve()} (configured: {config.payloads_path.resolve()}). "
+            "Overriding only one would either write response_ref values naming a payloads directory "
+            "the app, reading its own configured sessions file, would never look in, or migrate a "
+            "copy of sessions.json while leaving its blobs in the app's real payloads directory, "
+            "never read by anything. Pass both flags, or neither."
         )
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
