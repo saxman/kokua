@@ -1016,6 +1016,36 @@ persisted session must stay small and a localhost URL is not fetchable by the pr
 `core/messages.py` rewrites data URLs to references on persist and re-inlines them before each
 `agent.restore`.
 
+## Payloads
+
+`payloads.py` solves the same problem `images.py` does, for oversized text instead of image bytes:
+content-addressed filenames under `payloads_path` (the sha256 of the UTF-8 text, so identical content
+is stored once), a `/payloads/<sha256>` reference stored in session metadata in place of the bytes, and
+a route (`frontends/web.py`) that serves the file when asked. Two parallel modules rather than one
+shared abstraction, since the generic part is about twenty lines and the rest of each is specific to
+its own payload kind.
+
+The one caller today is `core/subagents.py`. A sub-agent's tool result can be megabytes (a PDF fetched
+as text is the case that forced this), and recording it inline put 51.9 MB of one developer's 56.8 MB
+session file into a field that every store read re-parsed and every conversation switch replayed to
+the browser. `SubagentReporter` now caps what a recorded tool-call card holds inline at
+`subagents.RESPONSE_PREVIEW_CHARS` (4,000 characters, a module constant rather than a config key: it is
+not a security control and not a capability an agent declares, so it has no natural home in
+`config.toml`). A response at or under that length is recorded exactly as before. A longer one is
+recorded as the first `RESPONSE_PREVIEW_CHARS` characters plus `response_ref` (the payload's
+`/payloads/<sha256>` reference) and `response_bytes` (the full length), with the rest of the text
+written once to `payloads_path` via `payloads.save_text`. The cap is applied where the card is
+recorded, not where it is replayed, so the frame sent live and the entry a later `send_history` replays
+are the same dict; capping only on replay would make a card change shape when the user switched away
+and back, which is worse than the size problem it would be fixing.
+
+`payloads.save_text` encodes with strict UTF-8, which raises `UnicodeEncodeError` on a Python `str`
+carrying lone surrogates, the shape upstream code leaves behind when it decoded bytes with
+`errors="surrogateescape"` (a binary file fetched as text is a realistic source). `SubagentReporter`
+treats that as a reason to skip the spill rather than let the turn fail: recording a spawn's activity
+sits on a live turn's path, so an exception there ends the turn, while falling back to the unbounded,
+pre-cap inline shape only leaves one oversized card.
+
 ## MCP
 
 All servers come from `[[mcp.server]]` at startup (`mcp.reconnect_mcp_servers` is a single pass over

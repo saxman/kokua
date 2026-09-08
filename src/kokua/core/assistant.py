@@ -96,7 +96,10 @@ class Assistant:
         # conversation's spawn_subagent reports through it, and it resolves the turn to record into
         # from a contextvar rather than from construction.
         self._subagent_reporter = SubagentReporter(
-            self._ui, model_for=config.model_for, thinking_for=config.thinking_for
+            self._ui,
+            model_for=config.model_for,
+            thinking_for=config.thinking_for,
+            payloads_path=config.payloads_path,
         )
         self._scheduler = scheduler
         self._store = store

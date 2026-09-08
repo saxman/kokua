@@ -289,6 +289,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer
     muted, and switching in later shows the work. A round the worker's own loop injected shows inside
     the card too, naming which one it was and quoting the prompt, so a worker that hit the round cap
     reads as an explained outcome rather than an answer that came back thinner for no visible reason.
+  - **An oversized tool response is recorded as a preview plus a reference, not held whole.** A PDF
+    fetched as text put 7.8 MB into a single recorded tool-call card, and 51.9 MB of one developer's
+    56.8 MB session file was this one field, re-parsed on every store read and replayed to the browser
+    on every conversation switch. `core/subagents.py` now caps what it keeps inline in a card at
+    `RESPONSE_PREVIEW_CHARS` (4,000 characters, a module constant rather than a config key: it is not
+    a security control and not a capability an agent declares). A response over that length is
+    recorded as the first `RESPONSE_PREVIEW_CHARS` characters, a `response_ref` (a `/payloads/<sha256>`
+    reference, see "Payloads" below), and `response_bytes` (the full length); the rest is written once
+    to `payloads_path`. The cap applies where the card is recorded, not where it is replayed, so a
+    reload never shows a card shaped differently than the one shown live.
   - **Rows carry a localized datetime caption**, revealed on hover (full precision in its tooltip) so
     the transcript is not dated line by line. Every kind of block carries it the same way: at the right
     edge of the row, on the block's first line, so the captions form one column down the page. On a
@@ -1177,6 +1187,15 @@ alone. The case that does cost something is a configured MCP server, which conne
   `GET /images/<name>`. A conversation keeps only a short `/images/<name>` reference, so the session
   store stays small; the bytes are re-inlined as base64 only when a turn is sent to the model, since a
   localhost URL is not fetchable by the provider.
+
+### Payloads
+
+- `payloads.py` is the same content-addressed shape as `images.py`, for oversized text instead of
+  image bytes. A payload is written under `data/payloads/` named by the sha256 of its UTF-8 bytes (so
+  identical text is stored once), served at `GET /payloads/<sha256>`, and referenced from session
+  metadata as `/payloads/<sha256>` rather than held inline. The one caller today is the sub-agent
+  reporter (see "An oversized tool response..." under Conversations and turns, above); other oversized
+  text a future feature wants to keep out of `sessions.json` can reuse it the same way.
 
 ### Security
 
