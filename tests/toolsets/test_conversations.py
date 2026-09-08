@@ -81,7 +81,7 @@ async def test_list_newest_first_with_counts_and_marks(tmp_path):
     lines = output.splitlines()
 
     assert [line.split()[1] for line in lines] == ["cccccccc3", "bbbbbbbb2", "aaaaaaaa1"]
-    assert "2 messages" in lines[1]
+    assert "2 stored messages" in lines[1]
     assert "(current)" in lines[0] and book.active_id == "cccccccc3"  # newest is adopted at startup
     assert "(current)" not in lines[1] and "(current)" not in lines[2]
     assert "(turn in progress)" in lines[2]
@@ -107,6 +107,32 @@ async def test_list_limit_clamped_and_reports_hidden(tmp_path):
 async def test_list_untitled_conversation_shows_the_placeholder(tmp_path):
     output = await _tools(_book(tmp_path, _session("c1")))["list_conversations"]()
     assert "New conversation" in output
+
+
+async def test_list_reports_the_raw_stored_count_not_the_readable_one(tmp_path):
+    """``list_conversations`` reads ``summary.message_count``, the raw stored count, not
+    ``len(readable_messages(...))``: a system message and a tool result each count here but neither
+    counts as something a person said or read, so the two numbers can diverge a lot on a real
+    conversation. Pinning the raw number (and the "stored messages" wording next to it) is what keeps
+    that divergence from silently drifting back to the smaller, misleading count.
+    """
+    book = _book(
+        tmp_path,
+        _session(
+            "divergent1",
+            title="Has tool calls",
+            messages=[
+                _said("system", "guidance"),
+                _said("user", "hi"),
+                {"role": "tool", "tool_call_id": "c1", "content": "flight data"},
+                _said("assistant", "hello"),
+            ],
+        ),
+    )
+    output = await _tools(book)["list_conversations"]()
+
+    assert "4 stored messages" in output  # the raw count: readable_messages would report 2
+    assert "2 stored messages" not in output
 
 
 # --- read_conversation -----------------------------------------------------------------------------

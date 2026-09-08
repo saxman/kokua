@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.28.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.29.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -15,13 +15,14 @@ declared version already reads new enough while the code behind it predates the 
 string of an editable install says what the branch claims, not what it contains.
 
 The probe covers exactly one surface at a time: the newest one Kokua depends on, whose shape decides the
-check's shape. A name lookup answers for a symbol; a membership check answers for an entry in a published
-set whose mere existence proves nothing (``SUBAGENT_SPEC_KEYS`` shipped a release before the
-``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a checkout); a signature
-check answers for a keyword argument no ``getattr`` would notice, which is the shape in force today and
-three times before, when it was ``SkillManager(include=...)``, then ``SkillAgent(script_env=...)``, then
-``WebChannel(stream_thinking=...)``. Checking one surface is no claim about the others; covering those is
-the version floor's job.
+check's shape. A name lookup answers for a symbol, the shape in force today (``SessionStore.list_summaries``)
+and twice before, for ``resolve_default_text_model`` and ``ModelRefusalError``; a membership check answers
+for an entry in a published set whose mere existence proves nothing (``SUBAGENT_SPEC_KEYS`` shipped a
+release before the ``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a
+checkout, and ``StreamingContentType`` answered the same way for ``CONTINUING``); a signature check answers
+for a keyword argument no ``getattr`` would notice, the shape three releases running before that:
+``SkillManager(include=...)``, then ``SkillAgent(script_env=...)``, then ``WebChannel(stream_thinking=...)``.
+Checking one surface is no claim about the others; covering those is the version floor's job.
 
 A capability can also be shaped so that *nothing* can probe it, and AIMU 0.17.0's headline surface is:
 the ``"thinking"`` key Kokua writes into an ``agent_types`` spec is a dict key, neither a symbol nor a
@@ -78,11 +79,37 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.28.0 is the current surface: a membership check on ``StreamingContentType.CONTINUING``, the
-phase a streamed driver yields before a round the loop itself injected rather than one the model asked
-for. The argument for that shape, and what it does and does not cover, lives in the comment above the
-``_PROBE_*`` constants below rather than here, so it is stated once instead of two places that can drift
-apart.
+AIMU 0.29.0 is the current surface, and the probe returns to a plain name lookup, the third time this
+shape has answered (``resolve_default_text_model`` at 0.21.0, ``ModelRefusalError`` at 0.27.0). The
+capability is ``SessionStore.list_summaries``: a session store's own answer to "every stored
+conversation's title, timestamp, and message count, without its messages". Kokua's sidebar, task
+ownership, and startup pointer all used to ask that question through ``ConversationBook.sessions()``,
+which cost one whole-file JSON parse per stored conversation to answer it: 4,790 ms on a 56.8 MB
+developer store, to draw a list of titles. ``ConversationBook.summaries()`` now calls
+``list_summaries()`` instead, and every caller whose question was metadata rather than message text
+(``list()``, ``sessions_for_task()``, ``most_recent_or_new()``) moved onto it in the same change;
+``sessions()`` survives only for the one caller that genuinely needs message text, the agent's
+cross-conversation search.
+
+The handle sits one level deeper than a module attribute: ``list_summaries`` is a method on
+``SessionStore``, not a name at module scope, so the probe resolves ``aimu.sessions.SessionStore``
+first and looks the symbol up there rather than on ``aimu.sessions`` itself. That is the one structural
+difference from ``resolve_default_text_model``'s single-hop lookup; the question the probe asks is still
+just "does this name exist", so nothing else has to be true of a checkout once the method is there.
+What it cannot see, and what the floor covers alone: ``SessionStore.list_summaries`` has a default
+implementation on the ABC itself (read every session, keep its metadata, drop its messages), which is
+correct on any store and slow on one where a full read is expensive, and ``TinyDBSessionStore`` overrides
+it with a query over TinyDB's own table that never builds a ``Session`` at all. A name lookup on the ABC
+is satisfied by the default alone; it cannot tell an override from an inheritance, so a
+``TinyDBSessionStore`` that stopped overriding the method, or a future store that never bothered, would
+still pass this probe while paying the old per-conversation read in silence. That is the same shape of
+gap ``events``' recursive passthrough left one level down for its own capability.
+
+AIMU 0.28.0 was the surface until 0.29.0, and it was a membership check on
+``StreamingContentType.CONTINUING``, the phase a streamed driver yields before a round the loop itself
+injected rather than one the model asked for. What it did and did not cover is the floor's job now:
+``channels/web.py`` and ``core/subagents.py`` still branch on that member by name, so an AIMU predating it
+still needs catching, which ``MINIMUM_AIMU`` does in its place.
 
 AIMU 0.27.0 was the surface until 0.28.0, and it was a plain name lookup: ``ModelRefusalError``, exported
 from ``aimu.aio`` alongside ``ModelConnectionError``. The second time this module had that shape (0.21.0's
@@ -174,44 +201,43 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 28, 0)
+MINIMUM_AIMU = (0, 29, 0)
 
-# The newest AIMU surface Kokua depends on is `StreamingContentType.CONTINUING`, the phase a streamed
-# driver yields to mark the boundary before a round the loop itself injected (a continuation nudge, a
-# forced wrap-up) rather than one the model asked for. This floor moved *for* that same phase, which
-# makes it unlike 0.27.0's: there, the floor moved for 0.26.0's tool-loop fix while the probe gripped
-# `ModelRefusalError`, a different capability from a different release. Here the reason for the floor
-# and the capability the probe grips are the same one.
+# The newest AIMU surface Kokua depends on is `SessionStore.list_summaries`, a session store's own
+# answer to "every stored conversation's title, timestamp, and message count, without its messages".
+# `ConversationBook.summaries()` calls it directly, and every caller whose question was metadata rather
+# than message text (the sidebar's `list()`, `sessions_for_task()`, `most_recent_or_new()`) moved onto
+# it in the same change; `sessions()` survives only for the one caller that needs message text, the
+# agent's cross-conversation search. Before this, answering the sidebar's question cost one whole-file
+# JSON parse per stored conversation: 4,790 ms on a 56.8 MB developer store, to draw a list of titles.
 #
-# The shape is a membership check on an enum class, the third shape this probe has taken and the second
-# time membership answered the question (0.18.0's `SUBAGENT_SPEC_KEYS` was the first). `StreamingContentType`
-# itself predates this floor by a long way, so its mere presence proves nothing; only whether it carries
-# this particular member dates a checkout, the same argument `SUBAGENT_SPEC_KEYS` made one container kind
-# over. It still needed the detour below rather than a bare `in`: a frozenset answers `in` by value
-# directly, while an enum class answers it by value too on Python 3.12 and raises `TypeError` for a plain
-# string on 3.11, which Kokua still supports, and the capability here is a member's *name*, not its
-# value.
+# The shape is a name lookup, the third time this probe has taken that shape (`resolve_default_text_model`
+# at 0.21.0, `ModelRefusalError` at 0.27.0), and for the same reason both of those were: the capability is
+# the export itself, so asking "does this name exist" is exactly the question that matters. It differs
+# from either in one structural way: `list_summaries` is a method on `SessionStore`, not a name at module
+# scope, so the probe resolves `aimu.sessions.SessionStore` first and looks the symbol up there.
+# `_PROBE_CLASS` names that intermediate holder; every earlier probe leaves it unset (`None`), and the
+# lookup runs exactly as before, straight off the module.
 #
-# It is a genuine silent-degradation case, the kind this module exists to catch. Kokua constructs
-# nothing differently against an older AIMU: `channels/web.py` and `core/subagents.py` simply never see
-# the phase, so no boundary is ever reported anywhere and nothing raises.
+# What this probe cannot see, and what the floor covers alone: `SessionStore.list_summaries` has a
+# default implementation on the ABC itself (read every session, keep its metadata, drop its messages),
+# correct on any store and slow on one where a full read is expensive, and `TinyDBSessionStore` overrides
+# it with a query over TinyDB's own table that never builds a `Session` at all. A name lookup on the ABC
+# is satisfied by the default alone; it cannot tell an override from an inheritance, so a
+# `TinyDBSessionStore` that stopped overriding the method, or a future store that never bothered, would
+# still pass this probe while paying the old per-conversation read in silence. The same shape of gap
+# `events`' recursive passthrough left one level down for its own capability.
 #
-# What this probe cannot see, and what the floor covers alone: whether *both* streamed drivers emit the
-# chunk, and whether *both* injection kinds (a continuation nudge and a forced wrap-up) do. A checkout
-# carrying the member but wired to only one driver, or emitting it for only one injection kind, still
-# passes this probe, the same kind of gap `events`' recursive passthrough left one level down for its
-# own capability. The other capability 0.28.0 brought, the `"max_iterations"` spec key, is the floor's
-# job for the reason the module docstring gives: an older AIMU rejects that key loudly on its own, so
-# it never needed the one probe slot the way a silent phase does.
-#
-# `make_async_subagent_tool(events=...)` was this probe's surface while 0.25.0 was the floor,
-# `make_command_tool` (a name lookup) before that, and `ModelRefusalError` (a name lookup) while 0.27.0
-# was the floor; all three are the floor's responsibility now, as everything this probe has ever pointed
-# at eventually becomes.
-_PROBE_MODULE = "aimu.models"
-_PROBE_SYMBOL = "StreamingContentType"
+# `StreamingContentType.CONTINUING` (a membership check) was this probe's surface while 0.28.0 was the
+# floor, `make_async_subagent_tool(events=...)` (a signature check) before that while 0.25.0 was the
+# floor, `make_command_tool` (a name lookup) before that, and `ModelRefusalError` (a name lookup) while
+# 0.27.0 was the floor; all four are the version floor's responsibility now, as everything this probe has
+# ever pointed at eventually becomes.
+_PROBE_MODULE = "aimu.sessions"
+_PROBE_CLASS: Optional[str] = "SessionStore"
+_PROBE_SYMBOL = "list_summaries"
 _PROBE_PARAMETER: Optional[str] = None
-_PROBE_MEMBER: Optional[str] = "CONTINUING"
+_PROBE_MEMBER: Optional[str] = None
 
 
 class AimuVersionError(RuntimeError):
@@ -261,7 +287,14 @@ def require_aimu() -> None:
     except ImportError as e:
         raise AimuVersionError(_message(f"{_PROBE_MODULE} could not be imported ({e})")) from None
     where = getattr(module, "__file__", "an unknown path")
-    probed = getattr(module, _PROBE_SYMBOL, None)
+    # Most probes look `_PROBE_SYMBOL` up directly on the module. `list_summaries` sits one level
+    # deeper, on `SessionStore`, so `_PROBE_CLASS` names that intermediate holder when the symbol lives
+    # on a class rather than the module itself; every earlier probe leaves it unset and this runs exactly
+    # as before, straight off the module.
+    holder = module
+    if _PROBE_CLASS is not None:
+        holder = getattr(module, _PROBE_CLASS, None)
+    probed = getattr(holder, _PROBE_SYMBOL, None) if holder is not None else None
     if probed is None:
         raise AimuVersionError(
             _message(

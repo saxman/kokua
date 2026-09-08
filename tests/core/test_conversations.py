@@ -379,8 +379,8 @@ async def test_list_projects_task_id_and_leaves_it_none_for_a_chat(tmp_path):
     assert by_id[assistant._active_id]["task_id"] is None
 
 
-async def test_sessions_backs_list_and_shares_its_ordering(tmp_path):
-    """``sessions()`` is the single store-walk-and-order seam; ``list()`` is a projection of it, so the
+async def test_summaries_backs_list_and_shares_its_ordering(tmp_path):
+    """``summaries()`` is the single store-walk-and-order seam; ``list()`` is a projection of it, so the
     two can never disagree about recency."""
     assistant = await Assistant.create(
         _config(tmp_path), FakeChannel(), client_factory=lambda cid: MockAsyncModelClient(["a"])
@@ -390,8 +390,38 @@ async def test_sessions_backs_list_and_shares_its_ordering(tmp_path):
     await assistant._handle(ChannelMessage(text="second chat", channel="fake"), conversation_id=assistant._active_id)
 
     book = assistant._book
-    assert [session.key for session in book.sessions()] == [item["id"] for item in book.list()]
-    assert len(book.sessions()) == 2
+    assert [summary.key for summary in book.summaries()] == [item["id"] for item in book.list()]
+    assert len(book.summaries()) == 2
+
+
+async def test_listing_conversations_does_not_read_transcripts(tmp_path, monkeypatch):
+    """The sidebar's question is about metadata, so it costs no transcript reads.
+
+    On a 56.8 MB store this was 4,790 ms per switch: one whole-file parse per stored conversation to
+    render a list of titles.
+    """
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    book = assistant._book
+    book.create()
+    book.create()
+
+    reads = []
+    original_get = book._store.get
+    monkeypatch.setattr(book._store, "get", lambda key: (reads.append(key), original_get(key))[1])
+
+    listed = book.list()
+
+    assert len(listed) == 3
+    assert reads == []
+    assert [item["id"] for item in listed] == [s.key for s in book.summaries()]
+
+
+async def test_summaries_are_most_recently_updated_first(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    book = assistant._book
+    newest = book.create()
+
+    assert book.summaries()[0].key == newest
 
 
 def test_resolve_accepts_a_unique_prefix_but_not_an_ambiguous_or_short_one(tmp_path):

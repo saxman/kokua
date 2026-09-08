@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -57,6 +57,17 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   ordinary message as the end of a turn, so a notice on either side of that gap is lost or leaves a
   live turn reading as idle. The three words are reserved from a workflow's command at startup, exactly
   as `/stop` and `/diag` already were.
+- **Listing conversations no longer reads their transcripts.** The sidebar, task ownership, and the
+  startup pointer only ever asked about a conversation's title, timestamp, and message count, but
+  `ConversationBook.sessions()` answered that by fetching every stored session in full: one whole-file
+  JSON parse per conversation, 4,790 ms on a 56.8 MB real store just to draw a list of titles. The new
+  `ConversationBook.summaries()` calls AIMU's `SessionStore.list_summaries()` instead, which
+  `TinyDBSessionStore` answers from its own table without building a `Session` at all, and `list()`,
+  `sessions_for_task()`, and `most_recent_or_new()` all moved onto it. `sessions()` survives for the one
+  caller that genuinely needs message text, the agent's cross-conversation search; the `list_conversations`
+  tool's message count is now the raw stored count (including tool results and the loop's own injected
+  turns) rather than the filtered, human-readable one, so its wording says "stored messages" to keep the
+  two from being confused. Needs `aimu>=0.29.0`; see "Diagnostics and error reporting" below.
 - **Per-conversation agents.** Each conversation owns its AIMU `SkillAgent` and model client, built
   lazily and held in a bounded LRU registry (`agent_cache_cap`, default 8). Memory and documents stay
   shared across conversations.
@@ -1209,7 +1220,7 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.28.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.29.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -1238,9 +1249,22 @@ notice on startup.
   `StreamingContentType.__members__` rather than a bare `in`, because `in` on an enum compares values on
   Python 3.12 and raises `TypeError` on 3.11, where the capability here is a member's name, not its
   value. 0.28.0's other capability, the `"max_iterations"` entry in `SUBAGENT_SPEC_KEYS` behind a
-  per-agent tool-loop cap, is the floor's job instead: that key set is closed and checked when a spawn
-  tool is built, so an AIMU predating 0.28.0 raises `ValueError` naming it at startup with or without a
-  probe, and the one slot goes to the capability that would otherwise fail silently.
+  per-agent tool-loop cap, was the floor's job instead: that key set is closed and checked when a spawn
+  tool is built, so an AIMU predating 0.28.0 raised `ValueError` naming it at startup with or without a
+  probe, and the one slot went to the capability that would otherwise fail silently. Today the floor is
+  0.29.0, and the probe returns to a plain name lookup, the third time (`resolve_default_text_model`,
+  then `ModelRefusalError`, now this): `aimu.sessions.SessionStore.list_summaries`, a session store's
+  own answer to "every stored conversation's title, timestamp, and message count, without its
+  messages", which is what `ConversationBook.summaries()` calls so the sidebar, task ownership, and the
+  startup pointer stop paying one whole-file parse per stored conversation just to draw a list of
+  titles (see "Conversations and turns" below). The one wrinkle on the usual name lookup: the symbol
+  lives on `SessionStore`, not at module scope, so the probe resolves the class first and looks the
+  method up there. What it cannot see is whether a concrete store still bothers to override the
+  default: the ABC's own `list_summaries` is correct but slow, `TinyDBSessionStore`'s override is what
+  makes it fast, and a name lookup on the ABC is satisfied by either, so a store that stopped
+  overriding it would still pass while paying the old cost in silence; `StreamingContentType.CONTINUING`
+  is the floor's job now, the same way every earlier probe surface became the floor's job once a newer
+  one took the slot.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
   halves of that one decision cannot drift.

@@ -200,6 +200,30 @@ Consequences for working in this repo:
   silently. Worth writing down, because a probe that overclaims is worse than one that covers less. The
   global tier needs nothing either: `[assistant].max_iterations` rides a factory argument that has existed
   since 0.12.0, so only the per-agent tier ever depended on 0.28.0.
+  **AIMU 0.29.0 is the current floor, and the probe returns to a plain name lookup, the third time this
+  shape has answered (`resolve_default_text_model` first, `ModelRefusalError` second): the capability is
+  `aimu.sessions.SessionStore.list_summaries`, a session store's own answer to "every stored
+  conversation's title, timestamp, and message count, without its messages."** Kokua's sidebar, task
+  ownership, and startup pointer used to ask that question through `ConversationBook.sessions()`, which
+  cost one whole-file JSON parse per stored conversation: 4,790 ms on a 56.8 MB developer store, to draw
+  a list of titles. `ConversationBook.summaries()` now calls `list_summaries()` instead, and every
+  caller whose question was metadata rather than message text (`list()`, `sessions_for_task()`,
+  `most_recent_or_new()`) moved onto it in the same change; `sessions()` survives only for the one
+  caller that genuinely needs message text, the agent's cross-conversation search. The one wrinkle on a
+  plain name lookup: `list_summaries` is a method on `SessionStore`, not a name at module scope, so the
+  probe resolves `aimu.sessions.SessionStore` first and looks the symbol up there rather than on
+  `aimu.sessions` itself, which is a structural difference from `resolve_default_text_model`'s
+  single-hop lookup and not a different shape, since the question asked is still just "does this name
+  exist." What that leaves to the floor: `SessionStore.list_summaries` has a default implementation on
+  the ABC itself (read every session, keep its metadata, drop its messages), correct on any store and
+  slow on one where a full read is expensive, and `TinyDBSessionStore` overrides it with a query over
+  TinyDB's own table that never builds a `Session` at all. A name lookup on the ABC is satisfied by the
+  default alone, so it cannot tell an override from an inheritance; a `TinyDBSessionStore` that stopped
+  overriding the method, or a future store that never bothered, would still pass this probe while
+  paying the old per-conversation read in silence, the same shape of gap `events`' recursive
+  passthrough left one level down for its own capability. `StreamingContentType.CONTINUING` is the
+  floor's job now, exactly as `ModelRefusalError` and `make_async_subagent_tool(events=...)` became the
+  floor's job when the probe moved past each of them in turn.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is
