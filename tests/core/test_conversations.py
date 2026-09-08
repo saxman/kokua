@@ -40,11 +40,34 @@ async def test_turn_persists_to_active_session_with_title(tmp_path):
     assert stored.metadata["title"] == "plan my trip to Kauai"
 
 
-async def test_history_returns_active_session_messages(tmp_path):
+async def test_history_view_returns_active_session_messages_and_metadata(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
     await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
-    assert assistant.history == assistant._session.messages
-    assert any(m.get("content") == "hello" for m in assistant.history)
+    messages, metadata = assistant.history_view()
+    assert messages == assistant._session.messages
+    assert metadata == assistant._session.metadata
+    assert any(m.get("content") == "hello" for m in messages)
+
+
+async def test_history_view_reads_the_session_once(tmp_path, monkeypatch):
+    """One repaint costs one store read.
+
+    `history` and `history_metadata` used to fetch the session separately, which both doubled the
+    cost and left two independent snapshots with nothing saying they must be read together.
+    """
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["ok"]))
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    reads = []
+    original_get = assistant._store.get
+    monkeypatch.setattr(assistant._store, "get", lambda key: (reads.append(key), original_get(key))[1])
+
+    messages, metadata = assistant.history_view()
+
+    assert reads == [assistant._active_id]
+    assert any(m.get("content") == "hello" for m in messages)
+    assert metadata["title"]
+    assert not hasattr(assistant, "history_metadata")
 
 
 async def test_fresh_start_has_empty_active_session(tmp_path):

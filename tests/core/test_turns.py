@@ -32,7 +32,7 @@ async def test_assistant_handles_message(tmp_path):
     await assistant._handle(ChannelMessage(text="do a thing", channel="fake"), conversation_id=assistant._active_id)
 
     assert channel.sent == ["Sure, done."]
-    assert assistant.history  # persisted at least the turn
+    assert assistant.history_view()[0]  # persisted at least the turn
 
 
 async def test_assistant_proactive_message(tmp_path):
