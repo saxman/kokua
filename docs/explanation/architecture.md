@@ -1046,6 +1046,15 @@ treats that as a reason to skip the spill rather than let the turn fail: recordi
 sits on a live turn's path, so an exception there ends the turn, while falling back to the unbounded,
 pre-cap inline shape only leaves one oversized card.
 
+An entry carrying `response_ref` renders in `app.js` exactly like any other, plus one control below
+the preview: "Show full response" with `response_bytes` formatted as KB or MB. Activating it fetches
+the reference and swaps the fetched text in for the preview, once; a second activation is a no-op
+because the control is gone by then. The fetched text is exactly as untrusted as the preview already
+was (someone else's tool result), so it lands the same way the preview does, as a text node rather
+than markup. A fetch can fail, since payloads are never garbage collected but a user can clear the
+folder by hand; that leaves the preview in place and turns the control into a short disabled note
+instead of a button that would only fail again.
+
 ## MCP
 
 All servers come from `[[mcp.server]]` at startup (`mcp.reconnect_mcp_servers` is a single pass over

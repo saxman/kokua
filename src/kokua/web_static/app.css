@@ -312,6 +312,10 @@ header { display: flex; align-items: center; justify-content: space-between; gap
   color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 4px;
   cursor: pointer; }
 .tool-output .output-more:hover { text-decoration: underline; }
+/* A fetch of a spilled payload failed (missing or unreadable file): the control becomes a disabled
+   note instead of a second button, since retrying would hit the same file. */
+.tool-output .output-more.output-error { color: var(--danger); border-color: transparent; padding-left: 0;
+  cursor: default; }
 .subagent[data-status="running"] .fold-metric { font-style: italic; }
 /* A spawn card stands in for the `spawn_subagent` tool block the server suppresses (see
    WebChannel.send_frame), so its header line and argument line carry the tool block's monospace

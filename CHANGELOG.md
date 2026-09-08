@@ -298,7 +298,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer
     recorded as the first `RESPONSE_PREVIEW_CHARS` characters, a `response_ref` (a `/payloads/<sha256>`
     reference, see "Payloads" below), and `response_bytes` (the full length); the rest is written once
     to `payloads_path`. The cap applies where the card is recorded, not where it is replayed, so a
-    reload never shows a card shaped differently than the one shown live.
+    reload never shows a card shaped differently than the one shown live. The card renders the preview
+    plus a "Show full response" control naming the size in KB or MB; activating it fetches the
+    reference and swaps the full text in for the preview, once, and a fetch that fails (the file was
+    cleared by hand; payloads are never garbage collected) leaves the preview in place with a short
+    note instead of a control that would only fail again.
   - **Rows carry a localized datetime caption**, revealed on hover (full precision in its tooltip) so
     the transcript is not dated line by line. Every kind of block carries it the same way: at the right
     edge of the row, on the block's first line, so the captions form one column down the page. On a

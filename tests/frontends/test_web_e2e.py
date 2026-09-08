@@ -15,6 +15,7 @@ those aren't installed, so the default mock-only suite stays green without them.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -857,6 +858,106 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(thinking).not_to_have_class(re.compile(r"\bcollapsed\b"))
     expect(thinking.locator(".fold-body")).to_contain_text("fetch each page")
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
+
+
+def _seed_subagent_tool_response(config, *, response, response_ref=None, response_bytes=None):
+    """A one-tool-call sub-agent conversation, with the append shape `core/subagents.py` records
+    for a tool result (optionally oversized, carrying `response_ref`/`response_bytes`)."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    append = {"kind": "tool", "name": "get_webpage", "arguments": {"url": "u"}, "response": response}
+    if response_ref is not None:
+        append["response_ref"] = response_ref
+        append["response_bytes"] = response_bytes
+    store = TinyDBSessionStore(str(config.sessions_path))
+    store.save(
+        Session(
+            key="seeded",
+            messages=[{"role": "user", "content": "fetch that page"}],
+            metadata={
+                "title": "seeded",
+                "created_at": "2026-08-10T00:00:00",
+                "updated_at": "2026-08-10T00:00:00",
+                "subagent": {
+                    "0": [
+                        {"id": "r-1", "role": "researcher", "task": "fetch it", "status": "running"},
+                        {"id": "r-1", "append": append},
+                        {"id": "r-1", "status": "done"},
+                    ]
+                },
+            },
+        )
+    )
+
+
+def _open_nested_tool_output(page):
+    """Drill from the top-level spawn card down to its tool entry's own output foldable, the same
+    three clicks every nested-tool test needs: the card, then the tool row, then the output row."""
+    card = page.locator(".bubble.subagent")
+    card.locator("> .fold-header").click()
+    tool = card.locator("> .fold-body > .bubble.tool")
+    tool.locator("> .fold-header").click()
+    output = tool.locator(".tool-output")
+    output.locator("> .fold-header").click()
+    return output
+
+
+def test_subagent_tool_response_previews_and_expands_on_request(page, live_server):
+    """A sub-agent tool response too large to record whole (core/subagents.py's RESPONSE_PREVIEW_CHARS)
+    arrives with a `response_ref` alongside its truncated `response`. The card shows the truncation
+    plus a control naming the full size; activating it fetches the payload and swaps it in, once."""
+    preview = "P" * 4000
+    full = preview + "T" * 16000  # 20,000 bytes total, past the preview
+    digest = hashlib.sha256(full.encode()).hexdigest()
+
+    def seed(config):
+        config.payloads_path.mkdir(parents=True, exist_ok=True)
+        (config.payloads_path / digest).write_text(full, encoding="utf-8")
+        _seed_subagent_tool_response(
+            config, response=preview, response_ref=f"/payloads/{digest}", response_bytes=len(full)
+        )
+
+    payload_requests: list[str] = []
+    url = live_server(delay=0.0, seed=seed)
+    page.on("request", lambda r: payload_requests.append(r.url) if "/payloads/" in r.url else None)
+    _open(page, url)
+
+    output = _open_nested_tool_output(page)
+    text = output.locator(".output-text")
+    expand = output.locator(".output-more")
+    expect(text).to_have_text(preview)
+    # 20,000 / 1024 rounds to 20 KB.
+    expect(expand).to_have_text("Show full response (20 KB)")
+
+    expand.click()
+    expect(text).to_have_text(full)
+    expect(output.locator(".output-more")).to_have_count(0)
+    assert len(payload_requests) == 1, "a second activation must not re-fetch"
+
+
+def test_subagent_tool_response_expand_failure_leaves_the_preview_in_place(page, live_server):
+    """Payloads are never garbage collected, but a user can clear the folder by hand, so the
+    reference can be real and the file gone. A failed fetch must not blank the card: the preview
+    stays, and a short note replaces the control rather than a button that would only fail again."""
+    preview = "P" * 4000
+
+    def seed(config):
+        _seed_subagent_tool_response(
+            config, response=preview, response_ref="/payloads/" + "0" * 64, response_bytes=500_000
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+
+    output = _open_nested_tool_output(page)
+    text = output.locator(".output-text")
+    expand = output.locator(".output-more")
+    # 500,000 / 1024 rounds to 488 KB.
+    expect(expand).to_have_text("Show full response (488 KB)")
+
+    expand.click()
+    expect(expand).to_have_text("could not load full response")
+    expect(expand).to_be_disabled()
+    expect(text).to_have_text(preview)
 
 
 def test_a_cards_injected_round_says_the_cap_was_hit_and_quotes_the_prompt(page, live_server):
