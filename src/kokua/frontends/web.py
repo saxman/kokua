@@ -247,6 +247,18 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             return Response(status_code=404)
         return FileResponse(path)
 
+    async def payload(request):
+        # Serve a stored oversized sub-agent tool response. Same traversal guard as image and
+        # download; nothing outside payloads_path is reachable. Referenced by the page as
+        # /payloads/<name>, and fetched only when a reader expands a card.
+        name = request.path_params["name"]
+        if name != Path(name).name:
+            return Response(status_code=404)
+        path = config.payloads_path / name
+        if not path.is_file():
+            return Response(status_code=404)
+        return FileResponse(path, media_type="text/plain; charset=utf-8")
+
     async def ws_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
         if busy["active"]:
@@ -537,6 +549,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             Route("/", index),
             Route("/download/{name:str}", download),  # generated files (e.g. markdown_to_pdf PDFs)
             Route("/images/{name:str}", image),  # uploaded + generated images
+            Route("/payloads/{name:str}", payload),  # oversized sub-agent tool responses
             Route("/fonts/{name:str}", static_font),  # vendored KaTeX woff2 fonts
             Route("/{name:str}", static_asset),  # vendored marked / purify / katex js + css
             WebSocketRoute("/ws", ws_endpoint),

@@ -12,6 +12,7 @@ app-written) and a single ``data/`` directory holding only content (conversation
         memory/
         documents/
         skills/
+        payloads/
 
 Only the root, ``data/``, and ``config.toml`` live here, because those three are needed to *find*
 the settings. Every leaf below ``data/`` is a derived property on ``AssistantConfig``
