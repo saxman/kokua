@@ -603,6 +603,7 @@ $KOKUA_HOME/
     documents/           the document store
     skills/              installed skills
     images/              uploaded and generated images, served at /images
+    payloads/            oversized sub-agent tool responses, served at /payloads
     downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
     logs/kokua.log       the rotating diagnostic log
 ```

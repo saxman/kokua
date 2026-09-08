@@ -24,6 +24,7 @@ src/kokua/
   cli.py               argparse surface, CLI-over-TOML merge, `config init`, main()
   plugins.py           entry-point discovery for front ends and toolsets
   images.py            the on-disk image store and the /images/<name> reference
+  payloads.py          the on-disk store for oversized tool responses and the /payloads/<name> reference
   logging_setup.py     rotating file log + a SIGUSR1 thread-stack dump
   transcript_export.py render_markdown: a saved conversation as Markdown a person can read and judge,
                         imports no channel and no front end, so the CLI export works without `web`
@@ -443,10 +444,16 @@ snapshot opens -- `turn_running` flags unsaved messages, and the active conversa
 one whose current turn the model should read out of its own context. A test constructs a book with no
 registry bound, so any accidental `agent_for` path fails rather than passing quietly.
 
-`ConversationBook.sessions()` is the single place the store's key-then-get walk and the `updated_at`
-ordering live; `list()` projects it and `most_recent_or_new` takes its head. It costs one store read per
-conversation, which is already what a sidebar push costs. A bulk read belongs in AIMU's store, and this
-is the seam it would land behind.
+`ConversationBook.summaries()` is the single place the store's bulk-metadata read and the `updated_at`
+ordering live: one call to `list_summaries()`, not one `get()` per stored conversation. `list()` projects
+it into the shape the sidebar wants, and `most_recent_or_new` (and `cli.py`'s `_export`, for `kokua
+export latest`) takes its head and fetches only that one winning conversation's messages with a single
+`get`. That is what makes a switch, a sidebar repaint, or an export independent of how many other
+conversations are stored: none of them costs more than the one conversation actually being shown.
+`sessions()` is the one method still paying for every conversation's messages, because it is the one
+question that genuinely needs all of them: `search_conversations` has to read what was actually said in
+each conversation to match a query against it, ids belong on `matching_ids`/the store's `list_keys`
+instead.
 
 ### Analyzing another conversation
 
@@ -1004,8 +1011,8 @@ built out of bounded parts.
 
 Everything lives under `~/.kokua` (override with `KOKUA_HOME`). `config.toml` sits at the root;
 `data/` holds only content: `sessions.json`, `skills/`, `memory/`, `documents/`, `downloads/`,
-`images/`. Scheduled tasks are the one declared, user-editable exception to that split: they live in
-`config.toml` as `[scheduling.task.<name>]` tables, not under `data/`.
+`images/`, `payloads/`. Scheduled tasks are the one declared, user-editable exception to that split:
+they live in `config.toml` as `[scheduling.task.<name>]` tables, not under `data/`.
 
 ## Images
 
@@ -1039,12 +1046,15 @@ recorded, not where it is replayed, so the frame sent live and the entry a later
 are the same dict; capping only on replay would make a card change shape when the user switched away
 and back, which is worse than the size problem it would be fixing.
 
-`payloads.save_text` encodes with strict UTF-8, which raises `UnicodeEncodeError` on a Python `str`
-carrying lone surrogates, the shape upstream code leaves behind when it decoded bytes with
-`errors="surrogateescape"` (a binary file fetched as text is a realistic source). `SubagentReporter`
-treats that as a reason to skip the spill rather than let the turn fail: recording a spawn's activity
-sits on a live turn's path, so an exception there ends the turn, while falling back to the unbounded,
-pre-cap inline shape only leaves one oversized card.
+`payloads.save_text` can fail two independent ways, both of which `SubagentReporter` treats as a reason
+to skip the spill rather than let the turn fail. Encoding with strict UTF-8 raises `UnicodeEncodeError`
+on a Python `str` carrying lone surrogates, the shape upstream code leaves behind when it decoded bytes
+with `errors="surrogateescape"` (a binary file fetched as text is a realistic source). Separately, the
+write itself can fail on its own terms (a full disk, a permissions problem, a `payloads_path` that
+cannot be created), raising `OSError`; before this cap existed, the tool-calling path never touched
+disk at all, so this callback did not previously depend on a write succeeding. Either way, recording a
+spawn's activity sits on a live turn's path, so an exception there ends the turn, while falling back to
+the unbounded, pre-cap inline shape only leaves one oversized card.
 
 An entry carrying `response_ref` renders in `app.js` exactly like any other, plus one control below
 the preview: "Show full response" with `response_bytes` formatted as KB or MB. Activating it fetches
@@ -1334,8 +1344,9 @@ Grouping a task's conversations under it happens **on the page**, not in the cor
 rename has to move that stamp too: `update_scheduled_task`'s `new_name` path calls
 `ConversationBook.retag_task` to re-point every conversation the old name owned, right after the table
 itself is renamed, which is what lets the sidebar keep a task's history nested under it across a rename.
-`ConversationBook.list()` projects `task_id`, but nothing is filtered there -- the agent's read-only
-conversation tools walk `sessions()` and still see every conversation. The page nests a conversation under a task when its `task_id` matches a task *currently in
+`ConversationBook.list()` projects `task_id`, but nothing is filtered there: `list_conversations` walks
+`summaries()` (through `list()`) and still sees every conversation, task-minted or not. The page nests a
+conversation under a task when its `task_id` matches a task *currently in
 the list*. Requiring the task to be present is what makes
 deleting a task return its conversations to the chat list instead of hiding them: keying on `task_id`
 alone would leave an orphan unreachable from the sidebar. Because the nesting is client-side, a firing's

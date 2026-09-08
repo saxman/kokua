@@ -316,7 +316,7 @@ model's context on every configuration question. A new or changed key goes in bo
 
 ```
 src/kokua/
-  cli.py  plugins.py  images.py  logging_setup.py  transcript_export.py  config.example.toml  web_static/
+  cli.py  plugins.py  images.py  payloads.py  logging_setup.py  transcript_export.py  config.example.toml  web_static/
   core/         assistant (composition root + serve loop), conversations, turns, interaction,
                 settings_runtime, diagnostics, build, agents (build_registry, validate_agents, prompt
                 assembly, delegation), agent_registry, turn_gate, turn_registry, messages, titles,

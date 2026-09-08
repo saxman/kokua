@@ -20,8 +20,9 @@ and twice before, for ``resolve_default_text_model`` and ``ModelRefusalError``; 
 for an entry in a published set whose mere existence proves nothing (``SUBAGENT_SPEC_KEYS`` shipped a
 release before the ``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a
 checkout, and ``StreamingContentType`` answered the same way for ``CONTINUING``); a signature check answers
-for a keyword argument no ``getattr`` would notice, the shape three releases running before that:
-``SkillManager(include=...)``, then ``SkillAgent(script_env=...)``, then ``WebChannel(stream_thinking=...)``.
+for a keyword argument no ``getattr`` would notice, the shape four releases running before that:
+``SkillManager(include=...)``, then ``SkillAgent(script_env=...)``, then ``WebChannel(stream_thinking=...)``,
+then ``make_async_subagent_tool(events=...)``.
 Checking one surface is no claim about the others; covering those is the version floor's job.
 
 A capability can also be shaped so that *nothing* can probe it, and AIMU 0.17.0's headline surface is:

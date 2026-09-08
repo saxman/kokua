@@ -151,10 +151,15 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer
   front ends and the CLI can call it. Two rules keep it honest: a figure nobody reported prints as "not
   reported" rather than an invented zero, and a tool payload past
   `DEFAULT_MAX_PAYLOAD_CHARS` (4000 characters) is cut with a note saying how much was removed rather
-  than shown as if it were complete (`--full` lifts the cap). `kokua export [id-or-prefix] [-o path|-]
-  [--full]` reads the session store directly and writes the file: no `Assistant`, no model client, no
-  agent, so it works with the model server down. A read that races the daemon's own persist reports the
-  store as busy rather than parsing a torn file. See
+  than shown as if it were complete (`--full` lifts the cap). A sub-agent's tool response spilled to a
+  payload file (see "Payloads" below) is a third case the cap-and-note rule alone would miss: its
+  stored preview is already `RESPONSE_PREVIEW_CHARS`, the same value as the default cap, so it would
+  read as complete either way. It is therefore always noted, naming the real size and the reference,
+  and `--full` reads the payload file back and shows the whole thing rather than the preview, falling
+  back to the preview with an explicit note if the file is gone. `kokua export [id-or-prefix]
+  [-o path|-] [--full]` reads the session store directly and writes the file: no `Assistant`, no model
+  client, no agent, so it works with the model server down. A read that races the daemon's own persist
+  reports the store as busy rather than parsing a torn file. See
   [Export a conversation](https://saxman.info/kokua/how-to/export-a-conversation/).
 - **Branch a conversation at a turn.** Every turn in the web UI carries a branch control, on the
   message that opened it and beside the delete-from-here control:
@@ -302,7 +307,10 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer
     plus a "Show full response" control naming the size in KB or MB; activating it fetches the
     reference and swaps the full text in for the preview, once, and a fetch that fails (the file was
     cleared by hand; payloads are never garbage collected) leaves the preview in place with a short
-    note instead of a control that would only fail again.
+    note instead of a control that would only fail again. The row's own collapsed header states
+    `response_bytes` when the response was spilled, not the preview's own length, so a 7.8 MB result
+    reads as its real size before the card is even opened rather than as "4,000 chars" until it is
+    expanded twice.
   - **Rows carry a localized datetime caption**, revealed on hover (full precision in its tooltip) so
     the transcript is not dated line by line. Every kind of block carries it the same way: at the right
     edge of the row, on the block's first line, so the captions form one column down the page. On a
@@ -1217,7 +1225,12 @@ alone. The case that does cost something is a configured MCP server, which conne
   the script's own docstring and `--help`. The reclaimed-bytes figure in the report is the actual
   JSON-encoded size delta (measured with the same `ensure_ascii=True` TinyDB's storage writes with),
   not a character count, since a character removed from a response could have cost up to six bytes on
-  disk as a `\uXXXX` escape.
+  disk as a `\uXXXX` escape. The default `sessions.json` and payloads directory are resolved by loading
+  `config.toml` the way `kokua` itself does, so a configured `[paths] data_dir` is honored rather than
+  silently scanning the built-in default. A `sessions_file` argument that is not the configured file
+  needs `--payloads-dir` too for a real (non-dry-run) run, or it is refused: writing `response_ref`
+  values under the default payloads directory while migrating a different file would point every
+  migrated card at blobs the app reading its own configured file would never find.
 
 ### Security
 
