@@ -20,12 +20,20 @@ Filenames are the sha256 of the text, so the same response recorded twice is sto
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Optional
 
 # The public URL prefix the web server serves payloads at, and the marker identifying a reference
 # inside stored session metadata. Kept together so both sides agree on one spelling.
 ROUTE_PREFIX = "/payloads/"
+
+# A payload's name is exactly a sha256 hex digest, which is what save_text writes and the only thing
+# that can legitimately reach reference_to_path. Matched positively rather than merely screened for
+# path separators: pathlib's own notion of "a bare basename" still lets ".." through (Path("..").name
+# is "..", not ""), so a blocklist answers only the inputs someone thought to try. This allowlist
+# instead accepts nothing that a real payload name would not already be.
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def is_reference(value: str) -> bool:
@@ -51,15 +59,16 @@ def save_text(payloads_path: Path, text: str) -> str:
 def reference_to_path(payloads_path: Path, reference: str) -> Optional[Path]:
     """The file a ``/payloads/<name>`` reference names, or None if it names none.
 
-    Returns None rather than raising for anything that is not a reference to a plain file directly
-    inside ``payloads_path``: a name carrying a path separator or a parent segment would otherwise
-    reach outside the folder, and this is the only place that check can be made once for every
-    caller.
+    Returns None for anything whose name is not exactly a sha256 hex digest, rather than merely
+    rejecting path separators: a name is only ever legitimate if ``save_text`` could have produced
+    it, so requiring that shape rules out traversal (including ``..``, which ``Path("..").name``
+    reports as ``".."`` rather than empty, so a separator-only check misses it) along with every
+    other malformed name in one place, for every caller.
     """
     if not is_reference(reference):
         return None
     name = reference[len(ROUTE_PREFIX) :]
-    if name != Path(name).name:
+    if not _DIGEST_RE.match(name):
         return None
     return payloads_path / name
 

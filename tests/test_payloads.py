@@ -46,6 +46,15 @@ def test_reference_to_path_refuses_traversal(tmp_path):
     assert payloads.reference_to_path(tmp_path, "/payloads/../config.toml") is None
     assert payloads.reference_to_path(tmp_path, "/payloads/") is None
     assert payloads.reference_to_path(tmp_path, "/elsewhere/abc") is None
+    # Path("..").name is "..", not "", so a guard checking only "name != Path(name).name" lets this
+    # one through; the digest allowlist rejects it because ".." is not 64 lowercase hex characters.
+    assert payloads.reference_to_path(tmp_path, "/payloads/..") is None
+    assert payloads.reference_to_path(tmp_path, "/payloads/.") is None
+    # Right shape (hex, no separators), wrong length: a stale or hand-typed reference, not one
+    # save_text ever produced.
+    assert payloads.reference_to_path(tmp_path, "/payloads/" + "a" * 63) is None
+    # Right length, wrong case: hexdigest() is always lowercase, so uppercase can't be a real name.
+    assert payloads.reference_to_path(tmp_path, "/payloads/" + "A" * 64) is None
 
 
 def test_route_serves_a_stored_payload(tmp_path):
