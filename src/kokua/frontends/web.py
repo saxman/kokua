@@ -23,7 +23,7 @@ from starlette.responses import FileResponse, HTMLResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from kokua import images
+from kokua import images, payloads
 from kokua.core.assistant import Assistant, ModelClientError
 from kokua.core.conversations import ID_PREFIX_MIN, ConversationNotFound, TurnInFlight, TurnNotFound
 from kokua.core.messages import derive_title
@@ -248,14 +248,15 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
         return FileResponse(path)
 
     async def payload(request):
-        # Serve a stored oversized sub-agent tool response. Same traversal guard as image and
-        # download; nothing outside payloads_path is reachable. Referenced by the page as
-        # /payloads/<name>, and fetched only when a reader expands a card.
+        # Serve a stored oversized sub-agent tool response, fetched only when a reader expands a
+        # card. Routed through payloads.reference_to_path rather than a basename check of its own:
+        # that function is the allowlist (a name is legitimate only if it is exactly the sha256
+        # save_text could have produced), documented as the check made once for every caller, so this
+        # route holding a second, separate traversal guard would be the one caller not actually using
+        # it despite claiming to.
         name = request.path_params["name"]
-        if name != Path(name).name:
-            return Response(status_code=404)
-        path = config.payloads_path / name
-        if not path.is_file():
+        path = payloads.reference_to_path(config.payloads_path, payloads.ROUTE_PREFIX + name)
+        if path is None or not path.is_file():
             return Response(status_code=404)
         return FileResponse(path, media_type="text/plain; charset=utf-8")
 

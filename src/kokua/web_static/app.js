@@ -1321,7 +1321,11 @@ function renderTool(name, args, ts, opts) {
   // has anything to show, and an "output (0 chars)" row on every such card would be noise.
   const response = opts && opts.response;
   const returned = typeof response === "string" && response;
-  const metric = returned ? `${response.length.toLocaleString()} chars` : "";
+  // A spilled response's `response` is already clamped to the preview cap, so its true size is
+  // `responseBytes` (see core/subagents.py); without this, a multi-megabyte result reads as
+  // "4,000 chars" in the collapsed row and the truth only appears once the card is opened and
+  // expanded.
+  const metric = returned ? `${(opts.responseBytes ?? response.length).toLocaleString()} chars` : "";
   const parts = { kind: "tool", payload: toolLine(name, args), metric };
   const f = addFoldable("tool", parts, { parent: opts && opts.parent }, ts);
   f.body.appendChild(document.createTextNode(toolArgs(args)));

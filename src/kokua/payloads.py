@@ -32,8 +32,10 @@ ROUTE_PREFIX = "/payloads/"
 # that can legitimately reach reference_to_path. Matched positively rather than merely screened for
 # path separators: pathlib's own notion of "a bare basename" still lets ".." through (Path("..").name
 # is "..", not ""), so a blocklist answers only the inputs someone thought to try. This allowlist
-# instead accepts nothing that a real payload name would not already be.
-_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+# instead accepts nothing that a real payload name would not already be. Anchored with ``\Z`` rather
+# than ``$``, which (outside MULTILINE mode) still matches just before a trailing newline: a name of
+# 64 hex characters plus ``"\n"`` is not a real digest, but ``$`` would call it one.
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}\Z")
 
 
 def is_reference(value: str) -> bool:

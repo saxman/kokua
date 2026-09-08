@@ -55,6 +55,9 @@ def test_reference_to_path_refuses_traversal(tmp_path):
     assert payloads.reference_to_path(tmp_path, "/payloads/" + "a" * 63) is None
     # Right length, wrong case: hexdigest() is always lowercase, so uppercase can't be a real name.
     assert payloads.reference_to_path(tmp_path, "/payloads/" + "A" * 64) is None
+    # A trailing newline is not part of any real digest, but `$` (outside MULTILINE mode) matches
+    # just before one, so a pattern anchored with `$` instead of `\Z` would wrongly accept this.
+    assert payloads.reference_to_path(tmp_path, "/payloads/" + "a" * 64 + "\n") is None
 
 
 def test_route_serves_a_stored_payload(tmp_path):
@@ -71,6 +74,13 @@ def test_route_serves_a_stored_payload(tmp_path):
     assert response.text == "the full response"
     assert client.get("/payloads/not-a-real-digest").status_code == 404
     assert client.get("/payloads/sub/evil").status_code == 404  # traversal blocked by the route converter
+
+    # The route is refused for the digest allowlist's own reason, not merely because nothing on disk
+    # happens to match: a real file at a name reference_to_path would never allow (not a sha256 hex
+    # digest) must stay unreachable even though it exists and has no path separator, the one thing a
+    # basename-only guard would have let through.
+    (config.payloads_path / "evil.txt").write_text("should never be served", encoding="utf-8")
+    assert client.get("/payloads/evil.txt").status_code == 404
 
 
 def test_payloads_path_sits_under_data_dir(tmp_path):
