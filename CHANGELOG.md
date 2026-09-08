@@ -1196,6 +1196,16 @@ alone. The case that does cost something is a configured MCP server, which conne
   metadata as `/payloads/<sha256>` rather than held inline. The one caller today is the sub-agent
   reporter (see "An oversized tool response..." under Conversations and turns, above); other oversized
   text a future feature wants to keep out of `sessions.json` can reuse it the same way.
+- **`scripts/migrate_subagent_payloads.py`** is a one-off, deletable migration for a `sessions.json`
+  written before the cap above existed: it walks every stored sub-agent tool response, spills anything
+  over `RESPONSE_PREVIEW_CHARS` to a payload file, and rewrites the entry to the same shape the live
+  recorder now writes. `--dry-run` reports what would change without touching disk; a real run backs
+  up `sessions.json` before its first write and is idempotent, so re-running it (including after an
+  interruption) changes nothing further. A response the recorder itself could not encode (a lone
+  surrogate from decoded binary content) is left inline exactly as the live recorder leaves it, counted
+  in the report rather than raised, so one unreadable entry cannot abort a migration of the rest of a
+  user's history. `--prune-orphans` is a separate pass, run only on request and never in a dry run,
+  that deletes payload files no session references.
 
 ### Security
 

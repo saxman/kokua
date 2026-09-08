@@ -267,6 +267,13 @@ toolsets/     one file per toolset, and nothing else
 Outside `src/`, the repository also carries `skills/`: Agent Skills Kokua ships as content rather than as
 Python, so they are not in the wheel. `kokua skills install` copies them into your skills folder.
 
+`scripts/` holds one-off maintenance scripts, also outside the wheel: run one by hand from a checkout,
+never as an installed command. `scripts/migrate_subagent_payloads.py` rewrites a `sessions.json`
+written before the payload-file cap in `core/subagents.py` existed, moving each oversized sub-agent
+tool response it already stored inline out to a payload file, matching what a current Kokua writes for
+a new one. It is safe to delete once every installation has run it once. Run `--dry-run` first to see
+what it would change before running it for real; it backs up `sessions.json` before its first write.
+
 The stable public import surface is `kokua.plugins`, `kokua.config`, `kokua.core`, `kokua.channels.web`, and `kokua.images`. Everything else is internal and may move.
 
 ## Resources
