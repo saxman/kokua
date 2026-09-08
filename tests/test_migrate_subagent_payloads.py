@@ -237,11 +237,26 @@ def test_main_allows_a_dry_run_without_confirmation(tmp_path, monkeypatch, capsy
 
 def test_main_runs_a_real_migration_once_confirmed(tmp_path, monkeypatch, capsys):
     sessions_path = tmp_path / "sessions.json"
+    payloads_path = tmp_path / "payloads"
     store = TinyDBSessionStore(str(sessions_path))
     store.save(_session_with_response("a", "x" * (RESPONSE_PREVIEW_CHARS * 3)))
     store.close()
 
-    monkeypatch.setattr(sys, "argv", ["migrate_subagent_payloads.py", str(sessions_path), "--confirm-kokua-stopped"])
+    # sessions_path is not the configured sessions.json (isolate_state points that at its own
+    # tmp_path/kokua-home/data/sessions.json), so a real run also has to say where the payloads
+    # belong; see test_main_refuses_a_real_run_against_an_unconfigured_sessions_file below for what
+    # happens without it.
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "migrate_subagent_payloads.py",
+            str(sessions_path),
+            "--payloads-dir",
+            str(payloads_path),
+            "--confirm-kokua-stopped",
+        ],
+    )
 
     main()
 
@@ -249,6 +264,79 @@ def test_main_runs_a_real_migration_once_confirmed(tmp_path, monkeypatch, capsys
     store = TinyDBSessionStore(str(sessions_path))
     assert "response_ref" in store.get("a").metadata["subagent"]["0"][0]["append"]
     store.close()
+    assert any(payloads_path.iterdir()), "the blob must land under the directory --payloads-dir named"
+
+
+def test_main_refuses_a_real_run_against_an_unconfigured_sessions_file_without_payloads_dir(
+    tmp_path, monkeypatch, capsys
+):
+    """The harmful case this refusal exists for: a real migration against a sessions_file that is
+    not the one Kokua is configured to read, with no --payloads-dir to say where the blobs should
+    actually go. Left unrefused, response_ref would point at the *configured* payloads directory
+    while the file being migrated is a different one: every migrated card would show "could not
+    load full response" forever, with the original text surviving only in the timestamped backup."""
+    sessions_path = tmp_path / "sessions.json"
+    store = TinyDBSessionStore(str(sessions_path))
+    store.save(_session_with_response("a", "x" * (RESPONSE_PREVIEW_CHARS * 3)))
+    store.close()
+    before = sessions_path.read_bytes()
+
+    monkeypatch.setattr(sys, "argv", ["migrate_subagent_payloads.py", str(sessions_path), "--confirm-kokua-stopped"])
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert sessions_path.read_bytes() == before
+    assert "--payloads-dir" in capsys.readouterr().err
+
+
+def test_main_allows_a_dry_run_against_an_unconfigured_sessions_file_without_payloads_dir(
+    tmp_path, monkeypatch, capsys
+):
+    """The refusal above guards a real write; a dry run never writes anything, so a preview copy
+    needs no --payloads-dir to be inspected."""
+    sessions_path = tmp_path / "sessions.json"
+    store = TinyDBSessionStore(str(sessions_path))
+    store.save(_session_with_response("a", "x" * (RESPONSE_PREVIEW_CHARS * 3)))
+    store.close()
+
+    monkeypatch.setattr(sys, "argv", ["migrate_subagent_payloads.py", str(sessions_path), "--dry-run"])
+
+    main()
+
+    assert "Tool responses moved to payload files: 1" in capsys.readouterr().out
+
+
+def test_main_honors_a_configured_data_dir(tmp_path, monkeypatch, capsys):
+    """`AssistantConfig()` built bare (the previous shape of this script) ignores `[paths] data_dir`
+    entirely, so a user who set it would have this script scan and write against a directory the
+    running app never uses. Loading config.toml the way `kokua` itself does is what makes the
+    default `sessions_file`/payloads directory follow that setting."""
+    from kokua.config import file as settings
+
+    home = tmp_path / "kokua-home"
+    custom_data = tmp_path / "custom-data"
+    home.mkdir(parents=True, exist_ok=True)
+    text = settings.example_text().replace('# data_dir = "/path/to/kokua-data"', f'data_dir = "{custom_data}"')
+    (home / "config.toml").write_text(text, encoding="utf-8")
+    monkeypatch.setenv("KOKUA_HOME", str(home))
+
+    sessions_path = custom_data / "sessions.json"
+    sessions_path.parent.mkdir(parents=True, exist_ok=True)
+    store = TinyDBSessionStore(str(sessions_path))
+    store.save(_session_with_response("a", "x" * (RESPONSE_PREVIEW_CHARS * 3)))
+    store.close()
+
+    # No sessions_file argument, so main() must resolve the configured one, which only lands under
+    # custom_data if it actually parsed [paths] data_dir rather than falling back to the bare default.
+    monkeypatch.setattr(sys, "argv", ["migrate_subagent_payloads.py", "--dry-run"])
+
+    main()
+
+    out = capsys.readouterr().out
+    assert str(sessions_path) in out
+    assert str(custom_data / "payloads") in out
+    assert "Tool responses moved to payload files: 1" in out
 
 
 def test_main_refuses_prune_orphans_with_a_custom_sessions_file(tmp_path, monkeypatch, capsys):

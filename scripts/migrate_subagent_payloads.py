@@ -9,7 +9,9 @@ of a 56.8 MB file, so this script rewrites what is already there to match the ne
 
 It is meant to be deleted once every instance of Kokua has run it once: there is no need for a
 `kokua` subcommand or a startup migration that would live in the codebase forever for a rewrite that
-only ever needs to happen once per installation.
+only ever needs to happen once per installation. Deleting it, though, also removes the only pass that
+ever prunes an orphaned payload file (`--prune-orphans`, below); if that matters to an installation,
+keep the script around rather than reaching for `rm` the moment every instance has migrated once.
 
 **Run `--dry-run` first.** It reports what would change without touching anything on disk. Once the
 numbers look right, run without `--dry-run`; the script copies `sessions.json` to a timestamped
@@ -31,6 +33,13 @@ files no session references. It never runs in a dry run, since deleting files is
 change a dry run promises not to make, and it refuses a custom sessions-file argument, since it always
 prunes against the one configured payloads directory and a sessions file that is not the real one
 (a copy made to preview the migration, say) would make it delete blobs other, real sessions still use.
+
+**The configured `sessions.json` and payloads directory are resolved the way `kokua` itself resolves
+them,** by loading `config.toml` rather than only the built-in defaults, so `[paths] data_dir` is
+honored when a user has set it (see `_load_config`). A `sessions_file` argument pointing at a copy
+made to preview the migration is still fine for `--dry-run`; for a real run, pass `--payloads-dir` too
+in that case, or the blobs would be written to the configured directory while the copy being migrated
+is not the file the app ever reads them alongside.
 """
 
 from __future__ import annotations
@@ -142,12 +151,16 @@ def _migrate_append(append: dict, payloads_path: Path, *, dry_run: bool, report:
     try:
         response.encode("utf-8")
     except UnicodeEncodeError:
-        # Mirrors SubagentReporter._tool_append's own fallback: a response that reached us already
-        # decoded with errors="surrogateescape" (a binary file fetched as text is the likely source)
-        # carries lone surrogates that strict UTF-8 cannot encode, so save_text would raise. This is
-        # a migration of the user's only copy of their history; leaving the one oversized entry
-        # inline, exactly as it always was, is the right failure mode, not aborting everything after
-        # it.
+        # The same undecodable-text case SubagentReporter._tool_append falls back on: a response
+        # that reached us already decoded with errors="surrogateescape" (a binary file fetched as
+        # text is the likely source) carries lone surrogates that strict UTF-8 cannot encode, so
+        # save_text would raise. Deliberately narrower than that fallback, though, not a mirror of
+        # it: _tool_append also catches OSError, because ending a live turn over a full disk would be
+        # worse than one inline card, but this script is a batch job over the user's only copy of
+        # their history, run once with nothing else depending on it staying up. Catching OSError here
+        # too would leave a partially migrated, silently inconsistent sessions.json on a write
+        # failure the caller never sees; letting it raise keeps every run idempotent, so re-running
+        # after fixing whatever disk problem caused it picks up exactly where it left off.
         logger.warning(
             "A stored sub-agent tool response for %r could not be written to a payload file "
             "(undecodable text); leaving it inline instead.",
@@ -265,6 +278,26 @@ def prune_orphans(sessions_path: Path, payloads_path: Path) -> int:
     return pruned
 
 
+def _load_config() -> AssistantConfig:
+    """The same ``AssistantConfig`` a real ``kokua`` invocation would resolve on this machine.
+
+    A bare ``AssistantConfig()`` skips ``config.toml`` entirely, so ``[paths] data_dir`` (a real,
+    documented setting) goes unread: every field falls back to its built-in default, honoring only
+    ``$KOKUA_HOME`` (which that default already reads) and never a data directory chosen in the file.
+    A user who set it would have this script scan and write against a directory the running app
+    never touches, reporting zero to migrate while their real, oversized ``sessions.json`` sits
+    untouched next door.
+
+    Going through :func:`kokua.cli.resolve_config` with an argument-less ``Namespace`` reruns the same
+    defaults-then-file-then-flags resolution ``kokua`` itself performs on every run, just with no CLI
+    flags of its own supplied, since this script's own argument list (``sessions_file``, ``--dry-run``,
+    ...) is unrelated to it.
+    """
+    from kokua.cli import build_arg_parser, resolve_config
+
+    return resolve_config(build_arg_parser().parse_args([]))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -297,6 +330,19 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--payloads-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Where payload files are written and read back from (default: the configured payloads "
+            "directory). Required whenever sessions_file is given and is not the configured "
+            "sessions.json itself, for a real (non-dry-run) migration: writing response_ref values "
+            "under the default directory while migrating a different sessions file would point every "
+            "migrated card at blobs the app reading that other file would never find, and the "
+            "original response text would then survive only in the timestamped backup."
+        ),
+    )
+    parser.add_argument(
         "--confirm-kokua-stopped",
         action="store_true",
         help=(
@@ -325,9 +371,27 @@ def main() -> None:
             "flag; see --help for the two specific ways a concurrent write can lose data."
         )
 
-    config = AssistantConfig()
+    config = _load_config()
     sessions_path = args.sessions_file if args.sessions_file is not None else config.sessions_path
-    payloads_path = config.payloads_path
+    payloads_path = args.payloads_dir if args.payloads_dir is not None else config.payloads_path
+
+    # A dry run only ever prints a report, so a sessions_file pointed somewhere other than the
+    # configured one costs nothing worse than a report about the wrong file. A real run is where the
+    # mismatch is destructive: response_ref values recorded under the *default* payloads directory
+    # while migrating a *different* sessions.json point at blobs the app reading that other file
+    # would never look for, so this is refused rather than silently doing the harmful thing.
+    if (
+        not args.dry_run
+        and args.sessions_file is not None
+        and args.payloads_dir is None
+        and sessions_path.expanduser().resolve() != config.sessions_path.resolve()
+    ):
+        parser.error(
+            "sessions_file is not the configured sessions.json, so writing response_ref values "
+            "under the default payloads directory would point them at blobs the app (reading its "
+            "own configured sessions file) would never find. Pass --payloads-dir to say where those "
+            "blobs should actually go, or drop sessions_file to run against the configured file."
+        )
 
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
