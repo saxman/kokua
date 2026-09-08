@@ -137,16 +137,22 @@ class SubagentReporter:
             return append
         try:
             reference = payloads.save_text(self._payloads_path, response)
-        except UnicodeEncodeError:
-            # A tool result that reached us already decoded with errors="surrogateescape" (a binary
-            # file fetched as text is the likely source) carries lone surrogates that strict UTF-8
-            # cannot encode, so save_text raises. This callback runs on a live turn's recording path,
-            # and an exception here would end the turn rather than merely leave one oversized card, so
-            # the response is kept inline, unbounded, exactly as it was before this cap existed.
+        except (UnicodeEncodeError, OSError) as exc:
+            # Two independent ways save_text can fail, both handled the same way. A tool result that
+            # reached us already decoded with errors="surrogateescape" (a binary file fetched as text
+            # is the likely source) carries lone surrogates that strict UTF-8 cannot encode, so
+            # save_text raises UnicodeEncodeError. Separately, writing to disk can fail on its own
+            # terms (a full disk, a permissions problem, a payloads directory that cannot be created),
+            # raising OSError; before this cap, the TOOL_CALLING branch never touched disk at all, so
+            # this callback did not previously depend on a write succeeding. Either way, this callback
+            # runs on a live turn's recording path, and an exception here would end the turn rather
+            # than merely leave one oversized card, so the response is kept inline, unbounded, exactly
+            # as it was before this cap existed.
             logger.warning(
-                "A sub-agent tool response for %r could not be written to a payload file "
-                "(undecodable text); recording it inline instead.",
+                "A sub-agent tool response for %r could not be written to a payload file (%s); "
+                "recording it inline instead.",
                 call.get("name"),
+                exc,
             )
             append["response"] = response
             return append

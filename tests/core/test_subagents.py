@@ -192,6 +192,67 @@ async def test_oversized_response_with_a_lone_surrogate_falls_back_to_inline(tmp
     assert not payloads_path.exists()
 
 
+async def test_a_response_of_exactly_the_threshold_stays_inline(tmp_path):
+    """The boundary itself, not just something safely past it. ``<=`` is what makes a response of
+    exactly RESPONSE_PREVIEW_CHARS keep today's shape; a suite that only ever tries sizes well past the
+    cap would stay green if that were quietly changed to ``<``, and every response of exactly the cap
+    would start spilling with nothing to catch it."""
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+    response = "x" * RESPONSE_PREVIEW_CHARS
+
+    await reporter.spawned("researcher-abc", "researcher", "look it up")
+    await reporter.chunk("researcher-abc", _tool_call("search", {"q": "kauai"}, response))
+
+    append = events[-1]["append"]
+    assert append["response"] == response
+    assert "response_ref" not in append
+    assert "response_bytes" not in append
+    assert not payloads_path.exists()
+
+
+async def test_one_character_past_the_threshold_spills(tmp_path):
+    """The other side of the same boundary: one character more than the threshold is enough to spill,
+    pinning the cap from both directions."""
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+    response = "x" * (RESPONSE_PREVIEW_CHARS + 1)
+
+    await reporter.spawned("researcher-abc", "researcher", "look it up")
+    await reporter.chunk("researcher-abc", _tool_call("search", {"q": "kauai"}, response))
+
+    append = events[-1]["append"]
+    assert append["response"] == response[:RESPONSE_PREVIEW_CHARS]
+    assert append["response_bytes"] == len(response)
+    assert payloads.read_text(payloads_path, append["response_ref"]) == response
+
+
+async def test_oversized_response_falls_back_to_inline_when_the_disk_write_fails(tmp_path, monkeypatch):
+    """Before this cap, the TOOL_CALLING branch never touched disk, so a live turn never depended on a
+    write succeeding. It does now, and a full disk, a permissions problem, or a payloads directory that
+    cannot be created are exactly the conditions under which a user least wants their turn to die, so
+    an OSError out of save_text gets the same inline fallback as the surrogate case."""
+    payloads_path = tmp_path / "payloads"
+    reporter, _channel = _reporter(payloads_path=payloads_path)
+    events = _collect()
+    response = "x" * (RESPONSE_PREVIEW_CHARS * 3)
+
+    def _raise(_payloads_path, _text):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(payloads, "save_text", _raise)
+
+    await reporter.spawned("researcher-abc", "researcher", "read the file")
+    await reporter.chunk("researcher-abc", _tool_call("get_webpage", {"url": "u"}, response))
+
+    append = events[-1]["append"]
+    assert append["response"] == response
+    assert "response_ref" not in append
+    assert "response_bytes" not in append
+
+
 async def test_generated_text_streams_chunk_by_chunk():
     """The card's text arrives live, like the parent's own answer."""
     reporter, channel = _reporter()
