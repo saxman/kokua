@@ -1454,6 +1454,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#payloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Payloads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#mcp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1966,6 +1977,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#payloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Payloads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#mcp" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2132,69 +2154,70 @@ questions -- which providers, which tools, which models support vision -- are an
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  cli.py               argparse surface, CLI-over-TOML merge, `config init`, main()
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  plugins.py           entry-point discovery for front ends and toolsets
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  images.py            the on-disk image store and the /images/&lt;name&gt; reference
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  logging_setup.py     rotating file log + a SIGUSR1 thread-stack dump
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  transcript_export.py render_markdown: a saved conversation as Markdown a person can read and judge,
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                        imports no channel and no front end, so the CLI export works without `web`
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  config.example.toml  every key, one line each (long form: docs/reference/configuration.md)
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  web_static/          the single-page web UI plus vendored marked/DOMPurify/KaTeX
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  core/          the transport-agnostic runtime
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    assistant.py         composition root + serve loop; delegates everything below
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    conversations.py     ConversationBook: store + agent cache + active pointer, and id resolution
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    transcripts.py       reading a stored conversation as text (flatten, truncate, search) or as full
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>                          replay items (replay_items), shared by the web channel's history replay and
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>                          the Markdown export
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
-</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    settings_runtime.py  SettingsApplier: read, apply live, persist
-</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    commands: /stop, /diag, and the three conversation commands are parsed inline in
-</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>              assistant._serve_channel; a workflow's own command (e.g. /plan) dispatches through
-</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>              self._workflows, built from the toolset registry
-</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    diagnostics.py       the /diag report
-</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    conversation_commands.py  what /new, /conversations, and /switch print
-</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    build.py             free functions that assemble a model client and wire one declared agent
-</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>    agents.py            assembles the registry from every provider; resolves, validates, and
-</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>                         prompts one declared agent, and builds its delegation tool
-</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>    subagents.py         SubagentReporter: sub-agent activity as display frames + recorded events
-</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>    agent_registry.py    per-conversation agent cache with LRU eviction and pinning
-</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>    turn_gate.py         writer-preferring readers-writer gate
-</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>    turn_registry.py     in-flight turn bookkeeping
-</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>    messages.py          transcript helpers: text extraction, the placeholder title, image compaction
-</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>    titles.py            the generated conversation title: one context-free model call
-</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>    errors.py            describe_error: root-cause extraction for user-facing messages
-</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>    metrics.py           TurnMetrics + record_event: what a turn cost, accumulated from AIMU's
-</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>                          ModelTurnFinished events into calls/tokens/seconds
-</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>
-</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>  config/        settings: the schema, the file, the writers
-</span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>    schema.py      AssistantConfig, AgentConfig, MCPServerConfig, the default prompt
-</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>    paths.py       the three locations that must resolve before config.toml can be read
-</span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>    file.py        TOML discovery, parsing, schema validation
-</span><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>    store.py       comment-preserving tomlkit writes, the write policy, and apply_setting
-</span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>    table.py       SettingsTable, built from CORE_RUNTIME_SETTINGS plus every toolset's declared hot
-</span><span id="__span-0-44"><a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>                   settings: the one declaration of what is changeable at runtime
-</span><span id="__span-0-45"><a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>    settings_sources.py  joins a toolset's declared settings into the table; the one module under
-</span><span id="__span-0-46"><a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>                   config/ that imports upward, so the rest of the layer stays at the bottom
-</span><span id="__span-0-47"><a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>
-</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>  workflows/     protocol.py (Workflow, WorkflowContext, WorkflowResult, is_rich), critics.py (the
-</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>                 shared context-free reviewer), planning/ (runner.py's PlanningWorkflow, prompts.py,
-</span><span id="__span-0-50"><a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>                 critics.py's thin wrappers over the shared reviewer)
-</span><span id="__span-0-51"><a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>  mcp/           servers.py (connect, attach, reconnect, runtime add/remove), auth.py (ChatOAuth)
-</span><span id="__span-0-52"><a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>  scheduling/    recurrence.py (pure schedule math), tasks.py (TaskService, over the `[scheduling.task.*]`
-</span><span id="__span-0-53"><a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>                 tables in config.toml)
-</span><span id="__span-0-54"><a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>  channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
-</span><span id="__span-0-55"><a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>  frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
-</span><span id="__span-0-56"><a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>  registry/      the machinery a toolset is built against, and no toolsets
-</span><span id="__span-0-57"><a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>    registry.py    the Toolset and Setting dataclasses, `register`, `select`, `build_tools`
-</span><span id="__span-0-58"><a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>    context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
-</span><span id="__span-0-59"><a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>  toolsets/      the named capabilities themselves, and nothing else: one file per toolset, each file
-</span><span id="__span-0-60"><a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>                 named for the toolset it declares, each exporting a module-level TOOLSET, and each
-</span><span id="__span-0-61"><a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>                 listed in pyproject.toml's kokua.toolsets entry-point table, which is the only index
-</span><span id="__span-0-62"><a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>    audio.py, compute.py, documents.py, fs.py, memory.py, misc.py, skills.py, speech.py, time.py,
-</span><span id="__span-0-63"><a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>                   transcription.py, web.py -- wrappers over AIMU's tool groups and stores
-</span><span id="__span-0-64"><a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>    capabilities.py, config.py, conversations.py, mcp.py, scheduling.py -- one Kokua subsystem's logic
-</span><span id="__span-0-65"><a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>                   each, as agent tools (capabilities wraps the registry itself)
-</span><span id="__span-0-66"><a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>    planning.py    a Workflow instead of tools: the only toolset that contributes no tool at all
-</span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>    aimu_agents.py, benchmark.py, github_backup.py, image.py -- Kokua's own, needing only the config
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  payloads.py          the on-disk store for oversized tool responses and the /payloads/&lt;name&gt; reference
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  logging_setup.py     rotating file log + a SIGUSR1 thread-stack dump
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  transcript_export.py render_markdown: a saved conversation as Markdown a person can read and judge,
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                        imports no channel and no front end, so the CLI export works without `web`
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  config.example.toml  every key, one line each (long form: docs/reference/configuration.md)
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>  web_static/          the single-page web UI plus vendored marked/DOMPurify/KaTeX
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>  core/          the transport-agnostic runtime
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    assistant.py         composition root + serve loop; delegates everything below
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    conversations.py     ConversationBook: store + agent cache + active pointer, and id resolution
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    transcripts.py       reading a stored conversation as text (flatten, truncate, search) or as full
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>                          replay items (replay_items), shared by the web channel's history replay and
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>                          the Markdown export
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>    settings_runtime.py  SettingsApplier: read, apply live, persist
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    commands: /stop, /diag, and the three conversation commands are parsed inline in
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>              assistant._serve_channel; a workflow's own command (e.g. /plan) dispatches through
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>              self._workflows, built from the toolset registry
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    diagnostics.py       the /diag report
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    conversation_commands.py  what /new, /conversations, and /switch print
+</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>    build.py             free functions that assemble a model client and wire one declared agent
+</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>    agents.py            assembles the registry from every provider; resolves, validates, and
+</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>                         prompts one declared agent, and builds its delegation tool
+</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>    subagents.py         SubagentReporter: sub-agent activity as display frames + recorded events
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>    agent_registry.py    per-conversation agent cache with LRU eviction and pinning
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>    turn_gate.py         writer-preferring readers-writer gate
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>    turn_registry.py     in-flight turn bookkeeping
+</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>    messages.py          transcript helpers: text extraction, the placeholder title, image compaction
+</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>    titles.py            the generated conversation title: one context-free model call
+</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>    errors.py            describe_error: root-cause extraction for user-facing messages
+</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>    metrics.py           TurnMetrics + record_event: what a turn cost, accumulated from AIMU's
+</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>                          ModelTurnFinished events into calls/tokens/seconds
+</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>
+</span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>  config/        settings: the schema, the file, the writers
+</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>    schema.py      AssistantConfig, AgentConfig, MCPServerConfig, the default prompt
+</span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>    paths.py       the three locations that must resolve before config.toml can be read
+</span><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>    file.py        TOML discovery, parsing, schema validation
+</span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>    store.py       comment-preserving tomlkit writes, the write policy, and apply_setting
+</span><span id="__span-0-44"><a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>    table.py       SettingsTable, built from CORE_RUNTIME_SETTINGS plus every toolset's declared hot
+</span><span id="__span-0-45"><a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>                   settings: the one declaration of what is changeable at runtime
+</span><span id="__span-0-46"><a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>    settings_sources.py  joins a toolset's declared settings into the table; the one module under
+</span><span id="__span-0-47"><a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>                   config/ that imports upward, so the rest of the layer stays at the bottom
+</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>
+</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>  workflows/     protocol.py (Workflow, WorkflowContext, WorkflowResult, is_rich), critics.py (the
+</span><span id="__span-0-50"><a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>                 shared context-free reviewer), planning/ (runner.py's PlanningWorkflow, prompts.py,
+</span><span id="__span-0-51"><a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>                 critics.py's thin wrappers over the shared reviewer)
+</span><span id="__span-0-52"><a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>  mcp/           servers.py (connect, attach, reconnect, runtime add/remove), auth.py (ChatOAuth)
+</span><span id="__span-0-53"><a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>  scheduling/    recurrence.py (pure schedule math), tasks.py (TaskService, over the `[scheduling.task.*]`
+</span><span id="__span-0-54"><a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>                 tables in config.toml)
+</span><span id="__span-0-55"><a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>  channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
+</span><span id="__span-0-56"><a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>  frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
+</span><span id="__span-0-57"><a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>  registry/      the machinery a toolset is built against, and no toolsets
+</span><span id="__span-0-58"><a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>    registry.py    the Toolset and Setting dataclasses, `register`, `select`, `build_tools`
+</span><span id="__span-0-59"><a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>    context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
+</span><span id="__span-0-60"><a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>  toolsets/      the named capabilities themselves, and nothing else: one file per toolset, each file
+</span><span id="__span-0-61"><a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>                 named for the toolset it declares, each exporting a module-level TOOLSET, and each
+</span><span id="__span-0-62"><a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>                 listed in pyproject.toml's kokua.toolsets entry-point table, which is the only index
+</span><span id="__span-0-63"><a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>    audio.py, compute.py, documents.py, fs.py, memory.py, misc.py, skills.py, speech.py, time.py,
+</span><span id="__span-0-64"><a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>                   transcription.py, web.py -- wrappers over AIMU's tool groups and stores
+</span><span id="__span-0-65"><a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>    capabilities.py, config.py, conversations.py, mcp.py, scheduling.py -- one Kokua subsystem's logic
+</span><span id="__span-0-66"><a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>                   each, as agent tools (capabilities wraps the registry itself)
+</span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>    planning.py    a Workflow instead of tools: the only toolset that contributes no tool at all
+</span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>    aimu_agents.py, benchmark.py, github_backup.py, image.py -- Kokua's own, needing only the config
 </span></code></pre></div>
 <p><code>tests/</code> mirrors this layout.</p>
 <h2 id="the-core">The core<a class="headerlink" href="#the-core" title="Permanent link">&para;</a></h2>
@@ -2570,10 +2593,16 @@ while the store holds a snapshot written once at the end of a turn. The two mark
 snapshot opens -- <code>turn_running</code> flags unsaved messages, and the active conversation is flagged as the
 one whose current turn the model should read out of its own context. A test constructs a book with no
 registry bound, so any accidental <code>agent_for</code> path fails rather than passing quietly.</p>
-<p><code>ConversationBook.sessions()</code> is the single place the store's key-then-get walk and the <code>updated_at</code>
-ordering live; <code>list()</code> projects it and <code>most_recent_or_new</code> takes its head. It costs one store read per
-conversation, which is already what a sidebar push costs. A bulk read belongs in AIMU's store, and this
-is the seam it would land behind.</p>
+<p><code>ConversationBook.summaries()</code> is the single place the store's bulk-metadata read and the <code>updated_at</code>
+ordering live: one call to <code>list_summaries()</code>, not one <code>get()</code> per stored conversation. <code>list()</code> projects
+it into the shape the sidebar wants, and <code>most_recent_or_new</code> (and <code>cli.py</code>'s <code>_export</code>, for <code>kokua
+export latest</code>) takes its head and fetches only that one winning conversation's messages with a single
+<code>get</code>. That is what makes a switch, a sidebar repaint, or an export independent of how many other
+conversations are stored: none of them costs more than the one conversation actually being shown.
+<code>sessions()</code> is the one method still paying for every conversation's messages, because it is the one
+question that genuinely needs all of them: <code>search_conversations</code> has to read what was actually said in
+each conversation to match a query against it, ids belong on <code>matching_ids</code>/the store's <code>list_keys</code>
+instead.</p>
 <h3 id="analyzing-another-conversation">Analyzing another conversation<a class="headerlink" href="#analyzing-another-conversation" title="Permanent link">&para;</a></h3>
 <p>The three reading tools answer "what was said". <code>export_conversation</code> answers a different question, "how
 did that run go", and the difference is everything <code>read_conversation</code> deliberately drops: the reasoning,
@@ -3062,8 +3091,8 @@ built out of bounded parts.</p>
 <h2 id="state">State<a class="headerlink" href="#state" title="Permanent link">&para;</a></h2>
 <p>Everything lives under <code>~/.kokua</code> (override with <code>KOKUA_HOME</code>). <code>config.toml</code> sits at the root;
 <code>data/</code> holds only content: <code>sessions.json</code>, <code>skills/</code>, <code>memory/</code>, <code>documents/</code>, <code>downloads/</code>,
-<code>images/</code>. Scheduled tasks are the one declared, user-editable exception to that split: they live in
-<code>config.toml</code> as <code>[scheduling.task.&lt;name&gt;]</code> tables, not under <code>data/</code>.</p>
+<code>images/</code>, <code>payloads/</code>. Scheduled tasks are the one declared, user-editable exception to that split:
+they live in <code>config.toml</code> as <code>[scheduling.task.&lt;name&gt;]</code> tables, not under <code>data/</code>.</p>
 <h2 id="images">Images<a class="headerlink" href="#images" title="Permanent link">&para;</a></h2>
 <p><code>images.py</code> owns the on-disk store and the <code>/images/&lt;name&gt;</code> reference. Input images (web upload/paste,
 CLI <code>/attach</code>) and generated images live under <code>images_path</code>; the web server serves them at
@@ -3071,6 +3100,43 @@ CLI <code>/attach</code>) and generated images live under <code>images_path</cod
 persisted session must stay small and a localhost URL is not fetchable by the provider, so
 <code>core/messages.py</code> rewrites data URLs to references on persist and re-inlines them before each
 <code>agent.restore</code>.</p>
+<h2 id="payloads">Payloads<a class="headerlink" href="#payloads" title="Permanent link">&para;</a></h2>
+<p><code>payloads.py</code> solves the same problem <code>images.py</code> does, for oversized text instead of image bytes:
+content-addressed filenames under <code>payloads_path</code> (the sha256 of the UTF-8 text, so identical content
+is stored once), a <code>/payloads/&lt;sha256&gt;</code> reference stored in session metadata in place of the bytes, and
+a route (<code>frontends/web.py</code>) that serves the file when asked. Two parallel modules rather than one
+shared abstraction, since the generic part is about twenty lines and the rest of each is specific to
+its own payload kind.</p>
+<p>The one caller today is <code>core/subagents.py</code>. A sub-agent's tool result can be megabytes (a PDF fetched
+as text is the case that forced this), and recording it inline put 51.9 MB of one developer's 56.8 MB
+session file into a field that every store read re-parsed and every conversation switch replayed to
+the browser. <code>SubagentReporter</code> now caps what a recorded tool-call card holds inline at
+<code>subagents.RESPONSE_PREVIEW_CHARS</code> (4,000 characters, a module constant rather than a config key: it is
+not a security control and not a capability an agent declares, so it has no natural home in
+<code>config.toml</code>). A response at or under that length is recorded exactly as before. A longer one is
+recorded as the first <code>RESPONSE_PREVIEW_CHARS</code> characters plus <code>response_ref</code> (the payload's
+<code>/payloads/&lt;sha256&gt;</code> reference) and <code>response_bytes</code> (the full length), with the rest of the text
+written once to <code>payloads_path</code> via <code>payloads.save_text</code>. The cap is applied where the card is
+recorded, not where it is replayed, so the frame sent live and the entry a later <code>send_history</code> replays
+are the same dict; capping only on replay would make a card change shape when the user switched away
+and back, which is worse than the size problem it would be fixing.</p>
+<p><code>payloads.save_text</code> can fail two independent ways, both of which <code>SubagentReporter</code> treats as a reason
+to skip the spill rather than let the turn fail. Encoding with strict UTF-8 raises <code>UnicodeEncodeError</code>
+on a Python <code>str</code> carrying lone surrogates, the shape upstream code leaves behind when it decoded bytes
+with <code>errors="surrogateescape"</code> (a binary file fetched as text is a realistic source). Separately, the
+write itself can fail on its own terms (a full disk, a permissions problem, a <code>payloads_path</code> that
+cannot be created), raising <code>OSError</code>; before this cap existed, the tool-calling path never touched
+disk at all, so this callback did not previously depend on a write succeeding. Either way, recording a
+spawn's activity sits on a live turn's path, so an exception there ends the turn, while falling back to
+the unbounded, pre-cap inline shape only leaves one oversized card.</p>
+<p>An entry carrying <code>response_ref</code> renders in <code>app.js</code> exactly like any other, plus one control below
+the preview: "Show full response" with <code>response_bytes</code> formatted as KB or MB. Activating it fetches
+the reference and swaps the fetched text in for the preview, once; a second activation is a no-op
+because the control is gone by then. The fetched text is exactly as untrusted as the preview already
+was (someone else's tool result), so it lands the same way the preview does, as a text node rather
+than markup. A fetch can fail, since payloads are never garbage collected but a user can clear the
+folder by hand; that leaves the preview in place and turns the control into a short disabled note
+instead of a button that would only fail again.</p>
 <h2 id="mcp">MCP<a class="headerlink" href="#mcp" title="Permanent link">&para;</a></h2>
 <p>All servers come from <code>[[mcp.server]]</code> at startup (<code>mcp.reconnect_mcp_servers</code> is a single pass over
 <code>config.mcp_servers</code>). Each one is also a toolset, named by its required <code>name</code>, which is how an agent
@@ -3316,8 +3382,9 @@ else rather than being dispatched on.</p>
 rename has to move that stamp too: <code>update_scheduled_task</code>'s <code>new_name</code> path calls
 <code>ConversationBook.retag_task</code> to re-point every conversation the old name owned, right after the table
 itself is renamed, which is what lets the sidebar keep a task's history nested under it across a rename.
-<code>ConversationBook.list()</code> projects <code>task_id</code>, but nothing is filtered there -- the agent's read-only
-conversation tools walk <code>sessions()</code> and still see every conversation. The page nests a conversation under a task when its <code>task_id</code> matches a task <em>currently in
+<code>ConversationBook.list()</code> projects <code>task_id</code>, but nothing is filtered there: <code>list_conversations</code> walks
+<code>summaries()</code> (through <code>list()</code>) and still sees every conversation, task-minted or not. The page nests a
+conversation under a task when its <code>task_id</code> matches a task <em>currently in
 the list</em>. Requiring the task to be present is what makes
 deleting a task return its conversations to the chat list instead of hiding them: keying on <code>task_id</code>
 alone would leave an orphan unreachable from the sidebar. Because the nesting is client-side, a firing's

@@ -2591,13 +2591,13 @@ from, and reads both halves of it that startup reads: the agent tables and the <
 naming the entry agent. So two writes that each looked fine alone cannot add up to a file your next
 launch refuses. A <code>[agents.&lt;name&gt;.generation]</code> parameter gets a different check instead:
 the same type-and-range check <code>[assistant.generation]</code> gets, not a <code>validate_agents</code> dry run, since a bad
-<code>temperature</code> cannot break startup the way a bad delegate can. An agent's <code>max_iterations</code> is the
-exception: the <code>agents.*</code> write path checks it the same way it checks a flat key, by dry-running
-<code>validate_agents</code>, and that dry run does not repeat the range check parse time applies. So a <code>0</code> or a
-negative value passes the tool and is only refused at the next startup, when <code>config/file.py</code> parses it,
-and reaching that write at all means <code>agents.*</code> has already been removed from <code>locked_config_keys</code>,
-since the table is locked by default. Every other way in, the write is checked before it is saved; no
-check tells you the result is one you wanted, only that it starts.</p>
+<code>temperature</code> cannot break startup the way a bad delegate can. A flat agent key that carries a check of
+its own keeps it here too, on top of the dry run rather than instead of it, because the two answer
+different questions: the dry run asks whether the whole file would still start, and a per-key check asks
+whether this one value is one the key accepts at all. So <code>thinking = "bogus"</code> and <code>max_iterations = 0</code>
+are both refused at the tool, where each used to be written and then refused by the next launch. Every
+way in, the write is checked before it is saved; no check tells you the result is one you wanted, only
+that it starts.</p>
 <p><code>[assistant].max_iterations</code> is not locked, so the assistant can raise or lower its own tool-loop cap
 there. That is deliberate, for the reason <code>[assistant].model</code> is unlocked: the key is startup-only, so
 no write escalates the session doing the writing, and what it moves is cost rather than reach.</p>
@@ -3120,8 +3120,9 @@ Locked by default.</p>
 </span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    documents/           the document store
 </span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    skills/              installed skills
 </span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    images/              uploaded and generated images, served at /images
-</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
-</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    logs/kokua.log       the rotating diagnostic log
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    payloads/            oversized sub-agent tool responses, served at /payloads
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    logs/kokua.log       the rotating diagnostic log
 </span></code></pre></div>
 <p>To move the whole tree including <code>config.toml</code>, set <code>$KOKUA_HOME</code> instead. That one is an environment
 variable rather than a setting because the config file lives inside it, so it has to resolve before the
