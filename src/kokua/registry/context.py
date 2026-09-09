@@ -44,6 +44,8 @@ class LiveState:
     """Process-wide state shared by every agent's toolsets.
 
     ``for_each_agent`` fans a global tool mutation (an MCP add or remove) across every live agent.
+    ``notify`` is ``ChannelUI.alert``: a line raised outside whatever conversation the user is reading,
+    which today is only the MCP authorization link (see ``mcp.auth.Notify`` for its shape).
     ``proactive`` is the assistant's unprompted-turn entry point, which a due scheduled task fires.
     ``registry`` is the toolset registry, needed here because rebuilding an agent's delegation tool
     after an MCP change has to re-resolve names.

@@ -492,9 +492,9 @@ class TurnRunner:
             return
         title = self._book.get(conversation_id).metadata.get("title") or "a conversation"
         if succeeded:
-            await self._ui.notify(f"Reply ready in '{title}'.")
+            await self._ui.notify(f"Reply ready in '{title}'.", conversation_id=conversation_id)
         else:
-            await self._ui.notify(f"A reply in '{title}' {failure_reason}.")
+            await self._ui.notify(f"A reply in '{title}' {failure_reason}.", conversation_id=conversation_id)
 
     # --- proactive ------------------------------------------------------------------------------
 
@@ -544,7 +544,7 @@ class TurnRunner:
         # on its conversation when it started.
         await self._push_conversations()
         if report:
-            await self._report(report)
+            await self._report(report, spec)
 
     async def _prune_task_conversations(self, spec: ProactiveTarget, cap: int) -> None:
         """Keep the firing task's newest ``cap`` conversations and delete the rest, once this run is done.
@@ -751,14 +751,21 @@ class TurnRunner:
         finally:
             current_metrics.reset(metrics_token)
 
-    async def _report(self, text: str) -> None:
-        """Send an unattended run's own status line, tolerating a channel that cannot take it.
+    async def _report(self, text: str, spec: ProactiveTarget) -> None:
+        """Raise an unattended run's own status line as an alert, tolerating a channel that cannot
+        take it.
+
+        An alert rather than a message in the transcript: the run happened outside whatever the user
+        is reading, so a bubble there is a sentence about somebody else's conversation.
+        The card is linked to the run's own conversation and grouped by the task, which is
+        deliberate: every firing mints a fresh conversation, so grouping by that would leave a card
+        per firing for a task that runs all night.
 
         Nobody is awaiting this turn, so a failed notification must not become the error that takes
         down the scheduler job (invariant 6).
         """
         try:
-            await self._ui.send(text)
+            await self._ui.alert(text, conversation_id=spec.conversation_id, group=spec.task_id)
         except Exception:
             logger.warning("A scheduled task ran; its notification could not be delivered", exc_info=True)
 

@@ -11,7 +11,7 @@ from aimu.aio.channels.base import Channel, ChannelMessage
 from kokua.config import ConfigError
 from kokua.config.schema import AssistantConfig
 from kokua.core.assistant import Assistant
-from tests.channels import FakeChannel, _config
+from tests.channels import AlertCapturingChannel, FakeChannel, _config
 from tests.fakes import _RequestsToolOnce
 from tests.helpers import MockAsyncModelClient
 
@@ -54,7 +54,12 @@ async def test_approve_gated_tool_waits_for_routed_answer(tmp_path):
         streaming_conversation.reset(token)
 
 
-async def test_approve_proactive_auto_denies_gated_tool(tmp_path):
+async def test_approve_backgrounded_auto_denies_without_prompting(tmp_path):
+    """The deny is immediate: the card that reports it is not a question, and nothing waits on a reply.
+
+    A channel with no card surface (this one) prints the sentence instead, which is why the alert's
+    text has to stand on its own.
+    """
     from kokua.channels.web import streaming_conversation
 
     channel = FakeChannel()
@@ -65,7 +70,9 @@ async def test_approve_proactive_auto_denies_gated_tool(tmp_path):
     token = streaming_conversation.set("elsewhere")
     try:
         assert await assistant._approve("add_skill_script", {}) is False
-        assert channel.sent == []  # auto-deny: no prompt, no waiting
+        assert not assistant._human.approval.pending  # nothing is waiting on an answer
+        assert [s for s in channel.sent if "[approve]" in s] == []  # and nothing asked for one
+        assert any("add_skill_script" in s and "denied" in s for s in channel.sent)
     finally:
         streaming_conversation.reset(token)
 
@@ -286,3 +293,46 @@ async def test_the_confirm_tools_flag_is_checked_by_the_same_rule(tmp_path):
     with pytest.raises(ConfigError) as error:
         await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
     assert "update_confg" in str(error.value) and "update_config" in str(error.value)
+
+
+async def test_background_auto_deny_raises_an_alert(tmp_path):
+    """The deny is silent from the user's side: the tool result saying so is on a transcript they are
+    not reading, and the turn carries on without the tool. The card is what makes it visible while
+    there is still something to do about it."""
+    from kokua.channels.web import streaming_conversation
+
+    cfg = _config(tmp_path, confirm_tools=["execute_python"])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient([]))
+    viewed = assistant._active_id
+    await assistant.new_conversation()
+    background = assistant._active_id
+    await assistant.select_conversation(viewed)
+
+    token = streaming_conversation.set(background)
+    try:
+        assert await assistant._approve("execute_python", {}) is False
+        assert await assistant._approve("execute_python", {}) is False  # same tool, same card
+    finally:
+        streaming_conversation.reset(token)
+
+    (text, conversation_id, url, group) = channel.alerts[-1]
+    assert "execute_python" in text and url is None
+    assert conversation_id == background
+    assert [g for _, _, _, g in channel.alerts] == [group, group]  # one group, so one card, not two
+
+
+async def test_proactive_auto_deny_stays_silent(tmp_path):
+    """A scheduled firing denies without a card: the run has its own report at the end, and a task
+    that calls a gated tool every firing would otherwise raise one every firing."""
+    from kokua.channels.web import proactive_turn
+
+    cfg = _config(tmp_path, confirm_tools=["execute_python"])
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient([]))
+    token = proactive_turn.set(True)
+    try:
+        assert await assistant._approve("execute_python", {}) is False
+    finally:
+        proactive_turn.reset(token)
+    assert channel.alerts == []

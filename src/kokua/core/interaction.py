@@ -150,7 +150,21 @@ class HumanGate:
             return True
         if self._is_proactive():
             return False
-        if self._turn_conversation() != self._active_id():
+        turn_conversation = self._turn_conversation()
+        if turn_conversation != self._active_id():
+            # Raised rather than denied in silence: the tool result recording the refusal lands on a
+            # transcript the user is not reading, and the turn carries on without the tool, so nothing
+            # tells them their own turn lost a capability by their switching away. Not raised for a
+            # proactive firing (above), which reports itself when it ends and would otherwise raise one
+            # of these on every firing.
+            await self._ui.alert(
+                f"A turn you switched away from asked to run {name}. It was denied automatically, "
+                "because approving a tool call means reading it, and that turn is not on screen.",
+                conversation_id=turn_conversation,
+                # One card per tool per conversation: a loop retrying the same call must not stack a
+                # card per attempt, while a second, different tool is genuinely something else to know.
+                group=f"{turn_conversation}:{name}",
+            )
             return False
         return await self.approval.ask(lambda: self._ui.ask_approval(name, arguments))
 

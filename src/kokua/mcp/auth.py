@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Optional, Protocol
 
 from fastmcp.client.auth.oauth import OAuth
 from key_value.aio.stores.filetree import (
@@ -29,8 +29,16 @@ from key_value.aio.stores.filetree import (
     FileTreeV1KeySanitizationStrategy,
 )
 
-# Async callable that delivers a short message to the user (bound to a Channel.send).
-Notify = Callable[[str], Awaitable[None]]
+
+class Notify(Protocol):
+    """Post a line the user needs to see, outside whatever conversation they are reading.
+
+    ``url`` is the one thing in the line worth clicking, passed as a field as well as in the text:
+    a front end that can render a control makes one from it, and a plain-text channel still has the
+    address in the sentence. See ``ChannelUI.alert``, which is what this is bound to.
+    """
+
+    async def __call__(self, text: str, *, url: Optional[str] = None) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -79,7 +87,8 @@ class ChatOAuth(OAuth):
             f"To connect, authorize access here: {authorization_url}\n"
             f"After you approve, your browser is sent to {self._callback_url}, where Kokua is "
             "listening, so that address has to reach the machine Kokua runs on. A browser window "
-            "should also open there automatically."
+            "should also open there automatically.",
+            url=authorization_url,
         )
         # super() performs the stale-client pre-flight check and webbrowser.open(). Run it after
         # posting the link so the user always has the URL even if the browser does not open.

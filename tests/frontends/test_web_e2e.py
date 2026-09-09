@@ -4,7 +4,7 @@ These cover the one surface pytest otherwise can't reach: the page script in ``w
 turning server frames into DOM. The server-side frame contract (what frames are emitted, and the
 muting/gating that decides them) is already unit-tested in ``test_web.py`` against a fake socket; here
 we run the real page in headless Chromium against a live server so the client's rendering is exercised
-too -- notification banners, the inline "working" indicator, and that a background turn's output never leaks
+too: alert cards, the inline "working" indicator, and that a background turn's output never leaks
 into the conversation being viewed.
 
 Deselected by default (``addopts = -m 'not e2e'``); run with ``uv run pytest -m e2e``. Needs the ``web``
@@ -472,7 +472,7 @@ TAIL = "And here is the rest of it."
 
 def test_background_turn_notifies_and_does_not_leak(page, live_server):
     """Switching away mid-turn: the rest of the reply is muted (never rendered in the now-viewed
-    conversation) and the turn's completion surfaces as a dismissible notification banner instead.
+    conversation) and the turn's completion surfaces as a dismissible alert card instead.
 
     `tail` is the part of the reply that streams *after* the switch, which is the part a once-per-send
     mute decision would have leaked into the conversation the user moved to."""
@@ -487,13 +487,30 @@ def test_background_turn_notifies_and_does_not_leak(page, live_server):
     expect(page.locator("#conv-list li")).to_have_count(2)
     expect(page.locator(".bubble.assistant")).to_have_count(0)  # the fresh conversation shows no reply
 
-    banner = page.locator("#notifications .notification-banner")
-    expect(banner).to_be_visible(timeout=15_000)  # the background turn's completion surfaces here instead
+    card = page.locator("#alerts .alert-card")
+    expect(card).to_be_visible(timeout=15_000)  # the background turn's completion surfaces here instead
     expect(page.locator(".bubble.assistant")).to_have_count(0)  # nothing of the turn leaked into view
     assert TAIL not in page.locator("#log").inner_text()
 
-    banner.locator("button").click()  # dismiss
-    expect(page.locator("#notifications .notification-banner")).to_have_count(0)
+    card.locator(".alert-close").click()  # sticky until dismissed, and only dismissal removes it
+    expect(page.locator("#alerts .alert-card")).to_have_count(0)
+
+
+def test_an_alert_card_opens_the_conversation_it_is_about(page, live_server):
+    """The card is a pointer: it names work that happened somewhere else, and its control is the way
+    there. Without it the user is left matching a title against the sidebar by hand."""
+    _open(page, live_server(delay=2.0, tail=TAIL))
+    page.fill("#msg", "ping")
+    page.click("#send")
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
+
+    page.click("#new-conv")  # switch away; the turn finishes in the background
+    card = page.locator("#alerts .alert-card")
+    expect(card).to_be_visible(timeout=15_000)
+
+    card.locator(".alert-open").click()
+    expect(page.locator(".bubble.user", has_text="ping")).to_be_visible(timeout=10_000)
+    expect(page.locator(".bubble.assistant", has_text=TAIL)).to_be_visible()
 
 
 def test_switching_back_mid_turn_shows_the_turn_so_far_and_keeps_streaming(page, live_server):
@@ -521,7 +538,7 @@ def test_switching_back_mid_turn_shows_the_turn_so_far_and_keeps_streaming(page,
     # The tail then streams into the bubble the replay left open: one bubble holding the whole reply.
     expect(page.locator(".bubble.assistant", has_text=TAIL)).to_be_visible(timeout=15_000)
     expect(page.locator(".bubble.assistant")).to_have_count(1)
-    assert page.locator("#notifications .notification-banner").count() == 0  # never backgrounded at the end
+    assert page.locator("#alerts .alert-card").count() == 0  # never backgrounded at the end
 
 
 def test_sidebar_collapse_resize_persist(page, live_server):
@@ -2107,3 +2124,28 @@ def test_a_second_message_sent_mid_reply_does_not_share_the_first_turns_truncate
     expect(page.locator(".bubble.user", has_text="second")).to_have_count(0, timeout=10_000)
     expect(page.locator(".bubble.user", has_text="first")).to_be_visible()
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(1)
+
+
+def test_alert_cards_group_and_guard_their_controls(page, live_server):
+    """Three page-side rules, driven by injecting frames rather than by arranging three server states:
+    a later card supersedes its own group, a card whose conversation is gone keeps its text and loses
+    its control, and only an http(s) address becomes a link."""
+    _open(page, live_server(delay=0.0))
+
+    def raise_alert(**frame):
+        page.evaluate("(f) => raiseAlert(f)", frame)
+
+    raise_alert(text="first run finished", group="Digest", conversation_id="pruned")
+    raise_alert(text="second run finished", group="Digest", conversation_id="pruned")
+    cards = page.locator("#alerts .alert-card")
+    expect(cards).to_have_count(1)  # same group, so the newer card replaced the older
+    expect(cards.first).to_contain_text("second run finished")
+    # "pruned" is in no sidebar row, which is what a task's own retention does to its older runs.
+    expect(cards.first.locator(".alert-open")).to_have_count(0)
+
+    raise_alert(text="authorize at javascript:alert(1)", url="javascript:alert(1)")
+    expect(cards.first).to_contain_text("authorize")  # the text still reaches the user
+    expect(cards.first.locator(".alert-link")).to_have_count(0)  # but nothing scheme-shy becomes a link
+
+    raise_alert(text="authorize at https://auth.example/x", url="https://auth.example/x")
+    expect(cards.first.locator(".alert-link")).to_have_attribute("href", "https://auth.example/x")

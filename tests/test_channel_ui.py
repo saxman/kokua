@@ -36,8 +36,8 @@ class RichChannelDouble(BareChannel):
     async def send_conversations(self, items: list[dict]) -> None:
         self.calls.append(("conversations", (items,)))
 
-    async def send_notification(self, text: str) -> None:
-        self.calls.append(("notification", (text,)))
+    async def send_notification(self, text: str, *, conversation_id=None, url=None, group=None) -> None:
+        self.calls.append(("notification", (text, conversation_id, url, group)))
 
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         self.calls.append(("approval", (name, arguments)))
@@ -172,6 +172,7 @@ async def test_rich_channel_receives_every_frame():
     ui = ChannelUI(channel)
     await ui.push_conversations([{"id": "a"}])
     await ui.notify("done")
+    await ui.alert("a scheduled task finished")
     await ui.ask_approval("execute_python", {"code": "1"})
     await ui.ask_plan_review("step 1", ["too vague"])
     await ui.show_plan("step 1")
@@ -182,7 +183,8 @@ async def test_rich_channel_receives_every_frame():
 
     assert [name for name, _ in channel.calls] == [
         "conversations",
-        "notification",
+        "notification",  # notify
+        "notification",  # alert: one frame, two methods, differing only in their fallback
         "approval",
         "plan_review",
         "plan",
@@ -237,3 +239,41 @@ async def test_turn_saved_reaches_a_channel_that_offers_it():
     channel = _Channel()
     await ChannelUI(channel).turn_saved("abc123", 4)
     assert channel.saved == [("abc123", 4)]
+
+
+# --- alerts: a card the user has to dismiss -------------------------------------------------------
+
+
+async def test_alert_carries_its_link_to_a_rich_channel():
+    """An alert names what it is about, so the card can offer a way to act on it."""
+    channel = RichChannelDouble()
+    await ChannelUI(channel).alert("Scheduled task 'Digest' finished.", conversation_id="c7")
+    assert channel.calls == [("notification", ("Scheduled task 'Digest' finished.", "c7", None, None))]
+
+
+async def test_alert_carries_an_authorization_url():
+    channel = RichChannelDouble()
+    await ChannelUI(channel).alert("Authorize access.", url="https://example.test/auth")
+    assert channel.calls == [("notification", ("Authorize access.", None, "https://example.test/auth", None))]
+
+
+async def test_alert_falls_back_to_plain_text():
+    """Unlike ``notify``, an alert must land somewhere: the terminal prints the sentence, which is
+    self-contained precisely so this fallback loses nothing but the click."""
+    channel = BareChannel()
+    await ChannelUI(channel).alert("Authorize access at https://example.test/auth", url="https://example.test/auth")
+    assert channel.sent == ["Authorize access at https://example.test/auth"]
+
+
+async def test_notify_names_the_conversation_it_is_about():
+    channel = RichChannelDouble()
+    await ChannelUI(channel).notify("Reply ready in 'Digest'.", conversation_id="c7")
+    assert channel.calls == [("notification", ("Reply ready in 'Digest'.", "c7", None, "c7"))]
+
+
+async def test_alert_carries_the_group_that_supersedes_an_earlier_card():
+    """An always-on assistant fires the same task all night. Without a group, a user who was away
+    comes back to one card per firing; with it, the newest card for a group is the only one left."""
+    channel = RichChannelDouble()
+    await ChannelUI(channel).alert("Scheduled task 'Digest' finished.", conversation_id="c7", group="Digest")
+    assert channel.calls == [("notification", ("Scheduled task 'Digest' finished.", "c7", None, "Digest"))]

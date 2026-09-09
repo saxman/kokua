@@ -13,7 +13,7 @@ import pytest
 from kokua.config import MCPServerConfig
 from kokua.config.schema import AgentConfig
 from kokua.core.assistant import Assistant
-from tests.channels import FakeChannel, _config
+from tests.channels import AlertCapturingChannel, FakeChannel, _config
 from tests.fakes import _FakeMCP, _await_value, _fake_mcp_tool, _offline_until_connected
 from tests.helpers import MockAsyncModelClient, core_table
 
@@ -495,3 +495,18 @@ async def test_newly_built_agent_gets_already_connected_server(tmp_path, monkeyp
     assistant._registry.get(new_id)
     assert len(delegates) == 1  # built once, with no fan-out rebuild needed
     assert "remote_ping" in delegates[0]  # and already carrying the connected server
+
+
+async def test_an_oauth_prompt_is_raised_as_an_alert_not_a_chat_message(tmp_path):
+    """``notify`` is the OAuth redirect handler's only route to the user, and what it raises belongs
+    outside the conversation being read: the connect it is waiting on may have been started by a
+    boot reconnect nobody asked for, or by a tool call in some other conversation."""
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["ok"])
+    )
+
+    await assistant._state.notify("Authorize access at https://auth.svc/a", url="https://auth.svc/a")
+
+    assert channel.alerts == [("Authorize access at https://auth.svc/a", None, "https://auth.svc/a", None)]
+    assert channel.sent == []

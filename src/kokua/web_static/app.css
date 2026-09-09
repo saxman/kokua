@@ -200,12 +200,30 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 @media (prefers-reduced-motion: reduce) {
   .task-row.running .task-dot { animation: none; opacity: 1; }
 }
-/* Dismissible banners for background-turn completions ("notification" frames), stacked above the log. */
-#notifications { display: flex; flex-direction: column; gap: 6px; padding: 8px 16px 0; }
-.notification-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+/* The alert layer ("notification" frames): work that happened outside the conversation on screen.
+   The page's only fixed layer, and deliberately so. It sits over everything because none of these
+   belongs in a transcript, and it takes no pointer events of its own (the cards do), so the page
+   underneath stays usable while a card waits: an unattended scheduled task must never be able to
+   block the compose box. The stack scrolls rather than growing without bound, since nothing here
+   disappears on its own.
+
+   It starts below the 40px header rather than at the top of the viewport: the theme button sits in the
+   header's right corner, directly under where the first card would otherwise land, and a card that
+   nothing dismisses on its own would take that control out of reach for as long as it stood. */
+#alerts { position: fixed; top: 52px; right: 12px; z-index: 50; display: flex; flex-direction: column;
+  gap: 8px; width: min(380px, calc(100vw - 24px)); max-height: min(70vh, 640px); overflow-y: auto;
+  pointer-events: none; }
+.alert-card { pointer-events: auto; display: flex; flex-direction: column; gap: 8px;
   background: var(--attention); border: 1px solid var(--attention-border); border-radius: 10px;
-  padding: 8px 14px; font-size: 0.9em; }
-.notification-banner button { padding: 5px 14px; font-size: 0.92em; }
+  padding: 10px 12px; font-size: 0.9em; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16); }
+.alert-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.alert-foot { display: flex; align-items: center; gap: 8px; }
+.alert-ts { color: var(--fg-faint); font-size: 0.86em; margin-right: auto; }
+.alert-card button, .alert-card a.alert-link { padding: 4px 12px; font-size: 0.92em; }
+.alert-card a.alert-link { border: 1px solid var(--border); border-radius: 6px; color: var(--fg);
+  text-decoration: none; background: none; }
+.alert-card a.alert-link:hover { background: var(--surface); }
+#alerts-clear { pointer-events: auto; align-self: flex-end; padding: 3px 10px; font-size: 0.84em; }
 /* A flat transcript: one left-aligned column, no fills, no alignment flip. The rhythm comes from
    per-row margins rather than a flex gap, so the space between two turns can be wider than the space
    between one turn's own blocks. */
@@ -447,8 +465,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 #thinking-level:disabled { opacity: 0.5; cursor: default; }
 #stop { background: none; border-color: var(--border); color: var(--fg-dim); }
 #stop:hover { color: var(--fg); border-color: var(--fg-dim); }
-button.secondary, .notification-banner button { background: none; border-color: var(--border);
-  color: var(--fg-dim); }
+button.secondary { background: none; border-color: var(--border); color: var(--fg-dim); }
 /* An inline image, in the composer preview row or a chat bubble. `fit-content` so the hover fill
    hugs the picture instead of trailing across the measure the block would otherwise stretch to; the
    resting layout is unchanged, since the box is left-aligned either way.

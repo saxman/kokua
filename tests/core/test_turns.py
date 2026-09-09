@@ -13,6 +13,7 @@ from kokua.core.assistant import Assistant
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
 from tests.channels import (
+    AlertCapturingChannel,
     FakeChannel,
     _ConvCapturingChannel,
     _TurnSavedChannel,
@@ -267,11 +268,7 @@ async def test_background_turn_notifies_on_success_when_switched_away(tmp_path):
     i.e. `conversation_id != self._active_id` at completion -- the same notion WebChannel's own
     muting uses once its active_conversation_id is kept in sync (see the sync test above)."""
 
-    class _NotifyChannel(FakeChannel):
-        async def send_notification(self, text: str) -> None:
-            self.sent.append(f"[notify] {text}")
-
-    channel = _NotifyChannel()
+    channel = AlertCapturingChannel()
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient(["ok"]))
     conv_a = assistant._active_id
@@ -280,7 +277,7 @@ async def test_background_turn_notifies_on_success_when_switched_away(tmp_path):
 
     await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=conv_a)
 
-    assert any(s.startswith("[notify]") for s in channel.sent)
+    assert channel.alerts
 
 
 async def test_background_turn_error_notifies_with_reason(tmp_path):
@@ -288,11 +285,7 @@ async def test_background_turn_error_notifies_with_reason(tmp_path):
     'reply ready' (its error reply went out muted, so the notification is the only signal the user
     gets that the background turn finished and how)."""
 
-    class _NotifyChannel(FakeChannel):
-        async def send_notification(self, text: str) -> None:
-            self.sent.append(f"[notify] {text}")
-
-    channel = _NotifyChannel()
+    channel = AlertCapturingChannel()
     cfg = _config(tmp_path)
     assistant = await Assistant.create(
         cfg, channel, client_factory=lambda cid: MockAsyncModelClient([Exception("boom")])
@@ -303,7 +296,7 @@ async def test_background_turn_error_notifies_with_reason(tmp_path):
 
     await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=conv_a)
 
-    notifies = [s for s in channel.sent if s.startswith("[notify]")]
+    notifies = [text for text, _, _, _ in channel.alerts]
     assert notifies, "a background failure should still notify the user"
     assert any("failed" in s.lower() for s in notifies)  # the notification carries the reason
     assert not any("reply ready" in s.lower() for s in notifies)  # not a misleading success notice
@@ -1780,3 +1773,39 @@ async def test_shutdown_cancels_a_pending_title_rather_than_waiting_on_the_endpo
 
     pending = [task for task in asyncio.all_tasks() if "_write_title" in repr(task.get_coro())]
     assert not pending, f"{len(pending)} title task(s) outlived the store: {pending}"
+
+
+async def test_background_notification_names_its_conversation(tmp_path):
+    """The card offers a way into the conversation that finished; a title alone leaves the user to
+    find the row themselves."""
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["ok"])
+    )
+    conv_a = assistant._active_id
+    await assistant.new_conversation()
+
+    await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=conv_a)
+
+    assert [conversation_id for _, conversation_id, _, _ in channel.alerts] == [conv_a]
+
+
+async def test_proactive_report_links_the_conversation_it_ran_in(tmp_path):
+    """A firing's report points at the conversation the firing minted, not at whichever one the user
+    happens to be reading when it lands."""
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["task output"])
+    )
+    viewed = assistant._active_id
+
+    # task_name and task_id as a real firing passes them (TaskService._fire sends the name as both).
+    await assistant._proactive("run the report", task_name="report", task_id="report")
+
+    (text, conversation_id, url, group) = channel.alerts[-1]
+    assert "report" in text and url is None
+    assert conversation_id not in (None, viewed)
+    assert assistant._store.get(conversation_id).metadata["title"] == "report"
+    # Grouped by the task, not by the conversation: every firing mints a new one, so grouping by
+    # conversation would leave a card per firing, which is the pile-up the group exists to prevent.
+    assert group == "report"

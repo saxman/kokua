@@ -220,3 +220,32 @@ Fix direction: an `offset` parameter (a 1-indexed first line, defaulting to 1) b
 makes a large file reachable in pages. Worth deciding at the same time whether paging alone is enough or
 whether the group also wants a search that returns matching line numbers, since paging makes a file
 reachable while search is what makes the right page findable without reading the wrong ones first.
+
+## 20. Park a backgrounded turn at the tool gate instead of auto-denying it
+`HumanGate.approve` denies a gated tool outright when the calling turn's conversation is not the one
+being viewed (`interaction.py`, the `turn_conversation() != active_id()` branch), and switching away
+denies any prompt already standing (`abandon_all`, called by `select_conversation`). The turn then
+carries on without the tool. A user who switches tabs mid-turn therefore loses a capability silently,
+and the alert card that now reports the deny is a consolation rather than a fix: there is nothing to
+approve any more, only a run to repeat.
+
+Fix direction: park such a call and let the user answer it from the conversation the alert card links
+to. That is a security-policy change as much as a UI one, so it needs its own design pass rather than
+riding a front-end change. What it has to answer:
+
+- `PendingRequest` is a single slot answered by a bare "y"/"n" (`interaction.py`), so two parked
+  conversations are not representable. Routing has to become per conversation.
+- `abandon_all` on switch exists so a reply typed after switching cannot be misrouted to the question
+  left behind. Parking removes the deny that made that safe, so the reply path needs the conversation
+  in it.
+- A parked turn holds its gate hold and its agent. It needs a timeout, or a rule for what happens when
+  the socket closes (the web front end builds one `Assistant` per connection, so today the whole
+  session goes with it).
+- Proactive firings must keep denying: parking one would hang a 3am task on its gate until morning, and
+  [SECURITY.md](SECURITY.md)'s claim that nothing gated runs unattended rests on that.
+- README, SECURITY.md, and `docs/explanation/architecture.md` all state the current rule, and it is
+  stated as a barrier rather than an accident, so all three move with the code.
+
+Approving from the card itself was considered and rejected in the same discussion: a card cannot hold
+`execute_python`'s body or `add_skill_script`'s script, and a truncated argument blob beside an Allow
+button trains the user to approve unread.

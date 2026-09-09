@@ -72,7 +72,7 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer
   lazily and held in a bounded LRU registry (`agent_cache_cap`, default 8). Memory and documents stay
   shared across conversations.
 - **Concurrent conversations.** A turn keeps running when you switch away: it streams only into the
-  conversation you are viewing, persists to its own conversation, and posts a completion notification
+  conversation you are viewing, persists to its own conversation, and raises a completion alert card
   instead of streaming. Switching does not cancel it; only deleting a conversation does, and only its
   own turn. The invariants that make this safe are documented at the top of `core/turns.py`.
 - **Switching into a running turn shows the turn.** A turn's messages are not in the store until it
@@ -248,6 +248,22 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer
     that the first rendered content displaced was on screen for 23ms against a local endpoint, whose
     first token lands about that fast, so what it answers has to be "is a turn running" (true until the
     turn ends) rather than "has anything arrived yet".
+  - **Alerts sit over the page, not in the transcript.** Everything raised outside the conversation on
+    screen is a card in a fixed layer: a scheduled task's report, an MCP authorization an in-flight
+    connect is waiting on, a background turn's completion, and a gated tool a backgrounded turn was
+    denied. Before this they were messages, pushed into whichever conversation the user happened to be
+    reading, which is how a task's "open the 'Digest' conversation to review" could land in the middle
+    of an unrelated one (or in 'Digest' itself). Each card carries the time the thing happened, one way
+    to act on it, and a dismiss control; Escape takes the newest. The action is a pointer rather than a
+    decision: Open switches to the conversation the card names, and Authorize is an anchor built from
+    the frame's own `url` field, only for `http(s)`, never by hunting for a URL in the text, since that
+    URL comes from a remote server's metadata. Nothing expires, and the layer takes no pointer events of
+    its own, so an unattended task can never block the composer. A later card supersedes an earlier one
+    with the same `group` (a task, a conversation, a conversation and tool pair), which keeps a task
+    firing all night from greeting you with one card per firing; a card whose conversation has since
+    been pruned keeps its text and drops its Open control. The terminal has no such layer, so
+    `ChannelUI.alert` prints the sentence there instead, which is why an alert's text always carries
+    its link in words.
   - **A Think picker beside the Plan toggle** sets the reasoning effort for the messages you send after
     it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
     `input` frame field, writes nothing to `config.toml`, and resets to the configured default on reload.
@@ -322,7 +338,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer
     with the sidebar's rather than a second one that agrees until someone edits it. That cluster is a flex
     track beside the content rather than a float or a positioned corner, which is what lets it sit on
     the first line at all: content wraps *before* a track, so however long an answer runs it can never
-    end up underneath the caption. Ephemeral chrome (approval prompts, banners) is not stamped, and a
+    end up underneath the caption. Ephemeral chrome (approval prompts) is not stamped, an alert card
+    carries a stamp of its own outside the transcript, and a
     centered system notice keeps its caption below its text, having no right edge to align to.
     Messages persisted before timestamps existed render without a caption.
   - **A loop marker names which injection it was, live and on reload.** The loop injects two kinds of
@@ -1250,7 +1267,12 @@ notice on startup.
   `add_mcp_server`, `execute_python`, `run_command`, and `update_config`; adjust with `[security] confirm_tools` or
   `--confirm-tools` (empty disables). Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
-  are currently viewing. The reply is routed through the single channel reader, so it is safe alongside
+  are currently viewing. **A backgrounded turn's auto-deny raises an alert card** naming the tool and
+  linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
+  the user is not reading told them nothing about their own turn losing a capability by their switching
+  away. A proactive firing denies silently still, since it reports itself when it ends and a task
+  calling a gated tool every firing would otherwise raise a card every firing.
+  The reply is routed through the single channel reader, so it is safe alongside
   `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
   cannot overwrite each other.
 - **A gate that names nothing fails startup.** `[security] confirm_tools` matches a tool by name, so an

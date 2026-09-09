@@ -110,7 +110,7 @@ Non-obvious control flow: the serve loop runs each reactive turn as a background
 the channel keeps reading during a turn. That is what lets a `/stop` cancel an in-flight reply, and
 what lets a web approval reply be routed back to the waiting tool call. Switching conversations does
 **not** cancel a running turn: each conversation owns its own agent and client, so a backgrounded turn
-persists to its own conversation, streams muted, and posts a notification when it finishes. Only
+persists to its own conversation, streams muted, and raises an alert card when it finishes. Only
 `delete_conversation` cancels, and only the deleted conversation's own turn.
 
 The three conversation commands (`/new`, `/conversations`, `/switch <id>`) are dispatched in that same
@@ -1278,6 +1278,48 @@ switch into a background turn count on from its real age instead of restarting a
 on the wire keeps a boolean, because that is what the page branches on, with `elapsed` riding along
 only when there is a turn to time.
 
+### The alert layer
+
+Four things happen outside the conversation on screen: a scheduled task finishes, a background turn
+finishes, an MCP connect needs an authorization, and a backgrounded turn's gated tool call is
+auto-denied. All four used to arrive as text. Three of them were pushed with `Channel.send`, and AIMU's
+`WebChannel` turns a string sent with no `reply_to` into a `message` frame marked `proactive`, so they
+were rendered as bubbles in whichever conversation the user happened to be reading. A scheduled task's
+"open the 'Digest' conversation to review" could therefore land in the middle of an unrelated
+conversation, or inside 'Digest' itself, where it names the thing already on screen.
+
+They now share one route, `ChannelUI.alert`, and one frame, `notification`, which the page draws as a
+card in a fixed layer over the whole UI. `notification` is not in `_TURN_FRAMES`, so it is never muted:
+being about work the user is *not* watching is the entire point of it.
+
+Two methods sit on that one frame, and the split is deliberate. `ChannelUI.notify` keeps its old
+no-op fallback, because a background turn's completion is worth nothing on a channel that never
+backgrounds one: the terminal has already printed the reply where the user is. `ChannelUI.alert` falls
+back to a plain `send` instead, because a scheduled task's failure or an authorization link has to land
+somewhere. That fallback is the reason an alert's `text` is always self-contained, carrying the URL or
+naming the conversation in words; `conversation_id`, `url`, and `group` are additions a front end that
+can draw a control turns into one, not the only copy of the information.
+
+The card is a pointer, never a decision. Open switches to the conversation the alert names; Authorize
+is an anchor. Approving a tool call from a card was considered and rejected: the card cannot hold
+`execute_python`'s body or `add_skill_script`'s script, and a truncated argument blob beside an Allow
+button trains the user to approve unread, which is the one thing the gate exists to prevent.
+
+Three properties of the layer are worth stating, because each answers a failure this shape can have:
+
+- **Non-blocking.** The layer takes no pointer events; the cards do. A scheduled task fires whether or
+  not anyone is at the keyboard, so a modal here would let an unattended process seize the composer.
+- **Grouped.** A card supersedes an earlier card with the same `group`: the task for a firing's report,
+  the conversation for a completion, the conversation and tool name for a denial. Ungrouped, a task
+  firing every ten minutes overnight greets the user with a card per firing.
+- **Anchors are built from the `url` field, never from the text.** The authorization URL comes from a
+  remote MCP server's own metadata, and the page checks its scheme is `http(s)` before making a link of
+  it. Linkifying the sentence instead would let any text that ever reaches a card become a link.
+
+A card can outlive what it points at, since a task prunes its older runs. The page re-renders the layer
+on every `conversations` frame, and a card whose conversation is no longer in that list keeps its text
+and drops its Open control, rather than offering a switch that would land on nothing.
+
 ### The tasks section, and the settings frames behind it
 
 Two page surfaces are pure front-end concerns and deliberately absent from `RichChannel`: the
@@ -1414,7 +1456,7 @@ Muting a background turn happens per frame, in `WebChannel.send_frame`, which ev
 through. The rule is a property of the frame's *type*: the `_TURN_FRAMES` set is turn output (tokens,
 thinking, tool calls, the message, `done`, loop markers, images, plan bubbles, phases, sub-agent cards)
 and is dropped when `streaming_conversation` names a conversation other than the one being viewed;
-everything else is channel state (the sidebar, replayed history, settings, notifications, human-decision
+everything else is channel state (the sidebar, replayed history, settings, alerts, human-decision
 prompts) and always goes out. Neither half can be decided by task context alone. Hoisting the check out
 of a streaming loop -- taking it once when a reply starts -- is what let a switch mid-reply append the
 rest of the old turn's tokens to the conversation the user had just moved to, since the viewed

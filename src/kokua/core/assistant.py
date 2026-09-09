@@ -247,7 +247,7 @@ class Assistant:
         # through build.py's functions by hand.
         state = LiveState(
             config=config,
-            notify=channel.send,
+            notify=assistant._ui.alert,
             oauth=oauth,
             connections=connections,
             scheduler=scheduler,
@@ -285,7 +285,7 @@ class Assistant:
         # agent is built: the entry agent's spawn_subagent snapshots `connections` at build time to give
         # MCP-backed workers their tools. The fan-out is a no-op here (no agents are live yet); it just
         # fills `connections`.
-        await reconnect_mcp_servers(for_each_agent, connections, config, notify=channel.send, oauth=oauth)
+        await reconnect_mcp_servers(for_each_agent, connections, config, notify=assistant._ui.alert, oauth=oauth)
         for name in configured_but_undeclared(config):
             logger.warning(
                 "config.toml has a [%s] section, but no agent declares the %r toolset, so its settings are "

@@ -236,9 +236,36 @@ class WebChannel(BaseWebChannel):
                 return
         await super().send_frame(frame)
 
-    async def send_notification(self, text: str) -> None:
-        """A background turn finished; tell the user without stealing the current view."""
-        await self.send_frame({"type": "notification", "text": text})
+    async def send_notification(
+        self,
+        text: str,
+        *,
+        conversation_id: Optional[str] = None,
+        url: Optional[str] = None,
+        group: Optional[str] = None,
+    ) -> None:
+        """Raise an alert card: something happened outside the conversation being read.
+
+        Never muted (``notification`` is not in ``_TURN_FRAMES``), because that is the whole point of
+        it: every producer is work the user is not watching.
+
+        ``conversation_id`` and ``url`` are what the card turns into a control, and both are optional
+        because not every alert has one to offer. The timestamp is stamped here rather than on the
+        page, so a card says when the thing happened rather than when the browser drew it, which are
+        different times for an alert that arrives while the tab is in the background.
+
+        ``group`` is what a later card supersedes: same group, one card, the newest.
+        """
+        await self.send_frame(
+            {
+                "type": "notification",
+                "text": text,
+                "ts": _now(),
+                "conversation_id": conversation_id,
+                "url": url,
+                "group": group,
+            }
+        )
 
     async def send_working(self, elapsed: Optional[float]) -> None:
         """Tell the page whether the conversation it is now viewing has a turn already running in

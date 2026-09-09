@@ -82,7 +82,6 @@
                   aria-label="Theme: auto (system)">◐</button>
         </span>
       </header>
-      <div id="notifications"></div>
       <div id="log"></div>
       <div id="attach-previews" class="attach-previews hidden"></div>
       <!-- #send and #stop keep separate ids and separate handlers, with only one in the DOM at a time
@@ -115,6 +114,13 @@
       </form>
     </main>
   </div>
+
+  <!-- The alert layer, over the whole page rather than inside the transcript: everything raised here
+       happened outside the conversation on screen (a scheduled task, an authorization a connect is
+       waiting on, a tool call a backgrounded turn was denied). Non-blocking on purpose, since an
+       unattended task must not be able to seize the page; nothing here times out either, so a card
+       stays until it is dismissed. -->
+  <div id="alerts" role="region" aria-label="Alerts" aria-live="assertive"></div>
 
   <!-- Vendored markdown renderer + sanitizer + math typesetter (offline; see the pinned versions in
        each file's own header). katex.min.js must load before auto-render.min.js (which reads
