@@ -94,12 +94,12 @@ async def test_nested_tool_calls_reach_the_card():
     reporter, channel = _reporter()
     _collect()
     await reporter.spawned("r-1", "researcher", "find X")
-    await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "https://example.com"}))
+    await reporter.chunk("r-1", _tool_call("get_web_content", {"url": "https://example.com"}))
     assert channel.subagent_frames[-1] == {
         "id": "r-1",
         "append": {
             "kind": "tool",
-            "name": "get_webpage",
+            "name": "get_web_content",
             "arguments": {"url": "https://example.com"},
             "response": None,
         },
@@ -112,7 +112,7 @@ async def test_a_nested_tool_entry_carries_what_the_call_returned():
     reporter, channel = _reporter()
     _collect()
     await reporter.spawned("r-1", "researcher", "find X")
-    await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "https://example.com"}, "<html>X</html>"))
+    await reporter.chunk("r-1", _tool_call("get_web_content", {"url": "https://example.com"}, "<html>X</html>"))
     assert channel.subagent_frames[-1]["append"]["response"] == "<html>X</html>"
 
 
@@ -128,11 +128,11 @@ async def test_oversized_tool_response_is_recorded_as_preview_and_reference(tmp_
     response = "x" * (RESPONSE_PREVIEW_CHARS * 3)
 
     await reporter.spawned("researcher-abc", "researcher", "read the PDF")
-    await reporter.chunk("researcher-abc", _tool_call("get_webpage", {"url": "u"}, response))
+    await reporter.chunk("researcher-abc", _tool_call("get_web_content", {"url": "u"}, response))
 
     append = events[-1]["append"]
     assert append["kind"] == "tool"
-    assert append["name"] == "get_webpage"
+    assert append["name"] == "get_web_content"
     assert append["arguments"] == {"url": "u"}
     assert append["response"] == response[:RESPONSE_PREVIEW_CHARS]
     assert append["response_bytes"] == len(response)
@@ -166,7 +166,7 @@ async def test_live_frame_and_recorded_event_are_identical(tmp_path):
     response = "y" * (RESPONSE_PREVIEW_CHARS * 2)
 
     await reporter.spawned("researcher-abc", "researcher", "read the PDF")
-    await reporter.chunk("researcher-abc", _tool_call("get_webpage", {"url": "u"}, response))
+    await reporter.chunk("researcher-abc", _tool_call("get_web_content", {"url": "u"}, response))
 
     assert channel.subagent_frames[-1] == events[-1]
 
@@ -183,7 +183,7 @@ async def test_oversized_response_with_a_lone_surrogate_falls_back_to_inline(tmp
     response = ("x" * (RESPONSE_PREVIEW_CHARS * 3)) + "\udcff"
 
     await reporter.spawned("researcher-abc", "researcher", "read the file")
-    await reporter.chunk("researcher-abc", _tool_call("get_webpage", {"url": "u"}, response))
+    await reporter.chunk("researcher-abc", _tool_call("get_web_content", {"url": "u"}, response))
 
     append = events[-1]["append"]
     assert append["response"] == response
@@ -245,7 +245,7 @@ async def test_oversized_response_falls_back_to_inline_when_the_disk_write_fails
     monkeypatch.setattr(payloads, "save_text", _raise)
 
     await reporter.spawned("researcher-abc", "researcher", "read the file")
-    await reporter.chunk("researcher-abc", _tool_call("get_webpage", {"url": "u"}, response))
+    await reporter.chunk("researcher-abc", _tool_call("get_web_content", {"url": "u"}, response))
 
     append = events[-1]["append"]
     assert append["response"] == response
@@ -301,7 +301,7 @@ async def test_a_tool_call_between_two_generations_starts_a_second_answer_entry(
     events = _collect()
     await reporter.spawned("r-1", "researcher", "find X")
     await reporter.chunk("r-1", _generating("first round"))
-    await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "u"}))
+    await reporter.chunk("r-1", _tool_call("get_web_content", {"url": "u"}))
     await reporter.chunk("r-1", _generating("second round"))
     assert [e.get("append", {}).get("text") for e in events[1:]] == ["first round", None, "second round"]
 
@@ -339,7 +339,7 @@ async def test_a_tool_round_adds_no_loop_entry_to_the_card():
     reporter, _ = _reporter()
     events = _collect()
     await reporter.spawned("r-1", "researcher", "find X")
-    await reporter.chunk("r-1", _tool_call("get_webpage", {"url": "u"}, "page"))
+    await reporter.chunk("r-1", _tool_call("get_web_content", {"url": "u"}, "page"))
 
     assert [e.get("append", {}).get("kind") for e in events[1:]] == ["tool"]
 

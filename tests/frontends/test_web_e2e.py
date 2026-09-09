@@ -110,14 +110,14 @@ class _SlowClient(MockAsyncModelClient):
         if self._tool_response:
             yield StreamChunk(
                 StreamingContentType.TOOL_CALLING,
-                {"name": "get_webpage", "arguments": {"url": "u"}, "response": self._tool_response},
+                {"name": "get_web_content", "arguments": {"url": "u"}, "response": self._tool_response},
             )
         yield StreamChunk(StreamingContentType.GENERATING, self._reply)  # renders now in the viewed conversation
         await asyncio.sleep(self._delay)  # hold the turn open so a test can switch away mid-reply
         if self._tool_between:
             yield StreamChunk(
                 StreamingContentType.TOOL_CALLING,
-                {"name": "get_webpage", "arguments": {"url": "u"}, "response": self._tool_between},
+                {"name": "get_web_content", "arguments": {"url": "u"}, "response": self._tool_between},
             )
         if self._tail:
             yield StreamChunk(StreamingContentType.GENERATING, self._tail)  # arrives after that switch
@@ -819,7 +819,10 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
                         "0": [
                             {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
                             {"id": "r-1", "append": {"kind": "reasoning", "text": "fetch each page"}},
-                            {"id": "r-1", "append": {"kind": "tool", "name": "get_webpage", "arguments": {"url": "u"}}},
+                            {
+                                "id": "r-1",
+                                "append": {"kind": "tool", "name": "get_web_content", "arguments": {"url": "u"}},
+                            },
                             {"id": "r-1", "append": {"kind": "answer", "text": "**Vendor A** is cheaper."}},
                             {
                                 "id": "r-1",
@@ -858,7 +861,7 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(thinking).to_have_class(re.compile(r"\bcollapsed\b"))
     expect(tool).to_have_class(re.compile(r"\btool\b"))
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
-    expect(tool.locator(".fold-label")).to_contain_text("get_webpage")
+    expect(tool.locator(".fold-label")).to_contain_text("get_web_content")
     # The answer block: open, and its markdown rendered as it is for the assistant's own reply.
     expect(answer).to_have_class(re.compile(r"\bassistant\b"))
     expect(answer).not_to_have_class(re.compile(r"\bcollapsed\b"))
@@ -882,7 +885,7 @@ def _seed_subagent_tool_response(config, *, response, response_ref=None, respons
     for a tool result (optionally oversized, carrying `response_ref`/`response_bytes`)."""
     from aimu.sessions import Session, TinyDBSessionStore
 
-    append = {"kind": "tool", "name": "get_webpage", "arguments": {"url": "u"}, "response": response}
+    append = {"kind": "tool", "name": "get_web_content", "arguments": {"url": "u"}, "response": response}
     if response_ref is not None:
         append["response_ref"] = response_ref
         append["response_bytes"] = response_bytes
@@ -1069,12 +1072,12 @@ def _seed_tool_call(result: str | None):
             "role": "assistant",
             "content": "done",
             "tool_calls": [
-                {"type": "function", "function": {"name": "get_webpage", "arguments": {"url": "u"}}, "id": "1"}
+                {"type": "function", "function": {"name": "get_web_content", "arguments": {"url": "u"}}, "id": "1"}
             ],
         },
     ]
     if result is not None:
-        messages.append({"role": "tool", "name": "get_webpage", "content": result, "tool_call_id": "1"})
+        messages.append({"role": "tool", "name": "get_web_content", "content": result, "tool_call_id": "1"})
 
     def seed(config):
         TinyDBSessionStore(str(config.sessions_path)).save(
@@ -1166,10 +1169,14 @@ def _seed_thinking_and_continuation(config):
                     "content": "Looking.",
                     "thinking": "Search first.\nThen read it.",
                     "tool_calls": [
-                        {"type": "function", "function": {"name": "get_webpage", "arguments": {"url": "u"}}, "id": "1"}
+                        {
+                            "type": "function",
+                            "function": {"name": "get_web_content", "arguments": {"url": "u"}},
+                            "id": "1",
+                        }
                     ],
                 },
-                {"role": "tool", "name": "get_webpage", "content": "body", "tool_call_id": "1"},
+                {"role": "tool", "name": "get_web_content", "content": "body", "tool_call_id": "1"},
                 {"role": "user", "content": "Continue working on the task.", "provenance": "continuation"},
                 {"role": "assistant", "content": "Done."},
             ],
@@ -1210,7 +1217,7 @@ def test_a_collapsed_tool_line_names_the_call_and_its_result_size(page, live_ser
 
     label = tool.locator("> .fold-header > .fold-label")
     expect(label.locator(".fold-kind")).to_have_text("tool")
-    expect(label.locator(".fold-payload")).to_have_text('get_webpage(url="u")')
+    expect(label.locator(".fold-payload")).to_have_text('get_web_content(url="u")')
     expect(label.locator(".fold-metric")).to_have_text("13 chars")
 
     # One line tall regardless of argument length: the payload ellipsizes, the row never wraps.

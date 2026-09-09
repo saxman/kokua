@@ -22,7 +22,7 @@ def _session_with_response(key: str, response: str) -> Session:
                         "id": "worker-1",
                         "append": {
                             "kind": "tool",
-                            "name": "get_webpage",
+                            "name": "get_web_content",
                             "arguments": {"url": "u"},
                             "response": response,
                         },
