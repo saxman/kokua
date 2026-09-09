@@ -1543,6 +1543,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#the-alert-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The alert layer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#the-tasks-section-and-the-settings-frames-behind-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2066,6 +2077,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#the-alert-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The alert layer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#the-tasks-section-and-the-settings-frames-behind-it" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2237,7 +2259,7 @@ serve loop, and little else. It owns:</p>
 the channel keeps reading during a turn. That is what lets a <code>/stop</code> cancel an in-flight reply, and
 what lets a web approval reply be routed back to the waiting tool call. Switching conversations does
 <strong>not</strong> cancel a running turn: each conversation owns its own agent and client, so a backgrounded turn
-persists to its own conversation, streams muted, and posts a notification when it finishes. Only
+persists to its own conversation, streams muted, and raises an alert card when it finishes. Only
 <code>delete_conversation</code> cancels, and only the deleted conversation's own turn.</p>
 <p>The three conversation commands (<code>/new</code>, <code>/conversations</code>, <code>/switch &lt;id&gt;</code>) are dispatched in that same
 loop, beside <code>/stop</code> and <code>/diag</code>, and go through the same <code>new_conversation</code> / <code>select_conversation</code>
@@ -3013,8 +3035,8 @@ The probe covers one surface at a time; the version floor covers every earlier r
 capability first shipped tagged 0.24.0, but the number collided with a different, unrelated 0.24.0 that
 AIMU's own <code>main</code> released first; the branch carrying <code>events</code> rebased past it and renumbered to 0.25.0,
 so a real, released 0.24.0 correctly failed that probe rather than exposing a gap in it.)</p>
-<p>The floor is now <code>aimu&gt;=0.28.0</code>, and unlike 0.27.0 it is a floor whose <em>reason</em> and whose <em>probe</em> are the
-same capability again. It moved for AIMU's <code>CONTINUING</code> chunk, the phase a streamed driver yields for a
+<p>The floor was <code>aimu&gt;=0.28.0</code> until 0.29.0, and unlike 0.27.0 it was a floor whose <em>reason</em> and whose
+<em>probe</em> were the same capability again. It moved for AIMU's <code>CONTINUING</code> chunk, the phase a streamed driver yields for a
 round the loop injected itself (a continuation nudge, or the forced wrap-up at the round cap) rather than
 one the model asked for. No other seam could carry it: Kokua constructs nothing differently against an
 older AIMU, so <code>channels/web.py</code> and <code>core/subagents.py</code> simply never see the phase, and nothing raises,
@@ -3041,6 +3063,36 @@ mid-session failure to pull forward. A probe there would buy the wording rather 
 why the one slot goes to the phase above, which has no such escape hatch, and this key is left to the
 floor. The global tier needed none of it: the factory argument behind <code>[assistant].max_iterations</code> has
 existed since 0.12.0.</p>
+<p><strong>0.29.0</strong> moved the floor for <code>SessionStore.list_summaries</code>, a store's own answer to "every stored
+conversation's title, timestamp, and message count, without its messages". Asking that through
+<code>ConversationBook.sessions()</code> cost one whole-file JSON parse per stored conversation, 4,790 ms on a
+56.8 MB developer store to draw a list of titles; <code>summaries()</code> now calls the store method, and the
+sidebar, task ownership, and the startup pointer all read through it. The probe gripped it as a plain
+name lookup, structurally a half-step deeper than its predecessors since the symbol is a method on
+<code>SessionStore</code> rather than a name at module scope. What that could not see, and what the floor covers
+now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
+messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
+<code>TinyDBSessionStore</code>'s override from a plain inheritance of the default.</p>
+<p>The floor is now <strong><code>aimu&gt;=0.30.0</code></strong>, and it is the first one moved by a <em>rename</em>. <code>get_webpage</code> became
+<code>get_web_content</code>, and the point is not the name: the old tool never asked what it had fetched. It
+handed <code>response.text</code> to an HTML stripper, and <code>requests</code> decodes <code>.text</code> with <code>errors="replace"</code>, so a
+PDF behind a URL arrived as megabytes of replacement characters that a tag stripper passes through
+almost whole. Four such results, 6.28 MB of them, are in this developer's own stored transcripts, each
+having entered a model's context whole. The new tool classifies the response by <code>Content-Type</code> with the
+<code>%PDF-</code> magic bytes as tiebreaker, returns Markdown (a PDF under one <code>## Page N</code> heading per page), and
+caps what it returns, downloads, and extracts. Kokua needs the floor because it hands that group out
+unchanged: <code>toolsets/web.py</code> is <code>list(builtin.web)</code>, and <code>workflows/critics.py</code> mounts the same group
+for the reviewer, so on an older AIMU both quietly poison a context.</p>
+<p>The probe is a name lookup on <code>builtin.get_web_content</code>, the fourth time that shape has answered. What
+Kokua actually hands an agent is the <em>group</em>, so the stricter question is whether <code>web</code> contains it, and
+that check was declined for the reason <code>run_command</code>'s was at 0.24.0, this time without even that
+release's brief window: the rename moved the function and the group's entry for it in a single upstream
+commit, so no checkout exists where the name resolves and the group still holds the old tool. A
+membership check over a list of callables, matching on <code>__name__</code>, would be a new probe shape bought to
+close a window that does not exist; <code>tests/test_aimu_compat.py</code> asserts the group membership instead, as
+a fact about the release rather than as the preflight's shape. What the probe leaves to the floor is the
+behavior behind the name: a checkout could export <code>get_web_content</code> and classify nothing, and only
+fetching a PDF would prove otherwise.</p>
 <p>Two application facts worth knowing beyond the parameters themselves. <code>max_tokens</code> and <code>context_length</code>
 are different knobs that share one window: <code>max_tokens</code> caps <em>generated</em> tokens, <code>context_length</code> sizes
 the whole window the prompt and the output share, so <code>context_length = 32768</code> with <code>max_tokens = 4096</code>
@@ -3323,6 +3375,42 @@ switch into a background turn count on from its real age instead of restarting a
 "idle, and it has been running twelve seconds" unsayable rather than merely wrong. The <code>working</code> frame
 on the wire keeps a boolean, because that is what the page branches on, with <code>elapsed</code> riding along
 only when there is a turn to time.</p>
+<h3 id="the-alert-layer">The alert layer<a class="headerlink" href="#the-alert-layer" title="Permanent link">&para;</a></h3>
+<p>Four things happen outside the conversation on screen: a scheduled task finishes, a background turn
+finishes, an MCP connect needs an authorization, and a backgrounded turn's gated tool call is
+auto-denied. All four used to arrive as text. Three of them were pushed with <code>Channel.send</code>, and AIMU's
+<code>WebChannel</code> turns a string sent with no <code>reply_to</code> into a <code>message</code> frame marked <code>proactive</code>, so they
+were rendered as bubbles in whichever conversation the user happened to be reading. A scheduled task's
+"open the 'Digest' conversation to review" could therefore land in the middle of an unrelated
+conversation, or inside 'Digest' itself, where it names the thing already on screen.</p>
+<p>They now share one route, <code>ChannelUI.alert</code>, and one frame, <code>notification</code>, which the page draws as a
+card in a fixed layer over the whole UI. <code>notification</code> is not in <code>_TURN_FRAMES</code>, so it is never muted:
+being about work the user is <em>not</em> watching is the entire point of it.</p>
+<p>Two methods sit on that one frame, and the split is deliberate. <code>ChannelUI.notify</code> keeps its old
+no-op fallback, because a background turn's completion is worth nothing on a channel that never
+backgrounds one: the terminal has already printed the reply where the user is. <code>ChannelUI.alert</code> falls
+back to a plain <code>send</code> instead, because a scheduled task's failure or an authorization link has to land
+somewhere. That fallback is the reason an alert's <code>text</code> is always self-contained, carrying the URL or
+naming the conversation in words; <code>conversation_id</code>, <code>url</code>, and <code>group</code> are additions a front end that
+can draw a control turns into one, not the only copy of the information.</p>
+<p>The card is a pointer, never a decision. Open switches to the conversation the alert names; Authorize
+is an anchor. Approving a tool call from a card was considered and rejected: the card cannot hold
+<code>execute_python</code>'s body or <code>add_skill_script</code>'s script, and a truncated argument blob beside an Allow
+button trains the user to approve unread, which is the one thing the gate exists to prevent.</p>
+<p>Three properties of the layer are worth stating, because each answers a failure this shape can have:</p>
+<ul>
+<li><strong>Non-blocking.</strong> The layer takes no pointer events; the cards do. A scheduled task fires whether or
+  not anyone is at the keyboard, so a modal here would let an unattended process seize the composer.</li>
+<li><strong>Grouped.</strong> A card supersedes an earlier card with the same <code>group</code>: the task for a firing's report,
+  the conversation for a completion, the conversation and tool name for a denial. Ungrouped, a task
+  firing every ten minutes overnight greets the user with a card per firing.</li>
+<li><strong>Anchors are built from the <code>url</code> field, never from the text.</strong> The authorization URL comes from a
+  remote MCP server's own metadata, and the page checks its scheme is <code>http(s)</code> before making a link of
+  it. Linkifying the sentence instead would let any text that ever reaches a card become a link.</li>
+</ul>
+<p>A card can outlive what it points at, since a task prunes its older runs. The page re-renders the layer
+on every <code>conversations</code> frame, and a card whose conversation is no longer in that list keeps its text
+and drops its Open control, rather than offering a switch that would land on nothing.</p>
 <h3 id="the-tasks-section-and-the-settings-frames-behind-it">The tasks section, and the settings frames behind it<a class="headerlink" href="#the-tasks-section-and-the-settings-frames-behind-it" title="Permanent link">&para;</a></h3>
 <p>Two page surfaces are pure front-end concerns and deliberately absent from <code>RichChannel</code>: the
 scheduled-tasks section (<code>tasks</code> / <code>get_tasks</code> / <code>task</code>) and the settings frames
@@ -3445,7 +3533,7 @@ export renders the same items as prose instead.</p>
 through. The rule is a property of the frame's <em>type</em>: the <code>_TURN_FRAMES</code> set is turn output (tokens,
 thinking, tool calls, the message, <code>done</code>, loop markers, images, plan bubbles, phases, sub-agent cards)
 and is dropped when <code>streaming_conversation</code> names a conversation other than the one being viewed;
-everything else is channel state (the sidebar, replayed history, settings, notifications, human-decision
+everything else is channel state (the sidebar, replayed history, settings, alerts, human-decision
 prompts) and always goes out. Neither half can be decided by task context alone. Hoisting the check out
 of a streaming loop -- taking it once when a reply starts -- is what let a switch mid-reply append the
 rest of the old turn's tokens to the conversation the user had just moved to, since the viewed

@@ -1750,7 +1750,7 @@ pymdownx.snippets so there is one file to maintain. Edit /CHANGELOG.md, not this
 installable, modular application: a small transport-agnostic core with capability pushed into plugins.
 Because there is no earlier release, this section describes what 0.1.0 <em>is</em> rather than what changed.
 The pre-release development history is in the git log.</p>
-<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.29.0 or newer. Apache-2.0.</p>
+<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.30.0 or newer. Apache-2.0.</p>
 <h3 id="package-and-entry-points">Package and entry points<a class="headerlink" href="#package-and-entry-points" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>src</code>-layout <code>kokua</code> package with two console scripts: <code>kokua</code> runs the selected front end (default
@@ -1814,7 +1814,7 @@ The pre-release development history is in the git log.</p>
   lazily and held in a bounded LRU registry (<code>agent_cache_cap</code>, default 8). Memory and documents stay
   shared across conversations.</li>
 <li><strong>Concurrent conversations.</strong> A turn keeps running when you switch away: it streams only into the
-  conversation you are viewing, persists to its own conversation, and posts a completion notification
+  conversation you are viewing, persists to its own conversation, and raises a completion alert card
   instead of streaming. Switching does not cancel it; only deleting a conversation does, and only its
   own turn. The invariants that make this safe are documented at the top of <code>core/turns.py</code>.</li>
 <li><strong>Switching into a running turn shows the turn.</strong> A turn's messages are not in the store until it
@@ -1990,6 +1990,22 @@ The pre-release development history is in the git log.</p>
     that the first rendered content displaced was on screen for 23ms against a local endpoint, whose
     first token lands about that fast, so what it answers has to be "is a turn running" (true until the
     turn ends) rather than "has anything arrived yet".</li>
+<li><strong>Alerts sit over the page, not in the transcript.</strong> Everything raised outside the conversation on
+    screen is a card in a fixed layer: a scheduled task's report, an MCP authorization an in-flight
+    connect is waiting on, a background turn's completion, and a gated tool a backgrounded turn was
+    denied. Before this they were messages, pushed into whichever conversation the user happened to be
+    reading, which is how a task's "open the 'Digest' conversation to review" could land in the middle
+    of an unrelated one (or in 'Digest' itself). Each card carries the time the thing happened, one way
+    to act on it, and a dismiss control; Escape takes the newest. The action is a pointer rather than a
+    decision: Open switches to the conversation the card names, and Authorize is an anchor built from
+    the frame's own <code>url</code> field, only for <code>http(s)</code>, never by hunting for a URL in the text, since that
+    URL comes from a remote server's metadata. Nothing expires, and the layer takes no pointer events of
+    its own, so an unattended task can never block the composer. A later card supersedes an earlier one
+    with the same <code>group</code> (a task, a conversation, a conversation and tool pair), which keeps a task
+    firing all night from greeting you with one card per firing; a card whose conversation has since
+    been pruned keeps its text and drops its Open control. The terminal has no such layer, so
+    <code>ChannelUI.alert</code> prints the sentence there instead, which is why an alert's text always carries
+    its link in words.</li>
 <li><strong>A Think picker beside the Plan toggle</strong> sets the reasoning effort for the messages you send after
     it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
     <code>input</code> frame field, writes nothing to <code>config.toml</code>, and resets to the configured default on reload.
@@ -2064,7 +2080,8 @@ The pre-release development history is in the git log.</p>
     with the sidebar's rather than a second one that agrees until someone edits it. That cluster is a flex
     track beside the content rather than a float or a positioned corner, which is what lets it sit on
     the first line at all: content wraps <em>before</em> a track, so however long an answer runs it can never
-    end up underneath the caption. Ephemeral chrome (approval prompts, banners) is not stamped, and a
+    end up underneath the caption. Ephemeral chrome (approval prompts) is not stamped, an alert card
+    carries a stamp of its own outside the transcript, and a
     centered system notice keeps its caption below its text, having no right edge to align to.
     Messages persisted before timestamps existed render without a caption.</li>
 <li><strong>A loop marker names which injection it was, live and on reload.</strong> The loop injects two kinds of
@@ -3003,7 +3020,12 @@ notice on startup.</p>
   <code>add_mcp_server</code>, <code>execute_python</code>, <code>run_command</code>, and <code>update_config</code>; adjust with <code>[security] confirm_tools</code> or
   <code>--confirm-tools</code> (empty disables). Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
-  are currently viewing. The reply is routed through the single channel reader, so it is safe alongside
+  are currently viewing. <strong>A backgrounded turn's auto-deny raises an alert card</strong> naming the tool and
+  linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
+  the user is not reading told them nothing about their own turn losing a capability by their switching
+  away. A proactive firing denies silently still, since it reports itself when it ends and a task
+  calling a gated tool every firing would otherwise raise a card every firing.
+  The reply is routed through the single channel reader, so it is safe alongside
   <code>/stop</code>. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
   cannot overwrite each other.</li>
 <li><strong>A gate that names nothing fails startup.</strong> <code>[security] confirm_tools</code> matches a tool by name, so an
@@ -3027,7 +3049,7 @@ notice on startup.</p>
 </ul>
 <h3 id="diagnostics-and-error-reporting">Diagnostics and error reporting<a class="headerlink" href="#diagnostics-and-error-reporting" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>An AIMU too old to run Kokua fails with an instruction, not a traceback.</strong> The <code>aimu&gt;=0.29.0</code>
+<li><strong>An AIMU too old to run Kokua fails with an instruction, not a traceback.</strong> The <code>aimu&gt;=0.30.0</code>
   requirement covers a normal install, but a development checkout installs the sibling <code>../aimu</code>
   editable and that checkout can sit on an older commit. <code>kokua.aimu_compat</code> preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -3071,7 +3093,19 @@ notice on startup.</p>
   makes it fast, and a name lookup on the ABC is satisfied by either, so a store that stopped
   overriding it would still pass while paying the old cost in silence; <code>StreamingContentType.CONTINUING</code>
   is the floor's job now, the same way every earlier probe surface became the floor's job once a newer
-  one took the slot.
+  one took the slot. Today the floor is <strong>0.30.0</strong>, the first one moved by a rename, and the probe is a
+  name lookup for the fourth time: <code>aimu.tools.builtin.get_web_content</code>, which replaces <code>get_webpage</code>.
+  The name is not the point. The old tool never asked what it had downloaded, handing <code>response.text</code>
+  to an HTML stripper, and since <code>requests</code> decodes <code>.text</code> with <code>errors="replace"</code>, a PDF behind a URL
+  became megabytes of replacement characters that the stripper passed through almost whole and into the
+  model's context. Kokua hands that group out unchanged (<code>toolsets/web.py</code> is <code>list(builtin.web)</code>, and
+  <code>workflows/critics.py</code> mounts the same group for the reviewer), so an older sibling poisons a context
+  with nothing raised anywhere. Group membership, not the bare name, is what Kokua depends on, and the
+  stricter check was declined the way <code>run_command</code>'s was at 0.24.0 and with even less to gain: the
+  rename moved the function and the group's entry for it in one upstream commit, so no checkout exists
+  where the name resolves and the group still holds the old tool. <code>list_summaries</code> joins the floor's
+  job; what the new probe leaves there in turn is the behavior behind the name, since a checkout could
+  export <code>get_web_content</code> and classify nothing.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and <code>tests/test_aimu_compat.py</code> pins the floor against <code>pyproject.toml</code>'s specifier so the two
   halves of that one decision cannot drift.</li>
