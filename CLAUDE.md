@@ -50,7 +50,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.28.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.30.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -200,8 +200,8 @@ Consequences for working in this repo:
   silently. Worth writing down, because a probe that overclaims is worse than one that covers less. The
   global tier needs nothing either: `[assistant].max_iterations` rides a factory argument that has existed
   since 0.12.0, so only the per-agent tier ever depended on 0.28.0.
-  **AIMU 0.29.0 is the current floor, and the probe returns to a plain name lookup, the third time this
-  shape has answered (`resolve_default_text_model` first, `ModelRefusalError` second): the capability is
+  **AIMU 0.29.0 was the floor until 0.30.0, and its probe was a plain name lookup, the third time that
+  shape had answered (`resolve_default_text_model` first, `ModelRefusalError` second): the capability is
   `aimu.sessions.SessionStore.list_summaries`, a session store's own answer to "every stored
   conversation's title, timestamp, and message count, without its messages."** Kokua's sidebar, task
   ownership, and startup pointer used to ask that question through `ConversationBook.sessions()`, which
@@ -224,6 +224,28 @@ Consequences for working in this repo:
   passthrough left one level down for its own capability. `StreamingContentType.CONTINUING` is the
   floor's job now, exactly as `ModelRefusalError` and `make_async_subagent_tool(events=...)` became the
   floor's job when the probe moved past each of them in turn.
+  **AIMU 0.30.0 is the current floor, and it is the first one a *rename* moved.** `get_webpage` became
+  `get_web_content`, and the name is not what matters: the old tool never asked what it had downloaded.
+  It handed `response.text` to an HTML stripper, and `requests` decodes `.text` with
+  `errors="replace"`, so a PDF behind a URL arrived as megabytes of replacement characters that a tag
+  stripper passes through almost whole; four such results, 6.28 MB of them, sit in this developer's own
+  stored transcripts, each having entered a model's context whole. Kokua needs the floor because it
+  hands that group out unchanged: `toolsets/web.py` is `list(builtin.web)` and `workflows/critics.py`
+  mounts the same group for the reviewer, so on an older sibling both poison a context with nothing
+  raised anywhere, which is the silent shape the floor exists for. The probe is a plain name lookup on
+  `aimu.tools.builtin.get_web_content`, the fourth time that shape has answered, and it is worth
+  reading for the check it *declines*. What Kokua hands an agent is the group, not the function, so the
+  strictly honest question is whether `builtin.web` contains it, which would take a membership check
+  over a list of *callables* matching on `__name__`: a new probe shape, and the same one declined at
+  0.24.0 for `run_command`. It is declined again here with even less to gain, because the rename moved
+  `def get_web_content` and the `web = [...]` entry for it in a single upstream commit, so unlike
+  0.24.0's fifteen-minute window there is no checkout at all in which the name resolves and the group
+  still holds the old tool. The membership is asserted in `tests/test_aimu_compat.py` instead, where it
+  is a fact about the release rather than a shape the preflight has to learn. What the probe leaves to
+  the floor is the *behavior* behind the name: a checkout could export `get_web_content` and classify
+  nothing, and its three caps (20,000 characters returned, 10 MB downloaded, 200,000 extracted from a
+  PDF) are invisible to a name lookup, which no preflight short of fetching a PDF could establish.
+  `SessionStore.list_summaries` is the floor's job now, in its turn.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.29.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.30.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -15,8 +15,9 @@ declared version already reads new enough while the code behind it predates the 
 string of an editable install says what the branch claims, not what it contains.
 
 The probe covers exactly one surface at a time: the newest one Kokua depends on, whose shape decides the
-check's shape. A name lookup answers for a symbol, the shape in force today (``SessionStore.list_summaries``)
-and twice before, for ``resolve_default_text_model`` and ``ModelRefusalError``; a membership check answers
+check's shape. A name lookup answers for a symbol, the shape in force today (``builtin.get_web_content``)
+and three times before, for ``resolve_default_text_model``, ``ModelRefusalError``, and
+``SessionStore.list_summaries``; a membership check answers
 for an entry in a published set whose mere existence proves nothing (``SUBAGENT_SPEC_KEYS`` shipped a
 release before the ``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a
 checkout, and ``StreamingContentType`` answered the same way for ``CONTINUING``); a signature check answers
@@ -80,8 +81,29 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.29.0 is the current surface, and the probe returns to a plain name lookup, the third time this
-shape has answered (``resolve_default_text_model`` at 0.21.0, ``ModelRefusalError`` at 0.27.0). The
+AIMU 0.30.0 is the current surface, and it is the first floor a *rename* has moved. ``get_webpage``
+became ``get_web_content``, and the name is not the capability: the old tool never asked what it had
+downloaded. It handed ``response.text`` to an HTML stripper, and ``requests`` decodes ``.text`` with
+``errors="replace"``, so a PDF behind a URL arrived as megabytes of replacement characters that a tag
+stripper passes through almost whole. Kokua hands that group out unchanged (``toolsets/web.py`` is
+``list(builtin.web)``) and ``workflows/critics.py`` mounts it for the reviewer, so an older sibling
+poisons a model's context with nothing raised anywhere.
+
+The shape is a plain name lookup, the fourth time, and what it declines is the interesting half. What
+Kokua hands an agent is the *group*, so the strictly honest question is whether ``builtin.web`` contains
+the function, which would take a membership check over a list of *callables* matching on ``__name__``:
+a new shape for this module, and the same one declined at 0.24.0 for ``run_command``. It is declined
+again here with even less to gain. The rename moved ``def get_web_content`` and the ``web = [...]``
+entry for it in one upstream commit, so unlike 0.24.0's fifteen-minute window there is no checkout in
+which the name resolves and the group still holds the old tool; ``tests/test_aimu_compat.py`` asserts
+the membership instead, as a fact about the release rather than as this module's shape. What the probe
+cannot see is the behavior behind the name: a checkout could export ``get_web_content`` and classify
+nothing, and its caps (20,000 characters returned, 10 MB downloaded, 200,000 extracted from a PDF) are
+invisible to a name lookup. Nothing short of fetching a PDF would establish those, which is not a
+preflight's job.
+
+AIMU 0.29.0 was the surface until 0.30.0, and the probe was a plain name lookup, the third time this
+shape had answered (``resolve_default_text_model`` at 0.21.0, ``ModelRefusalError`` at 0.27.0). The
 capability is ``SessionStore.list_summaries``: a session store's own answer to "every stored
 conversation's title, timestamp, and message count, without its messages". Kokua's sidebar, task
 ownership, and startup pointer all used to ask that question through ``ConversationBook.sessions()``,
@@ -202,41 +224,42 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 29, 0)
+MINIMUM_AIMU = (0, 30, 0)
 
-# The newest AIMU surface Kokua depends on is `SessionStore.list_summaries`, a session store's own
-# answer to "every stored conversation's title, timestamp, and message count, without its messages".
-# `ConversationBook.summaries()` calls it directly, and every caller whose question was metadata rather
-# than message text (the sidebar's `list()`, `sessions_for_task()`, `most_recent_or_new()`) moved onto
-# it in the same change; `sessions()` survives only for the one caller that needs message text, the
-# agent's cross-conversation search. Before this, answering the sidebar's question cost one whole-file
-# JSON parse per stored conversation: 4,790 ms on a 56.8 MB developer store, to draw a list of titles.
+# The newest AIMU surface Kokua depends on is `builtin.get_web_content`, the renamed page fetcher that
+# asks what it downloaded before reading it. `get_webpage` did not: it handed `response.text` to an HTML
+# stripper, and `requests` decodes `.text` with `errors="replace"`, so a PDF behind a URL arrived as
+# megabytes of replacement characters, which a tag stripper passes through almost whole. Four such
+# results, 6.28 MB of them, are in this developer's own stored transcripts, each having entered a model's
+# context whole. Kokua hands out that group unchanged (`toolsets/web.py` is `list(builtin.web)`) and
+# `workflows/critics.py` mounts it for the reviewer, so on an older sibling both poison a context with
+# nothing raised anywhere.
 #
-# The shape is a name lookup, the third time this probe has taken that shape (`resolve_default_text_model`
-# at 0.21.0, `ModelRefusalError` at 0.27.0), and for the same reason both of those were: the capability is
-# the export itself, so asking "does this name exist" is exactly the question that matters. It differs
-# from either in one structural way: `list_summaries` is a method on `SessionStore`, not a name at module
-# scope, so the probe resolves `aimu.sessions.SessionStore` first and looks the symbol up there.
-# `_PROBE_CLASS` names that intermediate holder; every earlier probe leaves it unset (`None`), and the
-# lookup runs exactly as before, straight off the module.
+# The shape is a name lookup, the fourth time this probe has taken it (`resolve_default_text_model` at
+# 0.21.0, `ModelRefusalError` at 0.27.0, `SessionStore.list_summaries` at 0.29.0), and back at module
+# scope, so `_PROBE_CLASS` returns to None. What Kokua actually hands an agent is the *group*, not the
+# function, so the honest question is whether `web` contains it; the stricter check is declined for the
+# reason `run_command`'s was at 0.24.0, and this time without even that release's fifteen-minute window.
+# The rename moved `def get_web_content` and the `web = [...]` entry for it in a single commit
+# (aimu 0c0436f), so no checkout exists in which the name resolves and the group still holds the old
+# tool. A membership check over a list of *callables*, matching on `__name__`, would be a fourth probe
+# shape teaching this module a new trick to close a window that does not exist. The group membership is
+# asserted in `tests/test_aimu_compat.py` instead, where it belongs: a fact about the release, not the
+# preflight's shape.
 #
-# What this probe cannot see, and what the floor covers alone: `SessionStore.list_summaries` has a
-# default implementation on the ABC itself (read every session, keep its metadata, drop its messages),
-# correct on any store and slow on one where a full read is expensive, and `TinyDBSessionStore` overrides
-# it with a query over TinyDB's own table that never builds a `Session` at all. A name lookup on the ABC
-# is satisfied by the default alone; it cannot tell an override from an inheritance, so a
-# `TinyDBSessionStore` that stopped overriding the method, or a future store that never bothered, would
-# still pass this probe while paying the old per-conversation read in silence. The same shape of gap
-# `events`' recursive passthrough left one level down for its own capability.
+# What this probe cannot see, and what the floor covers alone: the *behavior* behind the name. A checkout
+# could export `get_web_content` and classify nothing, and the caps (20,000 characters returned, 10 MB
+# downloaded, 200,000 characters extracted from a PDF) are invisible to a name lookup too. Nothing short
+# of fetching a PDF would prove those, which is not a preflight's job.
 #
-# `StreamingContentType.CONTINUING` (a membership check) was this probe's surface while 0.28.0 was the
-# floor, `make_async_subagent_tool(events=...)` (a signature check) before that while 0.25.0 was the
-# floor, `make_command_tool` (a name lookup) before that, and `ModelRefusalError` (a name lookup) while
-# 0.27.0 was the floor; all four are the version floor's responsibility now, as everything this probe has
-# ever pointed at eventually becomes.
-_PROBE_MODULE = "aimu.sessions"
-_PROBE_CLASS: Optional[str] = "SessionStore"
-_PROBE_SYMBOL = "list_summaries"
+# `SessionStore.list_summaries` (a name lookup) was this probe's surface while 0.29.0 was the floor,
+# `StreamingContentType.CONTINUING` (a membership check) while 0.28.0 was, `make_async_subagent_tool(events=...)`
+# (a signature check) while 0.25.0 was, `make_command_tool` (a name lookup) before that, and
+# `ModelRefusalError` (a name lookup) while 0.27.0 was; all five are the version floor's responsibility
+# now, as everything this probe has ever pointed at eventually becomes.
+_PROBE_MODULE = "aimu.tools.builtin"
+_PROBE_CLASS: Optional[str] = None
+_PROBE_SYMBOL = "get_web_content"
 _PROBE_PARAMETER: Optional[str] = None
 _PROBE_MEMBER: Optional[str] = None
 

@@ -18,7 +18,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-# 0.29.0 is the oldest AIMU carrying everything Kokua needs. Four releases contribute to it. 0.26.0 is
+# 0.30.0 is the oldest AIMU carrying everything Kokua needs. Five releases contribute to it. 0.26.0 is
 # why the floor first moved: its tool loop no longer strands an un-dispatched tool call before the forced
 # wrap-up prompt, and without that fix every Anthropic run reaching its round cap mid-tool-call died on
 # a 400 naming the unanswered `tool_use` ids rather than answering -- which made search-heavy sub-agents
@@ -36,13 +36,17 @@ classifiers = [
 # `SessionStore.list_summaries`, which answers "every stored conversation's title, timestamp, and
 # message count" in one call instead of one whole-file read per conversation; `ConversationBook`'s
 # sidebar, task-ownership, and startup-pointer callers all moved onto it, replacing a cost that ran to
-# seconds on a large session store just to draw a list of titles. Every earlier release in the floor's
+# seconds on a large session store just to draw a list of titles. 0.30.0 renames `get_webpage` to
+# `get_web_content` and makes it classify what it fetched: the old tool decoded every response as text,
+# so a PDF behind a URL became megabytes of replacement characters that an HTML stripper passed through
+# into the model's context. `toolsets/web.py` hands out that group unchanged and `workflows/critics.py`
+# mounts it for the reviewer, so on an older AIMU both do that silently. Every earlier release in the floor's
 # history is listed in `kokua.aimu_compat`, which is also what enforces this floor for a sibling
 # checkout, and `tests/test_aimu_compat.py` pins this specifier against that one so the two halves
 # cannot drift. This pin is what ships in the wheel and what a PyPI install resolves;
 # [tool.uv.sources] below separately redirects development installs to the sibling checkout.
 dependencies = [
-    "aimu[anthropic,ollama,openai_compat,memory]>=0.29.0",
+    "aimu[anthropic,ollama,openai_compat,memory]>=0.30.0",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
     # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
     "tomlkit>=0.13",

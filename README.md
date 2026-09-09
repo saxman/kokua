@@ -82,7 +82,7 @@ The `web` extra (included in `--all-extras`, or `pip install '.[web]'`) adds the
 > uv sync --all-extras                        # installs ../aimu editable; picks up your edits live
 > ```
 >
-> The `aimu>=0.28.0` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
+> The `aimu>=0.30.0` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
 
 ## Quick start
 

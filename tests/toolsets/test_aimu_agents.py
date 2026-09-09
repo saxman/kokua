@@ -138,7 +138,7 @@ def test_research_workers_always_get_web_tools(tmp_path, stub_prebuilts):
     tools = aimu_agents.build(_config(tmp_path))
     _tool(tools, "research_report")("photosynthesis")
     worker_tools = stub_prebuilts["instances"][0].kwargs["worker_tools"]
-    assert {fn.__name__ for fn in worker_tools} >= {"web_search", "get_webpage"}
+    assert {fn.__name__ for fn in worker_tools} >= {"web_search", "get_web_content"}
 
 
 def test_an_unresolvable_model_returns_a_message_instead_of_raising(tmp_path, monkeypatch):

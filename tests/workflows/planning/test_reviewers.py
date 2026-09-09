@@ -99,7 +99,7 @@ def test_reviewer_toolset_boundary():
     """The reviewer gets verification tools (date, web, arithmetic) but no access to user state."""
     names = {t.__name__ for t in critics.REVIEWER_TOOLS}
     # Present: the motivating date tool, web lookup, and arithmetic.
-    assert {"get_current_date_and_time", "web_search", "get_webpage", "calculate"} <= names
+    assert {"get_current_date_and_time", "web_search", "get_web_content", "calculate"} <= names
     # Absent: the user's memory/documents, skill authoring, and MCP mutation.
     assert not (names & {"store_memory", "search_memories", "save_document", "search_documents"})
     assert not any(n in names for n in ("author_skill", "add_skill_script", "add_mcp_server", "remove_mcp_server"))

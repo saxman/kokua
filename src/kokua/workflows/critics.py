@@ -26,7 +26,8 @@ from aimu.tools import builtin
 from kokua.core.metrics import record_event
 
 # The reviewer's verification toolset: an independent critic that can look things up and check
-# arithmetic, but has no access to user state. web = get_weather/get_webpage/web_search/wikipedia;
+# arithmetic, but has no access to user state. web = get_weather/get_web_content/get_webpage_html/
+# web_search/wikipedia;
 # `calculate` for numeric claims; plus the current date/time (the original motivation: reviewers were
 # rejecting correct recency claims for date-unawareness). Deliberately EXCLUDES the memory/document
 # stores, skill authoring, and MCP add/remove.

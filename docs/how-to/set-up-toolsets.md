@@ -64,7 +64,7 @@ What the AIMU-provided toolsets hold:
 
 | Toolset | Tools | Notes |
 | --- | --- | --- |
-| `web` | `web_search`, `get_webpage`, `get_webpage_html`, `wikipedia`, `get_weather` | |
+| `web` | `web_search`, `get_web_content`, `get_webpage_html`, `wikipedia`, `get_weather` | `get_web_content` returns Markdown, converting a PDF as well as a page; `get_webpage_html` is the raw-HTML escape hatch. |
 | `fs` | `list_directory`, `read_file` | **Read-only.** Writing a file needs `execute_python` or `run_command`. |
 | `compute` | `calculate`, `execute_python`, `run_command` | both execution tools are approval-gated by default; `[compute] command_env_passthrough` decides what a command's environment holds |
 | `time` | `get_current_date_and_time`, `convert_time` | not implicit; declare it |

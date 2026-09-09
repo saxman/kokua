@@ -119,26 +119,49 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    The surface today is ``SessionStore.list_summaries``, the method a session store answers "every
-    stored conversation's title and timestamp" with, in one call rather than one read per conversation.
-    An older AIMU has no such method (or, on the ABC alone, only the default that still costs a full read
-    per conversation), so a sibling missing it is exactly what this preflight exists to catch before the
-    sidebar reintroduces the multi-second cost it was built to remove.
+    The surface today is ``builtin.get_web_content``, the renamed page fetcher that classifies what it
+    downloaded and returns Markdown. Its predecessor, ``get_webpage``, handed ``response.text`` to an
+    HTML stripper, and ``requests`` decodes ``.text`` with ``errors="replace"``, so a PDF behind a URL
+    became megabytes of replacement characters that the stripper passed through almost whole and into
+    the model's context. Kokua's ``web`` toolset hands that group out unchanged and
+    ``workflows/critics.py`` mounts it for the reviewer, so an older sibling poisons a context with
+    nothing raised anywhere.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
-    holder = getattr(module, aimu_compat._PROBE_CLASS)
-    probe = getattr(holder, aimu_compat._PROBE_SYMBOL, None)
+    probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_MODULE == "aimu.sessions"
-    assert aimu_compat._PROBE_CLASS == "SessionStore"
-    assert aimu_compat._PROBE_SYMBOL == "list_summaries"
-    # A name lookup, because the capability is the method itself: nothing else has to be true of a
-    # checkout once it exists on `SessionStore`. See the module docstring for what that leaves to the
-    # floor (whether `TinyDBSessionStore` actually overrides the default rather than just inheriting it).
+    assert aimu_compat._PROBE_MODULE == "aimu.tools.builtin"
+    assert aimu_compat._PROBE_SYMBOL == "get_web_content"
+    # A name lookup, because the rename moved the function and the `web` group's entry for it in one
+    # commit, so the name dates the checkout exactly. Group membership is what Kokua actually hands an
+    # agent, and this asserts it, but as a fact about the release rather than as the probe's shape: a
+    # membership check over a list of callables matching on `__name__` would be a fourth probe shape
+    # bought for a window that does not exist.
+    assert aimu_compat._PROBE_CLASS is None
     assert aimu_compat._PROBE_MEMBER is None
     assert aimu_compat._PROBE_PARAMETER is None
+    assert probe.__name__ in {fn.__name__ for fn in module.web}
+
+
+def test_the_floor_covers_the_summaries_call_the_probe_no_longer_grips():
+    """0.29.0's probe surface is 0.30.0's floor now that ``get_web_content`` holds the one probe slot.
+
+    ``ConversationBook.summaries()`` calls ``SessionStore.list_summaries`` directly, and the sidebar,
+    task ownership, and the startup pointer all read through it. An AIMU without the method raises
+    ``AttributeError`` on the first sidebar push rather than degrading in silence, so what the floor
+    buys here is the instruction rather than the catch; it is pinned the way the two capabilities below
+    are, because one probe slot cannot hold every capability the floor covers.
+    """
+    from pathlib import Path
+
+    from aimu.sessions import SessionStore
+
+    from kokua.core import conversations
+
+    assert hasattr(SessionStore, "list_summaries")
+    assert "list_summaries" in Path(conversations.__file__).read_text()
 
 
 def test_the_floor_covers_the_streaming_content_type_the_probe_no_longer_grips():

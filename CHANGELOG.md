@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.29.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.30.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -1296,7 +1296,7 @@ notice on startup.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.29.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.30.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -1340,7 +1340,19 @@ notice on startup.
   makes it fast, and a name lookup on the ABC is satisfied by either, so a store that stopped
   overriding it would still pass while paying the old cost in silence; `StreamingContentType.CONTINUING`
   is the floor's job now, the same way every earlier probe surface became the floor's job once a newer
-  one took the slot.
+  one took the slot. Today the floor is **0.30.0**, the first one moved by a rename, and the probe is a
+  name lookup for the fourth time: `aimu.tools.builtin.get_web_content`, which replaces `get_webpage`.
+  The name is not the point. The old tool never asked what it had downloaded, handing `response.text`
+  to an HTML stripper, and since `requests` decodes `.text` with `errors="replace"`, a PDF behind a URL
+  became megabytes of replacement characters that the stripper passed through almost whole and into the
+  model's context. Kokua hands that group out unchanged (`toolsets/web.py` is `list(builtin.web)`, and
+  `workflows/critics.py` mounts the same group for the reviewer), so an older sibling poisons a context
+  with nothing raised anywhere. Group membership, not the bare name, is what Kokua depends on, and the
+  stricter check was declined the way `run_command`'s was at 0.24.0 and with even less to gain: the
+  rename moved the function and the group's entry for it in one upstream commit, so no checkout exists
+  where the name resolves and the group still holds the old tool. `list_summaries` joins the floor's
+  job; what the new probe leaves there in turn is the behavior behind the name, since a checkout could
+  export `get_web_content` and classify nothing.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
   halves of that one decision cannot drift.

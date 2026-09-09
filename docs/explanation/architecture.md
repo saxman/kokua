@@ -923,8 +923,8 @@ capability first shipped tagged 0.24.0, but the number collided with a different
 AIMU's own `main` released first; the branch carrying `events` rebased past it and renumbered to 0.25.0,
 so a real, released 0.24.0 correctly failed that probe rather than exposing a gap in it.)
 
-The floor is now `aimu>=0.28.0`, and unlike 0.27.0 it is a floor whose *reason* and whose *probe* are the
-same capability again. It moved for AIMU's `CONTINUING` chunk, the phase a streamed driver yields for a
+The floor was `aimu>=0.28.0` until 0.29.0, and unlike 0.27.0 it was a floor whose *reason* and whose
+*probe* were the same capability again. It moved for AIMU's `CONTINUING` chunk, the phase a streamed driver yields for a
 round the loop injected itself (a continuation nudge, or the forced wrap-up at the round cap) rather than
 one the model asked for. No other seam could carry it: Kokua constructs nothing differently against an
 older AIMU, so `channels/web.py` and `core/subagents.py` simply never see the phase, and nothing raises,
@@ -954,6 +954,39 @@ mid-session failure to pull forward. A probe there would buy the wording rather 
 why the one slot goes to the phase above, which has no such escape hatch, and this key is left to the
 floor. The global tier needed none of it: the factory argument behind `[assistant].max_iterations` has
 existed since 0.12.0.
+
+**0.29.0** moved the floor for `SessionStore.list_summaries`, a store's own answer to "every stored
+conversation's title, timestamp, and message count, without its messages". Asking that through
+`ConversationBook.sessions()` cost one whole-file JSON parse per stored conversation, 4,790 ms on a
+56.8 MB developer store to draw a list of titles; `summaries()` now calls the store method, and the
+sidebar, task ownership, and the startup pointer all read through it. The probe gripped it as a plain
+name lookup, structurally a half-step deeper than its predecessors since the symbol is a method on
+`SessionStore` rather than a name at module scope. What that could not see, and what the floor covers
+now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
+messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
+`TinyDBSessionStore`'s override from a plain inheritance of the default.
+
+The floor is now **`aimu>=0.30.0`**, and it is the first one moved by a *rename*. `get_webpage` became
+`get_web_content`, and the point is not the name: the old tool never asked what it had fetched. It
+handed `response.text` to an HTML stripper, and `requests` decodes `.text` with `errors="replace"`, so a
+PDF behind a URL arrived as megabytes of replacement characters that a tag stripper passes through
+almost whole. Four such results, 6.28 MB of them, are in this developer's own stored transcripts, each
+having entered a model's context whole. The new tool classifies the response by `Content-Type` with the
+`%PDF-` magic bytes as tiebreaker, returns Markdown (a PDF under one `## Page N` heading per page), and
+caps what it returns, downloads, and extracts. Kokua needs the floor because it hands that group out
+unchanged: `toolsets/web.py` is `list(builtin.web)`, and `workflows/critics.py` mounts the same group
+for the reviewer, so on an older AIMU both quietly poison a context.
+
+The probe is a name lookup on `builtin.get_web_content`, the fourth time that shape has answered. What
+Kokua actually hands an agent is the *group*, so the stricter question is whether `web` contains it, and
+that check was declined for the reason `run_command`'s was at 0.24.0, this time without even that
+release's brief window: the rename moved the function and the group's entry for it in a single upstream
+commit, so no checkout exists where the name resolves and the group still holds the old tool. A
+membership check over a list of callables, matching on `__name__`, would be a new probe shape bought to
+close a window that does not exist; `tests/test_aimu_compat.py` asserts the group membership instead, as
+a fact about the release rather than as the preflight's shape. What the probe leaves to the floor is the
+behavior behind the name: a checkout could export `get_web_content` and classify nothing, and only
+fetching a PDF would prove otherwise.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
