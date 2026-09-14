@@ -92,9 +92,11 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         "--confirm-tools",
         default=None,
         metavar="NAMES",
-        help="Comma-separated tool names that require interactive confirmation before each call. "
-        "Default: add_skill_script,add_mcp_server,execute_python,run_command,update_config. Pass an "
-        "empty string to disable.",
+        help="Comma-separated tools that require interactive confirmation before each call. Each entry "
+        "names its toolset: 'compute' (or 'compute.*') for every tool that capability provides, "
+        "'compute.execute_python' for one, with 'core' reserved for the tools no toolset provides. "
+        "Default: skills.add_skill_script,mcp.add_mcp_server,compute.execute_python,compute.run_command,"
+        "config.update_config. Pass an empty string to disable.",
     )
 
     # Web front-end binding (ignored by other front ends).

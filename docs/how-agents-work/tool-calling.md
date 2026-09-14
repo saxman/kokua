@@ -203,8 +203,9 @@ calls ([the turn loop](the-turn-loop.md)), a few self-corrections are the differ
 and a forced wrap-up.
 
 **Approval gates cost latency and buy control.** Kokua's `[security].confirm_tools` names the tools that
-stop and ask before running, and the shipped default includes `execute_python`, `run_command`, and
-`update_config`, since those run with full access to your machine. The cost is real and it is human
+stop and ask before running, each with the toolset that provides it in front, and the shipped default
+includes `compute.execute_python`, `compute.run_command`, and `config.update_config`, since those run
+with full access to your machine. A bare `compute` there would gate that whole capability instead. The cost is real and it is human
 latency, not compute: the turn is blocked on you, and a turn nobody is watching, such as a scheduled
 one, auto-denies rather than hanging forever. *Humans in the loop*, later in this catalogue, is that
 mechanism in full.

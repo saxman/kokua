@@ -142,13 +142,15 @@ That is exactly what `[security].confirm_tools` exists for, so add it there:
 
 ```toml
 [security]
-confirm_tools = ["execute_python", "run_command", "update_config", "tailor_application"]
+confirm_tools = ["compute.execute_python", "compute.run_command", "config.update_config", "jobme.tailor_application"]
 ```
 
-Make the two edits in this order. `confirm_tools` is checked against every tool this config actually
-builds, so a name with no toolset behind it yet fails startup, listing the near misses; jobme has to be
-declared on some agent first, whether in the same file or an earlier run, before `tailor_application`
-exists for this list to name at all.
+Every entry names the toolset providing the tool, which for a third party's is the same name your agent
+declared: `jobme.tailor_application` for the one tool, or a bare `jobme` for everything the toolset
+offers. Make the two edits in this order. `confirm_tools` is checked against every tool this config
+actually builds, so an entry naming a toolset no agent declares fails startup and says so; jobme has to
+be declared on some agent first, whether in the same file or an earlier run, before
+`tailor_application` exists for this list to name at all.
 
 The consequence worth knowing before you lean on it: a proactive turn, meaning a scheduled task or
 anything else Kokua starts unprompted, auto-denies every gated tool outright, with no prompt raised
@@ -217,4 +219,5 @@ skill on disk rather than a scoped list.
 - [Configuration reference](../reference/configuration.md#toolset-sections): how any toolset's `[<name>]`
   section is validated, and what a name collision with a core section does.
 - [Configuration reference](../reference/configuration.md#confirm_tools): the full behavior of
-  `[security].confirm_tools`, including what a misspelled entry does and does not protect against.
+  `[security].confirm_tools`, including the three entry forms and the four ways an entry can gate
+  nothing.

@@ -159,13 +159,16 @@ class AssistantConfig:
     generate_titles: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
+    # Each entry names the toolset providing the tool: "<toolset>" or "<toolset>.*" for all of them,
+    # "<toolset>.<tool>" for one, with "core" reserved for the tools no toolset provides. Resolved to
+    # tool names at startup by core.agents.resolve_confirm_tools, which rejects an entry gating nothing.
     confirm_tools: list[str] = field(
         default_factory=lambda: [
-            "add_skill_script",
-            "add_mcp_server",
-            "execute_python",
-            "run_command",
-            "update_config",
+            "skills.add_skill_script",
+            "mcp.add_mcp_server",
+            "compute.execute_python",
+            "compute.run_command",
+            "config.update_config",
         ]
     )
     # Which config keys update_config refuses. The user's to set: see store.locked_by for the pattern

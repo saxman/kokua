@@ -655,7 +655,8 @@ exits 1 with the answer on stdout. The timeout is per call, defaulting to 30 sec
 The shipped `[agents.coder]` is the only agent declaring `compute`, and its `system_message` already told
 it to run "Python, shell, or calculations," which is true for the first time; the toolset module's
 identical docstring claim was equally aspirational and is now accurate. **It arrives gated**:
-`config.example.toml` adds `run_command` next to `execute_python` in `[security].confirm_tools`, so a
+`config.example.toml` adds `compute.run_command` next to `compute.execute_python` in
+`[security].confirm_tools`, so a
 command reaches you for approval before it runs, including one a sub-agent asked for, since a worker's
 gated call routes to the parent's gate rather than running unattended. A `config.toml` scaffolded before
 this release still gates `execute_python` alone; add `run_command` to it by hand. **The reviewer does not
@@ -975,7 +976,7 @@ alone. The case that does cost something is a configured MCP server, which conne
   agent names cannot be enumerated ahead of time. Each is refused by the tool by default, and changeable
   only by hand-editing the list itself: `update_config` is a tool the assistant holds, so a writable
   agent table would let it widen its own reach. `update_config` is also in the default `confirm_tools`
-  list, so each write it *is* allowed goes through the approval prompt.
+  list, as `config.update_config`, so each write it *is* allowed goes through the approval prompt.
 - The `update_config` write policy is now yours to set. `[security].locked_config_keys` holds the
   patterns the assistant may not write, defaulting to what was previously hardcoded. The key is itself
   always locked, so the assistant cannot unlock itself in one call. A pattern that could never match
@@ -1263,9 +1264,9 @@ notice on startup.
   recipient lock, and secret disclosure), and which behavior is the product working as documented (a
   model you configured running code you approved).
 - **Tool approval.** Configured risky tools require confirmation before each call -- terminal `y/N`, web
-  Allow/Deny -- built on AIMU's `ToolApproval` gate. The default set is `add_skill_script`,
-  `add_mcp_server`, `execute_python`, `run_command`, and `update_config`; adjust with `[security] confirm_tools` or
-  `--confirm-tools` (empty disables). Proactive and backgrounded turns auto-deny gated tools regardless,
+  Allow/Deny -- built on AIMU's `ToolApproval` gate. The default set is `skills.add_skill_script`,
+  `mcp.add_mcp_server`, `compute.execute_python`, `compute.run_command`, and `config.update_config`;
+  adjust with `[security] confirm_tools` or `--confirm-tools` (empty disables). Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
   are currently viewing. **A backgrounded turn's auto-deny raises an alert card** naming the tool and
   linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
@@ -1275,13 +1276,22 @@ notice on startup.
   The reply is routed through the single channel reader, so it is safe alongside
   `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
   cannot overwrite each other.
-- **A gate that names nothing fails startup.** `[security] confirm_tools` matches a tool by name, so an
-  entry no configured agent provides gates nothing, and the symptom is a prompt that never comes, which
-  nobody notices. Every unmatched entry is now named at startup with its near misses. The vocabulary is
-  every tool the config builds, not just the entry agent's: `execute_python` comes from `[agents.coder]`,
-  and `spawn_subagent` and a skill's script tools count too. A tool that arrives later (from a runtime
-  `add_mcp_server`, or built only by `compose_subagent` out of a toolset no agent names) cannot be listed
-  ahead of time, and the error says so.
+- **A gate names its toolset, and one that would gate nothing fails startup.** A `[security]
+  confirm_tools` entry is `<toolset>` for every tool a capability provides, `<toolset>.*` for the same
+  thing said with a wildcard, or `<toolset>.<tool>` for one; `*` anywhere else is refused. A reserved
+  `core` prefix holds the two tools no toolset provides, `spawn_subagent` and `activate_skill`, and a
+  skill's scripts sit under the skill, which is also its toolset name. What the prefix buys is a gate
+  that can hold back a whole capability in one line, and an error that can point at the right one; the
+  gate itself still matches a bare tool name at call time, resolved from these entries once every agent
+  is wired. An entry that gates nothing holds nothing back, and the symptom is a prompt that never
+  comes, which nobody notices, so every such entry is named at startup with its near misses: a bare tool
+  name with no prefix (the error gives the form to write), a real tool filed under the wrong toolset, a
+  toolset no agent declares, and a toolset that provides no tools are all refused. The vocabulary is
+  every tool the config builds, not just the entry agent's: `compute.execute_python` resolves because
+  `[agents.coder]` declares `compute`. A tool that arrives later (from a runtime `add_mcp_server`, or
+  built only by `compose_subagent` out of a toolset no agent names) cannot be listed ahead of time, and
+  the error says so. `core` is refused as a toolset name at registration, so the reservation cannot be
+  shadowed by a plugin.
 - **The reviewer toolset needs no gate.** An autonomous critic cannot pause to ask you mid-review, so
   rather than exempting it from the gate the reviewer is given nothing the gate exists to cover: web
   lookup, `calculate`, and the clock. A test pins this against the shipped `confirm_tools` default, so
@@ -1289,8 +1299,9 @@ notice on startup.
 - **Injection crosses conversations.** The assistant can read every saved conversation, and a transcript
   is untrusted text, so an injection that lands in one conversation can influence what the assistant
   does in another. The three read tools are ungated by default, since they only read and gating them
-  would make an unattended scheduled run that reads history fail silently; add `read_conversation` and
-  `search_conversations` to `[security] confirm_tools` to change that. `export_conversation` is ungated
+  would make an unattended scheduled run that reads history fail silently; add
+  `conversations.read_conversation` and `conversations.search_conversations` to
+  `[security] confirm_tools` to change that. `export_conversation` is ungated
   for a different reason: it changes no conversation, and the reason to gate it is what it leaves behind
   rather than what it reads, a whole transcript in the clear under `data/downloads/`.
 

@@ -126,7 +126,7 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
     """A firing that fell back to the viewed conversation (a channel with no conversation list)
     auto-denies a gated tool, even though streaming_conversation == _active_id would otherwise look
     foreground and wrongly prompt. Unattended turns must never prompt."""
-    cfg = _config(tmp_path, confirm_tools=["update_config"])
+    cfg = _config(tmp_path, confirm_tools=["config.update_config"])
     client = _RequestsToolOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
 
@@ -140,7 +140,7 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
 
 async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
     """The minted-conversation path (never the viewed one) also auto-denies."""
-    cfg = _config(tmp_path, confirm_tools=["update_config"])
+    cfg = _config(tmp_path, confirm_tools=["config.update_config"])
     client = _RequestsToolOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: client)
@@ -516,7 +516,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
             return await super()._chat(*args, **kwargs)
 
     channel = _ConvCapturingChannel()
-    cfg = _config(tmp_path, confirm_tools=["update_config"])
+    cfg = _config(tmp_path, confirm_tools=["config.update_config"])
     assistant = await Assistant.create(
         cfg,
         channel,

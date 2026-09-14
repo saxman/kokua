@@ -252,10 +252,12 @@ declares `["web", "misc", "time"]`. It cannot read a file, and delegating a file
 returns an apology rather than an error. Widening the entry agent widens nothing for its workers.
 
 **What is loud, so you know what to expect.** An unknown name in a `tools` list fails startup. A cycle
-in `delegates_to` fails startup. A `[security].confirm_tools` entry naming no real tool fails startup,
-with the near misses suggested, because a gate that matches nothing prompts for nothing and nobody
-notices a prompt that never comes. The quiet failure is confined to exactly one case: installed, and
-never named.
+in `delegates_to` fails startup. A `[security].confirm_tools` entry that would gate nothing fails
+startup, with the near misses suggested, because a gate that matches nothing prompts for nothing and
+nobody notices a prompt that never comes. Note that the gate list speaks the same vocabulary this page
+is about: an entry is `<toolset>` for a whole capability or `<toolset>.<tool>` for one of its tools, so
+a gate naming a toolset no agent declares is refused for the same reason a tool nothing provides is.
+The quiet failure is confined to exactly one case: installed, and never named.
 
 **The tax you keep paying.** The declared list is not free either. The shipped entry agent's eleven
 toolsets resolve to thirty tools, plus the `spawn_subagent` its `delegates_to` earns, and all 31

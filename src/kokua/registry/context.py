@@ -76,12 +76,15 @@ class LiveState:
     tool_approval: Optional[Callable] = None
     observer: Optional[SubagentObserver] = None
     registry: dict = field(default_factory=dict)
-    # Every tool name `registry.build_tools` has produced so far, accumulated as agents are wired. It is
-    # the vocabulary the `[security].confirm_tools` startup check matches against, and it lives here
-    # rather than being returned by a builder because the names arrive from several builds at different
-    # depths (the entry agent's, each declared worker's, each nested worker's) and the check needs their
-    # union.
-    built_tool_names: set[str] = field(default_factory=set)
+    # Every tool name `registry.build_tools` has produced so far, under the toolset that produced it,
+    # accumulated as agents are wired. It is the vocabulary the `[security].confirm_tools` startup check
+    # matches against, and that check reads a `toolset.tool` grammar, so provenance is the point rather
+    # than a bonus: a flat set could not tell `compute.execute_python` from `web.execute_python`. It
+    # lives here rather than being returned by a builder because the names arrive from several builds at
+    # different depths (the entry agent's, each declared worker's, each nested worker's) and the check
+    # needs their union. A toolset that built nothing is recorded with an empty set, which is what lets
+    # a gate naming it say so instead of reading as a misspelled toolset name.
+    tools_by_toolset: dict[str, set[str]] = field(default_factory=dict)
     # Rebuilds one agent's delegate after a runtime MCP change. Assigned by the composition root rather
     # than imported by the toolsets that need it, since it lives in core.build and core.build imports
     # them.

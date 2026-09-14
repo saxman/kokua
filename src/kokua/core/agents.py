@@ -18,6 +18,7 @@ from kokua.core.metrics import record_event
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.registry.context import LiveState, ToolsetContext
 from kokua.registry.registry import (
+    RESERVED_GATE_NAMESPACE,
     Toolset,
     ToolsetError,
     ToolsetRegistry,
@@ -539,65 +540,150 @@ def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Op
     )
 
 
-# Where the approval gate is declared, so the error below points at the words the user would edit rather
+# Where the approval gate is declared, so the errors below point at the words the user would edit rather
 # than at a paraphrase of them.
 _CONFIRM_TOOLS_SECTION = "security"
 _CONFIRM_TOOLS_KEY = "confirm_tools"
+#: The one tool every skill's toolset carries a reference to. It is attributed to the reserved namespace
+#: and removed from each skill, so gating one skill cannot stop every skill from being loaded.
+_ACTIVATE_SKILL = "activate_skill"
+_GATE_SEPARATOR = "."
+_GATE_WILDCARD = "*"
+#: The forms a gate entry may take, quoted back at the user in every error this section raises.
+_GATE_GRAMMAR = (
+    "Every entry names its toolset: 'compute' for every tool that capability provides, 'compute.*' for "
+    "the same thing said with a wildcard, or 'compute.execute_python' for one tool. The reserved "
+    f"{RESERVED_GATE_NAMESPACE!r} prefix holds the tools no toolset provides."
+)
 
 
-def gateable_tool_names(state: LiveState, entry_agent) -> set[str]:
-    """Every tool name that exists once startup has finished, which is what a gate entry may name.
+def gateable_tools(state: LiveState, entry_agent) -> dict[str, set[str]]:
+    """Every tool a gate entry may name, under the prefix it has to be named with.
 
     Three sources, because a tool reaches an agent three ways and only one of them is the registry.
-    ``state.built_tool_names`` holds what ``build_tools`` produced, for the entry agent and for every
-    worker at every delegation depth. The entry agent's own list adds ``spawn_subagent``, attached after
-    its toolsets are built. The skills an AIMU ``SkillAgent`` surfaces add the rest, and they are derived
-    from the manager rather than read off the agent because that class attaches them on its first run,
-    not at construction; they belong here because a skill script is an unsandboxed subprocess, which is
-    precisely the kind of call somebody gates. ``activate_skill`` comes with them and only with them,
-    since a ``SkillAgent`` with no skills builds no skills server at all.
+    ``state.tools_by_toolset`` holds what ``build_tools`` produced, already grouped by the toolset that
+    offered it, for the entry agent and for every worker at every delegation depth. The entry agent's
+    own list adds ``spawn_subagent``, attached after its toolsets are built. The skills an AIMU
+    ``SkillAgent`` surfaces add the rest, and they are derived from the manager rather than read off the
+    agent because that class attaches them on its first run, not at construction; they belong here
+    because a skill script is an unsandboxed subprocess, which is precisely the kind of call somebody
+    gates. ``activate_skill`` comes with them and only with them, since a ``SkillAgent`` with no skills
+    builds no skills server at all.
+
+    Two of those three have no toolset, so :data:`RESERVED_GATE_NAMESPACE` is the prefix they get.
+    ``activate_skill`` needs the reservation for a second reason: ``LiveState.skill_tools`` prepends it
+    to *every* skill's tool list, so leaving it attributed per skill would let a gate on one skill hold
+    back the entry point to all of them. It is discarded from each skill here and attributed only to the
+    reserved prefix. A skill's own scripts stay under the skill, which is also its toolset name.
+
+    The reserved key is always present, even when it is empty (no delegates declared, no skills on
+    disk), so a gate naming it reads as a capability that provides nothing rather than as a misspelling.
     """
-    names = set(state.built_tool_names)
+    by_toolset = {name: set(tools) for name, tools in state.tools_by_toolset.items()}
+    skills = state.skill_manager.skills.values()
+    for skill in skills:
+        by_toolset.setdefault(skill.name, set()).update(skill.script_tool_names())
+    for tools in by_toolset.values():
+        tools.discard(_ACTIVATE_SKILL)
+    reserved = {_ACTIVATE_SKILL} if skills else set()
+    owned = {tool for tools in by_toolset.values() for tool in tools}
     for fn in entry_agent.tools:
         name = getattr(fn, "__name__", None)
-        if name:
-            names.add(name)
-    skills = state.skill_manager.skills.values()
-    if skills:
-        names.add("activate_skill")
-        names.update(tool for skill in skills for tool in skill.script_tool_names())
-    return names
+        if name and name not in owned:
+            reserved.add(name)
+    by_toolset[RESERVED_GATE_NAMESPACE] = reserved
+    return by_toolset
 
 
-def validate_confirm_tools(config: AssistantConfig, state: LiveState, entry_agent) -> None:
-    """Reject a ``[security].confirm_tools`` entry that names no tool this config can build.
+def _resolve_gate_entry(entry: str, vocabulary: dict[str, set[str]], registry: Mapping[str, Toolset]) -> tuple:
+    """One ``[security].confirm_tools`` entry as ``(tool names, fault)``, exactly one of which is empty.
 
-    The gate is a plain name match, so a misspelled entry gates nothing, and an entry that gates nothing
-    is the one config mistake whose symptom is the absence of a symptom: a tool with full machine access
-    runs without ever prompting, and no session says the line is dead. A user notices a prompt they did
-    not expect; nobody notices a prompt that never comes. That asymmetry is why this fails startup
-    instead of logging a warning.
+    Split out from the loop below so each way an entry can gate nothing gets its own sentence naming the
+    edit to make. A near-miss is worth more than a rejection here: the reader wrote a name meaning to
+    hold a tool back, and the difference between the name they wrote and the one that works is the whole
+    content of the error.
+    """
+    parts = entry.split(_GATE_SEPARATOR)
+    if len(parts) > 2:
+        return set(), f"{entry!r} has more than one {_GATE_SEPARATOR!r}. {_GATE_GRAMMAR}"
+    toolset, tool = (parts[0], _GATE_WILDCARD) if len(parts) == 1 else (parts[0], parts[1])
+    if _GATE_WILDCARD in toolset or (tool != _GATE_WILDCARD and _GATE_WILDCARD in tool):
+        return set(), (
+            f"{entry!r} uses {_GATE_WILDCARD!r} inside a name. It is legal only as the whole tool, as in "
+            f"'compute.{_GATE_WILDCARD}', because a pattern matching fewer tools than its author meant "
+            "is the same silent gap as a name matching none."
+        )
+    if toolset not in vocabulary:
+        if len(parts) == 1:
+            owners = sorted(name for name, tools in vocabulary.items() if toolset in tools)
+            if owners:
+                forms = " or ".join(repr(f"{name}{_GATE_SEPARATOR}{toolset}") for name in owners)
+                return set(), f"{entry!r} is a tool name with no toolset in front of it: write {forms}"
+        if toolset in registry:
+            return set(), (
+                f"{entry!r} names the {toolset!r} toolset, which no agent declares, so it builds no "
+                f"tools and holds nothing back. Add {toolset!r} to an [agents.<name>].tools list, or "
+                "drop the gate."
+            )
+        close = difflib.get_close_matches(toolset, sorted(set(vocabulary) | set(registry)), n=2)
+        hint = f" (did you mean {' or '.join(repr(match) for match in close)}?)" if close else ""
+        return set(), f"{entry!r} names no toolset{hint}. {_GATE_GRAMMAR}"
+    provided = vocabulary[toolset]
+    if not provided:
+        return set(), (
+            f"{entry!r} names the {toolset!r} toolset, which provides no tools, so there is nothing "
+            "under it to hold back."
+        )
+    if tool == _GATE_WILDCARD:
+        return set(provided), ""
+    if tool not in provided:
+        elsewhere = sorted(name for name, tools in vocabulary.items() if tool in tools)
+        if elsewhere:
+            forms = " or ".join(repr(f"{name}{_GATE_SEPARATOR}{tool}") for name in elsewhere)
+            return set(), f"{entry!r} is filed under the wrong toolset: {tool!r} comes from {forms}"
+        close = difflib.get_close_matches(tool, sorted(provided), n=2)
+        hint = f" (did you mean {' or '.join(repr(match) for match in close)}?)" if close else ""
+        return set(), f"{entry!r} names no tool the {toolset!r} toolset provides{hint}"
+    return {tool}, ""
+
+
+def resolve_confirm_tools(config: AssistantConfig, state: LiveState, entry_agent) -> frozenset[str]:
+    """The tool names ``[security].confirm_tools`` gates, rejecting an entry that would gate nothing.
+
+    An entry that gates nothing is the one config mistake whose symptom is the absence of a symptom: a
+    tool with full machine access runs without ever prompting, and no session says the line is dead. A
+    user notices a prompt they did not expect; nobody notices a prompt that never comes. That asymmetry
+    is why every fault here fails startup instead of logging a warning, and why a toolset that provides
+    no tools is refused as firmly as a misspelling is.
 
     Called once every agent has been wired, because the vocabulary does not exist before then and is
-    wider than the entry agent's own tools. ``execute_python`` is one of the four gates Kokua ships and
-    no toolset the entry agent declares provides it: it comes from ``[agents.coder]``, whose tools are
-    built when the delegation tool is.
+    wider than the entry agent's own tools. ``compute.execute_python`` is one of the five gates Kokua
+    ships and no toolset the entry agent declares provides it: it comes from ``[agents.coder]``, whose
+    tools are built when the delegation tool is.
+
+    **A prefix is a declaration vocabulary, not a call-time discriminator.** The gate itself sees only a
+    tool name (``HumanGate.approve``), so what a prefix buys is a gate that can name a whole capability,
+    an error that can point at the right one, and a config a reader can follow without knowing which of
+    the 21 toolsets a bare name came from. What it cannot buy is telling two toolsets' same-named tools
+    apart at the moment of the call: gating either prefix gates that name wherever it is called.
     """
-    known = gateable_tool_names(state, entry_agent)
-    unknown = [name for name in config.confirm_tools if name not in known]
-    if not unknown:
-        return
-    faults = []
-    for name in unknown:
-        close = difflib.get_close_matches(name, sorted(known), n=2)
-        hint = f" (did you mean {' or '.join(repr(match) for match in close)}?)" if close else ""
-        faults.append(f"{name!r}{hint}")
-    noun = "tool" if len(unknown) == 1 else "tools"
-    raise ConfigError(
-        f"[{_CONFIRM_TOOLS_SECTION}].{_CONFIRM_TOOLS_KEY} names {len(unknown)} {noun} nothing provides: "
-        f"{', '.join(faults)}. An entry matching no tool holds nothing back, so the call it was written "
-        "to stop runs with no prompt and nothing reports it. Correct the name, or remove it. Only tools "
-        "that exist at startup can be gated by name here, so a tool from a server the assistant connects "
-        "later with add_mcp_server cannot be listed ahead of time: give the server a [[mcp.server]] table "
-        "in config.toml and name it in an agent's tools, and its tools are gateable from the next start."
-    )
+    vocabulary = gateable_tools(state, entry_agent)
+    gated: set[str] = set()
+    faults: list[str] = []
+    for entry in config.confirm_tools:
+        names, fault = _resolve_gate_entry(entry, vocabulary, state.registry)
+        if fault:
+            faults.append(fault)
+        else:
+            gated.update(names)
+    if faults:
+        noun = "entry" if len(faults) == 1 else "entries"
+        raise ConfigError(
+            f"[{_CONFIRM_TOOLS_SECTION}].{_CONFIRM_TOOLS_KEY} has {len(faults)} {noun} that would gate "
+            f"nothing: {'; '.join(faults)}. An entry matching no tool holds nothing back, so the call it "
+            "was written to stop runs with no prompt and nothing reports it. Only tools that exist at "
+            "startup can be gated, so a tool from a server the assistant connects later with "
+            "add_mcp_server cannot be listed ahead of time: give the server a [[mcp.server]] table in "
+            "config.toml and name it in an agent's tools, and its tools are gateable from the next start."
+        )
+    return frozenset(gated)

@@ -248,9 +248,13 @@ assistant can rewrite for itself is not a policy.
 *How this cashes out:* [`config/store.py`](https://github.com/saxman/kokua/blob/main/src/kokua/config/store.py)'s `locked_by` matches a
 write against the user's own patterns, and `LOCK_AXIOM` beside it is the single unconditional lock.
 [`core/interaction.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py)'s `HumanGate.approve` is a bare name match
-against `confirm_tools`, which is what gates a worker's call identically to the entry agent's, and a
-proactive turn auto-denies rather than running a gated tool unattended.
-[`core/agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py)'s `validate_confirm_tools` and
+against the tool names startup resolved `confirm_tools` down to, which is what gates a worker's call
+identically to the entry agent's, and a proactive turn auto-denies rather than running a gated tool
+unattended. A `confirm_tools` entry names a toolset (`compute`, or `compute.execute_python`), so the
+resolution is what turns a capability the user declared into the names the gate matches; the prefix
+buys a gate that can name a whole capability and an error that can point at the right one, not a
+discriminator at the moment of the call.
+[`core/agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py)'s `resolve_confirm_tools` and
 [`config/file.py`](https://github.com/saxman/kokua/blob/main/src/kokua/config/file.py)'s lock-pattern checks are the two startup errors
 above. [`SECURITY.md`](https://github.com/saxman/kokua/blob/main/SECURITY.md) names which barrier a vulnerability report is about, and which
 behavior is the program working as documented.

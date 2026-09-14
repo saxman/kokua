@@ -98,9 +98,11 @@ def test_build_tools_concatenates_and_keeps_the_first_tool_of_a_repeated_name():
     assert tools == [first]
 
 
-def test_build_tools_records_every_name_it_built_on_the_shared_state():
-    """The vocabulary the [security].confirm_tools check matches against is collected here, so a name
-    dropped as a duplicate still counts: the tool it collided with answers to it."""
+def test_build_tools_records_each_name_under_the_toolset_that_built_it():
+    """The vocabulary the [security].confirm_tools check matches against is collected here, and it is
+    collected per toolset because a gate entry names one. A name dropped from the returned list as a
+    duplicate is still recorded under the toolset that offered it: `b` really does provide `first`, and
+    an entry saying so gates a call that `b` can serve on some other agent."""
 
     def first():
         pass
@@ -116,7 +118,26 @@ def test_build_tools_records_every_name_it_built_on_the_shared_state():
     state = LiveState(config=AssistantConfig())
     ctx = ToolsetContext(state=state, agent=None, agent_name="assistant")
     build_tools([_toolset("a", tools=[first, third]), _toolset("b", tools=[second])], ctx=ctx)
-    assert state.built_tool_names == {"first", "third"}
+    assert state.tools_by_toolset == {"a": {"first", "third"}, "b": {"first"}}
+
+
+def test_build_tools_records_a_toolset_that_built_nothing():
+    """`planning` contributes a workflow and no tools. Recorded as an empty set rather than left out,
+    so a gate entry naming it can say "that capability provides no tools" instead of "no such
+    toolset", which would send the reader hunting for a misspelling that is not there."""
+    state = LiveState(config=AssistantConfig())
+    ctx = ToolsetContext(state=state, agent=None, agent_name="assistant")
+    build_tools([_toolset("empty", tools=[])], ctx=ctx)
+    assert state.tools_by_toolset == {"empty": set()}
+
+
+def test_register_refuses_a_toolset_claiming_the_reserved_gate_namespace():
+    """`core` is the [security].confirm_tools prefix for the tools no toolset builds (spawn_subagent,
+    activate_skill). A toolset of that name would make those gates unwritable, so it fails at
+    registration rather than at the gate."""
+    with pytest.raises(ToolsetError) as error:
+        register([("a plugin", [_toolset("core")])])
+    assert "core" in str(error.value)
 
 
 def test_plugins_module_reexports_the_public_contract():

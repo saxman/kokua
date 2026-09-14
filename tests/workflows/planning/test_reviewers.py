@@ -108,9 +108,16 @@ def test_reviewer_toolset_boundary():
 def test_reviewer_toolset_holds_nothing_the_approval_gate_would_have_to_cover():
     """A reviewer cannot be approval-gated (nobody to ask mid-review), so its toolset must contain no
     tool that needs a gate. Pinned against the shipped `confirm_tools` default rather than a literal
-    list, so adding a name there fails here until the reviewer's toolset is re-checked."""
+    list, so adding a name there fails here until the reviewer's toolset is re-checked.
+
+    A shipped entry is `toolset.tool`, so the tool half is what this compares. Intersecting the whole
+    entries would pass no matter what the default held, which is the vacuous green this docstring's
+    promise depends on not happening. A bare-toolset entry (no dot) is expanded by startup against a
+    vocabulary that needs a wired assistant, so it is refused here rather than silently skipped."""
     names = {t.__name__ for t in critics.REVIEWER_TOOLS}
-    assert not (names & set(AssistantConfig().confirm_tools))
+    shipped = AssistantConfig().confirm_tools
+    assert all("." in entry for entry in shipped), f"expand this check for the bare entries in {shipped}"
+    assert not (names & {entry.split(".", 1)[1] for entry in shipped})
     assert "execute_python" not in names  # the specific escape this guards: arbitrary code, unsandboxed
     assert "run_command" not in names  # and the same escape one step shorter: an unsandboxed shell
 

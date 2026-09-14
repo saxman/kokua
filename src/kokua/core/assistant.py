@@ -141,7 +141,6 @@ class Assistant:
         # concurrent workflow turns) can never clobber the slot the serve loop is about to resolve.
         self._human = HumanGate(
             self._ui,
-            config,
             active_id=lambda: self._book.active_id,
             is_proactive=proactive_turn.get,
             turn_conversation=streaming_conversation.get,
@@ -184,7 +183,7 @@ class Assistant:
             build_command_map,
             configured_but_undeclared,
             undeclared_workflow_commands,
-            validate_confirm_tools,
+            resolve_confirm_tools,
             validated_registry,
         )
 
@@ -301,7 +300,10 @@ class Assistant:
         entry_agent = assistant._registry.get(assistant._active_id)
         # Last of the startup checks, because it is the first point where every tool this config builds
         # exists: the entry agent's own, and each worker's, built when the delegation tool above was.
-        validate_confirm_tools(config, state, entry_agent)
+        # It both validates and resolves: a `[security].confirm_tools` entry names a toolset, and the
+        # gate matches a tool name, so the gate cannot answer at all until this has run (see
+        # `HumanGate.gated_tools`).
+        assistant._human.gated_tools = resolve_confirm_tools(config, state, entry_agent)
 
         state.tasks.arm_all()
         return assistant

@@ -363,29 +363,69 @@ Tools that require interactive confirmation before each call: a terminal `y/N`, 
 UI. These are the tools that run with full machine access.
 
 ```toml
-confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "run_command", "update_config"]
+confirm_tools = ["skills.add_skill_script", "mcp.add_mcp_server", "compute.execute_python", "compute.run_command", "config.update_config"]
 ```
 
 Set to `[]` to disable approval entirely. Proactive turns (scheduled tasks, anything the assistant starts
 unprompted) **auto-deny** these regardless of the setting, since there is no one at the keyboard to ask.
 
-`update_config` is in the default list because it lets the assistant rewrite this file, except for the
-locked keys it can never change. This key is itself locked by default too, for the obvious reason.
+`config.update_config` is in the default list because it lets the assistant rewrite this file, except for
+the locked keys it can never change. This key is itself locked by default too, for the obvious reason.
 
-Gating is **by tool name**, so it applies to a worker's call as much as the entry agent's: a worker's
-gated call is routed to you. Note the flip side, which is easy to misread: there is no privilege tier
-among agents. An agent whose table declares `config` really does get `update_config`, and one declaring
-`compute` really does get `execute_python`. Your hand-edit is the consent, and this list is the gate at
-call time.
+#### Every entry names its toolset
 
-**A name no configured agent provides fails startup**, naming every entry that matched nothing and
-suggesting the close names. A gate is a plain name match, so a misspelled entry holds nothing back, and
-the only sign of it is a prompt that never comes, which is not a thing anyone notices:
-`confirm_tools = ["execute_pythn"]` once loaded clean and then let `execute_python` run unattended for
-as long as the file stood. The vocabulary is every tool this config builds, which is wider than the
-entry agent's own: `execute_python` is there because `[agents.coder]` declares `compute`, and
-`spawn_subagent` and a skill's `{skill}__{script}` tools count as well. An empty list names nothing, so
-there is nothing for the check to refuse.
+An entry is a tool's name with the toolset that provides it in front, and it takes one of three forms:
+
+| Form | Example | Gates |
+|---|---|---|
+| `<toolset>` | `compute` | every tool that capability provides |
+| `<toolset>.*` | `compute.*` | the same thing, said with a wildcard |
+| `<toolset>.<tool>` | `compute.execute_python` | that one tool |
+
+The wildcard is optional and says nothing the bare toolset does not; it is accepted because a reader may
+expect a glob to be required. It is legal only as the whole tool. `compute.exec*`, `comp*.run_command`,
+and a bare `*` are all rejected, because a pattern quietly matching fewer tools than its author meant is
+the same silent gap as a name matching none.
+
+Two tools have no toolset, so a reserved `core` prefix holds them: `core.spawn_subagent`, the delegation
+tool, attached to the entry agent after its toolsets are built, and `core.activate_skill`, which AIMU
+gives any skill-holding agent. `core` on its own gates both. A skill's own scripts stay under the skill,
+which is also its toolset name: `weekly-digest` gates every script that skill ships, and
+`weekly-digest.weekly_digest__collect_notes` gates one. `activate_skill` is deliberately *not* one of
+them, since every skill's tool list carries a reference to it and attributing it per skill would let a
+gate on one skill hold back the entry point to all of them.
+
+Naming a toolset is a broader statement than naming its members, and it means what it says:
+`compute` gates `calculate` as well as the two execution tools, which the shipped default leaves alone.
+
+Gating is still **by tool name at call time**, so it applies to a worker's call as much as the entry
+agent's: a worker's gated call is routed to you. The prefix is a declaration vocabulary that startup
+resolves down to tool names; it is not a discriminator at the moment of the call. If two toolsets ever
+provided one tool name, gating either prefix would gate that name wherever it is called. Note the flip
+side too, which is easy to misread: there is no privilege tier among agents. An agent whose table
+declares `config` really does get `update_config`, and one declaring `compute` really does get
+`execute_python`. Your hand-edit is the consent, and this list is the gate at call time.
+
+#### An entry that would gate nothing fails startup
+
+Every fault is refused at startup, naming each bad entry and suggesting the close names. An entry that
+gates nothing holds nothing back, and the only sign of it is a prompt that never comes, which is not a
+thing anyone notices: `confirm_tools = ["execute_pythn"]` once loaded clean and then let
+`execute_python` run unattended for as long as the file stood. Four ways an entry can be that entry:
+
+- **A bare tool name.** `execute_python` with no prefix is refused, and the error names the form to
+  write instead (`compute.execute_python`). This is what a config written before the prefix was required
+  will hit, once each.
+- **The wrong toolset.** `web.execute_python` is spelled correctly and filed wrong; the error says which
+  toolset does provide it.
+- **A toolset no agent declares.** `github_backup` is a real toolset the shipped config gives to nobody,
+  so nothing under it can be called. Name it in an `[agents.*]` table first.
+- **A toolset that provides no tools.** `planning` contributes a workflow, so there is nothing under it
+  to hold back.
+
+The vocabulary is every tool this config builds, which is wider than the entry agent's own:
+`compute.execute_python` resolves because `[agents.coder]` declares `compute`. An empty list names
+nothing, so there is nothing for the check to refuse.
 
 The limit is anything that does not exist when startup ends. A tool from an MCP server the assistant
 connects later with `add_mcp_server` has no name to match yet, and neither does a tool only
@@ -393,10 +433,12 @@ connects later with `add_mcp_server` has no name to match yet, and neither does 
 refused, which will look wrong if you were deliberately gating ahead of the connection. To gate an MCP
 tool, give its server a `[[mcp.server]]` table here and name that server in an agent's `tools`; to gate
 a tool from a toolset nothing declares, name that toolset in an agent's `tools`. Both are known from the
-next start.
+next start, and both are named by their server or toolset like anything else:
+`stocks.get_quote`, or `stocks` for all of them.
 
-Four names worth considering adding, all ungated by default: `read_conversation`,
-`search_conversations`, `rename_conversation`, and `export_conversation`. A saved transcript is
+Four names worth considering adding, all ungated by default: `conversations.read_conversation`,
+`conversations.search_conversations`, `conversations.rename_conversation`, and
+`conversations.export_conversation` (or `conversations` for the lot). A saved transcript is
 untrusted text, since a worker may have pasted web content into it, so an injection landing in one
 conversation can influence another. The two reads are ungated by default because gating a read would
 make an unattended scheduled run that reads history fail silently. The rename writes, but it writes one
@@ -756,7 +798,7 @@ on the agent Kokua constructs directly, and `capabilities` itself would hand it 
 composition budget. It runs on `[assistant].model` with the `[assistant]` thinking
 and generation defaults, and its tools still go through `[security].confirm_tools`, so `execute_python`
 and `add_mcp_server` still ask you first. Composing itself is not in the shipped `confirm_tools`, so it
-does not ask; add `compose_subagent` there to gate that too.
+does not ask; add `capabilities.compose_subagent` there to gate that too.
 
 ### `max_depth`
 
@@ -827,7 +869,8 @@ trailing comma is harmless. A name that is unset in Kokua's own environment prod
 rather than an empty one.
 
 Not hot: the value is read when an agent is built, so a change needs a restart. `run_command` is in the
-shipped `[security].confirm_tools`, so a command reaches you for approval before it runs, including one
+shipped `[security].confirm_tools` as `compute.run_command`, so a command reaches you for approval
+before it runs, including one
 a sub-agent asked for, since a worker's gated calls route to the parent's gate rather than running
 unattended.
 
@@ -892,7 +935,7 @@ Flags override the file for one run and are never written back.
 | `--frontend NAME` | `[frontend].name` |
 | `--model STRING` | `[assistant].model` |
 | `--system TEXT` | the entry agent's opener, leaving a worker's alone |
-| `--confirm-tools NAMES` | `[security].confirm_tools`, comma-separated; empty string disables |
+| `--confirm-tools NAMES` | `[security].confirm_tools`, comma-separated `toolset.tool` entries; empty string disables |
 | `--mcp URL` | adds a server for this run, unauthenticated or OAuth |
 | `--host`, `--port` | `[web].host`, `[web].port` |
 
