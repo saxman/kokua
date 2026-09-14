@@ -65,12 +65,13 @@ What the AIMU-provided toolsets hold:
 | Toolset | Tools | Notes |
 | --- | --- | --- |
 | `web` | `web_search`, `get_web_content`, `get_webpage_html`, `wikipedia`, `get_weather` | `get_web_content` returns Markdown, converting a PDF as well as a page; `get_webpage_html` is the raw-HTML escape hatch. |
-| `fs` | `list_directory`, `read_file` | **Read-only.** Writing a file needs `execute_python` or `run_command`. |
+| `fs` | `list_directory`, `read_file` | **Read-only**, and read-only by construction: AIMU's `fs` group holds the two writers below as well, and this toolset is that group with `builtin.unscoped` excluded. `read_file` returns 2,000 lines per call and names the offset that continues the read. |
+| `fs_write` | `write_file`, `edit_file` | both approval-gated by default. Neither confines a write to any root, so this reaches any path Kokua's own account can write. A separate name from `fs` so an agent can be given the read and not the write. |
 | `compute` | `calculate`, `execute_python`, `run_command` | both execution tools are approval-gated by default; `[compute] command_env_passthrough` decides what a command's environment holds |
 | `time` | `get_current_date_and_time`, `convert_time` | not implicit; declare it |
 | `misc` | `echo` | |
 | `memory` | `store_memory`, `search_memories`, `list_memories` | one store shared by every agent that declares it |
-| `documents` | `save_document`, `read_document`, `list_documents`, `search_documents` | likewise |
+| `documents` | `save_document`, `read_document`, `edit_document`, `list_documents`, `search_documents` | likewise. `read_document` windows a long document; change one with `edit_document`, since `save_document` replaces the whole thing and refuses to replace one it has not shown the model in full |
 | `skills` | `author_skill`, `add_skill_script` | entry agent only; see [Add a skill](add-skills.md) |
 | `audio` | `generate_audio` | needs `$AIMU_AUDIO_MODEL` |
 | `speech` | `generate_speech` | needs `$AIMU_SPEECH_MODEL` |

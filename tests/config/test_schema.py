@@ -27,6 +27,7 @@ def test_default_confirm_tools():
         "mcp.add_mcp_server",
         "compute.execute_python",
         "compute.run_command",
+        "fs_write",
         "config.update_config",
     ]
     assert AssistantConfig().confirm_tools == shipped

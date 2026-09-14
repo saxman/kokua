@@ -9,6 +9,7 @@ from __future__ import annotations
 import difflib
 from typing import Callable, Mapping, Optional, Sequence
 
+from aimu import trim_messages
 from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
 
 from kokua.config.file import ConfigError
@@ -398,6 +399,46 @@ def assemble_system_message(config: AssistantConfig, agent_name: str, toolsets: 
     return "".join(parts)
 
 
+# The share of a declared window left for a worker's messages. `trim_messages` counts messages alone,
+# while the window it has to fit also holds that worker's system message, its tool schemas, and the reply
+# still to be generated -- and a worker's tool block runs to several thousand tokens on its own. A
+# fraction rather than a subtraction of those three sizes: two of them cannot be measured before the
+# turn that needs them, and a subtraction of fixed guesses goes negative on a small window, which would
+# silently stop compacting exactly where a window fills soonest.
+_COMPACTION_WINDOW_SHARE = 0.75
+
+
+def compaction_for_window(generation: Mapping) -> Optional[Callable[[list[dict]], list[dict]]]:
+    """The trimmer a spawned worker applies before each of its model turns, or None to apply none.
+
+    Engaged by a declared ``context_length`` and nothing else, because that key is the only place a
+    window size is ever stated: no client reports the window it is talking to, so the alternative is
+    Kokua guessing one and rewriting a worker's messages against a number nobody wrote down. A worker
+    with no declared window therefore still fills it and still dies in it, and what it reports when it
+    does is AIMU's own doing rather than Kokua's -- since 0.31.0 a spawn returns a tool result naming
+    the *sub-agent's* window as the one that filled, where it used to hand the parent a message about
+    "the conversation" that the parent read as its own.
+
+    Only a spawned worker gets one. The entry agent's messages are the conversation the user is reading
+    and Kokua persists, so trimming them would drop history that is still on screen, silently and for
+    the rest of that conversation's life; a worker's messages are built per spawn and discarded with it,
+    which is what makes an automatic rewrite of them safe to do at all.
+    """
+    window = generation.get("context_length")
+    if not window:
+        return None
+    budget = int(window * _COMPACTION_WINDOW_SHARE)
+    if budget <= 0:
+        # A window whose message share rounds to nothing cannot hold a turn at all, so a trimmer built
+        # from it could only delete. `context_length` is validated as an int of at least 1 and `bool` is
+        # an int subclass, so `context_length = true` reaches here as a window of 1: a value the
+        # schema's floor lets through and that this would otherwise turn into "drop everything
+        # droppable before every turn". Declining leaves the reporting to AIMU, as an undeclared window
+        # does.
+        return None
+    return lambda messages: trim_messages(messages, max_tokens=budget)
+
+
 def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str) -> dict[str, dict]:
     """AIMU ``agent_types`` for one delegator: a spec per agent it names in ``delegates_to``.
 
@@ -455,6 +496,16 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         # so the parse-time floor stays the only thing with an opinion about the value.
         if agent.max_iterations is not None:
             specs[name]["max_iterations"] = agent.max_iterations
+        # Resolved, like thinking and generation and for the same reason: `generation_for` has already
+        # folded [assistant.generation] into this worker's own table, so the trimmer built here is the
+        # worker's own declared window when it declares one and the global window otherwise, and neither
+        # is ever its delegator's. Omitted when nothing resolves rather than written as None, which
+        # AIMU reads by *membership*: a written None means "no compaction for this specialist whatever
+        # the spawn tool was built with", a decision nobody made here. With the key absent the factory
+        # tier below applies, and that tier is built from the same global window, so the two agree.
+        compaction = compaction_for_window(config.generation_for(name))
+        if compaction is not None:
+            specs[name]["compaction"] = compaction
     return specs
 
 
@@ -505,6 +556,7 @@ def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Ca
         observer=observer,
         events=record_event,
         max_iterations=config.max_iterations,
+        compaction=compaction_for_window(config.generation),
     )
 
 
@@ -537,6 +589,7 @@ def make_delegation_tool(agent, config: AssistantConfig, state: LiveState) -> Op
         observer=observer,
         events=record_event,
         max_iterations=config.max_iterations,
+        compaction=compaction_for_window(config.generation),
     )
 
 

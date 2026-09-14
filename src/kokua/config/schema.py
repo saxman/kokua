@@ -162,12 +162,19 @@ class AssistantConfig:
     # Each entry names the toolset providing the tool: "<toolset>" or "<toolset>.*" for all of them,
     # "<toolset>.<tool>" for one, with "core" reserved for the tools no toolset provides. Resolved to
     # tool names at startup by core.agents.resolve_confirm_tools, which rejects an entry gating nothing.
+    # `fs_write` is named bare where the others name a tool, and the asymmetry is the point: that toolset
+    # is `select(builtin.fs, include=builtin.unscoped)`, so it holds every writer AIMU puts in that group
+    # and nothing else. Naming its two tools would gate today's writers and leave tomorrow's ungated on
+    # an upgrade, which is the drift `toolsets/fs.py` selects by reach to avoid, reappearing one layer up.
+    # `compute` cannot be named bare for the same reason in reverse: it carries `calculate`, which no gate
+    # should stop.
     confirm_tools: list[str] = field(
         default_factory=lambda: [
             "skills.add_skill_script",
             "mcp.add_mcp_server",
             "compute.execute_python",
             "compute.run_command",
+            "fs_write",
             "config.update_config",
         ]
     )

@@ -7,7 +7,8 @@ calling conversation -- an independent judge, not the author defending its own w
 factual/numeric claims instead of rejecting anything it cannot verify from its input alone. The typed
 verdict is then extracted in a second, tool-less structured call (`finalize_verdict`); that call stays
 `use_tools=False` because a forced schema and forced tools conflict on Anthropic. The reviewer toolset
-deliberately excludes the user's memory/documents, skills, and MCP mutation -- see `REVIEWER_TOOLS`.
+deliberately excludes the user's memory/documents, skills, MCP mutation, and every tool that writes
+anywhere the model chose -- see `REVIEWER_TOOLS`.
 
 What counts as approvable is the caller's, never this module's: the prompts are arguments, so a
 workflow brings its own standard (see :mod:`kokua.workflows.planning.critics` for the pair deep
@@ -38,6 +39,14 @@ from kokua.core.metrics import record_event
 # gate it could not satisfy would just deadlock it), so mounting either one here would hand it a
 # capability `[security] confirm_tools` exists to hold back, with the gate structurally unable to apply.
 # Arithmetic is the only thing a verdict actually needs computed, and `calculate` covers it.
+#
+# Naming individual callables rather than groups is what kept that true through AIMU 0.31.0, which put
+# `write_file` and `edit_file` *into* `builtin.fs`. Nothing here mounts `fs`, so nothing changed; had
+# this line read `[*builtin.fs]` for the file reads a reviewer might want, the same release would have
+# handed an ungateable agent a writer at any path. `web` is taken whole deliberately, being the one
+# group whose every member only reads, and `tests/workflows/planning/test_reviewers.py` pins the
+# absences against the shipped `confirm_tools` default so a name added there fails the suite until this
+# toolset is re-checked.
 REVIEWER_TOOLS: list[Callable] = [*builtin.web, builtin.calculate, builtin.get_current_date_and_time]
 
 _VERDICT_PROMPT = (

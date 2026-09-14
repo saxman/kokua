@@ -358,9 +358,9 @@ unconfigured, which is what `email-report` did on the entry agent until the seco
 
 #### The shipped entry agent's inventory
 
-All 33 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
+All 34 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
 `config.example.toml` declares, not a fixed list: a different `tools` line produces a different set.
-Twelve of the 32 come from AIMU, more than a third, and so are not greppable in this repository (more
+Thirteen of the 34 come from AIMU, more than a third, and so are not greppable in this repository (more
 once skills are installed, since AIMU injects a tool per skill script on top of this set), which is why
 this table exists rather than a naming convention alone:
 
@@ -368,7 +368,7 @@ this table exists rather than a naming convention alone:
 |---|---|---|
 | `author_skill`, `add_skill_script` | AIMU `make_skill_authoring_tool` / `make_skill_script_tool` | `skills` (entry agent only) |
 | `store_memory`, `search_memories`, `list_memories` | AIMU `make_memory_tools` | `memory` |
-| `save_document`, `read_document`, `list_documents`, `search_documents` | AIMU `make_document_tools` | `documents` |
+| `save_document`, `read_document`, `edit_document`, `list_documents`, `search_documents` | AIMU `make_document_tools` | `documents` |
 | `get_current_date_and_time`, `convert_time` | AIMU `builtin.time` | `time` |
 | `add_mcp_server`, `remove_mcp_server` | `toolsets/mcp.py` | `mcp` |
 | `read_config`, `update_config` | `toolsets/config.py` | `config` |
@@ -465,11 +465,12 @@ effort, what it cost, and why a turn stopped when it stopped short. That is not 
 sidebar's download button, over the same `replay_items` the web channel replays a reload from, so the
 tool is a resolve, a render, and a write.
 
-It returns a path, not the document. That is the whole design, and it is forced by a limit worth
-understanding: AIMU's `fs` group is `list_directory` and `read_file(path, max_lines)`, with no offset and
-no search, so a file is readable from its first line downward and nowhere else. A tool that returned the
-Markdown itself would put a run's entire tool output into the context of the conversation asking about
-it, which is the one context that cannot afford it. Handing back a path lets the answer go to a
+It returns a path, not the document. That is the whole design, and the reason survived the limit that
+first forced it. AIMU's `read_file(path, max_lines, offset)` gained the offset in 0.31.0, so a long
+export is now readable past its first window; what has not changed is that every page a model turns is
+paid for out of the context it is turning them in. A tool that returned the Markdown itself would put a
+run's entire tool output into the context of the conversation asking about it, which is the one context
+that cannot afford it, and paging it there is the same bill in instalments. Handing back a path lets the answer go to a
 sub-agent instead, so the transcript is spent against a fresh context and only the findings come back.
 `config.example.toml` ships `[agents.introspector]` as that worker, and
 `test_the_shipped_introspector_can_both_export_a_conversation_and_read_the_export` pins the pairing,
@@ -486,10 +487,10 @@ answer.
 Three consequences to know before changing it. The answer reports the file's line count and size and
 advises delegating past `DELEGATE_ABOVE_LINES`, because a model cannot see how big a file is before
 reading it, and the advice is a sentence rather than a refusal: the tool does not know what the model
-has to delegate to. Nothing slices, so an export larger than the introspector's context is read from
-its top and no further; the introspector's own instructions tell it to report a truncated read as
-truncated, which converts a silent partial answer into a stated one, and the real fix is an `offset` on
-AIMU's `read_file` (item 19 in `TODO.md`). And the write is bounded by construction rather than by validation:
+has to delegate to. An export larger than one window is read in pages, since `read_file`'s truncation
+notice names the offset that continues it, and the introspector's own instructions tell it to page
+through the rest and to say which part of the run it saw if it stops early, which converts a silent
+partial answer into a stated one. And the write is bounded by construction rather than by validation:
 the directory comes from `AssistantConfig.downloads_path` and the filename from the resolved session's
 key, so no argument the model passes reaches the filesystem, which is why exporting the same
 conversation twice replaces one file instead of accumulating.
@@ -966,7 +967,28 @@ now: the method has a default implementation on the ABC (read everything, keep t
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 `TinyDBSessionStore`'s override from a plain inheritance of the default.
 
-The floor is now **`aimu>=0.30.0`**, and it is the first one moved by a *rename*. `get_webpage` became
+The floor is now **`aimu>=0.31.0`**, and three capabilities in that release are Kokua's. `builtin.select`
+and `builtin.unscoped` are what [`toolsets/fs.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/fs.py)
+and `toolsets/fs_write.py` partition one group with, after AIMU put `write_file` and `edit_file` *into*
+`builtin.fs`: handing that group out unchanged would have granted a write to every agent already
+declaring `fs`, on an upgrade, with no config change and nothing reported. `edit_document` and a
+read-before-replace guard on `save_document` close the other silent one, since `read_document` now
+returns a window and replacing a whole document from a windowed read deleted everything past the window
+(a 3,000-line document came back 51 lines long). And `compaction` is a spec key `core/agents.py` writes
+per worker from a declared `context_length`, so a long delegation trims its own messages rather than
+dying in its window.
+
+The probe grips the third of those, `SUBAGENT_SPEC_KEYS`'s `"compaction"`, and the choice is the first
+time this preflight has passed over a *newer* handle on purpose. `select` landed earlier in the release
+and is a plain name lookup for a function Kokua calls directly, but the `save_document` guard landed two
+commits after it with no handle at all, while the windowing that makes an unguarded save destructive
+landed before it: a checkout in between would have passed a `select` probe and still truncated a
+document. `compaction` is in the release's last functional commit, so gripping it dates a checkout to
+all three. What it leaves to the floor is the *contents* of `builtin.unscoped`, since asking whether the
+group holds both writers needs a membership check over a list of callables, the shape declined twice
+before and asserted in `tests/test_aimu_compat.py` instead.
+
+The floor was **`aimu>=0.30.0`** until then, and that one was the first moved by a *rename*. `get_webpage` became
 `get_web_content`, and the point is not the name: the old tool never asked what it had fetched. It
 handed `response.text` to an HTML stripper, and `requests` decodes `.text` with `errors="replace"`, so a
 PDF behind a URL arrived as megabytes of replacement characters that a tag stripper passes through
@@ -977,7 +999,7 @@ caps what it returns, downloads, and extracts. Kokua needs the floor because it 
 unchanged: `toolsets/web.py` is `list(builtin.web)`, and `workflows/critics.py` mounts the same group
 for the reviewer, so on an older AIMU both quietly poison a context.
 
-The probe is a name lookup on `builtin.get_web_content`, the fourth time that shape has answered. What
+That probe was a name lookup on `builtin.get_web_content`, the fourth time that shape has answered. What
 Kokua actually hands an agent is the *group*, so the stricter question is whether `web` contains it, and
 that check was declined for the reason `run_command`'s was at 0.24.0, this time without even that
 release's brief window: the rename moved the function and the group's entry for it in a single upstream

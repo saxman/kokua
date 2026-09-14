@@ -656,8 +656,9 @@ async def test_export_of_the_current_conversation_says_this_turn_is_not_in_the_f
 
 
 async def test_a_long_export_tells_the_model_to_delegate_it_rather_than_read_it(tmp_path):
-    """`read_file` truncates from the top and takes no offset (TODO item 19), so a file past this
-    size is one the model should hand to a sub-agent whose context can hold it, not read here."""
+    """`read_file` returns 2,000 lines per call, so covering a file past this size means paging, and
+    every page is spent out of the context of the conversation that asked. A file this long is one the
+    model should hand to a sub-agent whose own context can hold it, not read here."""
     book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages() * 200))
 
     answer = await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1")

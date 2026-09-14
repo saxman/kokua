@@ -350,6 +350,17 @@ Three things to know:
 - **`context_length` is set per request only on Ollama's native API.** Everywhere else the window is
   fixed at model load time, at server launch (`--ctx-size`, `--max-model-len`), or by the vendor, and the
   key is dropped with a warning naming that remedy.
+- **`context_length` has a second job, and it applies on every backend.** A spawned sub-agent trims its
+  own messages before each model turn to fit the window declared for it, so a long delegation bounds its
+  own growth instead of failing once the window fills. Three quarters of the declared window is left for
+  messages, since the same window has to hold that worker's system message, its tool block, and the
+  reply. Declaring no `context_length` leaves the trimming off: nothing else states a window (no client
+  reports the one it is talking to), and guessing one would mean rewriting a worker's messages against a
+  number nobody wrote down. A worker with no declared window instead reports, when it fills, that *its*
+  window filled and that yours is neither the cause nor something it ever saw.
+  **The conversation you are in is never trimmed**, whatever you declare here: it is yours to read and
+  Kokua stores it, so dropping from it would delete history still on screen. A worker's messages are
+  built per spawn and discarded with it, which is what makes an automatic rewrite of them safe at all.
 
 Because this is a TOML sub-table, it must come **last** in `[assistant]`: any plain `[assistant]` key
 written after the `[assistant.generation]` header would belong to the sub-table instead. The same is true
@@ -363,14 +374,37 @@ Tools that require interactive confirmation before each call: a terminal `y/N`, 
 UI. These are the tools that run with full machine access.
 
 ```toml
-confirm_tools = ["skills.add_skill_script", "mcp.add_mcp_server", "compute.execute_python", "compute.run_command", "config.update_config"]
+confirm_tools = [
+    "skills.add_skill_script",
+    "mcp.add_mcp_server",
+    "compute.execute_python",
+    "compute.run_command",
+    "fs_write",
+    "config.update_config",
+]
 ```
 
 Set to `[]` to disable approval entirely. Proactive turns (scheduled tasks, anything the assistant starts
 unprompted) **auto-deny** these regardless of the setting, since there is no one at the keyboard to ask.
 
-`config.update_config` is in the default list because it lets the assistant rewrite this file, except for
-the locked keys it can never change. This key is itself locked by default too, for the obvious reason.
+Four of the six write with this process's privileges. `fs_write`'s two tools name the path,
+`compute.execute_python` and `compute.run_command` name their own target, and `config.update_config`
+rewrites this file, except for the locked keys it can never change (this key is itself locked by
+default, for the obvious reason). The other two sit one step further back, each installing something
+that will run later.
+
+The writers are gated for a reason worth stating, because leaving them out would have been the quiet
+mistake: `[agents.coder]` holds `run_command`, which is gated because a shell can write a file. An
+ungated `write_file` beside it is the same outcome by a shorter route, so the gate would have been
+approving the long way round and waving the short one through.
+
+Note `fs_write` is named bare where the rest name a tool. That toolset is
+`select(builtin.fs, include=builtin.unscoped)`, so it is every writer AIMU puts in that group and
+nothing else, and the bare name therefore gates a writer a later AIMU adds as well. Spelling out
+`fs_write.write_file` and `fs_write.edit_file` would gate today's two and let tomorrow's third through
+in silence, which is the drift [`toolsets/fs.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/fs.py)
+selects by reach to avoid, reappearing one layer up. `compute` cannot be named bare for the reverse
+reason: it carries `calculate`, which no gate should stop.
 
 #### Every entry names its toolset
 
@@ -503,7 +537,7 @@ An agent's `tools` list *is* its capability. Nothing is added in code, so a tool
 list is gone, and one you add is there on the next start.
 
 There is one namespace for every capability, so a name may be an AIMU built-in tool group (`web`, `fs`,
-`compute`, `time`, `misc`, `audio`, `speech`, `transcription`), one of Kokua's own (`memory`,
+`fs_write`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`), one of Kokua's own (`memory`,
 `documents`, `skills`, `capabilities`, `config`, `conversations`, `mcp`, `planning`, `scheduling`),
 an installed plugin toolset (`aimu_agents`, `benchmark`, `github_backup`, `image`), a skill in your skills folder
 named by its own name, or an MCP server configured under `[[mcp.server]]`, named by its `name`. The list

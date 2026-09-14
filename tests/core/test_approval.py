@@ -216,11 +216,28 @@ async def test_switch_away_resolves_a_pending_decision_with_its_default(tmp_path
 
 
 async def test_the_shipped_gates_all_name_tools_that_exist(tmp_path):
-    """The five names config.example.toml ships have to pass the check that rejects a gate naming
-    nothing, or the default install would not start."""
+    """The six entries config.example.toml ships have to pass the check that rejects a gate holding
+    nothing back, or the default install would not start.
+
+    Pinned as an exact resolved set, not just "it started", because the entries are a mix of forms and
+    what a reader wants to know is which calls actually stop. `fs_write` is the bare one: it contributes
+    both writers from one entry, which is the property that makes a writer added by a later AIMU gated
+    on arrival, and a regression to naming its two tools would still start and still pass a
+    smoke test."""
     config = _config(tmp_path)
     assert config.confirm_tools == AssistantConfig().confirm_tools
-    await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    assert assistant._human.gated_tools == {
+        "add_skill_script",
+        "add_mcp_server",
+        "execute_python",
+        "run_command",
+        "write_file",
+        "edit_file",
+        "update_config",
+    }
+    # And the benign member of a toolset one of those entries names is deliberately not gated.
+    assert "calculate" not in assistant._human.gated_tools
 
 
 async def test_an_empty_gate_list_is_still_valid(tmp_path):

@@ -49,16 +49,18 @@ def test_a_missing_aimu_is_reported_as_such(monkeypatch):
 
 def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
     """The floor moves with the capabilities Kokua uses, so the previous release must fail."""
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.23.0")
-    with pytest.raises(AimuVersionError, match="0.23.0"):
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.30.0")
+    with pytest.raises(AimuVersionError, match="0.30.0"):
         require_aimu()
 
 
 def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
-    """The probe follows whatever shape the newest surface has, and a set member is one of the three.
+    """The probe follows whatever shape its surface has, and a set member is one of the three.
 
-    Exercised here against 0.18.0's `generate_kwargs` member rather than monkeypatching over the live
-    probe (a name lookup today), so the branch stays covered independent of which shape currently applies.
+    This is the live shape today (0.31.0's ``"compaction"``), and it is still exercised here against
+    0.18.0's ``generate_kwargs`` member rather than against the current one, so the branch stays covered
+    whichever member the probe grips next. Both are entries in the same set, which is the point that set
+    keeps making: its presence says nothing, and only its contents date a checkout.
     """
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(aimu_compat, "_PROBE_CLASS", None)
@@ -119,13 +121,14 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    The surface today is ``builtin.get_web_content``, the renamed page fetcher that classifies what it
-    downloaded and returns Markdown. Its predecessor, ``get_webpage``, handed ``response.text`` to an
-    HTML stripper, and ``requests`` decodes ``.text`` with ``errors="replace"``, so a PDF behind a URL
-    became megabytes of replacement characters that the stripper passed through almost whole and into
-    the model's context. Kokua's ``web`` toolset hands that group out unchanged and
-    ``workflows/critics.py`` mounts it for the reviewer, so an older sibling poisons a context with
-    nothing raised anywhere.
+    The surface today is ``SUBAGENT_SPEC_KEYS``'s ``"compaction"``, the spec key ``core/agents.py``
+    writes so a spawned worker trims its own messages instead of filling its window and dying in it.
+    It is deliberately not the newest *name* in 0.31.0: ``builtin.select`` landed earlier in the release
+    and would have been a plain name lookup, but ``save_document``'s read-before-replace guard landed
+    two commits after it with no handle at all, while the ``read_document`` windowing that makes an
+    unguarded save destructive landed before it. A checkout in between passes a ``select`` probe and
+    still truncates a document to the window it was read through. ``compaction`` is in the release's
+    last functional commit, so gripping it dates a checkout to all of them.
     """
     import importlib
 
@@ -133,16 +136,50 @@ def test_the_probe_targets_the_release_the_floor_names():
     probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
     assert aimu_compat._PROBE_MODULE == "aimu.tools.builtin"
-    assert aimu_compat._PROBE_SYMBOL == "get_web_content"
-    # A name lookup, because the rename moved the function and the `web` group's entry for it in one
-    # commit, so the name dates the checkout exactly. Group membership is what Kokua actually hands an
-    # agent, and this asserts it, but as a fact about the release rather than as the probe's shape: a
-    # membership check over a list of callables matching on `__name__` would be a fourth probe shape
-    # bought for a window that does not exist.
+    assert aimu_compat._PROBE_SYMBOL == "SUBAGENT_SPEC_KEYS"
+    assert aimu_compat._PROBE_MEMBER == "compaction"
+    assert aimu_compat._PROBE_MEMBER in probe
+    # The set is at module scope and the shape is membership, so neither of the other two applies.
     assert aimu_compat._PROBE_CLASS is None
-    assert aimu_compat._PROBE_MEMBER is None
     assert aimu_compat._PROBE_PARAMETER is None
-    assert probe.__name__ in {fn.__name__ for fn in module.web}
+
+
+def test_the_floor_covers_the_fs_group_the_probe_cannot_inspect():
+    """What Kokua's two fs toolsets depend on is a group's *contents*, which no probe shape here asks.
+
+    ``toolsets/fs.py`` excludes ``builtin.unscoped`` from ``builtin.fs`` and ``toolsets/fs_write.py``
+    selects it, so the two partition one AIMU group by reach and the read-only half stays read-only
+    without either module naming a tool. That rests on ``unscoped`` holding both writers: an ``unscoped``
+    missing ``write_file`` would hand the read-only toolset a writer, silently, which is the whole
+    failure the split exists to prevent. Asking it in the preflight needs a membership check over a list
+    of *callables* matching on ``__name__``, a shape declined at 0.24.0 and 0.30.0 and declined again
+    here, so it is asserted as a fact about the release instead.
+    """
+    from aimu.tools import builtin
+
+    writers = {"write_file", "edit_file"}
+    assert callable(builtin.select)
+    assert writers <= {fn.__name__ for fn in builtin.unscoped}
+    assert writers <= {fn.__name__ for fn in builtin.fs}
+    assert {fn.__name__ for fn in builtin.select(builtin.fs, exclude=builtin.unscoped)} == {
+        "list_directory",
+        "read_file",
+    }
+    assert {fn.__name__ for fn in builtin.select(builtin.fs, include=builtin.unscoped)} == writers
+
+
+def test_the_floor_covers_the_web_fetcher_the_probe_no_longer_grips():
+    """0.30.0's probe surface is 0.31.0's floor now that ``"compaction"`` holds the one probe slot.
+
+    ``toolsets/web.py`` is ``list(builtin.web)`` and ``workflows/critics.py`` mounts the same group for
+    the reviewer, so an AIMU whose fetcher decodes every response as text poisons a context with nothing
+    raised anywhere. Pinned the way every other demoted surface is: one probe slot cannot hold every
+    capability the floor covers.
+    """
+    from aimu.tools import builtin
+
+    assert hasattr(builtin, "get_web_content")
+    assert "get_web_content" in {fn.__name__ for fn in builtin.web}
 
 
 def test_the_floor_covers_the_summaries_call_the_probe_no_longer_grips():

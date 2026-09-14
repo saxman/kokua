@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.30.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.31.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -14,13 +14,18 @@ frame, which no ``getattr`` can detect). The capability probe catches an editabl
 declared version already reads new enough while the code behind it predates the release -- the version
 string of an editable install says what the branch claims, not what it contains.
 
-The probe covers exactly one surface at a time: the newest one Kokua depends on, whose shape decides the
-check's shape. A name lookup answers for a symbol, the shape in force today (``builtin.get_web_content``)
-and three times before, for ``resolve_default_text_model``, ``ModelRefusalError``, and
-``SessionStore.list_summaries``; a membership check answers
-for an entry in a published set whose mere existence proves nothing (``SUBAGENT_SPEC_KEYS`` shipped a
-release before the ``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a
-checkout, and ``StreamingContentType`` answered the same way for ``CONTINUING``); a signature check answers
+The probe covers one surface at a time, and until 0.31.0 that was always the *newest* surface Kokua
+depends on. It is now the newest surface with a handle worth gripping, which is not the same thing and
+is why the rule is written this way: see AIMU 0.31.0 below, the first release where two handles existed
+and the later one had to be taken to close a window the earlier one left open.
+
+Whichever surface it is, its shape decides the check's shape. A membership check answers for an entry in
+a published set whose mere existence proves nothing, the shape in force today
+(``SUBAGENT_SPEC_KEYS``'s ``"compaction"``) and twice before: that same set shipped a release before the
+``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a checkout, and
+``StreamingContentType`` answered the same way for ``CONTINUING``. A name lookup answers for a symbol,
+the shape four times before that, for ``resolve_default_text_model``, ``ModelRefusalError``,
+``SessionStore.list_summaries``, and ``builtin.get_web_content``; a signature check answers
 for a keyword argument no ``getattr`` would notice, the shape four releases running before that:
 ``SkillManager(include=...)``, then ``SkillAgent(script_env=...)``, then ``WebChannel(stream_thinking=...)``,
 then ``make_async_subagent_tool(events=...)``.
@@ -81,7 +86,44 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.30.0 is the current surface, and it is the first floor a *rename* has moved. ``get_webpage``
+AIMU 0.31.0 is the current surface, and it is the first release where picking the newest handle would
+have been the wrong call. Three capabilities in it are Kokua's: ``builtin.select`` and
+``builtin.unscoped``, which ``toolsets/fs.py`` and ``toolsets/fs_write.py`` use to partition a group
+that gained ``write_file`` and ``edit_file`` (without which every agent declaring ``fs`` silently gains
+a write it never declared); ``edit_document`` plus a read-before-replace guard on ``save_document``,
+without which a windowed ``read_document`` saved back truncates a user's document to the window it
+showed; and ``compaction``, which ``core/agents.py`` writes per worker off a declared
+``context_length`` so a long delegation trims its own messages rather than dying in its window.
+
+The probe grips the last of those, and the reason is the release's commit order rather than anything
+about the capability. ``select`` and ``unscoped`` arrived in one commit (aimu c44dc8d) and would have
+been the obvious handle: a plain name lookup for a function Kokua calls directly. But the
+``save_document`` guard landed two commits *later* (c66b08b) and offers no handle at all, being a set of
+digests private to one ``make_document_tools`` call, while the windowing that makes an unguarded save
+destructive landed *earlier* (aae4a10). A checkout parked between them therefore windows
+``read_document``, does not refuse the save, and would have passed a ``select`` probe while silently
+cutting a 3,000-line document down to 51 lines. ``compaction`` is in the release's last functional
+commit (9354536), so a checkout carrying it carries all three, and taking a later handle to subsume an
+earlier window is the reverse of the trade 0.20.0's ``endpoint_kwargs`` had to accept.
+
+The shape is a membership check, and it is the same *set* the probe already gripped once, at 0.18.0, for
+a different member. That is the 0.18.0 lesson stated twice: a published set's presence proves nothing
+about its contents, and ``SUBAGENT_SPEC_KEYS`` has now twice shipped ahead of an entry Kokua came to
+depend on. Worth not confusing with a coincidence one level down: AIMU reads ``"compaction"`` from a
+spec by membership too, rather than with ``.get()``, so that a written ``None`` can mean "no compaction
+for this specialist" distinctly from an absent key. That is AIMU's reason for its own read, not this
+probe's reason for its shape.
+
+What this probe cannot see, and what the floor covers alone: the *contents* of ``builtin.unscoped``.
+What Kokua's two ``fs`` toolsets depend on is that the group holds ``write_file`` and ``edit_file``, so
+that one selects the writers and the other excludes them, and asking that directly would take a
+membership check over a list of *callables* matching on ``__name__`` -- the shape declined at 0.24.0 for
+``run_command`` and again at 0.30.0 for ``get_web_content``, declined a third time here, and asserted in
+``tests/test_aimu_compat.py`` instead. A checkout whose ``unscoped`` was missing ``write_file`` would
+hand Kokua's read-only ``fs`` a writer, which is the failure the split exists to prevent; nothing short
+of that declined shape would catch it, and the floor is what stands in its place.
+
+AIMU 0.30.0 was the surface until 0.31.0, and it is the first floor a *rename* has moved. ``get_webpage``
 became ``get_web_content``, and the name is not the capability: the old tool never asked what it had
 downloaded. It handed ``response.text`` to an HTML stripper, and ``requests`` decodes ``.text`` with
 ``errors="replace"``, so a PDF behind a URL arrived as megabytes of replacement characters that a tag
@@ -100,7 +142,7 @@ the membership instead, as a fact about the release rather than as this module's
 cannot see is the behavior behind the name: a checkout could export ``get_web_content`` and classify
 nothing, and its caps (20,000 characters returned, 10 MB downloaded, 200,000 extracted from a PDF) are
 invisible to a name lookup. Nothing short of fetching a PDF would establish those, which is not a
-preflight's job.
+preflight's job. ``get_web_content`` is the floor's job now, in its turn.
 
 AIMU 0.29.0 was the surface until 0.30.0, and the probe was a plain name lookup, the third time this
 shape had answered (``resolve_default_text_model`` at 0.21.0, ``ModelRefusalError`` at 0.27.0). The
@@ -224,44 +266,48 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 30, 0)
+MINIMUM_AIMU = (0, 31, 0)
 
-# The newest AIMU surface Kokua depends on is `builtin.get_web_content`, the renamed page fetcher that
-# asks what it downloaded before reading it. `get_webpage` did not: it handed `response.text` to an HTML
-# stripper, and `requests` decodes `.text` with `errors="replace"`, so a PDF behind a URL arrived as
-# megabytes of replacement characters, which a tag stripper passes through almost whole. Four such
-# results, 6.28 MB of them, are in this developer's own stored transcripts, each having entered a model's
-# context whole. Kokua hands out that group unchanged (`toolsets/web.py` is `list(builtin.web)`) and
-# `workflows/critics.py` mounts it for the reviewer, so on an older sibling both poison a context with
-# nothing raised anywhere.
+# The surface is `SUBAGENT_SPEC_KEYS`'s `"compaction"` entry, the spec key `core/agents.py` writes so a
+# spawned worker trims its own messages before each model turn instead of filling its window and dying
+# in it. Kokua builds that trimmer from a declared `[assistant.generation].context_length`, per worker,
+# because `generation_for` has already resolved the per-agent tier by the time the spec is assembled.
 #
-# The shape is a name lookup, the fourth time this probe has taken it (`resolve_default_text_model` at
-# 0.21.0, `ModelRefusalError` at 0.27.0, `SessionStore.list_summaries` at 0.29.0), and back at module
-# scope, so `_PROBE_CLASS` returns to None. What Kokua actually hands an agent is the *group*, not the
-# function, so the honest question is whether `web` contains it; the stricter check is declined for the
-# reason `run_command`'s was at 0.24.0, and this time without even that release's fifteen-minute window.
-# The rename moved `def get_web_content` and the `web = [...]` entry for it in a single commit
-# (aimu 0c0436f), so no checkout exists in which the name resolves and the group still holds the old
-# tool. A membership check over a list of *callables*, matching on `__name__`, would be a fourth probe
-# shape teaching this module a new trick to close a window that does not exist. The group membership is
-# asserted in `tests/test_aimu_compat.py` instead, where it belongs: a fact about the release, not the
-# preflight's shape.
+# Why this key and not `builtin.select`, which lands earlier in the same release and which Kokua calls
+# directly: commit order. `select` and `unscoped` arrived together (aimu c44dc8d) and are a plain name
+# lookup, but `save_document`'s read-before-replace guard landed two commits later (c66b08b) with no
+# handle at all (a digest set private to one `make_document_tools` call), while the `read_document`
+# windowing that makes an unguarded save destructive landed earlier (aae4a10). A checkout between those
+# two windows a read, does not refuse the save, and would pass a `select` probe while cutting a
+# 3,000-line document to 51 lines. `compaction` is in the release's last functional commit (9354536),
+# so a checkout carrying it carries `select`, `unscoped`, `edit_document`, and the guard as well.
 #
-# What this probe cannot see, and what the floor covers alone: the *behavior* behind the name. A checkout
-# could export `get_web_content` and classify nothing, and the caps (20,000 characters returned, 10 MB
-# downloaded, 200,000 characters extracted from a PDF) are invisible to a name lookup too. Nothing short
-# of fetching a PDF would prove those, which is not a preflight's job.
+# The shape is a membership check, the third time (`SUBAGENT_SPEC_KEYS`'s `generate_kwargs` at 0.18.0,
+# `StreamingContentType.CONTINUING` at 0.28.0) and the second time on this same set, which is the 0.18.0
+# lesson restated: a published set's presence proves nothing about its contents, and this one has now
+# twice shipped a release ahead of an entry Kokua came to depend on. `_PROBE_CLASS` stays None because
+# the set is at module scope; the `in` runs through `__members__` when there is one and against the
+# container otherwise, which for a frozenset is the frozenset.
 #
-# `SessionStore.list_summaries` (a name lookup) was this probe's surface while 0.29.0 was the floor,
-# `StreamingContentType.CONTINUING` (a membership check) while 0.28.0 was, `make_async_subagent_tool(events=...)`
-# (a signature check) while 0.25.0 was, `make_command_tool` (a name lookup) before that, and
-# `ModelRefusalError` (a name lookup) while 0.27.0 was; all five are the version floor's responsibility
-# now, as everything this probe has ever pointed at eventually becomes.
+# What this probe cannot see, and what the floor covers alone: the *contents* of `builtin.unscoped`.
+# Kokua's two fs toolsets depend on that group holding `write_file` and `edit_file`, so that `fs_write`
+# selects the writers and `fs` excludes them; an `unscoped` missing one would hand the read-only toolset
+# a writer, which is the whole failure the split prevents. Asking it directly needs a membership check
+# over a list of *callables* matching on `__name__`, the shape declined at 0.24.0 for `run_command` and
+# at 0.30.0 for `get_web_content`, declined again here and asserted in `tests/test_aimu_compat.py`
+# instead: a fact about the release, not the preflight's shape.
+#
+# `get_web_content` (a name lookup) was this probe's surface while 0.30.0 was the floor,
+# `SessionStore.list_summaries` (a name lookup) while 0.29.0 was, `StreamingContentType.CONTINUING`
+# (a membership check) while 0.28.0 was, `make_async_subagent_tool(events=...)` (a signature check)
+# while 0.25.0 was, `make_command_tool` (a name lookup) before that, and `ModelRefusalError` (a name
+# lookup) while 0.27.0 was; all six are the version floor's responsibility now, as everything this probe
+# has ever pointed at eventually becomes.
 _PROBE_MODULE = "aimu.tools.builtin"
 _PROBE_CLASS: Optional[str] = None
-_PROBE_SYMBOL = "get_web_content"
+_PROBE_SYMBOL = "SUBAGENT_SPEC_KEYS"
 _PROBE_PARAMETER: Optional[str] = None
-_PROBE_MEMBER: Optional[str] = None
+_PROBE_MEMBER: Optional[str] = "compaction"
 
 
 class AimuVersionError(RuntimeError):

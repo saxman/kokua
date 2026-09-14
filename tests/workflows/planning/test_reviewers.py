@@ -16,6 +16,8 @@ from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import critics
 from kokua.workflows.planning import critics as review
 from kokua.core.assistant import Assistant
+from kokua.core.agents import build_registry
+from kokua.registry.context import LiveState, ToolsetContext
 from kokua.workflows.planning.runner import _tool_evidence
 from kokua.config import AssistantConfig
 from tests.channels import example_agents, planning_settings
@@ -110,16 +112,37 @@ def test_reviewer_toolset_holds_nothing_the_approval_gate_would_have_to_cover():
     tool that needs a gate. Pinned against the shipped `confirm_tools` default rather than a literal
     list, so adding a name there fails here until the reviewer's toolset is re-checked.
 
-    A shipped entry is `toolset.tool`, so the tool half is what this compares. Intersecting the whole
-    entries would pass no matter what the default held, which is the vacuous green this docstring's
-    promise depends on not happening. A bare-toolset entry (no dot) is expanded by startup against a
-    vocabulary that needs a wired assistant, so it is refused here rather than silently skipped."""
+    A shipped entry names a toolset, so the entries have to be expanded to tool names before they can be
+    compared to anything. Intersecting the raw entries would pass no matter what the default held, which
+    is the vacuous green this docstring's promise depends on not happening: `fs_write` matches no tool
+    name, and `compute.execute_python` matches none either.
+
+    The expansion mirrors `core.agents.gateable_tools` rather than calling it, because that function
+    reads a `LiveState` filled in by wiring a whole assistant, and what this test needs is one question
+    about one shipped toolset. An entry naming a toolset the registry does not have fails loudly here
+    instead of contributing nothing, since a gate silently expanding to zero tools is the same vacuous
+    green by a different route."""
+    config = AssistantConfig()
+    registry = build_registry(config)
+    ctx = ToolsetContext(state=LiveState(config=config), agent=None, agent_name="reviewer")
+    gated: set[str] = set()
+    for entry in config.confirm_tools:
+        toolset, _, tool = entry.partition(".")
+        assert toolset in registry, f"shipped gate {entry!r} names no toolset"
+        if tool and tool != "*":
+            gated.add(tool)
+        else:
+            provided = {fn.__name__ for fn in registry[toolset].build(ctx)}
+            assert provided, f"shipped gate {entry!r} expands to no tools"
+            gated |= provided
+
     names = {t.__name__ for t in critics.REVIEWER_TOOLS}
-    shipped = AssistantConfig().confirm_tools
-    assert all("." in entry for entry in shipped), f"expand this check for the bare entries in {shipped}"
-    assert not (names & {entry.split(".", 1)[1] for entry in shipped})
+    assert not (names & gated)
     assert "execute_python" not in names  # the specific escape this guards: arbitrary code, unsandboxed
     assert "run_command" not in names  # and the same escape one step shorter: an unsandboxed shell
+    # Shorter still, and the reason the `fs` group is not mounted here whole: AIMU 0.31.0 put these two
+    # inside it, so `[*builtin.fs]` would have handed an ungateable agent a writer at any path.
+    assert not (names & {"write_file", "edit_file"})
 
 
 def test_reviewer_prompts_warn_about_stale_knowledge():
