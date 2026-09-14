@@ -27,6 +27,8 @@ def test_default_confirm_tools():
         "add_mcp_server",
         "execute_python",
         "run_command",
+        "write_file",
+        "edit_file",
         "update_config",
     ]
     assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == [
@@ -34,6 +36,8 @@ def test_default_confirm_tools():
         "add_mcp_server",
         "execute_python",
         "run_command",
+        "write_file",
+        "edit_file",
         "update_config",
     ]
 

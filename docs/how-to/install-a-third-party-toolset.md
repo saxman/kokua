@@ -15,7 +15,7 @@ example.
 
 Kokua discovers toolsets at startup with `kokua.plugins.discover_toolsets`, which reads every entry
 registered under the `kokua.toolsets` group through Python's own `importlib.metadata.entry_points`, the
-same call that finds Kokua's own 21 built-in toolsets listed in its `pyproject.toml`. There is no second
+same call that finds Kokua's own 22 built-in toolsets listed in its `pyproject.toml`. There is no second
 registry and no code change on Kokua's side to add a plugin: a package that publishes an entry in that
 group is found the moment it is installed into the environment Kokua runs in.
 

@@ -113,6 +113,9 @@ def test_reviewer_toolset_holds_nothing_the_approval_gate_would_have_to_cover():
     assert not (names & set(AssistantConfig().confirm_tools))
     assert "execute_python" not in names  # the specific escape this guards: arbitrary code, unsandboxed
     assert "run_command" not in names  # and the same escape one step shorter: an unsandboxed shell
+    # Shorter still, and the reason the `fs` group is not mounted here whole: AIMU 0.31.0 put these two
+    # inside it, so `[*builtin.fs]` would have handed an ungateable agent a writer at any path.
+    assert not (names & {"write_file", "edit_file"})
 
 
 def test_reviewer_prompts_warn_about_stale_knowledge():

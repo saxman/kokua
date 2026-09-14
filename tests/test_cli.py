@@ -310,7 +310,14 @@ def test_main_web_reports_a_broken_agents_table_as_an_instruction(monkeypatch, t
     from kokua.config import file as settings
 
     monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
-    text = settings.example_text().replace('tools = ["fs", "compute", "time"]', 'tools = ["fs", "nope", "time"]')
+    # Substituted into the shipped example rather than written out, so this exercises the real file. The
+    # asserted-on string is `[agents.coder]`'s tools line, which is why it fails loudly if that line is
+    # edited without editing this: a no-op replace leaves a *valid* config and the test stops testing.
+    broken = settings.example_text().replace(
+        'tools = ["fs", "fs_write", "compute", "time"]', 'tools = ["fs", "nope", "time"]'
+    )
+    assert "nope" in broken, "the [agents.coder] tools line moved; this replace no longer breaks anything"
+    text = broken
     (tmp_path / "config.toml").write_text(text, encoding="utf-8")
     monkeypatch.setattr("sys.argv", ["kokua-web"])
 

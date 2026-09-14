@@ -165,6 +165,8 @@ class AssistantConfig:
             "add_mcp_server",
             "execute_python",
             "run_command",
+            "write_file",
+            "edit_file",
             "update_config",
         ]
     )

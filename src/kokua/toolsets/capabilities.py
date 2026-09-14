@@ -226,9 +226,16 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
         # ImportError on those, instead of the fix the preflight prints.
         from aimu.aio.tools.builtin import make_async_subagent_tool
 
+        # Function-scope for a second reason: core/build.py reaches toolsets/, so a module-scope import
+        # of core.agents here would close that cycle.
+        from kokua.core.agents import compaction_for_window
+
         # The global default, not a per-agent cap: a composed worker is built per call and discarded
         # with the call, so it is not an agent the config describes and [assistant].max_iterations is
-        # the only tier it has. Same reasoning as the model it is handed just above.
+        # the only tier it has. Same reasoning as the model it is handed just above, and as the
+        # compaction beside it: [assistant.generation].context_length is the only window this worker
+        # has ever been given, since there is no [agents.<name>.generation] table for one composed
+        # per call.
         spawn = make_async_subagent_tool(
             model,
             agent_types={label: spec},
@@ -236,6 +243,7 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
             tool_approval=state.tool_approval,
             observer=state.observer,
             max_iterations=state.config.max_iterations,
+            compaction=compaction_for_window(state.config.generation),
         )
         return await spawn(label, task)
 

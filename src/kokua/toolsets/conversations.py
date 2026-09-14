@@ -82,9 +82,11 @@ RENAME_DEFERRED_NOTE = "It takes effect when this turn finishes, so it will stil
 
 # Above this many lines, an export is a file the model should hand onward rather than read. The number
 # is a judgment about context rather than about the file: a few hundred lines of transcript is already
-# thousands of tokens, and AIMU's `read_file` truncates from the top and takes no offset, so a model
-# that starts reading a long export cannot page to the part it wanted (see TODO item 19). Deliberately
-# not a config setting: it advises, and the model is free to read the file anyway.
+# thousands of tokens, and `read_file` returns 2,000 lines per call. What changed with AIMU 0.31.0 is
+# that the rest is now reachable, by paging with an offset, which is a reason to keep this advice rather
+# than to drop it: the part of a long run worth reading is rarely the opening, and every page a model
+# turns here is spent out of the context of the conversation that asked the question. Deliberately not a
+# config setting: it advises, and the model is free to read the file anyway.
 DELEGATE_ABOVE_LINES = 400
 
 EXPORT_CONTENTS_NOTE = (
@@ -94,8 +96,8 @@ EXPORT_CONTENTS_NOTE = (
 )
 LARGE_EXPORT_NOTE = (
     "This file is long. If you can delegate to a sub-agent that reads files, give it this path and the "
-    "question instead of reading the file here: reading it yourself would spend this conversation's "
-    "context on it, and a single read cannot cover a file this size anyway."
+    "question instead of reading the file here: covering a file this size takes several paged reads, and "
+    "reading it yourself spends this conversation's context on every one of them."
 )
 
 
