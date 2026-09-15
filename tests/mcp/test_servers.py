@@ -93,6 +93,36 @@ async def test_connect_mcp_other_oauth_failure_reraises_unchanged(monkeypatch, t
         )
 
 
+async def test_connect_mcp_serializes_the_oauth_branch_across_concurrent_connects(monkeypatch, tmp_path):
+    """Two servers each running an interactive OAuth flow at once would both try to bind the same
+    pinned callback port; the second bind's failure would then be misreported as that server being
+    unreachable rather than a port collision. Counted rather than timed, in the same style as the
+    connect-concurrency test: the peak number of OAuth connects in flight is exactly what the lock
+    bounds.
+    """
+    live = 0
+    peak = 0
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        await asyncio.sleep(0)  # yield, so a concurrent OAuth connect can start before this one returns
+        live -= 1
+        return "oauth-client"
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+
+    async def connect(url: str):
+        return await mcp.connect_mcp(
+            url, auth_mode="oauth", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+        )
+
+    await asyncio.gather(connect("https://one/mcp"), connect("https://two/mcp"))
+
+    assert peak == 1
+
+
 def test_resolve_server_token_reads_env(monkeypatch):
     monkeypatch.setenv("MY_MCP_TOKEN", "secret")
     server = MCPServerConfig(url="https://svc/mcp", name="svc", token_env="MY_MCP_TOKEN")

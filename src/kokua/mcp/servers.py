@@ -77,6 +77,19 @@ def _looks_like_registration_unsupported(exc: BaseException) -> bool:
 # all conversations instead of touching a single captured agent.
 ForEachAgent = Callable[[Callable[[Any], None]], None]
 
+# Serializes the OAuth branch of `connect_mcp` across whatever connects are running concurrently.
+# `ChatOAuth`'s callback listener binds one port (`OAuthSettings.callback_port`, pinned deliberately so
+# a later process's re-auth presents the same registered redirect_uri it did before), and a socket can
+# only be bound once. Two servers each running an interactive OAuth flow at the same time would both
+# try to bind it; the second bind fails, and since `reconnect_mcp_servers` treats a connect failure as
+# "this server is unreachable", a port collision that has nothing to do with either server's
+# reachability would be reported as exactly that. Reconnecting servers concurrently is what makes this
+# reachable at all: it was never possible while they connected one at a time. The lock costs the overlap
+# between two OAuth servers specifically, which is the truth about a port that cannot be shared; a
+# bearer-token connect and an unauthenticated probe never touch it, so they still overlap fully, and the
+# common shape of one bearer server plus one OAuth server keeps essentially the whole benefit.
+_OAUTH_CONNECT_LOCK = asyncio.Lock()
+
 
 @dataclass
 class ServerConnection:
@@ -116,8 +129,9 @@ async def connect_mcp(
     if bearer_token:
         return await aio.MCPClient.connect(url=url, auth=bearer_token), "bearer"
     if auth_mode == "oauth":
-        provider = build_chat_oauth(url, notify=notify, oauth=oauth)
-        return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
+        async with _OAUTH_CONNECT_LOCK:
+            provider = build_chat_oauth(url, notify=notify, oauth=oauth)
+            return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
     if auth_mode == "none":
         return await aio.MCPClient.connect(url=url), "none"
     try:
@@ -130,13 +144,14 @@ async def connect_mcp(
         # flow reads like the user is about to be prompted, and sends anyone reading the log after a
         # tool came back empty off hunting a token-persistence bug that isn't there.
         logger.info("MCP server %s rejected an unauthenticated request; trying OAuth credentials.", url)
-        provider = build_chat_oauth(url, notify=notify, oauth=oauth)
-        try:
-            return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
-        except Exception as oauth_exc:
-            if _looks_like_registration_unsupported(oauth_exc):
-                raise BearerTokenRequired(url) from oauth_exc
-            raise
+        async with _OAUTH_CONNECT_LOCK:
+            provider = build_chat_oauth(url, notify=notify, oauth=oauth)
+            try:
+                return await aio.MCPClient.connect(url=url, auth=provider), "oauth"
+            except Exception as oauth_exc:
+                if _looks_like_registration_unsupported(oauth_exc):
+                    raise BearerTokenRequired(url) from oauth_exc
+                raise
 
 
 async def attach_server(connections: list, url: str, client: Any, auth_mode: str) -> list[str]:
