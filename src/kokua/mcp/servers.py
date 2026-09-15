@@ -12,6 +12,7 @@ newly connected server can and cannot reach this session, which is presentation 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
@@ -318,8 +319,10 @@ async def reconnect_mcp_servers(
     """Reconnect MCP servers at boot so their tools are available without re-adding them.
 
     All servers now live in config.toml ``[[mcp.server]]`` (both hand-authored bearer-token servers and
-    runtime-added ones the tool recorded there), so this is a single pass over ``config.mcp_servers``. A
-    connect failure logs and continues so one unreachable server can't stop the assistant from starting.
+    runtime-added ones the tool recorded there), so this is a single pass over ``config.mcp_servers``.
+    Servers connect concurrently and attach in declaration order, so a boot pays the slowest handshake
+    rather than their sum while ``connections`` stays in config.toml's order. A connect failure logs
+    and continues so one unreachable server can't stop the assistant from starting.
     Each connection is recorded in ``connections``, so an agent naming it resolves against it when built,
     including conversations built later. Boot deliberately connects before the first agent is built, which
     is what lets a config-declared server reach an agent's own tool list at all rather than only its next
@@ -329,26 +332,53 @@ async def reconnect_mcp_servers(
     Each success logs the tools the server contributed, because nothing else in the process will: see the
     comment on that line.
     """
-    for server in config.mcp_servers:
+
+    def failed(url: str) -> None:
+        """One message for both halves of a per-server failure, the connect and the tool fetch: from
+        the user's side they are the same event, this server is not available this run."""
+        logger.warning("Could not connect MCP server %s; continuing without it.", url, exc_info=True)
+
+    async def connect_one(server: MCPServerConfig):
+        """Connect one server, or return None having logged why.
+
+        Swallowing only ``Exception`` keeps the per-server tolerance this has always had while letting
+        a cancellation through: a connection torn down mid-boot must cancel the rest rather than be
+        recorded as an unreachable endpoint.
+        """
         try:
-            client, mode = await connect_mcp(
+            return await connect_mcp(
                 server.url,
                 bearer_token=_resolve_server_token(server),
                 notify=notify,
                 oauth=oauth,
             )
-            added = await attach_server(connections, server.url, client, mode)
-            # The names, not just the count: a remote server's tool list is the one part of an agent's
-            # capability this repository cannot show you: it is not in config.toml, not in
-            # `--list-toolsets` (which runs before any connection), and no tool reports it, since
-            # `add_mcp_server` announces its own tools only on a runtime add. Without this line, an
-            # agent that answered from its own knowledge instead of calling a server's tool leaves no
-            # way to tell whether the tool it needed was missing or merely unused.
-            logger.info(
-                "MCP server %s connected (%s): %s",
-                server.url,
-                mode,
-                ", ".join(added) if added else "no tools",
-            )
         except Exception:
-            logger.warning("Could not connect MCP server %s; continuing without it.", server.url, exc_info=True)
+            failed(server.url)
+            return None
+
+    # Connected concurrently, attached in declaration order. The handshakes overlap, which is most of
+    # what a boot with two remote servers spends its time on, while `connections` still ends up in
+    # config.toml's order, so which server wins a duplicate tool name at build time does not depend on
+    # which endpoint answered first.
+    results = await asyncio.gather(*(connect_one(server) for server in config.mcp_servers))
+    for server, result in zip(config.mcp_servers, results):
+        if result is None:
+            continue
+        client, mode = result
+        try:
+            added = await attach_server(connections, server.url, client, mode)
+        except Exception:
+            failed(server.url)
+            continue
+        # The names, not just the count: a remote server's tool list is the one part of an agent's
+        # capability this repository cannot show you: it is not in config.toml, not in
+        # `--list-toolsets` (which runs before any connection), and no tool reports it, since
+        # `add_mcp_server` announces its own tools only on a runtime add. Without this line, an
+        # agent that answered from its own knowledge instead of calling a server's tool leaves no
+        # way to tell whether the tool it needed was missing or merely unused.
+        logger.info(
+            "MCP server %s connected (%s): %s",
+            server.url,
+            mode,
+            ", ".join(added) if added else "no tools",
+        )
