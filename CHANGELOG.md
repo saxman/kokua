@@ -1132,14 +1132,20 @@ alone. The case that does cost something is a configured MCP server, which conne
   remove rebuilds each live agent's `spawn_subagent` so its workers pick the server up or drop it
   immediately.
 - **Configured servers connect concurrently at boot, and still attach in `config.toml`'s order.** A boot
-  with two remote servers used to pay the sum of their handshakes; it now pays the slower one, while
+  with two remote servers used to pay the sum of their handshakes; the handshakes now overlap, while
   `connections` (and so which server wins a duplicate tool name) stays in declaration order regardless of
-  which one answers first. The one exception is an interactive OAuth authorization: its callback listener
-  binds one pinned port, so two servers both needing a fresh authorization at the same moment would race
-  to bind it, and the loser's bind failure would read as that server being unreachable rather than the
-  port collision it actually is. A lock serializes only that branch; a bearer-token connect and an
-  unauthenticated probe still overlap fully, so the common shape of one bearer server plus one OAuth
-  server keeps essentially the whole win.
+  which one answers first. Each server's tool fetch still happens inside that same ordered attach pass
+  (one `list_tools()` round trip per server), so it remains serial; only the handshake itself was made
+  concurrent. A lock serializes every OAuth-mode connect, not only an interactive authorization: fastmcp
+  decides inside `connect` whether a stored token is reusable, so the lock cannot tell in advance which
+  kind it is about to hold, and two OAuth servers with valid cached tokens still do not overlap each
+  other. When the held call really is an interactive authorization, its callback listener binds one
+  pinned port, so two servers both needing a fresh authorization at the same moment would race to bind
+  it, and the loser's bind failure would read as that server being unreachable rather than the port
+  collision it actually is; the wait there is however long the person takes to approve it, not network
+  time, so a second server's link is not posted until the first server's flow completes. A bearer-token
+  connect and an unauthenticated probe never touch the lock and still overlap fully, so the common shape
+  of one bearer server plus one OAuth server keeps essentially the whole win.
 - **Each configured server is a toolset, named by its `name`.** `name` is required: it is how the server
   enters the one namespace an agent declares against, so a server nothing can name reaches nothing. A
   runtime `add_mcp_server`, and the startup `--mcp <url>` flag, both derive a name from the server's host

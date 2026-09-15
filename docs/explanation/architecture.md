@@ -1019,16 +1019,22 @@ persisted session must stay small and a localhost URL is not fetchable by the pr
 ## MCP
 
 All servers come from `[[mcp.server]]` at startup (`mcp.reconnect_mcp_servers` is a single pass over
-`config.mcp_servers`, connecting them concurrently and attaching them in declaration order, so a boot
-pays the slowest handshake rather than the sum and a duplicate tool name still resolves the same way
-every run). Two servers whose connects each take 1.5 seconds finish together in about 1.5 seconds rather
-than the roughly 3 a serial pass would take. The one exception to the concurrency is an interactive OAuth
-authorization: its callback
-listener binds one pinned port, so two servers each needing a fresh authorization at once would collide
-on the bind and have that collision misreported as either server being unreachable. A module-level lock
-in `mcp/servers.py` serializes only that branch; a bearer-token connect and an unauthenticated probe
-never touch it and still overlap fully, so the common case of one bearer server plus one OAuth server
-keeps essentially the whole win.
+`config.mcp_servers`, connecting them concurrently and attaching them in declaration order, so a
+duplicate tool name still resolves the same way every run). Two servers whose connects each take 1.5
+seconds finish their handshakes together in about 1.5 seconds rather than the roughly 3 a serial pass
+would take, but `attach_server` still awaits each server's `client.as_tools()` inside that same ordered
+attach pass, one `list_tools()` round trip per server, so the tool fetch itself stays serial and only
+the handshakes overlap. A module-level lock in `mcp/servers.py` serializes every OAuth-mode connect, not
+only an interactive authorization: fastmcp decides inside `connect` whether a stored token is reusable,
+so the lock cannot tell in advance which kind of connect it is about to hold and wraps the whole call
+either way. Two OAuth servers therefore never overlap each other, even when both hold valid cached
+tokens; a bearer-token connect and an unauthenticated probe never touch the lock and still overlap
+fully, so the common case of one bearer server plus one OAuth server keeps essentially the whole win.
+The lock exists because an interactive authorization's callback listener binds one pinned port, so two
+servers each needing a fresh authorization at once would collide on the bind and have that collision
+misreported as either server being unreachable; when the call it holds really is interactive, the wait
+is however long the person takes to approve it, not network time, so a second server's own authorization
+link is not even posted until the first server's flow completes.
 
 Each server is also a toolset, named by its required `name`, which is how an agent
 reaches it. The runtime `add_mcp_server` tool appends reconnectable servers there via
@@ -1195,7 +1201,7 @@ is already on screen, so a page keyed on the transcript would treat that refusal
 forever. The honest cost of that choice is the same rule catching a case that is not a refusal at all: a
 server that dies partway through its own start, for any reason, looks identical from the socket's side to
 one that refused on purpose, so the page asks you to reload rather than retrying on its own. A drop
-before the history frame is still unambiguous and still retries.
+before any frame arrives is still unambiguous and still retries.
 
 ### Streaming the answer
 

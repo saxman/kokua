@@ -88,6 +88,15 @@ ForEachAgent = Callable[[Callable[[Any], None]], None]
 # between two OAuth servers specifically, which is the truth about a port that cannot be shared; a
 # bearer-token connect and an unauthenticated probe never touch it, so they still overlap fully, and the
 # common shape of one bearer server plus one OAuth server keeps essentially the whole benefit.
+#
+# The lock is held for the whole `connect(auth=provider)` call, not just an interactive authorization,
+# so two OAuth servers with valid cached tokens still serialize their handshakes; fastmcp decides
+# inside `connect` whether a token is reusable, and nothing here can tell in advance which kind of
+# connect it is about to hold the lock for. When the call this holds the lock for really is interactive,
+# the wait is not network time: it is however long the person takes to open the link and approve it, so
+# a second OAuth server's own authorization link is not even posted until the first server's flow
+# completes, and nothing bounds that wait. That is not a regression, since connecting servers one at a
+# time had the identical property; concurrency is what makes it visible as an overlap being given up.
 _OAUTH_CONNECT_LOCK = asyncio.Lock()
 
 

@@ -1702,6 +1702,11 @@ function connect() {
     input.focus();
   };
   ws.onclose = () => {
+    // A closed socket is not a booting one, on any path that reaches here: the one-connection
+    // refusal below, a create()/start() failure the server closed on, or an ordinary outage.
+    // Leaving the class set would stack "Starting up..." above "Disconnected...", and freeze the
+    // sidebar's pointer-events: none with nothing left to lift it once no ready frame is coming.
+    document.body.classList.remove("booting");
     input.disabled = true;
     sendBtn.disabled = true;
     setProcessing(false);

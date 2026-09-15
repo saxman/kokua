@@ -1844,6 +1844,10 @@ def test_a_refused_second_tab_does_not_retry(page, live_server):
         second.wait_for_timeout(2_000)  # long enough for several backoff attempts, had it retried
         expect(second.locator(".bubble", has_text="busy in another tab")).to_have_count(1)
         expect(second.locator("#msg")).to_be_disabled()
+        # The close that follows a refusal never sends `ready`, so the class has to come off on the
+        # close itself; left on, it would sit a "Starting up..." notice above "Reload the page" and
+        # keep the sidebar's rows inert with nothing left to lift `pointer-events: none`.
+        expect(second.locator("body")).not_to_have_class(re.compile(r"\bbooting\b"))
     finally:
         second.close()
 
