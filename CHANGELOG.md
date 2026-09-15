@@ -334,7 +334,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     conversation and task lists and disables clicks on their rows, with a "Starting up..." line explaining
     why, so a row that cannot act yet reads as inert rather than broken. The composer is left alone
     throughout, since neither typing nor sending ever depended on that half of boot finishing. Measured
-    against a config with two remote servers, the chat list now renders at about 2 seconds instead of 8.7.
+    against a copy of a real `$KOKUA_HOME` (28 conversations, the same two remote servers declared), the
+    sidebar itself, meaning `Assistant.create()` plus the conversation list, history, and settings reads
+    it renders, is on screen in about 1.5 seconds (three runs, 1.49-1.53s, roughly half spent in `create()`
+    and half in those reads), against about 8.5 seconds measured on the same config before this change.
+    That figure covers the sidebar only, not the whole connection: `start()` still has the remote servers
+    to connect, so the assistant behind the sidebar is ready later, not at the 1.5-second mark.
   - **A dropped socket reconnects on its own.** Restarting Kokua under an open browser used to leave a
     page that said "Disconnected." and could only be recovered by reloading. The page now retries with
     backoff (500ms doubling to a 10s ceiling, indefinitely) and shows one notice for the whole outage
