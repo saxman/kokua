@@ -1289,6 +1289,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="confirm_tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#every-entry-names-its-toolset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Every entry names its toolset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#an-entry-that-would-gate-nothing-fails-startup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        An entry that would gate nothing fails startup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2067,6 +2095,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="confirm_tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#every-entry-names-its-toolset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Every entry names its toolset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#an-entry-that-would-gate-nothing-fails-startup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        An entry that would gate nothing fails startup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -2847,6 +2903,17 @@ profile in force. Setting nothing keeps the whole profile.</p>
 <li><strong><code>context_length</code> is set per request only on Ollama's native API.</strong> Everywhere else the window is
   fixed at model load time, at server launch (<code>--ctx-size</code>, <code>--max-model-len</code>), or by the vendor, and the
   key is dropped with a warning naming that remedy.</li>
+<li><strong><code>context_length</code> has a second job, and it applies on every backend.</strong> A spawned sub-agent trims its
+  own messages before each model turn to fit the window declared for it, so a long delegation bounds its
+  own growth instead of failing once the window fills. Three quarters of the declared window is left for
+  messages, since the same window has to hold that worker's system message, its tool block, and the
+  reply. Declaring no <code>context_length</code> leaves the trimming off: nothing else states a window (no client
+  reports the one it is talking to), and guessing one would mean rewriting a worker's messages against a
+  number nobody wrote down. A worker with no declared window instead reports, when it fills, that <em>its</em>
+  window filled and that yours is neither the cause nor something it ever saw.
+  <strong>The conversation you are in is never trimmed</strong>, whatever you declare here: it is yours to read and
+  Kokua stores it, so dropping from it would delete history still on screen. A worker's messages are
+  built per spawn and discarded with it, which is what makes an automatic rewrite of them safe at all.</li>
 </ul>
 <p>Because this is a TOML sub-table, it must come <strong>last</strong> in <code>[assistant]</code>: any plain <code>[assistant]</code> key
 written after the <code>[assistant.generation]</code> header would belong to the sub-table instead. The same is true
@@ -2855,34 +2922,111 @@ of an agent's own generation table.</p>
 <h3 id="confirm_tools"><code>confirm_tools</code><a class="headerlink" href="#confirm_tools" title="Permanent link">&para;</a></h3>
 <p>Tools that require interactive confirmation before each call: a terminal <code>y/N</code>, or Allow/Deny in the web
 UI. These are the tools that run with full machine access.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">confirm_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"add_skill_script"</span><span class="p">,</span><span class="w"> </span><span class="s2">"add_mcp_server"</span><span class="p">,</span><span class="w"> </span><span class="s2">"execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"update_config"</span><span class="p">]</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">confirm_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">    </span><span class="s2">"skills.add_skill_script"</span><span class="p">,</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="s2">"mcp.add_mcp_server"</span><span class="p">,</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="s2">"compute.execute_python"</span><span class="p">,</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="s2">"compute.run_command"</span><span class="p">,</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span><span class="s2">"fs_write"</span><span class="p">,</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span><span class="s2">"config.update_config"</span><span class="p">,</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="p">]</span>
 </span></code></pre></div>
 <p>Set to <code>[]</code> to disable approval entirely. Proactive turns (scheduled tasks, anything the assistant starts
 unprompted) <strong>auto-deny</strong> these regardless of the setting, since there is no one at the keyboard to ask.</p>
-<p><code>update_config</code> is in the default list because it lets the assistant rewrite this file, except for the
-locked keys it can never change. This key is itself locked by default too, for the obvious reason.</p>
-<p>Gating is <strong>by tool name</strong>, so it applies to a worker's call as much as the entry agent's: a worker's
-gated call is routed to you. Note the flip side, which is easy to misread: there is no privilege tier
-among agents. An agent whose table declares <code>config</code> really does get <code>update_config</code>, and one declaring
-<code>compute</code> really does get <code>execute_python</code>. Your hand-edit is the consent, and this list is the gate at
-call time.</p>
-<p><strong>A name no configured agent provides fails startup</strong>, naming every entry that matched nothing and
-suggesting the close names. A gate is a plain name match, so a misspelled entry holds nothing back, and
-the only sign of it is a prompt that never comes, which is not a thing anyone notices:
-<code>confirm_tools = ["execute_pythn"]</code> once loaded clean and then let <code>execute_python</code> run unattended for
-as long as the file stood. The vocabulary is every tool this config builds, which is wider than the
-entry agent's own: <code>execute_python</code> is there because <code>[agents.coder]</code> declares <code>compute</code>, and
-<code>spawn_subagent</code> and a skill's <code>{skill}__{script}</code> tools count as well. An empty list names nothing, so
-there is nothing for the check to refuse.</p>
+<p>Four of the six write with this process's privileges. <code>fs_write</code>'s two tools name the path,
+<code>compute.execute_python</code> and <code>compute.run_command</code> name their own target, and <code>config.update_config</code>
+rewrites this file, except for the locked keys it can never change (this key is itself locked by
+default, for the obvious reason). The other two sit one step further back, each installing something
+that will run later.</p>
+<p>The writers are gated for a reason worth stating, because leaving them out would have been the quiet
+mistake: <code>[agents.coder]</code> holds <code>run_command</code>, which is gated because a shell can write a file. An
+ungated <code>write_file</code> beside it is the same outcome by a shorter route, so the gate would have been
+approving the long way round and waving the short one through.</p>
+<p>Note <code>fs_write</code> is named bare where the rest name a tool. That toolset is
+<code>select(builtin.fs, include=builtin.unscoped)</code>, so it is every writer AIMU puts in that group and
+nothing else, and the bare name therefore gates a writer a later AIMU adds as well. Spelling out
+<code>fs_write.write_file</code> and <code>fs_write.edit_file</code> would gate today's two and let tomorrow's third through
+in silence, which is the drift <a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/fs.py"><code>toolsets/fs.py</code></a>
+selects by reach to avoid, reappearing one layer up. <code>compute</code> cannot be named bare for the reverse
+reason: it carries <code>calculate</code>, which no gate should stop.</p>
+<h4 id="every-entry-names-its-toolset">Every entry names its toolset<a class="headerlink" href="#every-entry-names-its-toolset" title="Permanent link">&para;</a></h4>
+<p>An entry is a tool's name with the toolset that provides it in front, and it takes one of three forms:</p>
+<table>
+<thead>
+<tr>
+<th>Form</th>
+<th>Example</th>
+<th>Gates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;toolset&gt;</code></td>
+<td><code>compute</code></td>
+<td>every tool that capability provides</td>
+</tr>
+<tr>
+<td><code>&lt;toolset&gt;.*</code></td>
+<td><code>compute.*</code></td>
+<td>the same thing, said with a wildcard</td>
+</tr>
+<tr>
+<td><code>&lt;toolset&gt;.&lt;tool&gt;</code></td>
+<td><code>compute.execute_python</code></td>
+<td>that one tool</td>
+</tr>
+</tbody>
+</table>
+<p>The wildcard is optional and says nothing the bare toolset does not; it is accepted because a reader may
+expect a glob to be required. It is legal only as the whole tool. <code>compute.exec*</code>, <code>comp*.run_command</code>,
+and a bare <code>*</code> are all rejected, because a pattern quietly matching fewer tools than its author meant is
+the same silent gap as a name matching none.</p>
+<p>Two tools have no toolset, so a reserved <code>core</code> prefix holds them: <code>core.spawn_subagent</code>, the delegation
+tool, attached to the entry agent after its toolsets are built, and <code>core.activate_skill</code>, which AIMU
+gives any skill-holding agent. <code>core</code> on its own gates both. A skill's own scripts stay under the skill,
+which is also its toolset name: <code>weekly-digest</code> gates every script that skill ships, and
+<code>weekly-digest.weekly_digest__collect_notes</code> gates one. <code>activate_skill</code> is deliberately <em>not</em> one of
+them, since every skill's tool list carries a reference to it and attributing it per skill would let a
+gate on one skill hold back the entry point to all of them.</p>
+<p>Naming a toolset is a broader statement than naming its members, and it means what it says:
+<code>compute</code> gates <code>calculate</code> as well as the two execution tools, which the shipped default leaves alone.</p>
+<p>Gating is still <strong>by tool name at call time</strong>, so it applies to a worker's call as much as the entry
+agent's: a worker's gated call is routed to you. The prefix is a declaration vocabulary that startup
+resolves down to tool names; it is not a discriminator at the moment of the call. If two toolsets ever
+provided one tool name, gating either prefix would gate that name wherever it is called. Note the flip
+side too, which is easy to misread: there is no privilege tier among agents. An agent whose table
+declares <code>config</code> really does get <code>update_config</code>, and one declaring <code>compute</code> really does get
+<code>execute_python</code>. Your hand-edit is the consent, and this list is the gate at call time.</p>
+<h4 id="an-entry-that-would-gate-nothing-fails-startup">An entry that would gate nothing fails startup<a class="headerlink" href="#an-entry-that-would-gate-nothing-fails-startup" title="Permanent link">&para;</a></h4>
+<p>Every fault is refused at startup, naming each bad entry and suggesting the close names. An entry that
+gates nothing holds nothing back, and the only sign of it is a prompt that never comes, which is not a
+thing anyone notices: <code>confirm_tools = ["execute_pythn"]</code> once loaded clean and then let
+<code>execute_python</code> run unattended for as long as the file stood. Four ways an entry can be that entry:</p>
+<ul>
+<li><strong>A bare tool name.</strong> <code>execute_python</code> with no prefix is refused, and the error names the form to
+  write instead (<code>compute.execute_python</code>). This is what a config written before the prefix was required
+  will hit, once each.</li>
+<li><strong>The wrong toolset.</strong> <code>web.execute_python</code> is spelled correctly and filed wrong; the error says which
+  toolset does provide it.</li>
+<li><strong>A toolset no agent declares.</strong> <code>github_backup</code> is a real toolset the shipped config gives to nobody,
+  so nothing under it can be called. Name it in an <code>[agents.*]</code> table first.</li>
+<li><strong>A toolset that provides no tools.</strong> <code>planning</code> contributes a workflow, so there is nothing under it
+  to hold back.</li>
+</ul>
+<p>The vocabulary is every tool this config builds, which is wider than the entry agent's own:
+<code>compute.execute_python</code> resolves because <code>[agents.coder]</code> declares <code>compute</code>. An empty list names
+nothing, so there is nothing for the check to refuse.</p>
 <p>The limit is anything that does not exist when startup ends. A tool from an MCP server the assistant
 connects later with <code>add_mcp_server</code> has no name to match yet, and neither does a tool only
 <code>compose_subagent</code> would build, out of a toolset no <code>[agents.*]</code> table names. Listing either one is
 refused, which will look wrong if you were deliberately gating ahead of the connection. To gate an MCP
 tool, give its server a <code>[[mcp.server]]</code> table here and name that server in an agent's <code>tools</code>; to gate
 a tool from a toolset nothing declares, name that toolset in an agent's <code>tools</code>. Both are known from the
-next start.</p>
-<p>Four names worth considering adding, all ungated by default: <code>read_conversation</code>,
-<code>search_conversations</code>, <code>rename_conversation</code>, and <code>export_conversation</code>. A saved transcript is
+next start, and both are named by their server or toolset like anything else:
+<code>stocks.get_quote</code>, or <code>stocks</code> for all of them.</p>
+<p>Four names worth considering adding, all ungated by default: <code>conversations.read_conversation</code>,
+<code>conversations.search_conversations</code>, <code>conversations.rename_conversation</code>, and
+<code>conversations.export_conversation</code> (or <code>conversations</code> for the lot). A saved transcript is
 untrusted text, since a worker may have pasted web content into it, so an injection landing in one
 conversation can influence another. The two reads are ungated by default because gating a read would
 make an unattended scheduled run that reads history fail silently. The rename writes, but it writes one
@@ -2976,7 +3120,7 @@ for what removing <code>agents.*</code> from <code>[security].locked_config_keys
 <p>An agent's <code>tools</code> list <em>is</em> its capability. Nothing is added in code, so a toolset you delete from a
 list is gone, and one you add is there on the next start.</p>
 <p>There is one namespace for every capability, so a name may be an AIMU built-in tool group (<code>web</code>, <code>fs</code>,
-<code>compute</code>, <code>time</code>, <code>misc</code>, <code>audio</code>, <code>speech</code>, <code>transcription</code>), one of Kokua's own (<code>memory</code>,
+<code>fs_write</code>, <code>compute</code>, <code>time</code>, <code>misc</code>, <code>audio</code>, <code>speech</code>, <code>transcription</code>), one of Kokua's own (<code>memory</code>,
 <code>documents</code>, <code>skills</code>, <code>capabilities</code>, <code>config</code>, <code>conversations</code>, <code>mcp</code>, <code>planning</code>, <code>scheduling</code>),
 an installed plugin toolset (<code>aimu_agents</code>, <code>benchmark</code>, <code>github_backup</code>, <code>image</code>), a skill in your skills folder
 named by its own name, or an MCP server configured under <code>[[mcp.server]]</code>, named by its <code>name</code>. The list
@@ -3357,7 +3501,7 @@ on the agent Kokua constructs directly, and <code>capabilities</code> itself wou
 composition budget. It runs on <code>[assistant].model</code> with the <code>[assistant]</code> thinking
 and generation defaults, and its tools still go through <code>[security].confirm_tools</code>, so <code>execute_python</code>
 and <code>add_mcp_server</code> still ask you first. Composing itself is not in the shipped <code>confirm_tools</code>, so it
-does not ask; add <code>compose_subagent</code> there to gate that too.</p>
+does not ask; add <code>capabilities.compose_subagent</code> there to gate that too.</p>
 <h3 id="max_depth"><code>max_depth</code><a class="headerlink" href="#max_depth" title="Permanent link">&para;</a></h3>
 <p>How far composition may nest. Default <code>3</code>. Hot.</p>
 <p>At <code>3</code> a chain reaches three sub-agents, and the last of them holds neither <code>compose_subagent</code> nor
@@ -3452,7 +3596,8 @@ here is how you grant one back. Whitespace around a name is ignored and empty se
 trailing comma is harmless. A name that is unset in Kokua's own environment produces no variable at all
 rather than an empty one.</p>
 <p>Not hot: the value is read when an agent is built, so a change needs a restart. <code>run_command</code> is in the
-shipped <code>[security].confirm_tools</code>, so a command reaches you for approval before it runs, including one
+shipped <code>[security].confirm_tools</code> as <code>compute.run_command</code>, so a command reaches you for approval
+before it runs, including one
 a sub-agent asked for, since a worker's gated calls route to the parent's gate rather than running
 unattended.</p>
 <p><strong>Neither execution tool is a sandbox.</strong> They buy a hard timeout, crash isolation, and no parent
@@ -3555,7 +3700,7 @@ reference, not inline data.</p>
 </tr>
 <tr>
 <td><code>--confirm-tools NAMES</code></td>
-<td><code>[security].confirm_tools</code>, comma-separated; empty string disables</td>
+<td><code>[security].confirm_tools</code>, comma-separated <code>toolset.tool</code> entries; empty string disables</td>
 </tr>
 <tr>
 <td><code>--mcp URL</code></td>

@@ -1527,7 +1527,7 @@ example.</p>
 <h2 id="what-kokua-sees-when-you-install-one">What Kokua sees when you install one<a class="headerlink" href="#what-kokua-sees-when-you-install-one" title="Permanent link">&para;</a></h2>
 <p>Kokua discovers toolsets at startup with <code>kokua.plugins.discover_toolsets</code>, which reads every entry
 registered under the <code>kokua.toolsets</code> group through Python's own <code>importlib.metadata.entry_points</code>, the
-same call that finds Kokua's own 21 built-in toolsets listed in its <code>pyproject.toml</code>. There is no second
+same call that finds Kokua's own 22 built-in toolsets listed in its <code>pyproject.toml</code>. There is no second
 registry and no code change on Kokua's side to add a plugin: a package that publishes an entry in that
 group is found the moment it is installed into the environment Kokua runs in.</p>
 <p>jobme's <code>pyproject.toml</code> carries one line for this:</p>
@@ -1619,12 +1619,14 @@ restart before the running assistant reads it.</p>
 <p><code>tailor_application</code> runs the whole pipeline: several minutes, and real provider spend on every call.
 That is exactly what <code>[security].confirm_tools</code> exists for, so add it there:</p>
 <div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[security]</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">confirm_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"update_config"</span><span class="p">,</span><span class="w"> </span><span class="s2">"tailor_application"</span><span class="p">]</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">confirm_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute.execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compute.run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"config.update_config"</span><span class="p">,</span><span class="w"> </span><span class="s2">"jobme.tailor_application"</span><span class="p">]</span>
 </span></code></pre></div>
-<p>Make the two edits in this order. <code>confirm_tools</code> is checked against every tool this config actually
-builds, so a name with no toolset behind it yet fails startup, listing the near misses; jobme has to be
-declared on some agent first, whether in the same file or an earlier run, before <code>tailor_application</code>
-exists for this list to name at all.</p>
+<p>Every entry names the toolset providing the tool, which for a third party's is the same name your agent
+declared: <code>jobme.tailor_application</code> for the one tool, or a bare <code>jobme</code> for everything the toolset
+offers. Make the two edits in this order. <code>confirm_tools</code> is checked against every tool this config
+actually builds, so an entry naming a toolset no agent declares fails startup and says so; jobme has to
+be declared on some agent first, whether in the same file or an earlier run, before
+<code>tailor_application</code> exists for this list to name at all.</p>
 <p>The consequence worth knowing before you lean on it: a proactive turn, meaning a scheduled task or
 anything else Kokua starts unprompted, auto-denies every gated tool outright, with no prompt raised
 anywhere. So a scheduled task that asks the assistant to tailor an application has that call denied
@@ -1683,7 +1685,8 @@ skill on disk rather than a scoped list.</p>
 <li><a href="../../reference/configuration/#toolset-sections">Configuration reference</a>: how any toolset's <code>[&lt;name&gt;]</code>
   section is validated, and what a name collision with a core section does.</li>
 <li><a href="../../reference/configuration/#confirm_tools">Configuration reference</a>: the full behavior of
-  <code>[security].confirm_tools</code>, including what a misspelled entry does and does not protect against.</li>
+  <code>[security].confirm_tools</code>, including the three entry forms and the four ways an entry can gate
+  nothing.</li>
 </ul>
 
 

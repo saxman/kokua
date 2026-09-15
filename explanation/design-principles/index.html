@@ -1835,6 +1835,17 @@ an ordinary setting does not: silence. A gate naming a tool that does not exist 
 a lock pattern matching no real key locks nothing. You notice a prompt you did not expect; nobody
 notices a prompt that never comes. Both are hard startup errors naming the offending entry, because the
 alternative is a user who believes they are covered and is not.</p>
+<p><strong>A capability the config cannot describe is a capability you do not control.</strong> That sounds abstract
+until a dependency makes it concrete, which AIMU 0.31.0 did: it added <code>write_file</code> and <code>edit_file</code> into
+the <code>fs</code> tool group Kokua had been handing out whole, so an upgrade alone would have given every agent
+declaring <code>fs</code> a write that no <code>tools</code> list ever asked for. The answer was not a flag: <code>fs</code> reads and
+<code>fs_write</code> writes, as two names, because with one name there is no way to <em>write down</em> "read a file and
+do not write one". The shipped <code>introspector</code> declares <code>fs</code> to read a transcript it was asked to
+evaluate, and its inability to rewrite that transcript is now a property of the config rather than a
+hope about the group's contents. The writers are gated in <code>confirm_tools</code> beside <code>run_command</code> for a
+related reason: <code>coder</code> holds a shell that can write a file, so an ungated <code>write_file</code> next to it would
+be the same outcome by a shorter route, with the gate approving the long way round and waving the short
+one through.</p>
 <p><strong>You may loosen, not only tighten.</strong> <code>locked_config_keys</code> is yours to empty. Strike <code>agents.*</code> from it
 and the assistant really can rewrite its own capability table on the next restart. The documentation
 states that consequence plainly rather than preventing it, because a control you cannot release is not
@@ -1843,9 +1854,13 @@ assistant can rewrite for itself is not a policy.</p>
 <p><em>How this cashes out:</em> <a href="https://github.com/saxman/kokua/blob/main/src/kokua/config/store.py"><code>config/store.py</code></a>'s <code>locked_by</code> matches a
 write against the user's own patterns, and <code>LOCK_AXIOM</code> beside it is the single unconditional lock.
 <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py"><code>core/interaction.py</code></a>'s <code>HumanGate.approve</code> is a bare name match
-against <code>confirm_tools</code>, which is what gates a worker's call identically to the entry agent's, and a
-proactive turn auto-denies rather than running a gated tool unattended.
-<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py"><code>core/agents.py</code></a>'s <code>validate_confirm_tools</code> and
+against the tool names startup resolved <code>confirm_tools</code> down to, which is what gates a worker's call
+identically to the entry agent's, and a proactive turn auto-denies rather than running a gated tool
+unattended. A <code>confirm_tools</code> entry names a toolset (<code>compute</code>, or <code>compute.execute_python</code>), so the
+resolution is what turns a capability the user declared into the names the gate matches; the prefix
+buys a gate that can name a whole capability and an error that can point at the right one, not a
+discriminator at the moment of the call.
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py"><code>core/agents.py</code></a>'s <code>resolve_confirm_tools</code> and
 <a href="https://github.com/saxman/kokua/blob/main/src/kokua/config/file.py"><code>config/file.py</code></a>'s lock-pattern checks are the two startup errors
 above. <a href="https://github.com/saxman/kokua/blob/main/SECURITY.md"><code>SECURITY.md</code></a> names which barrier a vulnerability report is about, and which
 behavior is the program working as documented.</p>

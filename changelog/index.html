@@ -1750,7 +1750,7 @@ pymdownx.snippets so there is one file to maintain. Edit /CHANGELOG.md, not this
 installable, modular application: a small transport-agnostic core with capability pushed into plugins.
 Because there is no earlier release, this section describes what 0.1.0 <em>is</em> rather than what changed.
 The pre-release development history is in the git log.</p>
-<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.30.0 or newer. Apache-2.0.</p>
+<p>Requires Python 3.11+ and <a href="https://github.com/saxman/aimu">AIMU</a> 0.31.0 or newer. Apache-2.0.</p>
 <h3 id="package-and-entry-points">Package and entry points<a class="headerlink" href="#package-and-entry-points" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>src</code>-layout <code>kokua</code> package with two console scripts: <code>kokua</code> runs the selected front end (default
@@ -2266,15 +2266,16 @@ The pre-release development history is in the git log.</p>
   parameter lifts the payload cap, the same one <code>kokua export --full</code> lifts, for when the exact text of
   a long tool result is the thing being debugged.</p>
 <p>It answers with a path rather than the document, and that is the design rather than a limitation of
-  it. AIMU's <code>fs</code> group is <code>list_directory</code> and <code>read_file(path, max_lines)</code>, with no offset and no
-  search, so returning the Markdown itself would spend the asking conversation's whole context on one
-  run's tool output, in the one context that cannot afford it. A path can be handed onward instead:
-  <code>config.example.toml</code> ships <code>[agents.introspector]</code>, a delegate declaring <code>fs</code>, and the tool's answer
-  advises delegating once the file passes <code>DELEGATE_ABOVE_LINES</code>, so a long transcript is spent against
-  a worker's fresh context and only the findings come back. What it does not do is slice: an export
-  larger than the introspector's context is read from its top and no further, which the introspector is
-  instructed to report as a partial read rather than answer through. The fix is an <code>offset</code> on AIMU's
-  <code>read_file</code> (<code>TODO.md</code> item 19).</p>
+  it. <code>read_file(path, max_lines, offset)</code> returns 2,000 lines per call, so returning the Markdown
+  itself would spend the asking conversation's whole context on one run's tool output, in the one
+  context that cannot afford it, and paging it there is the same bill in instalments. A path can be
+  handed onward instead: <code>config.example.toml</code> ships <code>[agents.introspector]</code>, a delegate declaring <code>fs</code>,
+  and the tool's answer advises delegating once the file passes <code>DELEGATE_ABOVE_LINES</code>, so a long
+  transcript is spent against a worker's fresh context and only the findings come back. Paging arrived
+  with AIMU 0.31.0 (<code>read_file</code>'s truncation notice now names the offset that continues the read, which
+  retired <code>TODO.md</code> item 19), and the introspector is instructed to use it and to say which part of the
+  run it saw if it stops short. What paging does not fix is an export longer than the introspector's
+  <em>own</em> context, which no offset makes holdable.</p>
 <p>The write is bounded by construction, not by validation: the directory is
   <code>AssistantConfig.downloads_path</code> and the filename is the resolved session's key, so no argument the
   model passes reaches the filesystem, and exporting the same conversation twice replaces one file
@@ -2287,8 +2288,10 @@ The pre-release development history is in the git log.</p>
   the criteria it was given, quoting the transcript lines each judgment rests on. The search results,
   the transcript, and the file all stay out of the asking conversation's context, and its instructions
   hold it to three honesty rules that mirror the export's own: a criterion the transcript cannot settle
-  is reported unassessable rather than guessed, a truncated read is reported as covering part of the
-  run, and with no criteria given it names the rubric it chose, since a worker cannot ask.</p>
+  is reported unassessable rather than guessed, a read it stopped short of finishing is reported as
+  covering part of the run, and with no criteria given it names the rubric it chose, since a worker
+  cannot ask. It declares <code>fs</code> and not <code>fs_write</code>, so it reads every file it can reach and changes none
+  of them: a conversation is its subject, and evaluating one is no reason to rewrite one.</p>
 <p>That is a narrowing of the old rule, not an exception to it. Reading the user's other conversations is
   meaningless to an agent with no relationship to any of them, which is why <code>researcher</code> and <code>coder</code>
   hold none of it, and <code>test_only_the_introspector_reads_history_among_the_shipped_workers</code> pins both
@@ -2366,7 +2369,7 @@ copy directly.</p>
 <p>A skill carrying scripts belongs on an agent that also declares <code>fs</code> and <code>compute</code>, since running the
 script is how the skill does its work.</p>
 <h3 id="toolsets">Toolsets<a class="headerlink" href="#toolsets" title="Permanent link">&para;</a></h3>
-<p><strong>All 21 toolsets Kokua ships are one file each under <code>src/kokua/toolsets/</code>, named for the toolset, and
+<p><strong>All 22 toolsets Kokua ships are one file each under <code>src/kokua/toolsets/</code>, named for the toolset, and
 registered in <code>pyproject.toml</code>'s <code>kokua.toolsets</code> entry-point table</strong> -- the same table a third party's
 package writes into. There is no second route, no index in code, and no directory scan: that table is the
 index. Adding a toolset is a new file and one line, and <code>tests/toolsets/test_registration.py</code> fails until
@@ -2378,6 +2381,33 @@ only the provenance label, so a mismatch would otherwise register a toolset unde
 collected into the wheel and importable by name).</p>
 <p><strong><code>mcp-admin</code> is now <code>mcp</code></strong>, since a toolset's file name is its name. A <code>tools</code> list saying <code>"mcp-admin"</code>
 fails startup on the unknown name.</p>
+<p><strong><code>fs</code> reads and the new <code>fs_write</code> writes, because one name could not say both.</strong> AIMU 0.31.0 put
+<code>write_file</code> and <code>edit_file</code> <em>into</em> <code>builtin.fs</code>, and <code>toolsets/fs.py</code> was <code>list(builtin.fs)</code>, so the
+upgrade alone would have handed a write to every agent already declaring <code>fs</code> -- a capability arriving by
+dependency bump rather than by declaration, which is the one thing an agent's <code>tools</code> list is supposed to
+be the whole of. Two names, because Kokua's config has exactly one lever for a capability and with a
+single <code>fs</code> there is no way to write down "read a file and do not write one": the shipped
+<code>[agents.introspector]</code> declares <code>fs</code> to read a transcript it was asked to evaluate, and the shipped
+<code>[agents.coder]</code> declares both. Neither module names a tool. <code>fs</code> is
+<code>select(builtin.fs, exclude=builtin.unscoped)</code> and <code>fs_write</code> is
+<code>select(builtin.fs, include=builtin.unscoped)</code>, over AIMU's own group of tools whose target the <em>model</em>
+names, so the two partition one group by reach: a read tool AIMU adds later lands in <code>fs</code> on its own, a
+writer lands in <code>fs_write</code>, and <code>tests/toolsets/test_fs.py</code> pins that the halves are a partition rather
+than two hand-kept lists. <strong>They arrive gated.</strong> <code>config.example.toml</code> adds <code>write_file</code> and <code>edit_file</code>
+to <code>[security].confirm_tools</code> for the reason <code>run_command</code> is there: <code>coder</code> holds a shell that can write
+a file, so an ungated <code>write_file</code> beside it is the same outcome by a shorter route, and the gate would
+have been approving the long way round while waving the short one through. A <code>config.toml</code> scaffolded
+before this release gates neither; add them by hand, and note that adding them without also declaring
+<code>fs_write</code> somewhere fails startup, since a gate naming no real tool is refused. Needs <code>aimu&gt;=0.31.0</code>,
+which is the release that added <code>builtin.select</code> and <code>builtin.unscoped</code> along with the writers.</p>
+<p><strong><code>documents</code> gained <code>edit_document</code>, and <code>save_document</code> now refuses to replace a document it has not
+seen whole.</strong> Both are AIMU 0.31.0's, arriving through <code>make_document_tools</code>, and the pair closes a
+destructive round trip that release opened: <code>read_document</code> began returning a 2,000-line window, while
+<code>save_document</code> replaces the whole document, so read-then-save on anything longer deleted everything past
+the window and answered <code>Saved</code>. A 3,000-line document came back 51 lines long with the truncation marker
+written in as content. <code>toolsets/documents.py</code> names <code>edit_document</code> in its guidance rather than leaving
+the refusal to do the teaching, because a refusal arrives only after the model has spent a turn deciding,
+and it tells the model that <code>read_document</code> windows at all, which nothing else would.</p>
 <p><strong>The <code>compute</code> toolset now carries a shell tool, <code>run_command</code>, alongside <code>calculate</code> and
 <code>execute_python</code>.</strong> It runs a command line through <code>/bin/sh -c</code> and returns the exit code with stdout
 and stderr labelled separately; a nonzero exit comes back as output rather than an error, since <code>pytest</code>
@@ -2385,7 +2415,8 @@ exits 1 with the answer on stdout. The timeout is per call, defaulting to 30 sec
 The shipped <code>[agents.coder]</code> is the only agent declaring <code>compute</code>, and its <code>system_message</code> already told
 it to run "Python, shell, or calculations," which is true for the first time; the toolset module's
 identical docstring claim was equally aspirational and is now accurate. <strong>It arrives gated</strong>:
-<code>config.example.toml</code> adds <code>run_command</code> next to <code>execute_python</code> in <code>[security].confirm_tools</code>, so a
+<code>config.example.toml</code> adds <code>compute.run_command</code> next to <code>compute.execute_python</code> in
+<code>[security].confirm_tools</code>, so a
 command reaches you for approval before it runs, including one a sub-agent asked for, since a worker's
 gated call routes to the parent's gate rather than running unattended. A <code>config.toml</code> scaffolded before
 this release still gates <code>execute_python</code> alone; add <code>run_command</code> to it by hand. <strong>The reviewer does not
@@ -2730,7 +2761,7 @@ alone. The case that does cost something is a configured MCP server, which conne
   agent names cannot be enumerated ahead of time. Each is refused by the tool by default, and changeable
   only by hand-editing the list itself: <code>update_config</code> is a tool the assistant holds, so a writable
   agent table would let it widen its own reach. <code>update_config</code> is also in the default <code>confirm_tools</code>
-  list, so each write it <em>is</em> allowed goes through the approval prompt.
+  list, as <code>config.update_config</code>, so each write it <em>is</em> allowed goes through the approval prompt.
 - The <code>update_config</code> write policy is now yours to set. <code>[security].locked_config_keys</code> holds the
   patterns the assistant may not write, defaulting to what was previously hardcoded. The key is itself
   always locked, so the assistant cannot unlock itself in one call. A pattern that could never match
@@ -2829,6 +2860,30 @@ alone. The case that does cost something is a configured MCP server, which conne
   <code>[assistant.generation]</code> is the first dotted sub-table <code>config/file.py</code>'s section loader handles, which
   is what lets a schema entry per parameter serve it instead of the flat-key loop reading it as one
   <code>[assistant]</code> key holding a table.
+  <strong><code>context_length</code> has a second job, and it applies on every backend.</strong> A spawned worker now trims its
+  own messages before each model turn to fit the window declared for it, so a long delegation bounds its
+  own growth instead of failing once the window fills. <code>core.agents.compaction_for_window</code> builds the
+  trimmer from the resolved <code>context_length</code> and <code>build_agent_specs</code> writes it into each worker's spec,
+  which means a worker declaring its own window compacts to that one and an undeclared worker to the
+  global one, never to its delegator's. Three quarters of the window is left for messages, since the
+  same window has to hold that worker's system message, its tool block, and the reply, and
+  <code>trim_messages</code> counts only the messages; a fraction rather than a subtraction of those three, because
+  two of them cannot be measured before the turn that needs them and a subtraction of guesses goes
+  negative on a small window, which would stop compacting exactly where a window fills soonest.
+  Declaring no <code>context_length</code> leaves it off: nothing else states a window (no client reports the one it
+  is talking to), and guessing one would mean rewriting a worker's messages against a number nobody
+  wrote down. What a worker with no declared window does instead is AIMU 0.31.0's doing rather than
+  Kokua's: a spawn that runs out of context now returns a tool result naming the <em>sub-agent's</em> window as
+  the one that filled, where it used to hand the parent a message about "the conversation" that the
+  parent read as its own and stopped delegating over. <strong>The conversation you are in is never trimmed</strong>,
+  whatever you declare: it is yours to read and Kokua stores it, so dropping from it would delete history
+  still on screen, silently and for the rest of that conversation's life. A worker's messages are built
+  per spawn and discarded with it, which is what makes an automatic rewrite of them safe at all, and
+  <code>tests/core/test_delegation.py</code> pins the asymmetry. Needs <code>aimu&gt;=0.31.0</code>, which added the <code>compaction</code>
+  factory argument and the matching <code>"compaction"</code> entry in <code>SUBAGENT_SPEC_KEYS</code>; it is also the surface
+  the startup preflight's capability probe now grips. <code>TODO.md</code> item 8, bounding a <code>target="task"</code>
+  conversation, is <em>not</em> settled by this: a task conversation is stored and readable, so trimming it is
+  the product question that item still owes an answer to.
   Two things worth knowing about the parameters themselves: <code>max_tokens</code> caps <em>generated</em> tokens while
   <code>context_length</code> sizes the whole window prompt and output share, so a 32768 window with a 4096 cap
   leaves roughly 28k for the system prompt, the tool block, and history -- and AIMU's own weakest tier
@@ -3016,9 +3071,10 @@ notice on startup.</p>
   recipient lock, and secret disclosure), and which behavior is the product working as documented (a
   model you configured running code you approved).</li>
 <li><strong>Tool approval.</strong> Configured risky tools require confirmation before each call -- terminal <code>y/N</code>, web
-  Allow/Deny -- built on AIMU's <code>ToolApproval</code> gate. The default set is <code>add_skill_script</code>,
-  <code>add_mcp_server</code>, <code>execute_python</code>, <code>run_command</code>, and <code>update_config</code>; adjust with <code>[security] confirm_tools</code> or
-  <code>--confirm-tools</code> (empty disables). Proactive and backgrounded turns auto-deny gated tools regardless,
+  Allow/Deny -- built on AIMU's <code>ToolApproval</code> gate. The default set is <code>skills.add_skill_script</code>,
+  <code>mcp.add_mcp_server</code>, <code>compute.execute_python</code>, <code>compute.run_command</code>, <code>fs_write</code>, and
+  <code>config.update_config</code>; adjust with <code>[security] confirm_tools</code> or <code>--confirm-tools</code> (empty disables).
+  Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
   are currently viewing. <strong>A backgrounded turn's auto-deny raises an alert card</strong> naming the tool and
   linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
@@ -3028,13 +3084,22 @@ notice on startup.</p>
   The reply is routed through the single channel reader, so it is safe alongside
   <code>/stop</code>. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
   cannot overwrite each other.</li>
-<li><strong>A gate that names nothing fails startup.</strong> <code>[security] confirm_tools</code> matches a tool by name, so an
-  entry no configured agent provides gates nothing, and the symptom is a prompt that never comes, which
-  nobody notices. Every unmatched entry is now named at startup with its near misses. The vocabulary is
-  every tool the config builds, not just the entry agent's: <code>execute_python</code> comes from <code>[agents.coder]</code>,
-  and <code>spawn_subagent</code> and a skill's script tools count too. A tool that arrives later (from a runtime
-  <code>add_mcp_server</code>, or built only by <code>compose_subagent</code> out of a toolset no agent names) cannot be listed
-  ahead of time, and the error says so.</li>
+<li><strong>A gate names its toolset, and one that would gate nothing fails startup.</strong> A <code>[security]
+  confirm_tools</code> entry is <code>&lt;toolset&gt;</code> for every tool a capability provides, <code>&lt;toolset&gt;.*</code> for the same
+  thing said with a wildcard, or <code>&lt;toolset&gt;.&lt;tool&gt;</code> for one; <code>*</code> anywhere else is refused. A reserved
+  <code>core</code> prefix holds the two tools no toolset provides, <code>spawn_subagent</code> and <code>activate_skill</code>, and a
+  skill's scripts sit under the skill, which is also its toolset name. What the prefix buys is a gate
+  that can hold back a whole capability in one line, and an error that can point at the right one; the
+  gate itself still matches a bare tool name at call time, resolved from these entries once every agent
+  is wired. An entry that gates nothing holds nothing back, and the symptom is a prompt that never
+  comes, which nobody notices, so every such entry is named at startup with its near misses: a bare tool
+  name with no prefix (the error gives the form to write), a real tool filed under the wrong toolset, a
+  toolset no agent declares, and a toolset that provides no tools are all refused. The vocabulary is
+  every tool the config builds, not just the entry agent's: <code>compute.execute_python</code> resolves because
+  <code>[agents.coder]</code> declares <code>compute</code>. A tool that arrives later (from a runtime <code>add_mcp_server</code>, or
+  built only by <code>compose_subagent</code> out of a toolset no agent names) cannot be listed ahead of time, and
+  the error says so. <code>core</code> is refused as a toolset name at registration, so the reservation cannot be
+  shadowed by a plugin.</li>
 <li><strong>The reviewer toolset needs no gate.</strong> An autonomous critic cannot pause to ask you mid-review, so
   rather than exempting it from the gate the reviewer is given nothing the gate exists to cover: web
   lookup, <code>calculate</code>, and the clock. A test pins this against the shipped <code>confirm_tools</code> default, so
@@ -3042,14 +3107,15 @@ notice on startup.</p>
 <li><strong>Injection crosses conversations.</strong> The assistant can read every saved conversation, and a transcript
   is untrusted text, so an injection that lands in one conversation can influence what the assistant
   does in another. The three read tools are ungated by default, since they only read and gating them
-  would make an unattended scheduled run that reads history fail silently; add <code>read_conversation</code> and
-  <code>search_conversations</code> to <code>[security] confirm_tools</code> to change that. <code>export_conversation</code> is ungated
+  would make an unattended scheduled run that reads history fail silently; add
+  <code>conversations.read_conversation</code> and <code>conversations.search_conversations</code> to
+  <code>[security] confirm_tools</code> to change that. <code>export_conversation</code> is ungated
   for a different reason: it changes no conversation, and the reason to gate it is what it leaves behind
   rather than what it reads, a whole transcript in the clear under <code>data/downloads/</code>.</li>
 </ul>
 <h3 id="diagnostics-and-error-reporting">Diagnostics and error reporting<a class="headerlink" href="#diagnostics-and-error-reporting" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>An AIMU too old to run Kokua fails with an instruction, not a traceback.</strong> The <code>aimu&gt;=0.30.0</code>
+<li><strong>An AIMU too old to run Kokua fails with an instruction, not a traceback.</strong> The <code>aimu&gt;=0.31.0</code>
   requirement covers a normal install, but a development checkout installs the sibling <code>../aimu</code>
   editable and that checkout can sit on an older commit. <code>kokua.aimu_compat</code> preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -3093,7 +3159,7 @@ notice on startup.</p>
   makes it fast, and a name lookup on the ABC is satisfied by either, so a store that stopped
   overriding it would still pass while paying the old cost in silence; <code>StreamingContentType.CONTINUING</code>
   is the floor's job now, the same way every earlier probe surface became the floor's job once a newer
-  one took the slot. Today the floor is <strong>0.30.0</strong>, the first one moved by a rename, and the probe is a
+  one took the slot. <strong>0.30.0</strong> was the floor until 0.31.0, the first one moved by a rename, and its probe was a
   name lookup for the fourth time: <code>aimu.tools.builtin.get_web_content</code>, which replaces <code>get_webpage</code>.
   The name is not the point. The old tool never asked what it had downloaded, handing <code>response.text</code>
   to an HTML stripper, and since <code>requests</code> decodes <code>.text</code> with <code>errors="replace"</code>, a PDF behind a URL
@@ -3103,9 +3169,25 @@ notice on startup.</p>
   with nothing raised anywhere. Group membership, not the bare name, is what Kokua depends on, and the
   stricter check was declined the way <code>run_command</code>'s was at 0.24.0 and with even less to gain: the
   rename moved the function and the group's entry for it in one upstream commit, so no checkout exists
-  where the name resolves and the group still holds the old tool. <code>list_summaries</code> joins the floor's
-  job; what the new probe leaves there in turn is the behavior behind the name, since a checkout could
-  export <code>get_web_content</code> and classify nothing.
+  where the name resolves and the group still holds the old tool. <code>list_summaries</code> joined the floor's
+  job then, and the behavior behind that name (a checkout could export <code>get_web_content</code> and classify
+  nothing) was what it left there in turn.
+  Today the floor is <strong>0.31.0</strong>, and it is the first release where the probe passed over a <em>newer</em>
+  handle on purpose. The probe is a membership check on <code>SUBAGENT_SPEC_KEYS</code> for <code>"compaction"</code> -- the
+  second time it has gripped that same set for a different member, which restates the point that set
+  keeps making: a published set's presence proves nothing and only its contents date a checkout.
+  <code>builtin.select</code> landed earlier in the release and would have been the obvious grip, a plain name
+  lookup on a function <code>toolsets/fs.py</code> calls directly. It was passed over because <code>save_document</code>'s
+  read-before-replace guard landed two commits <em>later</em> with no handle at all (a digest set private to
+  one <code>make_document_tools</code> call), while the <code>read_document</code> windowing that makes an unguarded save
+  destructive landed <em>earlier</em>: a sibling parked in between passes a <code>select</code> probe and still cuts a
+  3,000-line document to 51 lines. <code>"compaction"</code> is in the release's last functional commit, so
+  gripping it dates a checkout to <code>select</code>, <code>unscoped</code>, the writers in <code>builtin.fs</code>, <code>edit_document</code>,
+  and the guard together -- the reverse of the trade 0.20.0's <code>endpoint_kwargs</code> had to accept. What it
+  leaves to the floor is the <em>contents</em> of <code>builtin.unscoped</code>: the whole <code>fs</code> / <code>fs_write</code> split rests
+  on that group holding both writers, and asking it needs a membership check over a list of callables
+  matching on <code>__name__</code>, declined for the third time and asserted in <code>tests/test_aimu_compat.py</code>
+  instead. <code>get_web_content</code> joins the floor's job.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and <code>tests/test_aimu_compat.py</code> pins the floor against <code>pyproject.toml</code>'s specifier so the two
   halves of that one decision cannot drift.</li>

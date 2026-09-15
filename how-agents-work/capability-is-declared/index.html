@@ -1657,10 +1657,12 @@ read the tables.</p>
 declares <code>["web", "misc", "time"]</code>. It cannot read a file, and delegating a file-reading task to it
 returns an apology rather than an error. Widening the entry agent widens nothing for its workers.</p>
 <p><strong>What is loud, so you know what to expect.</strong> An unknown name in a <code>tools</code> list fails startup. A cycle
-in <code>delegates_to</code> fails startup. A <code>[security].confirm_tools</code> entry naming no real tool fails startup,
-with the near misses suggested, because a gate that matches nothing prompts for nothing and nobody
-notices a prompt that never comes. The quiet failure is confined to exactly one case: installed, and
-never named.</p>
+in <code>delegates_to</code> fails startup. A <code>[security].confirm_tools</code> entry that would gate nothing fails
+startup, with the near misses suggested, because a gate that matches nothing prompts for nothing and
+nobody notices a prompt that never comes. Note that the gate list speaks the same vocabulary this page
+is about: an entry is <code>&lt;toolset&gt;</code> for a whole capability or <code>&lt;toolset&gt;.&lt;tool&gt;</code> for one of its tools, so
+a gate naming a toolset no agent declares is refused for the same reason a tool nothing provides is.
+The quiet failure is confined to exactly one case: installed, and never named.</p>
 <p><strong>The tax you keep paying.</strong> The declared list is not free either. The shipped entry agent's eleven
 toolsets resolve to thirty tools, plus the <code>spawn_subagent</code> its <code>delegates_to</code> earns, and all 31
 descriptions are re-sent on every round of every turn. Declaring a capability you never use costs context on each call, which is the argument
@@ -1678,7 +1680,7 @@ descriptions are re-sent on every round of every turn. Declaring a capability yo
   and <a href="../../explanation/architecture/#agents-and-delegation">Architecture: agents and delegation</a> for
   how a declaration becomes a built agent.</li>
 <li><a href="../../explanation/architecture/#the-shipped-entry-agents-inventory">The shipped entry agent's
-  inventory</a>: all 33 tools and where
+  inventory</a>: all 34 tools and where
   each comes from.</li>
 <li><a href="../../reference/configuration/">Configuration reference</a>: every key in the tables above.</li>
 </ul>

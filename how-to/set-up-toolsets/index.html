@@ -1667,7 +1667,12 @@ let deduplication quietly pick one.</p>
 <tr>
 <td><code>fs</code></td>
 <td><code>list_directory</code>, <code>read_file</code></td>
-<td><strong>Read-only.</strong> Writing a file needs <code>execute_python</code> or <code>run_command</code>.</td>
+<td><strong>Read-only</strong>, and read-only by construction: AIMU's <code>fs</code> group holds the two writers below as well, and this toolset is that group with <code>builtin.unscoped</code> excluded. <code>read_file</code> returns 2,000 lines per call and names the offset that continues the read.</td>
+</tr>
+<tr>
+<td><code>fs_write</code></td>
+<td><code>write_file</code>, <code>edit_file</code></td>
+<td>both approval-gated by default. Neither confines a write to any root, so this reaches any path Kokua's own account can write. A separate name from <code>fs</code> so an agent can be given the read and not the write.</td>
 </tr>
 <tr>
 <td><code>compute</code></td>
@@ -1691,8 +1696,8 @@ let deduplication quietly pick one.</p>
 </tr>
 <tr>
 <td><code>documents</code></td>
-<td><code>save_document</code>, <code>read_document</code>, <code>list_documents</code>, <code>search_documents</code></td>
-<td>likewise</td>
+<td><code>save_document</code>, <code>read_document</code>, <code>edit_document</code>, <code>list_documents</code>, <code>search_documents</code></td>
+<td>likewise. <code>read_document</code> windows a long document; change one with <code>edit_document</code>, since <code>save_document</code> replaces the whole thing and refuses to replace one it has not shown the model in full</td>
 </tr>
 <tr>
 <td><code>skills</code></td>

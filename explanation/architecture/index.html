@@ -2486,9 +2486,9 @@ forgets raises nothing anywhere: the script simply runs with the settings missin
 unconfigured, which is what <code>email-report</code> did on the entry agent until the second route was wired.
 <code>tests/core/test_build.py</code> pins it, because nothing else would notice.</p>
 <h4 id="the-shipped-entry-agents-inventory">The shipped entry agent's inventory<a class="headerlink" href="#the-shipped-entry-agents-inventory" title="Permanent link">&para;</a></h4>
-<p>All 33 tools the shipped <code>[agents.assistant]</code> table resolves to, and where each comes from. This is what
+<p>All 34 tools the shipped <code>[agents.assistant]</code> table resolves to, and where each comes from. This is what
 <code>config.example.toml</code> declares, not a fixed list: a different <code>tools</code> line produces a different set.
-Twelve of the 32 come from AIMU, more than a third, and so are not greppable in this repository (more
+Thirteen of the 34 come from AIMU, more than a third, and so are not greppable in this repository (more
 once skills are installed, since AIMU injects a tool per skill script on top of this set), which is why
 this table exists rather than a naming convention alone:</p>
 <table>
@@ -2511,7 +2511,7 @@ this table exists rather than a naming convention alone:</p>
 <td><code>memory</code></td>
 </tr>
 <tr>
-<td><code>save_document</code>, <code>read_document</code>, <code>list_documents</code>, <code>search_documents</code></td>
+<td><code>save_document</code>, <code>read_document</code>, <code>edit_document</code>, <code>list_documents</code>, <code>search_documents</code></td>
 <td>AIMU <code>make_document_tools</code></td>
 <td><code>documents</code></td>
 </tr>
@@ -2633,11 +2633,12 @@ effort, what it cost, and why a turn stopped when it stopped short. That is not 
 <code>transcript_export.render_markdown</code> already produced exactly this document for <code>kokua export</code> and for the
 sidebar's download button, over the same <code>replay_items</code> the web channel replays a reload from, so the
 tool is a resolve, a render, and a write.</p>
-<p>It returns a path, not the document. That is the whole design, and it is forced by a limit worth
-understanding: AIMU's <code>fs</code> group is <code>list_directory</code> and <code>read_file(path, max_lines)</code>, with no offset and
-no search, so a file is readable from its first line downward and nowhere else. A tool that returned the
-Markdown itself would put a run's entire tool output into the context of the conversation asking about
-it, which is the one context that cannot afford it. Handing back a path lets the answer go to a
+<p>It returns a path, not the document. That is the whole design, and the reason survived the limit that
+first forced it. AIMU's <code>read_file(path, max_lines, offset)</code> gained the offset in 0.31.0, so a long
+export is now readable past its first window; what has not changed is that every page a model turns is
+paid for out of the context it is turning them in. A tool that returned the Markdown itself would put a
+run's entire tool output into the context of the conversation asking about it, which is the one context
+that cannot afford it, and paging it there is the same bill in instalments. Handing back a path lets the answer go to a
 sub-agent instead, so the transcript is spent against a fresh context and only the findings come back.
 <code>config.example.toml</code> ships <code>[agents.introspector]</code> as that worker, and
 <code>test_the_shipped_introspector_can_both_export_a_conversation_and_read_the_export</code> pins the pairing,
@@ -2652,10 +2653,10 @@ answer.</p>
 <p>Three consequences to know before changing it. The answer reports the file's line count and size and
 advises delegating past <code>DELEGATE_ABOVE_LINES</code>, because a model cannot see how big a file is before
 reading it, and the advice is a sentence rather than a refusal: the tool does not know what the model
-has to delegate to. Nothing slices, so an export larger than the introspector's context is read from
-its top and no further; the introspector's own instructions tell it to report a truncated read as
-truncated, which converts a silent partial answer into a stated one, and the real fix is an <code>offset</code> on
-AIMU's <code>read_file</code> (item 19 in <code>TODO.md</code>). And the write is bounded by construction rather than by validation:
+has to delegate to. An export larger than one window is read in pages, since <code>read_file</code>'s truncation
+notice names the offset that continues it, and the introspector's own instructions tell it to page
+through the rest and to say which part of the run it saw if it stops early, which converts a silent
+partial answer into a stated one. And the write is bounded by construction rather than by validation:
 the directory comes from <code>AssistantConfig.downloads_path</code> and the filename from the resolved session's
 key, so no argument the model passes reaches the filesystem, which is why exporting the same
 conversation twice replaces one file instead of accumulating.</p>
@@ -3073,7 +3074,26 @@ name lookup, structurally a half-step deeper than its predecessors since the sym
 now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 <code>TinyDBSessionStore</code>'s override from a plain inheritance of the default.</p>
-<p>The floor is now <strong><code>aimu&gt;=0.30.0</code></strong>, and it is the first one moved by a <em>rename</em>. <code>get_webpage</code> became
+<p>The floor is now <strong><code>aimu&gt;=0.31.0</code></strong>, and three capabilities in that release are Kokua's. <code>builtin.select</code>
+and <code>builtin.unscoped</code> are what <a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/fs.py"><code>toolsets/fs.py</code></a>
+and <code>toolsets/fs_write.py</code> partition one group with, after AIMU put <code>write_file</code> and <code>edit_file</code> <em>into</em>
+<code>builtin.fs</code>: handing that group out unchanged would have granted a write to every agent already
+declaring <code>fs</code>, on an upgrade, with no config change and nothing reported. <code>edit_document</code> and a
+read-before-replace guard on <code>save_document</code> close the other silent one, since <code>read_document</code> now
+returns a window and replacing a whole document from a windowed read deleted everything past the window
+(a 3,000-line document came back 51 lines long). And <code>compaction</code> is a spec key <code>core/agents.py</code> writes
+per worker from a declared <code>context_length</code>, so a long delegation trims its own messages rather than
+dying in its window.</p>
+<p>The probe grips the third of those, <code>SUBAGENT_SPEC_KEYS</code>'s <code>"compaction"</code>, and the choice is the first
+time this preflight has passed over a <em>newer</em> handle on purpose. <code>select</code> landed earlier in the release
+and is a plain name lookup for a function Kokua calls directly, but the <code>save_document</code> guard landed two
+commits after it with no handle at all, while the windowing that makes an unguarded save destructive
+landed before it: a checkout in between would have passed a <code>select</code> probe and still truncated a
+document. <code>compaction</code> is in the release's last functional commit, so gripping it dates a checkout to
+all three. What it leaves to the floor is the <em>contents</em> of <code>builtin.unscoped</code>, since asking whether the
+group holds both writers needs a membership check over a list of callables, the shape declined twice
+before and asserted in <code>tests/test_aimu_compat.py</code> instead.</p>
+<p>The floor was <strong><code>aimu&gt;=0.30.0</code></strong> until then, and that one was the first moved by a <em>rename</em>. <code>get_webpage</code> became
 <code>get_web_content</code>, and the point is not the name: the old tool never asked what it had fetched. It
 handed <code>response.text</code> to an HTML stripper, and <code>requests</code> decodes <code>.text</code> with <code>errors="replace"</code>, so a
 PDF behind a URL arrived as megabytes of replacement characters that a tag stripper passes through
@@ -3083,7 +3103,7 @@ having entered a model's context whole. The new tool classifies the response by 
 caps what it returns, downloads, and extracts. Kokua needs the floor because it hands that group out
 unchanged: <code>toolsets/web.py</code> is <code>list(builtin.web)</code>, and <code>workflows/critics.py</code> mounts the same group
 for the reviewer, so on an older AIMU both quietly poison a context.</p>
-<p>The probe is a name lookup on <code>builtin.get_web_content</code>, the fourth time that shape has answered. What
+<p>That probe was a name lookup on <code>builtin.get_web_content</code>, the fourth time that shape has answered. What
 Kokua actually hands an agent is the <em>group</em>, so the stricter question is whether <code>web</code> contains it, and
 that check was declined for the reason <code>run_command</code>'s was at 0.24.0, this time without even that
 release's brief window: the rename moved the function and the group's entry for it in a single upstream
