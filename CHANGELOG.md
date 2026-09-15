@@ -321,6 +321,20 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     lost it to whatever that section set. `[generation]` gets no special handling on the way out: it is now
     an unrecognized section, so a stale one left in a `config.toml` fails to load the way any unknown key
     does, and deleting it is the fix.
+  - **The sidebar appears before the assistant has finished starting.** `Assistant.create` now reads
+    only local state (the session store, the validated agent registry) and reaches no network; connecting
+    every configured MCP server, building the entry agent, checking the approval gates against the tools
+    that connect contributed, and arming the scheduled tasks moved to a new `Assistant.start()`, which
+    `run()` awaits so serving a turn always implies a started assistant. `start()` is idempotent and
+    terminal: a failed start is not retried, since a retry would reconnect a server a first attempt
+    already appended to the live connection list. The web front end sends the conversation list, the
+    active conversation's history, and the current settings between the two calls, then the tasks, then a
+    closing `ready` frame, so the page renders what it already knows while the servers are still being
+    asked for their tool lists. Until `ready` lands, `<body>` carries a `booting` class that dims the
+    conversation and task lists and disables clicks on their rows, with a "Starting up..." line explaining
+    why, so a row that cannot act yet reads as inert rather than broken. The composer is left alone
+    throughout, since neither typing nor sending ever depended on that half of boot finishing. Measured
+    against a config with two remote servers, the chat list now renders at about 2 seconds instead of 8.7.
   - **A dropped socket reconnects on its own.** Restarting Kokua under an open browser used to leave a
     page that said "Disconnected." and could only be recovered by reloading. The page now retries with
     backoff (500ms doubling to a 10s ceiling, indefinitely) and shows one notice for the whole outage
@@ -330,16 +344,21 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     A manual retry deliberately does not reset the backoff, which only a connection that succeeded does,
     so clicking repeatedly at a server that is still down cannot drive it back to the base 500ms interval.
     Almost none of the work is on the client: the server already resyncs its
-    whole view on every connection (conversations, history, settings, tasks) and the `history` frame
-    replaces the transcript, so a reconnected page repaints rather than appending a second copy of what it
-    already showed. What a reconnect does not restore is a turn that was in flight when the socket
-    dropped, since the front end builds an `Assistant` per connection: the page comes back to what was
-    persisted, not to the stream it was watching. Two closes are not retried, and the page tells them
-    apart from a restart by whether anything arrived before the close: a server that answered and
-    *refused* sends one message and closes without syncing (the one-connection guard's "busy in another
-    tab", or a config error reported in place of a session), and retrying that would thrash a server that
-    is working while burying its explanation under repetitions of itself, so a refused page says to reload
-    and stops. Nothing having arrived at all is the ordinary restart case, and does retry.
+    whole view on every connection (conversations, history, settings, tasks, then a closing `ready`) and
+    the `history` frame replaces the transcript, so a reconnected page repaints rather than appending a
+    second copy of what it already showed. What a reconnect does not restore is a turn that was in flight
+    when the socket dropped, since the front end builds an `Assistant` per connection: the page comes back
+    to what was persisted, not to the stream it was watching. Two closes are not retried, and the page
+    tells them apart from a restart by whether anything arrived before the close: a server that answered
+    and *refused* sends one message and closes without ever reaching `ready` (the one-connection guard's
+    "busy in another tab", or a config error reported in place of a session), and retrying that would
+    thrash a server that is working while burying its explanation under repetitions of itself, so a
+    refused page says to reload and stops. `ready`, not `history`, is what marks a connection synced,
+    because a config error is now reported from the half of boot that runs after the history has already
+    reached the page: a page still keyed on `history` would read that refusal as a drop and retry it
+    forever. The same rule catches a server that dies partway through starting for any other reason, which
+    looks identical from the socket's side, so that case also asks for a reload rather than retrying on
+    its own. Nothing having arrived at all is the ordinary restart case, and does retry.
   - Reloading the page replays the prior conversation, reasoning and tool calls included. What was
     streamed live is what is replayed: nothing in the core decides which frames are worth sending, so a
     front end that wants to fold or hide a block does that with the block in hand.
@@ -1107,6 +1126,15 @@ alone. The case that does cost something is a configured MCP server, which conne
   first agent is built so config-declared servers reach the agents that name them, and a runtime add or
   remove rebuilds each live agent's `spawn_subagent` so its workers pick the server up or drop it
   immediately.
+- **Configured servers connect concurrently at boot, and still attach in `config.toml`'s order.** A boot
+  with two remote servers used to pay the sum of their handshakes; it now pays the slower one, while
+  `connections` (and so which server wins a duplicate tool name) stays in declaration order regardless of
+  which one answers first. The one exception is an interactive OAuth authorization: its callback listener
+  binds one pinned port, so two servers both needing a fresh authorization at the same moment would race
+  to bind it, and the loser's bind failure would read as that server being unreachable rather than the
+  port collision it actually is. A lock serializes only that branch; a bearer-token connect and an
+  unauthenticated probe still overlap fully, so the common shape of one bearer server plus one OAuth
+  server keeps essentially the whole win.
 - **Each configured server is a toolset, named by its `name`.** `name` is required: it is how the server
   enters the one namespace an agent declares against, so a server nothing can name reaches nothing. A
   runtime `add_mcp_server`, and the startup `--mcp <url>` flag, both derive a name from the server's host
@@ -1262,7 +1290,7 @@ notice on startup.
 - **Model resolution failures surface cleanly.** With no `model` set, AIMU resolves
   `AIMU_LANGUAGE_MODEL`, else the first already-running local model (Ollama, then a local
   OpenAI-compatible server), and never a cloud model. When nothing resolves, or the model string is
-  invalid, `Assistant.create` raises a `ModelClientError` carrying AIMU's actionable message: the CLI
+  invalid, `Assistant.start()` raises a `ModelClientError` carrying AIMU's actionable message: the CLI
   prints it and exits non-zero, the web UI shows it in the chat. Because agents are built lazily, the
   web UI's new / select / delete controls can hit the same error, and report it in the chat rather than
   tearing down the WebSocket. Any failure between taking the web front end's single-connection guard and
