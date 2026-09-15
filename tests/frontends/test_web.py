@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import queue
+import threading
 import time
 
 import pytest
@@ -44,15 +46,50 @@ class _FakeWS:
 # room to spare, and far short of waiting forever for a frame the server may not send.
 _FRAME_LIMIT = 12
 
+# A mock-only test never legitimately waits this long for a frame, so a read stuck past this deadline
+# means the frame is never coming rather than merely running late.
+_RECEIVE_DEADLINE = 5.0
+
+
+def _receive_json(ws, type_, deadline=_RECEIVE_DEADLINE):
+    """Read one frame off `ws`, bounded by a wall-clock deadline instead of `ws.receive_json()`'s own.
+
+    `WebSocketTestSession.receive()` blocks on a queue with no timeout argument, so a frame the server
+    never sends again (the regression this exists to catch) would otherwise hang the read forever
+    rather than failing the test. The read runs on a daemon thread, not a `ThreadPoolExecutor`, because
+    a pool joins its workers at process exit and a read still blocked there would reintroduce the same
+    hang one step later. A `queue.Queue` of size 1 carries the outcome, success or a raised exception,
+    back to the caller, which is what applies the timeout the read itself cannot take. `type_` names the
+    frame the caller is waiting for, so a timeout can say what never arrived.
+    """
+    outcome: queue.Queue = queue.Queue(maxsize=1)
+
+    def read():
+        try:
+            outcome.put((True, ws.receive_json()))
+        except BaseException as exc:  # propagate a real failure (e.g. WebSocketDisconnect), don't swallow it
+            outcome.put((False, exc))
+
+    threading.Thread(target=read, daemon=True).start()
+    try:
+        ok, value = outcome.get(timeout=deadline)
+    except queue.Empty:
+        raise AssertionError(f"no {type_} frame arrived within the {deadline}s deadline") from None
+    if not ok:
+        raise value
+    return value
+
 
 def _drain_until_limit(ws, type_, limit=_FRAME_LIMIT):
-    """Receive at most `limit` frames looking for one of the given type.
+    """Receive at most `limit` frames, each bounded by `_RECEIVE_DEADLINE`, looking for one of the given type.
 
-    Bounded, unlike `_drain_until`: a test asserting a frame the server does not send yet would
-    otherwise block the suite instead of failing it.
+    The count bound guards against a server that keeps sending other frames past the one under test;
+    the per-read deadline guards against a server that sends nothing further at all, which the count
+    alone would not catch, since a read blocked waiting for a frame that never comes never reaches the
+    next iteration to be counted.
     """
     for _ in range(limit):
-        frame = ws.receive_json()
+        frame = _receive_json(ws, type_)
         if frame["type"] == type_:
             return frame
     raise AssertionError(f"no {type_} frame in the first {limit} frames")
@@ -942,8 +979,6 @@ def test_ws_sends_the_conversation_list_before_connecting_mcp(tmp_path, monkeypa
     not an `asyncio.Event` because TestClient runs the app in its own thread with its own loop, and
     the frames it has already sent are queued for this one to read.
     """
-    import threading
-
     from starlette.testclient import TestClient
 
     from kokua.config import MCPServerConfig
@@ -952,7 +987,12 @@ def test_ws_sends_the_conversation_list_before_connecting_mcp(tmp_path, monkeypa
     gate = threading.Event()
 
     async def fake_connect(url, **kw):
-        gate.wait(timeout=10)
+        # A blocking (not async) wait, so it also blocks the test's own event loop thread until it
+        # returns; the conversations read below only ever completes once this call does, whether that
+        # is because the test's own `gate.set()` unblocks it or because this timeout elapses on its
+        # own. It has to stay comfortably under `_RECEIVE_DEADLINE`, or that read fails on the deadline
+        # instead of on a real regression.
+        gate.wait(timeout=1)
         return _FakeMCPClient(["remote_tool"]), "none"
 
     monkeypatch.setattr(servers, "connect_mcp", fake_connect)
@@ -974,7 +1014,7 @@ def test_ws_connect_ends_with_ready_after_the_sidebar(tmp_path):
     seen = []
     with TestClient(app).websocket_connect("/ws") as ws:
         for _ in range(_FRAME_LIMIT):
-            seen.append(ws.receive_json()["type"])
+            seen.append(_receive_json(ws, "ready")["type"])
             if seen[-1] == "ready":
                 break
 
