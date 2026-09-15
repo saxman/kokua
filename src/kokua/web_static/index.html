@@ -38,6 +38,9 @@
     <aside id="sidebar">
       <div id="sidebar-top">
         <span id="wordmark">Kokua</span>
+        <!-- Shown only while <body> carries `booting`: the conversation list below renders before the
+             assistant has finished connecting its remote servers, and its rows do not act until then. -->
+        <p id="booting-notice">Starting up...</p>
         <button id="new-conv" type="button" title="New conversation">
           <span class="icon">+</span><span class="label">New conversation</span>
         </button>

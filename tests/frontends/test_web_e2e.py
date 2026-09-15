@@ -227,9 +227,16 @@ def restartable_server():
 
 
 def _open(page, url: str) -> None:
-    """Load the page and wait until the WebSocket is up (the sidebar list has rendered)."""
+    """Load the page and wait until it is interactive.
+
+    Two waits, not one. The sidebar list renders as soon as the conversation frame lands, which is now
+    before the assistant has finished starting, and a row is deliberately not clickable until the
+    `ready` frame clears the starting state. Waiting only for the row would hand a test a sidebar that
+    ignores its click.
+    """
     page.goto(url)
     page.wait_for_selector("#conv-list li")
+    page.wait_for_selector("body:not(.booting)")
 
 
 def test_send_message_renders_reply(page, live_server):
@@ -560,6 +567,18 @@ def test_sidebar_collapse_resize_persist(page, live_server):
     page.reload()
     page.wait_for_selector("#conv-list li")
     assert abs(sidebar.bounding_box()["width"] - resized_width) < 2
+
+
+def test_the_sidebar_is_marked_starting_until_the_ready_frame(page, live_server):
+    """The page renders its conversation list before the assistant has finished starting, so it says
+    so until then. Asserted on the cleared state rather than the set one: boot is fast in this
+    fixture (no MCP servers), so catching `booting` set would be a race, while its removal is the
+    thing the `ready` frame has to cause.
+    """
+    page.goto(live_server(delay=0.0))
+    page.wait_for_selector("#conv-list li")
+    page.wait_for_selector("body:not(.booting)")
+    expect(page.locator("#booting-notice")).to_be_hidden()
 
 
 def test_sidebar_row_shows_the_conversation_age(page, live_server):
