@@ -416,7 +416,7 @@ def _export(args: argparse.Namespace, config: AssistantConfig) -> int:
     renderer it calls, `render_markdown`, imports neither, and a CLI path that built a front end just to
     read a file back off disk would quietly make the web extra a requirement for exporting again.
     """
-    from kokua.transcript_export import DEFAULT_MAX_PAYLOAD_CHARS, render_markdown
+    from kokua.transcript_export import DEFAULT_MAX_PAYLOAD_CHARS, export_filename, render_markdown
 
     try:
         session, match_count = _resolve_export_session(args, config)
@@ -453,7 +453,9 @@ def _export(args: argparse.Namespace, config: AssistantConfig) -> int:
         print(markdown, end="")
         return 0
 
-    destination = Path(args.output) if args.output else config.downloads_path / f"{session.key}.md"
+    destination = (
+        Path(args.output) if args.output else config.downloads_path / export_filename(session.key, full=args.full)
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(markdown, encoding="utf-8")
     print(str(destination))

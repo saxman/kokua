@@ -35,7 +35,11 @@ Without `-o`, the file lands in `$KOKUA_HOME/data/downloads/<conversation id>.md
 `~/.kokua/data/downloads/`), the same folder generated PDFs and other artifacts use, and the path
 is printed on success so a script can pick it up. `-o -` writes the Markdown to stdout instead, for
 piping into something else. `--full` lifts the truncation a plain export applies to long tool
-payloads (see below).
+payloads (see below), and writes `<conversation id>.full.md` rather than sharing the plain export's
+name: the two files hold different amounts of the same conversation and read identically, so one
+name for both meant a later plain export replaced a `--full` one in place, with nothing in the
+result to say what had gone. Re-exporting at the same fidelity still overwrites, so a conversation
+has at most these two files. Take the path from the printed output rather than assembling it.
 
 ## What a turn's block shows
 

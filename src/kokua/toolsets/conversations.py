@@ -39,7 +39,7 @@ from aimu.tools import tool
 
 from kokua.core.transcripts import flatten_transcript, readable_messages, search, short_time, truncate_lines
 from kokua.registry.registry import Toolset
-from kokua.transcript_export import DEFAULT_MAX_PAYLOAD_CHARS, render_markdown
+from kokua.transcript_export import DEFAULT_MAX_PAYLOAD_CHARS, export_filename, render_markdown
 
 if TYPE_CHECKING:
     # Annotation only. A real import would run kokua/core/__init__.py, and this module is reached from
@@ -339,10 +339,12 @@ def make_conversation_tools(
         `list_conversations` or `search_conversations` (a unique leading fragment of at least six
         characters also works).
 
-        This changes nothing about the conversation. The file is named for the conversation, so
-        exporting the same one again replaces that file rather than leaving two. The answer says how
-        long the file is: when it is long, hand the path to a sub-agent that can read files together
-        with the question you want answered, instead of reading the file into this conversation.
+        This changes nothing about the conversation. The file is named for the conversation and for
+        whether `full` was set, so exporting the same one again at the same fidelity replaces that file
+        rather than leaving two, and a full export is never replaced by a trimmed one. Always use the
+        path the answer gives you rather than assembling it yourself. The answer says how long the file
+        is: when it is long, hand the path to a sub-agent that can read files together with the question
+        you want answered, instead of reading the file into this conversation.
 
         Args:
             conversation_id: The conversation to export (full id, or a unique leading fragment).
@@ -361,7 +363,7 @@ def make_conversation_tools(
         # The web front end's download route serves this directory and 404s rather than creating it,
         # so a fresh $KOKUA_HOME may never have had anything written here.
         downloads_path.mkdir(parents=True, exist_ok=True)
-        destination = downloads_path / f"{session.key}.md"
+        destination = downloads_path / export_filename(session.key, full=full)
         destination.write_text(markdown, encoding="utf-8")
 
         # Lines, because that is the unit `read_file` caps by, and the file's real byte size, because
