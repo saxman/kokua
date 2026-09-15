@@ -232,7 +232,7 @@ def slow_boot_server(monkeypatch):
     before handing back a tool-less fake client.
 
     `Assistant.start()` reconnects every configured MCP server before it can build the first agent, so
-    a boot window wide enough to observe requires at least one server and a slow connect -- with
+    a boot window wide enough to observe requires at least one server and a slow connect: with
     neither, `start()` returns before a test's first assertion could ever run, and the state this is
     for would go untested regardless of what the page does. Patches `connect_mcp` on
     `kokua.mcp.servers` in place rather than passing a delay through `AssistantConfig`, since
