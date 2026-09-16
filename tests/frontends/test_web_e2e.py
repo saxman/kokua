@@ -4,7 +4,7 @@ These cover the one surface pytest otherwise can't reach: the page script in ``w
 turning server frames into DOM. The server-side frame contract (what frames are emitted, and the
 muting/gating that decides them) is already unit-tested in ``test_web.py`` against a fake socket; here
 we run the real page in headless Chromium against a live server so the client's rendering is exercised
-too -- notification banners, the inline "working" indicator, and that a background turn's output never leaks
+too: alert cards, the inline "working" indicator, and that a background turn's output never leaks
 into the conversation being viewed.
 
 Deselected by default (``addopts = -m 'not e2e'``); run with ``uv run pytest -m e2e``. Needs the ``web``
@@ -15,6 +15,7 @@ those aren't installed, so the default mock-only suite stays green without them.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -109,14 +110,14 @@ class _SlowClient(MockAsyncModelClient):
         if self._tool_response:
             yield StreamChunk(
                 StreamingContentType.TOOL_CALLING,
-                {"name": "get_webpage", "arguments": {"url": "u"}, "response": self._tool_response},
+                {"name": "get_web_content", "arguments": {"url": "u"}, "response": self._tool_response},
             )
         yield StreamChunk(StreamingContentType.GENERATING, self._reply)  # renders now in the viewed conversation
         await asyncio.sleep(self._delay)  # hold the turn open so a test can switch away mid-reply
         if self._tool_between:
             yield StreamChunk(
                 StreamingContentType.TOOL_CALLING,
-                {"name": "get_webpage", "arguments": {"url": "u"}, "response": self._tool_between},
+                {"name": "get_web_content", "arguments": {"url": "u"}, "response": self._tool_between},
             )
         if self._tail:
             yield StreamChunk(StreamingContentType.GENERATING, self._tail)  # arrives after that switch
@@ -518,7 +519,7 @@ TAIL = "And here is the rest of it."
 
 def test_background_turn_notifies_and_does_not_leak(page, live_server):
     """Switching away mid-turn: the rest of the reply is muted (never rendered in the now-viewed
-    conversation) and the turn's completion surfaces as a dismissible notification banner instead.
+    conversation) and the turn's completion surfaces as a dismissible alert card instead.
 
     `tail` is the part of the reply that streams *after* the switch, which is the part a once-per-send
     mute decision would have leaked into the conversation the user moved to."""
@@ -533,13 +534,30 @@ def test_background_turn_notifies_and_does_not_leak(page, live_server):
     expect(page.locator("#conv-list li")).to_have_count(2)
     expect(page.locator(".bubble.assistant")).to_have_count(0)  # the fresh conversation shows no reply
 
-    banner = page.locator("#notifications .notification-banner")
-    expect(banner).to_be_visible(timeout=15_000)  # the background turn's completion surfaces here instead
+    card = page.locator("#alerts .alert-card")
+    expect(card).to_be_visible(timeout=15_000)  # the background turn's completion surfaces here instead
     expect(page.locator(".bubble.assistant")).to_have_count(0)  # nothing of the turn leaked into view
     assert TAIL not in page.locator("#log").inner_text()
 
-    banner.locator("button").click()  # dismiss
-    expect(page.locator("#notifications .notification-banner")).to_have_count(0)
+    card.locator(".alert-close").click()  # sticky until dismissed, and only dismissal removes it
+    expect(page.locator("#alerts .alert-card")).to_have_count(0)
+
+
+def test_an_alert_card_opens_the_conversation_it_is_about(page, live_server):
+    """The card is a pointer: it names work that happened somewhere else, and its control is the way
+    there. Without it the user is left matching a title against the sidebar by hand."""
+    _open(page, live_server(delay=2.0, tail=TAIL))
+    page.fill("#msg", "ping")
+    page.click("#send")
+    expect(page.locator(".bubble.assistant", has_text=REPLY)).to_be_visible(timeout=10_000)
+
+    page.click("#new-conv")  # switch away; the turn finishes in the background
+    card = page.locator("#alerts .alert-card")
+    expect(card).to_be_visible(timeout=15_000)
+
+    card.locator(".alert-open").click()
+    expect(page.locator(".bubble.user", has_text="ping")).to_be_visible(timeout=10_000)
+    expect(page.locator(".bubble.assistant", has_text=TAIL)).to_be_visible()
 
 
 def test_switching_back_mid_turn_shows_the_turn_so_far_and_keeps_streaming(page, live_server):
@@ -567,7 +585,7 @@ def test_switching_back_mid_turn_shows_the_turn_so_far_and_keeps_streaming(page,
     # The tail then streams into the bubble the replay left open: one bubble holding the whole reply.
     expect(page.locator(".bubble.assistant", has_text=TAIL)).to_be_visible(timeout=15_000)
     expect(page.locator(".bubble.assistant")).to_have_count(1)
-    assert page.locator("#notifications .notification-banner").count() == 0  # never backgrounded at the end
+    assert page.locator("#alerts .alert-card").count() == 0  # never backgrounded at the end
 
 
 def test_sidebar_collapse_resize_persist(page, live_server):
@@ -872,7 +890,10 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
                         "0": [
                             {"id": "r-1", "role": "researcher", "task": "compare pricing", "status": "running"},
                             {"id": "r-1", "append": {"kind": "reasoning", "text": "fetch each page"}},
-                            {"id": "r-1", "append": {"kind": "tool", "name": "get_webpage", "arguments": {"url": "u"}}},
+                            {
+                                "id": "r-1",
+                                "append": {"kind": "tool", "name": "get_web_content", "arguments": {"url": "u"}},
+                            },
                             {"id": "r-1", "append": {"kind": "answer", "text": "**Vendor A** is cheaper."}},
                             {
                                 "id": "r-1",
@@ -911,7 +932,7 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(thinking).to_have_class(re.compile(r"\bcollapsed\b"))
     expect(tool).to_have_class(re.compile(r"\btool\b"))
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
-    expect(tool.locator(".fold-label")).to_contain_text("get_webpage")
+    expect(tool.locator(".fold-label")).to_contain_text("get_web_content")
     # The answer block: open, and its markdown rendered as it is for the assistant's own reply.
     expect(answer).to_have_class(re.compile(r"\bassistant\b"))
     expect(answer).not_to_have_class(re.compile(r"\bcollapsed\b"))
@@ -928,6 +949,106 @@ def test_subagent_card_replays_with_its_nested_trace(page, live_server):
     expect(thinking).not_to_have_class(re.compile(r"\bcollapsed\b"))
     expect(thinking.locator(".fold-body")).to_contain_text("fetch each page")
     expect(tool).to_have_class(re.compile(r"\bcollapsed\b"))
+
+
+def _seed_subagent_tool_response(config, *, response, response_ref=None, response_bytes=None):
+    """A one-tool-call sub-agent conversation, with the append shape `core/subagents.py` records
+    for a tool result (optionally oversized, carrying `response_ref`/`response_bytes`)."""
+    from aimu.sessions import Session, TinyDBSessionStore
+
+    append = {"kind": "tool", "name": "get_web_content", "arguments": {"url": "u"}, "response": response}
+    if response_ref is not None:
+        append["response_ref"] = response_ref
+        append["response_bytes"] = response_bytes
+    store = TinyDBSessionStore(str(config.sessions_path))
+    store.save(
+        Session(
+            key="seeded",
+            messages=[{"role": "user", "content": "fetch that page"}],
+            metadata={
+                "title": "seeded",
+                "created_at": "2026-08-10T00:00:00",
+                "updated_at": "2026-08-10T00:00:00",
+                "subagent": {
+                    "0": [
+                        {"id": "r-1", "role": "researcher", "task": "fetch it", "status": "running"},
+                        {"id": "r-1", "append": append},
+                        {"id": "r-1", "status": "done"},
+                    ]
+                },
+            },
+        )
+    )
+
+
+def _open_nested_tool_output(page):
+    """Drill from the top-level spawn card down to its tool entry's own output foldable, the same
+    three clicks every nested-tool test needs: the card, then the tool row, then the output row."""
+    card = page.locator(".bubble.subagent")
+    card.locator("> .fold-header").click()
+    tool = card.locator("> .fold-body > .bubble.tool")
+    tool.locator("> .fold-header").click()
+    output = tool.locator(".tool-output")
+    output.locator("> .fold-header").click()
+    return output
+
+
+def test_subagent_tool_response_previews_and_expands_on_request(page, live_server):
+    """A sub-agent tool response too large to record whole (core/subagents.py's RESPONSE_PREVIEW_CHARS)
+    arrives with a `response_ref` alongside its truncated `response`. The card shows the truncation
+    plus a control naming the full size; activating it fetches the payload and swaps it in, once."""
+    preview = "P" * 4000
+    full = preview + "T" * 16000  # 20,000 bytes total, past the preview
+    digest = hashlib.sha256(full.encode()).hexdigest()
+
+    def seed(config):
+        config.payloads_path.mkdir(parents=True, exist_ok=True)
+        (config.payloads_path / digest).write_text(full, encoding="utf-8")
+        _seed_subagent_tool_response(
+            config, response=preview, response_ref=f"/payloads/{digest}", response_bytes=len(full)
+        )
+
+    payload_requests: list[str] = []
+    url = live_server(delay=0.0, seed=seed)
+    page.on("request", lambda r: payload_requests.append(r.url) if "/payloads/" in r.url else None)
+    _open(page, url)
+
+    output = _open_nested_tool_output(page)
+    text = output.locator(".output-text")
+    expand = output.locator(".output-more")
+    expect(text).to_have_text(preview)
+    # 20,000 / 1024 rounds to 20 KB.
+    expect(expand).to_have_text("Show full response (20 KB)")
+
+    expand.click()
+    expect(text).to_have_text(full)
+    expect(output.locator(".output-more")).to_have_count(0)
+    assert len(payload_requests) == 1, "a second activation must not re-fetch"
+
+
+def test_subagent_tool_response_expand_failure_leaves_the_preview_in_place(page, live_server):
+    """Payloads are never garbage collected, but a user can clear the folder by hand, so the
+    reference can be real and the file gone. A failed fetch must not blank the card: the preview
+    stays, and a short note replaces the control rather than a button that would only fail again."""
+    preview = "P" * 4000
+
+    def seed(config):
+        _seed_subagent_tool_response(
+            config, response=preview, response_ref="/payloads/" + "0" * 64, response_bytes=500_000
+        )
+
+    _open(page, live_server(delay=0.0, seed=seed))
+
+    output = _open_nested_tool_output(page)
+    text = output.locator(".output-text")
+    expand = output.locator(".output-more")
+    # 500,000 / 1024 rounds to 488 KB.
+    expect(expand).to_have_text("Show full response (488 KB)")
+
+    expand.click()
+    expect(expand).to_have_text("could not load full response")
+    expect(expand).to_be_disabled()
+    expect(text).to_have_text(preview)
 
 
 def test_a_cards_injected_round_says_the_cap_was_hit_and_quotes_the_prompt(page, live_server):
@@ -1022,12 +1143,12 @@ def _seed_tool_call(result: str | None):
             "role": "assistant",
             "content": "done",
             "tool_calls": [
-                {"type": "function", "function": {"name": "get_webpage", "arguments": {"url": "u"}}, "id": "1"}
+                {"type": "function", "function": {"name": "get_web_content", "arguments": {"url": "u"}}, "id": "1"}
             ],
         },
     ]
     if result is not None:
-        messages.append({"role": "tool", "name": "get_webpage", "content": result, "tool_call_id": "1"})
+        messages.append({"role": "tool", "name": "get_web_content", "content": result, "tool_call_id": "1"})
 
     def seed(config):
         TinyDBSessionStore(str(config.sessions_path)).save(
@@ -1119,10 +1240,14 @@ def _seed_thinking_and_continuation(config):
                     "content": "Looking.",
                     "thinking": "Search first.\nThen read it.",
                     "tool_calls": [
-                        {"type": "function", "function": {"name": "get_webpage", "arguments": {"url": "u"}}, "id": "1"}
+                        {
+                            "type": "function",
+                            "function": {"name": "get_web_content", "arguments": {"url": "u"}},
+                            "id": "1",
+                        }
                     ],
                 },
-                {"role": "tool", "name": "get_webpage", "content": "body", "tool_call_id": "1"},
+                {"role": "tool", "name": "get_web_content", "content": "body", "tool_call_id": "1"},
                 {"role": "user", "content": "Continue working on the task.", "provenance": "continuation"},
                 {"role": "assistant", "content": "Done."},
             ],
@@ -1163,7 +1288,7 @@ def test_a_collapsed_tool_line_names_the_call_and_its_result_size(page, live_ser
 
     label = tool.locator("> .fold-header > .fold-label")
     expect(label.locator(".fold-kind")).to_have_text("tool")
-    expect(label.locator(".fold-payload")).to_have_text('get_webpage(url="u")')
+    expect(label.locator(".fold-payload")).to_have_text('get_web_content(url="u")')
     expect(label.locator(".fold-metric")).to_have_text("13 chars")
 
     # One line tall regardless of argument length: the payload ellipsizes, the row never wraps.
@@ -2081,3 +2206,28 @@ def test_a_second_message_sent_mid_reply_does_not_share_the_first_turns_truncate
     expect(page.locator(".bubble.user", has_text="second")).to_have_count(0, timeout=10_000)
     expect(page.locator(".bubble.user", has_text="first")).to_be_visible()
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(1)
+
+
+def test_alert_cards_group_and_guard_their_controls(page, live_server):
+    """Three page-side rules, driven by injecting frames rather than by arranging three server states:
+    a later card supersedes its own group, a card whose conversation is gone keeps its text and loses
+    its control, and only an http(s) address becomes a link."""
+    _open(page, live_server(delay=0.0))
+
+    def raise_alert(**frame):
+        page.evaluate("(f) => raiseAlert(f)", frame)
+
+    raise_alert(text="first run finished", group="Digest", conversation_id="pruned")
+    raise_alert(text="second run finished", group="Digest", conversation_id="pruned")
+    cards = page.locator("#alerts .alert-card")
+    expect(cards).to_have_count(1)  # same group, so the newer card replaced the older
+    expect(cards.first).to_contain_text("second run finished")
+    # "pruned" is in no sidebar row, which is what a task's own retention does to its older runs.
+    expect(cards.first.locator(".alert-open")).to_have_count(0)
+
+    raise_alert(text="authorize at javascript:alert(1)", url="javascript:alert(1)")
+    expect(cards.first).to_contain_text("authorize")  # the text still reaches the user
+    expect(cards.first.locator(".alert-link")).to_have_count(0)  # but nothing scheme-shy becomes a link
+
+    raise_alert(text="authorize at https://auth.example/x", url="https://auth.example/x")
+    expect(cards.first.locator(".alert-link")).to_have_attribute("href", "https://auth.example/x")

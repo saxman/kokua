@@ -22,20 +22,16 @@ def test_default_confirm_tools():
     """The code-level default and the shipped example agree: `resolve_config` returns exactly what the
     example's explicit `confirm_tools` line says, which is the same list `AssistantConfig` falls back to
     when a `config.toml` omits the key entirely."""
-    assert AssistantConfig().confirm_tools == [
-        "add_skill_script",
-        "add_mcp_server",
-        "execute_python",
-        "run_command",
-        "update_config",
+    shipped = [
+        "skills.add_skill_script",
+        "mcp.add_mcp_server",
+        "compute.execute_python",
+        "compute.run_command",
+        "fs_write",
+        "config.update_config",
     ]
-    assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == [
-        "add_skill_script",
-        "add_mcp_server",
-        "execute_python",
-        "run_command",
-        "update_config",
-    ]
+    assert AssistantConfig().confirm_tools == shipped
+    assert resolve_config(build_arg_parser().parse_args([])).confirm_tools == shipped
 
 
 # --- the default model: one resolution, carrying whatever the string carries ----------

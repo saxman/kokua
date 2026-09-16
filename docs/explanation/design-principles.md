@@ -239,6 +239,18 @@ a lock pattern matching no real key locks nothing. You notice a prompt you did n
 notices a prompt that never comes. Both are hard startup errors naming the offending entry, because the
 alternative is a user who believes they are covered and is not.
 
+**A capability the config cannot describe is a capability you do not control.** That sounds abstract
+until a dependency makes it concrete, which AIMU 0.31.0 did: it added `write_file` and `edit_file` into
+the `fs` tool group Kokua had been handing out whole, so an upgrade alone would have given every agent
+declaring `fs` a write that no `tools` list ever asked for. The answer was not a flag: `fs` reads and
+`fs_write` writes, as two names, because with one name there is no way to *write down* "read a file and
+do not write one". The shipped `introspector` declares `fs` to read a transcript it was asked to
+evaluate, and its inability to rewrite that transcript is now a property of the config rather than a
+hope about the group's contents. The writers are gated in `confirm_tools` beside `run_command` for a
+related reason: `coder` holds a shell that can write a file, so an ungated `write_file` next to it would
+be the same outcome by a shorter route, with the gate approving the long way round and waving the short
+one through.
+
 **You may loosen, not only tighten.** `locked_config_keys` is yours to empty. Strike `agents.*` from it
 and the assistant really can rewrite its own capability table on the next restart. The documentation
 states that consequence plainly rather than preventing it, because a control you cannot release is not
@@ -248,9 +260,13 @@ assistant can rewrite for itself is not a policy.
 *How this cashes out:* [`config/store.py`](https://github.com/saxman/kokua/blob/main/src/kokua/config/store.py)'s `locked_by` matches a
 write against the user's own patterns, and `LOCK_AXIOM` beside it is the single unconditional lock.
 [`core/interaction.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py)'s `HumanGate.approve` is a bare name match
-against `confirm_tools`, which is what gates a worker's call identically to the entry agent's, and a
-proactive turn auto-denies rather than running a gated tool unattended.
-[`core/agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py)'s `validate_confirm_tools` and
+against the tool names startup resolved `confirm_tools` down to, which is what gates a worker's call
+identically to the entry agent's, and a proactive turn auto-denies rather than running a gated tool
+unattended. A `confirm_tools` entry names a toolset (`compute`, or `compute.execute_python`), so the
+resolution is what turns a capability the user declared into the names the gate matches; the prefix
+buys a gate that can name a whole capability and an error that can point at the right one, not a
+discriminator at the moment of the call.
+[`core/agents.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/agents.py)'s `resolve_confirm_tools` and
 [`config/file.py`](https://github.com/saxman/kokua/blob/main/src/kokua/config/file.py)'s lock-pattern checks are the two startup errors
 above. [`SECURITY.md`](https://github.com/saxman/kokua/blob/main/SECURITY.md) names which barrier a vulnerability report is about, and which
 behavior is the program working as documented.

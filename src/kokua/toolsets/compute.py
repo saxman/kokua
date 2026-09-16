@@ -2,7 +2,10 @@
 
 Defines no tools of its own. Note what declaring this grants: ``execute_python`` and ``run_command`` run
 with the privileges of the Kokua process, which is why the shipped ``[security].confirm_tools`` gates
-both by name rather than leaving the agent's declaration as the only control. Neither offers
+both by name (``compute.execute_python`` and ``compute.run_command``) rather than leaving the agent's
+declaration as the only control. It gates the two rather than the whole toolset, deliberately:
+``calculate`` runs no code of the model's and a prompt before every sum would train the reflex the other
+two need intact. A bare ``compute`` there is the stricter choice, and it is one line. Neither offers
 containment, and ``run_command`` offers one step less of it: a shell string reaches a credential sitting
 in a file with no code for anyone to read first, and process signalling is unconfined, so Kokua's own
 process is reachable from a command it ran.

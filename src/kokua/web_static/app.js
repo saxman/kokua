@@ -17,24 +17,140 @@ const tasksToggle = document.getElementById("tasks-toggle");
 const tasksRefresh = document.getElementById("tasks-refresh");
 const tasksCount = document.getElementById("tasks-count");
 const taskList = document.getElementById("task-list");
-const notifications = document.getElementById("notifications");
+const alertLayer = document.getElementById("alerts");
 const convHeading = document.getElementById("conv-heading");
 
-// A background turn finished while the user was viewing a different conversation ("notification"
-// frame): show a dismissible banner rather than stealing the current view.
-function showNotification(text) {
-  const el = document.createElement("div");
-  el.className = "notification-banner";
-  const span = document.createElement("span");
-  span.textContent = text;
-  const dismiss = document.createElement("button");
-  dismiss.type = "button";
-  dismiss.textContent = "Dismiss";
-  dismiss.addEventListener("click", () => el.remove());
-  el.appendChild(span);
-  el.appendChild(dismiss);
-  notifications.appendChild(el);
+// Alert cards ("notification" frames): work the user is not watching, raised over the page instead of
+// written into the transcript, because none of it is about the conversation on screen. Three things
+// produce one today (a scheduled task's report, an authorization an MCP connect is waiting on, and a
+// gated tool a backgrounded turn was denied), and each is a pointer rather than a place to act: the
+// deciding happens in the conversation, or in the browser tab the link opens.
+//
+// Newest first, and nothing expires. A card leaves when it is dismissed, or when a later card
+// supersedes it: same `group`, one card. That is what keeps a task firing every ten minutes overnight
+// from greeting the user with a wall of its own history.
+let alerts = [];
+
+function raiseAlert(frame) {
+  if (frame.group != null) alerts = alerts.filter((a) => a.group !== frame.group);
+  alerts.unshift({
+    text: frame.text || "",
+    ts: frame.ts,
+    conversationId: frame.conversation_id || null,
+    url: frame.url || null,
+    group: frame.group != null ? frame.group : null,
+  });
+  renderAlerts();
 }
+
+// Only http(s) becomes a link. The authorization URL comes from a remote MCP server's own metadata, so
+// it is not ours to trust: a `javascript:` href here would be that server scripting the page. An
+// address that fails this still reaches the user, in the card's text, which always carries it in words.
+function safeHref(url) {
+  try {
+    const parsed = new URL(url, window.location.href);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// The title of a conversation still in the sidebar, or null once it is gone. A task prunes its older
+// runs, so a card can outlive the conversation it points at; the card then keeps its text and drops
+// the control, rather than offering a switch that would land on nothing.
+function liveConversationTitle(id) {
+  const found = lastConversations.find((conv) => conv.id === id);
+  return found ? found.title : null;
+}
+
+function renderAlerts() {
+  alertLayer.replaceChildren();
+  // Above the cards rather than below them: the stack scrolls once it is tall enough, and the one
+  // control that empties it should not be the thing you have to scroll to reach.
+  if (alerts.length > 1) {
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.id = "alerts-clear";
+    clear.className = "secondary";
+    clear.textContent = `Clear all (${alerts.length})`;
+    clear.addEventListener("click", () => {
+      alerts = [];
+      renderAlerts();
+    });
+    alertLayer.appendChild(clear);
+  }
+  alerts.forEach((alert, index) => {
+    // No `role="alert"` on the card: the layer itself is the live region (`aria-live="assertive"` on
+    // #alerts), and a live region nested inside one is announced twice by some screen readers.
+    const card = document.createElement("div");
+    card.className = "alert-card";
+
+    const text = document.createElement("div");
+    text.className = "alert-text";
+    text.textContent = alert.text;  // never markdown: a card is chrome, and its text is not the model's
+    card.appendChild(text);
+
+    const foot = document.createElement("div");
+    foot.className = "alert-foot";
+    const when = tsParts(alert.ts);
+    if (when) {
+      const stamp = document.createElement("span");
+      stamp.className = "alert-ts";
+      stamp.textContent = when.label;
+      stamp.title = when.full;
+      foot.appendChild(stamp);
+    }
+
+    const title = alert.conversationId ? liveConversationTitle(alert.conversationId) : null;
+    if (title !== null) {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "alert-open secondary";
+      open.textContent = `Open "${title}"`;
+      open.addEventListener("click", () => {
+        selectConversation(alert.conversationId);
+        dismissAlert(index);
+      });
+      foot.appendChild(open);
+    }
+
+    const href = alert.url ? safeHref(alert.url) : null;
+    if (href) {
+      const link = document.createElement("a");
+      link.className = "alert-link";
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Authorize";
+      foot.appendChild(link);
+    }
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "alert-close secondary";
+    close.textContent = "✕";
+    close.setAttribute("aria-label", "Dismiss");
+    close.addEventListener("click", () => dismissAlert(index));
+    foot.appendChild(close);
+
+    card.appendChild(foot);
+    alertLayer.appendChild(card);
+  });
+}
+
+function dismissAlert(index) {
+  alerts.splice(index, 1);
+  renderAlerts();
+}
+
+// Escape takes the newest card, which is the one on top. Keyed off `defaultPrevented` rather than off
+// which element is focused: the composer is autofocused on load and holds focus for most of a session,
+// so a rule like "only from the body" would make the shortcut unreachable exactly when it is wanted.
+// Anything with a closer claim on the key (a rename input, mid-edit) calls preventDefault, and its
+// listener on the input runs before this one on the document.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !e.defaultPrevented && alerts.length) dismissAlert(0);
+});
 
 // The inline "working" indicator: a dim row saying a turn is under way, pinned to the foot of the
 // transcript for the turn's whole life, with the turn's output growing above it. It carries a spinner
@@ -757,7 +873,12 @@ function appendSubagentEntry(card, entry) {
   }
   if (entry.kind === "tool") {
     card.answer = null;
-    renderTool(entry.name, entry.arguments, undefined, { parent: card.body, response: entry.response });
+    renderTool(entry.name, entry.arguments, undefined, {
+      parent: card.body,
+      response: entry.response,
+      responseRef: entry.response_ref,
+      responseBytes: entry.response_bytes,
+    });
     return;
   }
   if (entry.kind === "error") {
@@ -1236,11 +1357,26 @@ function toolLine(name, args) {
 // become a multi-megabyte text node just because someone opened its card.
 const OUTPUT_CLAMP = 4000;
 
+// A response_bytes count as "N KB"/"N MB" for the expand control's label. A payload file only
+// exists past RESPONSE_PREVIEW_CHARS (core/subagents.py), so this never needs to say "bytes".
+function formatPayloadSize(bytes) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 // What a tool call returned, as its own nested foldable below the arguments, so the arguments stay
 // scannable when the card is opened. Populated on first expand, and clamped to OUTPUT_CLAMP with a
 // button for the rest. Plain text only, never markdown: a tool result is untrusted input.
-function renderToolOutput(parent, response) {
+//
+// A sub-agent's response can also carry `responseRef`/`responseBytes` (see core/subagents.py):
+// `response` is then already clamped to OUTPUT_CLAMP server-side, spilled there rather than merely
+// truncated for display, so the "show all" button below never applies to it. Its own control fetches
+// the payload on demand instead, once, and leaves the preview in place if the fetch fails, since the
+// file is never garbage collected but a user can clear the folder by hand.
+function renderToolOutput(parent, response, opts) {
   const size = response.length.toLocaleString();
+  const responseRef = opts && opts.responseRef;
+  const responseBytes = opts && opts.responseBytes;
   // Not also `.tool`: that would make `.bubble.tool` match a card and its own output. The monospace
   // type and colour are inherited properties, so they arrive from the enclosing card regardless.
   addFoldable("tool-output", { kind: "output", metric: `${size} chars` }, {
@@ -1250,6 +1386,33 @@ function renderToolOutput(parent, response) {
       text.className = "output-text";
       text.textContent = response.slice(0, OUTPUT_CLAMP);
       body.appendChild(text);
+      if (responseRef) {
+        const expand = document.createElement("button");
+        expand.type = "button";
+        expand.className = "output-more";
+        expand.textContent = `Show full response (${formatPayloadSize(responseBytes)})`;
+        let fetched = false;
+        expand.addEventListener("click", () => {
+          if (fetched) return;
+          fetched = true;
+          expand.disabled = true;
+          fetch(responseRef)
+            .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+            .then((full) => {
+              text.textContent = full;
+              expand.remove();
+            })
+            .catch(() => {
+              // The preview already on screen stands; only the control changes, to a note rather
+              // than a second button, since retrying would hit the same missing or unreadable file.
+              expand.textContent = "could not load full response";
+              expand.disabled = true;
+              expand.classList.add("output-error");
+            });
+        });
+        body.appendChild(expand);
+        return;
+      }
       if (response.length <= OUTPUT_CLAMP) return;
       const more = document.createElement("button");
       more.type = "button";
@@ -1274,11 +1437,20 @@ function renderTool(name, args, ts, opts) {
   // has anything to show, and an "output (0 chars)" row on every such card would be noise.
   const response = opts && opts.response;
   const returned = typeof response === "string" && response;
-  const metric = returned ? `${response.length.toLocaleString()} chars` : "";
+  // A spilled response's `response` is already clamped to the preview cap, so its true size is
+  // `responseBytes` (see core/subagents.py); without this, a multi-megabyte result reads as
+  // "4,000 chars" in the collapsed row and the truth only appears once the card is opened and
+  // expanded.
+  const metric = returned ? `${(opts.responseBytes ?? response.length).toLocaleString()} chars` : "";
   const parts = { kind: "tool", payload: toolLine(name, args), metric };
   const f = addFoldable("tool", parts, { parent: opts && opts.parent }, ts);
   f.body.appendChild(document.createTextNode(toolArgs(args)));
-  if (returned) renderToolOutput(f.body, response);
+  if (returned) {
+    renderToolOutput(f.body, response, {
+      responseRef: opts && opts.responseRef,
+      responseBytes: opts && opts.responseBytes,
+    });
+  }
   return f;
 }
 // The kind word each injection wears. AIMU raises the loop's counter for a tool round too, and this
@@ -1384,10 +1556,10 @@ function handleFrame(event) {
       setWorking(null);
     }
   } else if (frame.type === "notification") {
-    // A background turn on some OTHER conversation finished (never the one being viewed -- the
-    // server only sends this when you've switched away); show it without touching this view or its
-    // own working indicator.
-    showNotification(frame.text);
+    // Something happened outside the conversation on screen: a background turn finished, a scheduled
+    // task reported, an authorization is waiting, a backgrounded turn's gated tool was denied. It goes
+    // to the alert layer, so this view and its working indicator are left exactly as they are.
+    raiseAlert(frame);
   } else if (frame.type === "working") {
     setProcessing(!!frame.active);
     // `elapsed` is how long the turn has been running server-side, so switching into one that started
@@ -1405,6 +1577,11 @@ function handleFrame(event) {
     lastConversations = frame.items;
     awaitingTitle.clear();
     renderSidebar();
+    // A card names its conversation by title and offers a way into it, and a task prunes its older
+    // runs, so the list arriving is also the moment a standing card learns its target is gone. Only
+    // when a card is actually pointing somewhere: re-rendering the layer re-announces it to a screen
+    // reader, and this frame arrives on every turn that saves.
+    if (alerts.some((alert) => alert.conversationId)) renderAlerts();
   } else if (frame.type === "tasks") {
     lastTasks = frame.items;
     renderSidebar();

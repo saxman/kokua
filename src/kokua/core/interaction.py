@@ -107,17 +107,24 @@ class HumanGate:
     def __init__(
         self,
         ui,
-        config,
         *,
         active_id: Callable[[], str],
         is_proactive: Callable[[], bool],
         turn_conversation: Callable[[], Optional[str]],
     ):
         self._ui = ui
-        self._config = config
         self._active_id = active_id
         self._is_proactive = is_proactive
         self._turn_conversation = turn_conversation
+        # The tool names [security].confirm_tools resolves to, assigned once every agent has been wired
+        # (core.agents.resolve_confirm_tools, called from Assistant.start). None until then,
+        # deliberately, rather than an empty set: this gate is built in the composition root's __init__
+        # because wiring needs `approve` to hand to each agent, while the vocabulary a config entry
+        # resolves against does not exist until that wiring finishes. An empty default would make the
+        # window between the two read as "nothing is gated", which is the exact silent failure the
+        # startup check exists to prevent, so `approve` raises in it instead. The window is wider than
+        # it looks: boot's remote half runs in `start`, so it spans every MCP handshake.
+        self.gated_tools: Optional[frozenset[str]] = None
         self.approval: PendingRequest[bool] = PendingRequest(default=False)
         # One slot for whatever the running workflow asks. Single-slot and lock-guarded like approval:
         # a second asker waits until the first is answered, so the serve loop can never resolve the
@@ -138,7 +145,9 @@ class HumanGate:
     async def approve(self, name: str, arguments: dict) -> bool:
         """Tool-approval gate run before each tool call (published to the model client per run).
 
-        Ungated tools pass. A proactive/scheduled turn always auto-denies a gated tool: it is
+        Ungated tools pass, and what is gated is ``gated_tools``: the tool names startup resolved
+        ``[security].confirm_tools`` to, not the config entries themselves, which name a toolset each.
+        A proactive/scheduled turn always auto-denies a gated tool: it is
         unattended, so nobody is watching to confirm, and a firing that fell back to the viewed
         conversation would otherwise look foreground (its turn conversation equals the viewed one) and
         wrongly prompt.
@@ -146,11 +155,31 @@ class HumanGate:
         currently viewing; a turn backgrounded by a switch auto-denies. Otherwise prompt over the
         channel and await the answer, which the serve loop routes here.
         """
-        if name not in self._config.confirm_tools:
+        if self.gated_tools is None:
+            raise RuntimeError(
+                "the tool-approval gate was asked about a call before startup resolved "
+                f"[security].confirm_tools, so it cannot say whether {name!r} is gated. Nothing may run "
+                "a tool before Assistant.start has finished wiring."
+            )
+        if name not in self.gated_tools:
             return True
         if self._is_proactive():
             return False
-        if self._turn_conversation() != self._active_id():
+        turn_conversation = self._turn_conversation()
+        if turn_conversation != self._active_id():
+            # Raised rather than denied in silence: the tool result recording the refusal lands on a
+            # transcript the user is not reading, and the turn carries on without the tool, so nothing
+            # tells them their own turn lost a capability by their switching away. Not raised for a
+            # proactive firing (above), which reports itself when it ends and would otherwise raise one
+            # of these on every firing.
+            await self._ui.alert(
+                f"A turn you switched away from asked to run {name}. It was denied automatically, "
+                "because approving a tool call means reading it, and that turn is not on screen.",
+                conversation_id=turn_conversation,
+                # One card per tool per conversation: a loop retrying the same call must not stack a
+                # card per attempt, while a second, different tool is genuinely something else to know.
+                group=f"{turn_conversation}:{name}",
+            )
             return False
         return await self.approval.ask(lambda: self._ui.ask_approval(name, arguments))
 

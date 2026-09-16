@@ -50,7 +50,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.28.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.31.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -200,6 +200,91 @@ Consequences for working in this repo:
   silently. Worth writing down, because a probe that overclaims is worse than one that covers less. The
   global tier needs nothing either: `[assistant].max_iterations` rides a factory argument that has existed
   since 0.12.0, so only the per-agent tier ever depended on 0.28.0.
+  **AIMU 0.29.0 was the floor until 0.30.0, and its probe was a plain name lookup, the third time that
+  shape had answered (`resolve_default_text_model` first, `ModelRefusalError` second): the capability is
+  `aimu.sessions.SessionStore.list_summaries`, a session store's own answer to "every stored
+  conversation's title, timestamp, and message count, without its messages."** Kokua's sidebar, task
+  ownership, and startup pointer used to ask that question through `ConversationBook.sessions()`, which
+  cost one whole-file JSON parse per stored conversation: 4,790 ms on a 56.8 MB developer store, to draw
+  a list of titles. `ConversationBook.summaries()` now calls `list_summaries()` instead, and every
+  caller whose question was metadata rather than message text (`list()`, `sessions_for_task()`,
+  `most_recent_or_new()`) moved onto it in the same change; `sessions()` survives only for the one
+  caller that genuinely needs message text, the agent's cross-conversation search. The one wrinkle on a
+  plain name lookup: `list_summaries` is a method on `SessionStore`, not a name at module scope, so the
+  probe resolves `aimu.sessions.SessionStore` first and looks the symbol up there rather than on
+  `aimu.sessions` itself, which is a structural difference from `resolve_default_text_model`'s
+  single-hop lookup and not a different shape, since the question asked is still just "does this name
+  exist." What that leaves to the floor: `SessionStore.list_summaries` has a default implementation on
+  the ABC itself (read every session, keep its metadata, drop its messages), correct on any store and
+  slow on one where a full read is expensive, and `TinyDBSessionStore` overrides it with a query over
+  TinyDB's own table that never builds a `Session` at all. A name lookup on the ABC is satisfied by the
+  default alone, so it cannot tell an override from an inheritance; a `TinyDBSessionStore` that stopped
+  overriding the method, or a future store that never bothered, would still pass this probe while
+  paying the old per-conversation read in silence, the same shape of gap `events`' recursive
+  passthrough left one level down for its own capability. `StreamingContentType.CONTINUING` is the
+  floor's job now, exactly as `ModelRefusalError` and `make_async_subagent_tool(events=...)` became the
+  floor's job when the probe moved past each of them in turn.
+  **AIMU 0.30.0 was the floor until 0.31.0, and it was the first one a *rename* moved.** `get_webpage` became
+  `get_web_content`, and the name is not what matters: the old tool never asked what it had downloaded.
+  It handed `response.text` to an HTML stripper, and `requests` decodes `.text` with
+  `errors="replace"`, so a PDF behind a URL arrived as megabytes of replacement characters that a tag
+  stripper passes through almost whole; four such results, 6.28 MB of them, sit in this developer's own
+  stored transcripts, each having entered a model's context whole. Kokua needs the floor because it
+  hands that group out unchanged: `toolsets/web.py` is `list(builtin.web)` and `workflows/critics.py`
+  mounts the same group for the reviewer, so on an older sibling both poison a context with nothing
+  raised anywhere, which is the silent shape the floor exists for. The probe is a plain name lookup on
+  `aimu.tools.builtin.get_web_content`, the fourth time that shape has answered, and it is worth
+  reading for the check it *declines*. What Kokua hands an agent is the group, not the function, so the
+  strictly honest question is whether `builtin.web` contains it, which would take a membership check
+  over a list of *callables* matching on `__name__`: a new probe shape, and the same one declined at
+  0.24.0 for `run_command`. It is declined again here with even less to gain, because the rename moved
+  `def get_web_content` and the `web = [...]` entry for it in a single upstream commit, so unlike
+  0.24.0's fifteen-minute window there is no checkout at all in which the name resolves and the group
+  still holds the old tool. The membership is asserted in `tests/test_aimu_compat.py` instead, where it
+  is a fact about the release rather than a shape the preflight has to learn. What the probe leaves to
+  the floor is the *behavior* behind the name: a checkout could export `get_web_content` and classify
+  nothing, and its three caps (20,000 characters returned, 10 MB downloaded, 200,000 extracted from a
+  PDF) are invisible to a name lookup, which no preflight short of fetching a PDF could establish.
+  `SessionStore.list_summaries` is the floor's job now, in its turn.
+  **AIMU 0.31.0 is the current floor, and it is the first release where the probe deliberately passed
+  over a newer handle.** Three of its capabilities are Kokua's, and each is a different one of this
+  module's recurring shapes. First, `builtin.fs` gained `write_file` and `edit_file`, so the group Kokua
+  used to hand out as `list(builtin.fs)` became a group that writes: an upgrade alone would have given
+  every agent declaring `fs` a capability nothing declared, which is principle 2's corollary broken by
+  a dependency bump. `builtin.select` and `builtin.unscoped` are the answer, and they are why there are
+  now two toolsets: `toolsets/fs.py` is `select(builtin.fs, exclude=builtin.unscoped)` and
+  `toolsets/fs_write.py` is `select(builtin.fs, include=builtin.unscoped)`, so the pair partitions one
+  AIMU group by *reach* with no tool named in this repository, and a read tool AIMU adds later lands in
+  the read half on its own. Two names rather than one because Kokua's config has exactly one lever for a
+  capability, an agent's `tools` list, and with a single `fs` there is no way to write down "read a file
+  and do not write one" -- which is what the shipped `introspector` needs, holding `fs` to read a
+  transcript it was asked to evaluate. `write_file` and `edit_file` join the shipped
+  `[security].confirm_tools` for the reason `run_command` is there: an ungated write beside a gated one
+  is the same outcome by a shorter route. Second, `make_document_tools` gained `edit_document` and a
+  read-before-replace guard on `save_document`; `read_document` windows now, so replacing a whole
+  document from a windowed read deleted everything past the window (a 3,000-line document came back 51
+  lines long, truncation marker written in as content), and `toolsets/documents.py` names `edit_document`
+  in its guidance rather than relying on the refusal, which arrives only after the model has spent a
+  turn deciding. Third is `compaction`, on both spawn factories and in `SUBAGENT_SPEC_KEYS`, which
+  `core/agents.py` writes per worker from a declared `[assistant.generation].context_length`
+  (`compaction_for_window`, three quarters of the window, since `trim_messages` counts messages while
+  the window also holds a system message, a tool block, and the reply). Only a *spawned* worker gets
+  one: its messages are built per spawn and discarded with it, where the entry agent's are the
+  conversation on screen and in the session store, so trimming those would delete history the user can
+  still read. The probe is a membership check on `SUBAGENT_SPEC_KEYS` for `"compaction"` -- the second
+  time it has gripped that same set, for a different member, which is the 0.18.0 lesson restated: a
+  published set's presence proves nothing and only its contents date a checkout. It is **not** the
+  newest name in the release, and that is the new thing here. `select` landed earlier (aimu c44dc8d) and
+  would have been a plain name lookup on a function Kokua calls directly, but the `save_document` guard
+  landed two commits later (c66b08b) with no handle at all, while the windowing that makes an unguarded
+  save destructive landed earlier still (aae4a10) -- so a sibling parked in between passes a `select`
+  probe and destroys a document anyway. `compaction` is in the release's last functional commit
+  (9354536), so gripping it dates a checkout to all three capabilities, which is the reverse of the
+  trade 0.20.0's `endpoint_kwargs` had to accept. What it leaves to the floor is the *contents* of
+  `builtin.unscoped`: the whole `fs` split rests on that group holding both writers, and asking it needs
+  a membership check over a list of *callables* matching on `__name__`, declined at 0.24.0, again at
+  0.30.0, and again here, asserted in `tests/test_aimu_compat.py` instead. `get_web_content` is the
+  floor's job now, in its turn.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is
@@ -220,7 +305,7 @@ change. Full rationale, with the code that backs each claim, is in
    `isinstance(channel, WebChannel)` in `core/` or `workflows/`.
 2. **Grow by plugin, not by core change.** Capability arrives as a `FrontEnd` or a `Toolset`. A third
    party's arrives through the `kokua.frontends` / `kokua.toolsets` entry-point groups, and **every one of
-   the 21 toolsets Kokua ships arrives the same way**, listed in `pyproject.toml`'s
+   the 22 toolsets Kokua ships arrives the same way**, listed in `pyproject.toml`'s
    `[project.entry-points."kokua.toolsets"]` table beside where a third party's entry would go. There is no
    second route and no index in code: that table *is* the index, and
    `tests/toolsets/test_registration.py` pins it against `src/kokua/toolsets/` in both directions so a
@@ -270,10 +355,18 @@ change. Full rationale, with the code that backs each claim, is in
 6. **Security is explicit and user controlled.** Capability stays real; a control is added beside it
    and the control is yours. Every security control is a value in `config.toml` (`[security]
    confirm_tools`, `[security] locked_config_keys`, an agent's own `tools` list), never a constant in
-   the source. A control that would do nothing, a gate naming no real tool or a lock pattern matching
-   no real key, is a hard startup error rather than a silent no-op, because nobody notices a prompt
-   that never comes. You may loosen as well as tighten; only the key holding the lock list is
-   unconditional.
+   the source. A control that would do nothing, a gate that would hold nothing back or a lock pattern
+   matching no real key, is a hard startup error rather than a silent no-op, because nobody notices a
+   prompt that never comes. You may loosen as well as tighten; only the key holding the lock list is
+   unconditional. **A `confirm_tools` entry speaks the same vocabulary an agent's `tools` list does:**
+   `<toolset>` (or `<toolset>.*`) for a whole capability, `<toolset>.<tool>` for one of its tools, with
+   `core` reserved for the two tools no toolset provides (`spawn_subagent`, `activate_skill`) and
+   refused as a toolset name at registration so nothing can shadow it. `core/agents.py`'s
+   `resolve_confirm_tools` turns those entries into the tool names `HumanGate.approve` matches, which is
+   why a prefix cannot discriminate at call time and is not meant to. Prefer the bare toolset where the
+   toolset is exactly the risky set: the shipped default names `fs_write` bare, so a writer a later AIMU
+   adds to that group is gated on arrival, and names `compute.execute_python` explicitly, because
+   `compute` also carries `calculate`.
 
 Kokua inherits AIMU's six library-level principles on top of these.
 
@@ -292,7 +385,7 @@ model's context on every configuration question. A new or changed key goes in bo
 
 ```
 src/kokua/
-  cli.py  plugins.py  images.py  logging_setup.py  transcript_export.py  config.example.toml  web_static/
+  cli.py  plugins.py  images.py  payloads.py  logging_setup.py  transcript_export.py  config.example.toml  web_static/
   core/         assistant (composition root + serve loop), conversations, turns, interaction,
                 settings_runtime, diagnostics, build, agents (build_registry, validate_agents, prompt
                 assembly, delegation), agent_registry, turn_gate, turn_registry, messages, titles,
@@ -308,7 +401,8 @@ src/kokua/
   frontends/    cli, web           -- registered as plugins, exactly like a third party's
   registry/     registry (Toolset, Setting, select, build_tools, register), context (LiveState,
                 ToolsetContext) -- the machinery, and no toolsets
-  toolsets/     audio, compute, documents, fs, memory, misc, skills, speech, time, transcription, web
+  toolsets/     audio, compute, documents, fs, fs_write, memory, misc, skills, speech, time,
+                transcription, web
                 -- wrappers over AIMU's groups and stores,
                 capabilities, config, conversations, mcp, scheduling -- one Kokua subsystem each,
                 planning -- a Workflow and no tools, aimu_agents, benchmark, github_backup, image --
@@ -386,7 +480,7 @@ and does so inside the function that needs it rather than at module scope, becau
 imports `settings_sources` at module level to build its cold-key schema -- hoisting the upward import
 would close that loop and break `import kokua.toolsets.core` on a partially-initialized module.
 
-Note the convention is only part of the answer: twelve of the 33 tools the shipped entry agent holds
+Note the convention is only part of the answer: thirteen of the 34 tools the shipped entry agent holds
 come from AIMU and are not in this repo at all, which is why
 [docs/explanation/architecture.md](docs/explanation/architecture.md#how-an-agents-tools-resolve) carries
 the full inventory and `tests/core/test_build.py` pins it as an exact set. That inventory is what

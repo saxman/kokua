@@ -310,7 +310,14 @@ def test_main_web_reports_a_broken_agents_table_as_an_instruction(monkeypatch, t
     from kokua.config import file as settings
 
     monkeypatch.setenv("KOKUA_HOME", str(tmp_path))
-    text = settings.example_text().replace('tools = ["fs", "compute", "time"]', 'tools = ["fs", "nope", "time"]')
+    # Substituted into the shipped example rather than written out, so this exercises the real file. The
+    # asserted-on string is `[agents.coder]`'s tools line, which is why it fails loudly if that line is
+    # edited without editing this: a no-op replace leaves a *valid* config and the test stops testing.
+    broken = settings.example_text().replace(
+        'tools = ["fs", "fs_write", "compute", "time"]', 'tools = ["fs", "nope", "time"]'
+    )
+    assert "nope" in broken, "the [agents.coder] tools line moved; this replace no longer breaks anything"
+    text = broken
     (tmp_path / "config.toml").write_text(text, encoding="utf-8")
     monkeypatch.setattr("sys.argv", ["kokua-web"])
 
@@ -387,6 +394,43 @@ def test_export_to_stdout_with_a_dash(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert out.startswith("# ")
     assert "what is it" in out
+
+
+def test_export_full_reads_a_spilled_sub_agent_response_back_off_disk(monkeypatch, tmp_path, capsys):
+    """`_export` must pass `config.payloads_path` through to `render_markdown`: without it, `--full`
+    on a conversation carrying a spilled sub-agent tool response (core/subagents.py) could only ever
+    show the RESPONSE_PREVIEW_CHARS preview already stored in metadata, silently abridging what the
+    flag promises to keep whole."""
+    from kokua import payloads
+
+    full_text = "w" * 9000
+    reference = payloads.save_text(tmp_path / "data" / "payloads", full_text)
+    key = _seeded_home(
+        monkeypatch,
+        tmp_path,
+        [{"role": "user", "content": "go"}, {"role": "assistant", "content": "done"}],
+        metadata={
+            "subagent": {
+                "0": [
+                    {"id": "s1", "role": "worker", "task": "fetch", "status": "running"},
+                    {
+                        "id": "s1",
+                        "append": {
+                            "kind": "tool",
+                            "name": "fetch_url",
+                            "arguments": "{}",
+                            "response": full_text[:4000],
+                            "response_ref": reference,
+                            "response_bytes": len(full_text),
+                        },
+                    },
+                    {"id": "s1", "status": "done"},
+                ]
+            }
+        },
+    )
+    _run_main(monkeypatch, ["export", key, "--full", "-o", "-"], expect_exit=0)
+    assert full_text in capsys.readouterr().out
 
 
 def test_export_of_an_unknown_id_reports_it_and_exits_nonzero(monkeypatch, tmp_path, capsys):

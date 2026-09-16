@@ -13,6 +13,7 @@ from kokua.core.assistant import Assistant
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
 from tests.channels import (
+    AlertCapturingChannel,
     FakeChannel,
     _ConvCapturingChannel,
     _TurnSavedChannel,
@@ -32,7 +33,7 @@ async def test_assistant_handles_message(tmp_path):
     await assistant._handle(ChannelMessage(text="do a thing", channel="fake"), conversation_id=assistant._active_id)
 
     assert channel.sent == ["Sure, done."]
-    assert assistant.history  # persisted at least the turn
+    assert assistant.history_view()[0]  # persisted at least the turn
 
 
 async def test_assistant_proactive_message(tmp_path):
@@ -125,9 +126,10 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
     """A firing that fell back to the viewed conversation (a channel with no conversation list)
     auto-denies a gated tool, even though streaming_conversation == _active_id would otherwise look
     foreground and wrongly prompt. Unattended turns must never prompt."""
-    cfg = _config(tmp_path, confirm_tools=["update_config"])
+    cfg = _config(tmp_path, confirm_tools=["config.update_config"])
     client = _RequestsToolOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    await assistant.start()
 
     # No streaming_conversation is set by the test; _proactive sets it to _active_id (the viewed
     # conversation) itself, so only the proactive marker keeps this from prompting.
@@ -139,10 +141,11 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
 
 async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
     """The minted-conversation path (never the viewed one) also auto-denies."""
-    cfg = _config(tmp_path, confirm_tools=["update_config"])
+    cfg = _config(tmp_path, confirm_tools=["config.update_config"])
     client = _RequestsToolOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: client)
+    await assistant.start()
 
     await asyncio.wait_for(assistant._proactive("do it", task_name="t"), timeout=2.0)
 
@@ -267,11 +270,7 @@ async def test_background_turn_notifies_on_success_when_switched_away(tmp_path):
     i.e. `conversation_id != self._active_id` at completion -- the same notion WebChannel's own
     muting uses once its active_conversation_id is kept in sync (see the sync test above)."""
 
-    class _NotifyChannel(FakeChannel):
-        async def send_notification(self, text: str) -> None:
-            self.sent.append(f"[notify] {text}")
-
-    channel = _NotifyChannel()
+    channel = AlertCapturingChannel()
     cfg = _config(tmp_path)
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient(["ok"]))
     conv_a = assistant._active_id
@@ -280,7 +279,7 @@ async def test_background_turn_notifies_on_success_when_switched_away(tmp_path):
 
     await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=conv_a)
 
-    assert any(s.startswith("[notify]") for s in channel.sent)
+    assert channel.alerts
 
 
 async def test_background_turn_error_notifies_with_reason(tmp_path):
@@ -288,11 +287,7 @@ async def test_background_turn_error_notifies_with_reason(tmp_path):
     'reply ready' (its error reply went out muted, so the notification is the only signal the user
     gets that the background turn finished and how)."""
 
-    class _NotifyChannel(FakeChannel):
-        async def send_notification(self, text: str) -> None:
-            self.sent.append(f"[notify] {text}")
-
-    channel = _NotifyChannel()
+    channel = AlertCapturingChannel()
     cfg = _config(tmp_path)
     assistant = await Assistant.create(
         cfg, channel, client_factory=lambda cid: MockAsyncModelClient([Exception("boom")])
@@ -303,7 +298,7 @@ async def test_background_turn_error_notifies_with_reason(tmp_path):
 
     await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=conv_a)
 
-    notifies = [s for s in channel.sent if s.startswith("[notify]")]
+    notifies = [text for text, _, _, _ in channel.alerts]
     assert notifies, "a background failure should still notify the user"
     assert any("failed" in s.lower() for s in notifies)  # the notification carries the reason
     assert not any("reply ready" in s.lower() for s in notifies)  # not a misleading success notice
@@ -523,7 +518,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
             return await super()._chat(*args, **kwargs)
 
     channel = _ConvCapturingChannel()
-    cfg = _config(tmp_path, confirm_tools=["update_config"])
+    cfg = _config(tmp_path, confirm_tools=["config.update_config"])
     assistant = await Assistant.create(
         cfg,
         channel,
@@ -531,6 +526,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
             "update_config", {"section": "planning", "key": "plan_review", "value": "true"}
         ),
     )
+    await assistant.start()
     viewed = assistant._active_id
 
     await assistant._proactive("run the report", task_name="report")
@@ -1515,7 +1511,8 @@ async def test_a_failed_firing_persists_the_partial_transcript_it_produced(tmp_p
 
     await assistant._proactive("scan the transcripts", task_name="digest", task_id="t1")
 
-    session = assistant._book.sessions_for_task("t1")[0]
+    summary = assistant._book.sessions_for_task("t1")[0]
+    session = assistant._book.get(summary.key)
     assert [m.get("content") for m in session.messages if m.get("role") == "user"] == ["scan the transcripts"]
     assert session.metadata["updated_at"] > session.metadata["created_at"]
 
@@ -1557,7 +1554,8 @@ async def test_a_failed_firing_tags_its_partial_messages_as_proactive(tmp_path):
 
     await assistant._proactive("scan the transcripts", task_name="digest", task_id="t1")
 
-    session = assistant._book.sessions_for_task("t1")[0]
+    summary = assistant._book.sessions_for_task("t1")[0]
+    session = assistant._book.get(summary.key)
     assert session.messages
     assert all(m.get(PROVENANCE_KEY) == PROVENANCE_PROACTIVE for m in session.messages)
 
@@ -1779,3 +1777,39 @@ async def test_shutdown_cancels_a_pending_title_rather_than_waiting_on_the_endpo
 
     pending = [task for task in asyncio.all_tasks() if "_write_title" in repr(task.get_coro())]
     assert not pending, f"{len(pending)} title task(s) outlived the store: {pending}"
+
+
+async def test_background_notification_names_its_conversation(tmp_path):
+    """The card offers a way into the conversation that finished; a title alone leaves the user to
+    find the row themselves."""
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["ok"])
+    )
+    conv_a = assistant._active_id
+    await assistant.new_conversation()
+
+    await assistant._handle(ChannelMessage(text="hi", channel="fake"), conversation_id=conv_a)
+
+    assert [conversation_id for _, conversation_id, _, _ in channel.alerts] == [conv_a]
+
+
+async def test_proactive_report_links_the_conversation_it_ran_in(tmp_path):
+    """A firing's report points at the conversation the firing minted, not at whichever one the user
+    happens to be reading when it lands."""
+    channel = AlertCapturingChannel()
+    assistant = await Assistant.create(
+        _config(tmp_path), channel, client_factory=lambda cid: MockAsyncModelClient(["task output"])
+    )
+    viewed = assistant._active_id
+
+    # task_name and task_id as a real firing passes them (TaskService._fire sends the name as both).
+    await assistant._proactive("run the report", task_name="report", task_id="report")
+
+    (text, conversation_id, url, group) = channel.alerts[-1]
+    assert "report" in text and url is None
+    assert conversation_id not in (None, viewed)
+    assert assistant._store.get(conversation_id).metadata["title"] == "report"
+    # Grouped by the task, not by the conversation: every firing mints a new one, so grouping by
+    # conversation would leave a card per firing, which is the pile-up the group exists to prevent.
+    assert group == "report"

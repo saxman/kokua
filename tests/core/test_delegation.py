@@ -300,7 +300,101 @@ def test_every_spec_key_kokua_writes_is_one_aimu_accepts():
         "thinking",
         "generate_kwargs",
         "max_iterations",
+        "compaction",
     } <= SUBAGENT_SPEC_KEYS
+
+
+def test_a_spec_carries_a_trimmer_sized_to_the_window_its_agent_resolves(tmp_path):
+    """A declared ``context_length`` is the only statement of a window anywhere: no client reports the
+    one it is talking to. So it does two jobs, and the second is bounding a worker's own growth."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"], generation={"context_length": 8000}),
+    }
+    config, state = _state(tmp_path, agents)
+    config.generation = {"context_length": 200_000}
+    compaction = build_agent_specs(config, state, "assistant")["researcher"]["compaction"]
+
+    # Its own window, not the global one and not its delegator's: 8,000 leaves 6,000 for messages, so a
+    # conversation over that is trimmed and one under it is handed back unchanged.
+    long_conversation = [{"role": "user", "content": "word " * 20_000}] + [
+        {"role": "assistant", "content": "ok"},
+        {"role": "user", "content": "and?"},
+    ]
+    assert len(compaction(long_conversation)) < len(long_conversation)
+    short = [{"role": "user", "content": "hello"}]
+    assert compaction(short) == short
+
+
+def test_a_spec_omits_compaction_when_no_window_is_declared_anywhere(tmp_path):
+    """Omitted rather than written as None, which AIMU reads by *membership*: a written None means "no
+    compaction for this specialist whatever the spawn tool was built with", a decision nobody made."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"]),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    assert "compaction" not in build_agent_specs(config, state, "assistant")["researcher"]
+
+
+def test_a_window_too_small_to_hold_a_turn_declines_to_trim(tmp_path):
+    """A trimmer built from a window whose message share rounds to nothing could only delete. The value
+    that gets here is not hypothetical: `context_length` is validated as an int of at least 1 and `bool`
+    is an int subclass, so `context_length = true` arrives as a window of 1."""
+    from kokua.core.agents import compaction_for_window
+
+    assert compaction_for_window({"context_length": True}) is None
+    assert compaction_for_window({"context_length": 1}) is None
+    assert compaction_for_window({"context_length": 4096}) is not None
+
+
+def test_a_worker_inherits_the_global_window_when_it_declares_none(tmp_path):
+    """``generation_for`` has already folded [assistant.generation] in, so the trimmer written into a
+    spec is the worker's own declared window when it has one and the global window otherwise. Never its
+    delegator's, which is the trap ``model`` and ``max_iterations`` each document one field over."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher"], generation={"context_length": 999}),
+        "researcher": AgentConfig(tools=["web"]),
+    }
+    config, state = _state(tmp_path, agents)
+    config.generation = {"context_length": 32768}
+    spec = build_agent_specs(config, state, "assistant")["researcher"]
+
+    assert "compaction" in spec
+    # The delegator's 999 would trim a two-message exchange; the global 32,768 does not.
+    exchange = [{"role": "user", "content": "word " * 400}, {"role": "assistant", "content": "ok"}]
+    assert spec["compaction"](exchange) == exchange
+
+
+async def test_the_conversation_the_user_reads_is_never_trimmed(tmp_path):
+    """Compaction reaches a spawned worker's messages and nothing else. The entry agent's messages are
+    the conversation on screen and in the session store, so rewriting them would drop history the user
+    can still see, silently and for the rest of that conversation's life. A worker's are built per spawn
+    and discarded with it, which is what makes an automatic rewrite of them safe to do at all."""
+    from kokua.core.agents import compaction_for_window
+    from kokua.core.assistant import Assistant
+
+    from tests.channels import FakeChannel
+    from tests.helpers import MockAsyncModelClient
+
+    config, _ = _state(
+        tmp_path,
+        {
+            "assistant": AgentConfig(delegates_to=["researcher"]),
+            "researcher": AgentConfig(tools=["web"]),
+        },
+    )
+    config.generation = {"context_length": 32768}
+    # Emptied because these two agents provide none of the tools the shipped gate list names, which
+    # `validate_confirm_tools` refuses at startup rather than let a dead gate sit there.
+    config.confirm_tools = []
+    # The window is declared, so a worker built from this config would get a trimmer...
+    assert compaction_for_window(config.generation) is not None
+
+    assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+
+    # ...and the agent the user talks to has none, which is the asymmetry worth pinning.
+    assert assistant._agent.compaction is None
 
 
 def test_a_nested_delegate_is_built_with_the_resolved_default(tmp_path, monkeypatch):

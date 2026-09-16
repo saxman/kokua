@@ -130,3 +130,14 @@ def _config(tmp_path: Path, **overrides) -> AssistantConfig:
     }
     base.update(overrides)
     return AssistantConfig(**base)
+
+
+class AlertCapturingChannel(_ConvCapturingChannel):
+    """Captures alert cards with the link each one carries, and the sidebar pushes beside them."""
+
+    def __init__(self):
+        super().__init__()
+        self.alerts: list[tuple[str, str | None, str | None, str | None]] = []
+
+    async def send_notification(self, text: str, *, conversation_id=None, url=None, group=None) -> None:
+        self.alerts.append((text, conversation_id, url, group))

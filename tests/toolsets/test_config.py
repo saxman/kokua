@@ -306,6 +306,38 @@ async def test_update_config_refuses_an_agent_model_this_process_cannot_build(tm
     assert not path.exists()
 
 
+async def test_update_config_refuses_an_agent_cap_below_one(tmp_path):
+    """The dry run answers "would the next startup accept this file" and repeats no per-key check, so a
+    key whose validity is enforced only at parse time needs its own converter to run here too."""
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config)
+    result = await update_config("agents.researcher", "max_iterations", "0")
+    assert "max_iterations" in result
+    assert not path.exists()
+
+
+async def test_update_config_refuses_an_agent_thinking_level_that_is_not_one(tmp_path):
+    """The same gap, and it predates ``max_iterations``: nothing ``validate_agents`` reads covers the
+    value set ``_thinking`` enforces, so an unrecognized level was written and refused at startup."""
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config)
+    result = await update_config("agents.researcher", "thinking", "bogus")
+    assert "bogus" in result
+    assert not path.exists()
+
+
+async def test_update_config_still_writes_agent_keys_their_converters_accept(tmp_path):
+    """The composed converter must not over-reject, and the value the dry run sees is the converted one:
+    ``thinking`` lands as the bool ``_thinking`` maps the string to, not as the string."""
+    config = _unlocked(tmp_path, agents={"researcher": AgentConfig()}, entry_agent="researcher")
+    path, _, update_config = _tools(tmp_path, config=config)
+    await update_config("agents.researcher", "max_iterations", "25")
+    await update_config("agents.researcher", "thinking", "true")
+    written = _read(path)["agents"]["researcher"]
+    assert written["max_iterations"] == 25
+    assert written["thinking"] is True
+
+
 async def test_update_config_creates_an_agent_table_that_does_not_exist_yet(tmp_path):
     config = _unlocked(tmp_path, agents={"assistant": AgentConfig()}, entry_agent="assistant")
     path, _, update_config = _tools(tmp_path, config=config, registry={"time": _stub_toolset("time")})

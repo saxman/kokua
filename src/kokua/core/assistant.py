@@ -96,7 +96,10 @@ class Assistant:
         # conversation's spawn_subagent reports through it, and it resolves the turn to record into
         # from a contextvar rather than from construction.
         self._subagent_reporter = SubagentReporter(
-            self._ui, model_for=config.model_for, thinking_for=config.thinking_for
+            self._ui,
+            model_for=config.model_for,
+            thinking_for=config.thinking_for,
+            payloads_path=config.payloads_path,
         )
         self._scheduler = scheduler
         self._store = store
@@ -138,7 +141,6 @@ class Assistant:
         # concurrent workflow turns) can never clobber the slot the serve loop is about to resolve.
         self._human = HumanGate(
             self._ui,
-            config,
             active_id=lambda: self._book.active_id,
             is_proactive=proactive_turn.get,
             turn_conversation=streaming_conversation.get,
@@ -255,7 +257,7 @@ class Assistant:
         # through build.py's functions by hand.
         state = LiveState(
             config=config,
-            notify=channel.send,
+            notify=assistant._ui.alert,
             oauth=oauth,
             connections=connections,
             scheduler=scheduler,
@@ -312,7 +314,7 @@ class Assistant:
             return
         self._started = True
         # Imported here, not at module level, for the cycle `create` documents above.
-        from kokua.core.agents import configured_but_undeclared, validate_confirm_tools
+        from kokua.core.agents import configured_but_undeclared, resolve_confirm_tools
 
         config, state = self._config, self._state
         # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when that
@@ -337,7 +339,10 @@ class Assistant:
         entry_agent = self._registry.get(self._active_id)
         # Last of the startup checks, because it is the first point where every tool this config builds
         # exists: the entry agent's own, and each worker's, built when the delegation tool above was.
-        validate_confirm_tools(config, state, entry_agent)
+        # It both validates and resolves: a `[security].confirm_tools` entry names a toolset, and the
+        # gate matches a tool name, so the gate cannot answer at all until this has run (see
+        # `HumanGate.gated_tools`).
+        self._human.gated_tools = resolve_confirm_tools(config, state, entry_agent)
 
         state.tasks.arm_all()
 
@@ -395,15 +400,17 @@ class Assistant:
         not force it into existence."""
         return self._state.__dict__.get("document_store") if self._state else None
 
-    @property
-    def history(self) -> list[dict]:
-        """The active conversation's messages (OpenAI-format), for a front end to display."""
-        return self._session.messages
+    def history_view(self) -> tuple[list[dict], dict]:
+        """The active conversation's messages (OpenAI-format) and metadata (e.g. the ``subagent``
+        map), from one store read.
 
-    @property
-    def history_metadata(self) -> dict:
-        """The active conversation's metadata (e.g. the ``subagent`` map), for replay display."""
-        return self._session.metadata
+        A method returning both rather than two properties, because the two are halves of one
+        snapshot: a front end repainting the view needs the metadata that goes with the messages it
+        is showing. Read separately they are two snapshots, and a background turn's save landing
+        between them would repaint messages from before it with metadata from after.
+        """
+        session = self._session
+        return session.messages, session.metadata
 
     def list_conversations(self) -> list[dict]:
         """All conversations as {id, title, updated_at, active, task_id, running}, most-recently-updated
@@ -900,7 +907,7 @@ class Assistant:
                 self._conversation_title(leaving), leaving, muted=self._ui.mutes_background_turns
             )
         await self._ui.push_conversations(items)
-        await self._ui.show_history(self.history, self.history_metadata)
+        await self._ui.show_history(*self.history_view())
         # The notice goes between the two, and the order is load-bearing at both ends. A page replaces
         # its whole transcript on a history frame, so a notice sent before it is wiped unseen, taking
         # the auto-deny warning with it; and a page treats an ordinary message as the end of a turn and

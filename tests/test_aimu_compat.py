@@ -49,19 +49,21 @@ def test_a_missing_aimu_is_reported_as_such(monkeypatch):
 
 def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
     """The floor moves with the capabilities Kokua uses, so the previous release must fail."""
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.23.0")
-    with pytest.raises(AimuVersionError, match="0.23.0"):
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.30.0")
+    with pytest.raises(AimuVersionError, match="0.30.0"):
         require_aimu()
 
 
 def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
-    """The probe follows whatever shape the newest surface has, and a set member is one of the three.
+    """The probe follows whatever shape its surface has, and a set member is one of the three.
 
-    This is in fact today's shape too (0.28.0's surface is `max_iterations`), but exercised here against
-    0.18.0's `generate_kwargs` member instead of monkeypatching over the live probe, so the branch stays
-    covered independent of whichever member the real surface currently names.
+    This is the live shape today (0.31.0's ``"compaction"``), and it is still exercised here against
+    0.18.0's ``generate_kwargs`` member rather than against the current one, so the branch stays covered
+    whichever member the probe grips next. Both are entries in the same set, which is the point that set
+    keeps making: its presence says nothing, and only its contents date a checkout.
     """
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
+    monkeypatch.setattr(aimu_compat, "_PROBE_CLASS", None)
     monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "SUBAGENT_SPEC_KEYS")
     monkeypatch.setattr(aimu_compat, "_PROBE_MEMBER", "generate_kwargs")
     monkeypatch.setattr(
@@ -87,6 +89,7 @@ def test_a_probe_that_checks_an_enum_member_still_works(monkeypatch):
         THINKING = "thinking"
 
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
+    monkeypatch.setattr(aimu_compat, "_PROBE_CLASS", None)
     monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "StreamingContentType")
     monkeypatch.setattr(aimu_compat, "_PROBE_MEMBER", "CONTINUING")
     monkeypatch.setattr(
@@ -105,6 +108,7 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
     """An editable checkout's version says what its branch claims, not what its code contains, so a
     sibling on an older branch can report the floor while missing the surface behind it."""
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
+    monkeypatch.setattr(aimu_compat, "_PROBE_CLASS", None)
     monkeypatch.setattr(
         aimu_compat.importlib,
         "import_module",
@@ -117,20 +121,105 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    The surface today is ``StreamingContentType.CONTINUING``, the phase AIMU 0.28.0 yields before an
-    injected round. An older AIMU never yields it, so Kokua's branches on it are dead code and the loop
-    stops being watchable in a front end whose whole claim is that it is watched.
+    The surface today is ``SUBAGENT_SPEC_KEYS``'s ``"compaction"``, the spec key ``core/agents.py``
+    writes so a spawned worker trims its own messages instead of filling its window and dying in it.
+    It is deliberately not the newest *name* in 0.31.0: ``builtin.select`` landed earlier in the release
+    and would have been a plain name lookup, but ``save_document``'s read-before-replace guard landed
+    two commits after it with no handle at all, while the ``read_document`` windowing that makes an
+    unguarded save destructive landed before it. A checkout in between passes a ``select`` probe and
+    still truncates a document to the window it was read through. ``compaction`` is in the release's
+    last functional commit, so gripping it dates a checkout to all of them.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
     probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_SYMBOL == "StreamingContentType"
-    # A membership check, because the capability is one member of an enum that is itself old: the type
-    # has existed since long before this floor, so only its contents date a checkout.
-    assert aimu_compat._PROBE_MEMBER == "CONTINUING"
+    assert aimu_compat._PROBE_MODULE == "aimu.tools.builtin"
+    assert aimu_compat._PROBE_SYMBOL == "SUBAGENT_SPEC_KEYS"
+    assert aimu_compat._PROBE_MEMBER == "compaction"
+    assert aimu_compat._PROBE_MEMBER in probe
+    # The set is at module scope and the shape is membership, so neither of the other two applies.
+    assert aimu_compat._PROBE_CLASS is None
     assert aimu_compat._PROBE_PARAMETER is None
+
+
+def test_the_floor_covers_the_fs_group_the_probe_cannot_inspect():
+    """What Kokua's two fs toolsets depend on is a group's *contents*, which no probe shape here asks.
+
+    ``toolsets/fs.py`` excludes ``builtin.unscoped`` from ``builtin.fs`` and ``toolsets/fs_write.py``
+    selects it, so the two partition one AIMU group by reach and the read-only half stays read-only
+    without either module naming a tool. That rests on ``unscoped`` holding both writers: an ``unscoped``
+    missing ``write_file`` would hand the read-only toolset a writer, silently, which is the whole
+    failure the split exists to prevent. Asking it in the preflight needs a membership check over a list
+    of *callables* matching on ``__name__``, a shape declined at 0.24.0 and 0.30.0 and declined again
+    here, so it is asserted as a fact about the release instead.
+    """
+    from aimu.tools import builtin
+
+    writers = {"write_file", "edit_file"}
+    assert callable(builtin.select)
+    assert writers <= {fn.__name__ for fn in builtin.unscoped}
+    assert writers <= {fn.__name__ for fn in builtin.fs}
+    assert {fn.__name__ for fn in builtin.select(builtin.fs, exclude=builtin.unscoped)} == {
+        "list_directory",
+        "read_file",
+    }
+    assert {fn.__name__ for fn in builtin.select(builtin.fs, include=builtin.unscoped)} == writers
+
+
+def test_the_floor_covers_the_web_fetcher_the_probe_no_longer_grips():
+    """0.30.0's probe surface is 0.31.0's floor now that ``"compaction"`` holds the one probe slot.
+
+    ``toolsets/web.py`` is ``list(builtin.web)`` and ``workflows/critics.py`` mounts the same group for
+    the reviewer, so an AIMU whose fetcher decodes every response as text poisons a context with nothing
+    raised anywhere. Pinned the way every other demoted surface is: one probe slot cannot hold every
+    capability the floor covers.
+    """
+    from aimu.tools import builtin
+
+    assert hasattr(builtin, "get_web_content")
+    assert "get_web_content" in {fn.__name__ for fn in builtin.web}
+
+
+def test_the_floor_covers_the_summaries_call_the_probe_no_longer_grips():
+    """0.29.0's probe surface is 0.30.0's floor now that ``get_web_content`` holds the one probe slot.
+
+    ``ConversationBook.summaries()`` calls ``SessionStore.list_summaries`` directly, and the sidebar,
+    task ownership, and the startup pointer all read through it. An AIMU without the method raises
+    ``AttributeError`` on the first sidebar push rather than degrading in silence, so what the floor
+    buys here is the instruction rather than the catch; it is pinned the way the two capabilities below
+    are, because one probe slot cannot hold every capability the floor covers.
+    """
+    from pathlib import Path
+
+    from aimu.sessions import SessionStore
+
+    from kokua.core import conversations
+
+    assert hasattr(SessionStore, "list_summaries")
+    assert "list_summaries" in Path(conversations.__file__).read_text()
+
+
+def test_the_floor_covers_the_streaming_content_type_the_probe_no_longer_grips():
+    """0.28.0's probe surface is 0.29.0's floor now that ``list_summaries`` holds the one probe slot.
+
+    ``StreamingContentType.CONTINUING`` is the phase a streamed driver yields before a round the loop
+    itself injected; both producers still branch on it by name, so an AIMU predating it would still
+    degrade in silence with no probe to catch it. Pinned directly against the source, the same way
+    ``test_the_floor_covers_the_spec_key_the_probe_no_longer_grips`` pins ``max_iterations``: a single
+    probe slot cannot hold every capability the floor has come to cover.
+    """
+    from pathlib import Path
+
+    from aimu.models import StreamingContentType
+
+    from kokua.channels import web
+    from kokua.core import subagents
+
+    assert hasattr(StreamingContentType, "CONTINUING")
+    for module in (web, subagents):
+        assert "StreamingContentType.CONTINUING" in Path(module.__file__).read_text()
 
 
 def test_the_floor_covers_the_spec_key_the_probe_no_longer_grips():
@@ -146,27 +235,6 @@ def test_the_floor_covers_the_spec_key_the_probe_no_longer_grips():
     from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
 
     assert "max_iterations" in SUBAGENT_SPEC_KEYS
-
-
-def test_the_probe_names_the_phase_kokua_actually_branches_on():
-    """The probe is only honest if the depended-on capability is the thing it looks up.
-
-    Both producers branch on this member by name, so a checkout without it degrades in silence: the
-    channel and the reporter simply never report a boundary, and nothing raises anywhere. Asserted
-    against the source rather than by calling either one, because what the probe stands in for is that
-    these two modules name the member at all.
-    """
-    from pathlib import Path
-
-    from aimu.models import StreamingContentType
-
-    from kokua.channels import web
-    from kokua.core import subagents
-
-    assert hasattr(StreamingContentType, aimu_compat._PROBE_MEMBER)
-    for module in (web, subagents):
-        assert f"StreamingContentType.{aimu_compat._PROBE_MEMBER}" in Path(module.__file__).read_text()
-    require_aimu()  # does not raise against the AIMU this suite runs on
 
 
 def test_the_default_cap_matches_aimus_own():
@@ -203,7 +271,7 @@ def test_the_declared_floor_matches_the_packaged_requirement():
 
 
 def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
-    """A keyword argument is one of the three shapes, and is the one in force today (0.25.0's `events`).
+    """A keyword argument is one of the three shapes, and was the one in force for 0.25.0's `events`.
 
     Exercised here against a stand-in rather than the live surface, because the point is the *negative*:
     where a capability is a constructor parameter, a name lookup passes over an older signature that has
@@ -217,6 +285,7 @@ def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
             pass
 
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
+    monkeypatch.setattr(aimu_compat, "_PROBE_CLASS", None)
     monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "SkillManager")
     monkeypatch.setattr(aimu_compat, "_PROBE_MEMBER", None)
     monkeypatch.setattr(aimu_compat, "_PROBE_PARAMETER", "include")

@@ -104,6 +104,14 @@ class ToolsetRegistry(dict):
         self.providers: dict[str, str] = dict(providers)
 
 
+#: The ``[security].confirm_tools`` prefix for the tools no toolset builds: ``spawn_subagent``, attached
+#: to the entry agent after its toolsets are, and ``activate_skill``, which AIMU gives a ``SkillAgent``.
+#: Reserved here rather than only in the gate's own parser, because a registered toolset of this name
+#: would make those two gates unwritable, and a gate nobody can write is the failure this whole check
+#: exists to prevent. See ``core.agents.gateable_tools``.
+RESERVED_GATE_NAMESPACE = "core"
+
+
 def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistry:
     """Index every toolset by name, rejecting a name two providers claim.
 
@@ -113,11 +121,19 @@ def register(sources: Sequence[tuple[str, Iterable[Toolset]]]) -> ToolsetRegistr
     would leave nothing to tell them apart, so the message also carries each side's ``description`` --
     for an MCP server that already names its URL, so both entries in the config are identifiable without
     a new field.
+
+    One name is refused outright rather than on collision: :data:`RESERVED_GATE_NAMESPACE`.
     """
     registry: dict[str, Toolset] = {}
     provider: dict[str, str] = {}
     for label, toolsets in sources:
         for toolset in toolsets:
+            if toolset.name == RESERVED_GATE_NAMESPACE:
+                raise ToolsetError(
+                    f"toolset name {RESERVED_GATE_NAMESPACE!r} (from {label}) is reserved. It is the "
+                    "[security].confirm_tools prefix for the tools no toolset provides, so a toolset "
+                    "holding it would leave those gates with no name to write. Rename it."
+                )
             if toolset.name in registry:
                 existing = registry[toolset.name]
                 # Each side's description may already end in its own period (every MCP toolset's does:
@@ -175,22 +191,32 @@ def build_tools(toolsets: Sequence[Toolset], ctx: "ToolsetContext") -> list:
     First-wins matches the declared order, so an agent that wants one toolset's version of a shared
     tool name declares that toolset earlier.
 
-    Each name is also recorded on ``ctx.state``, which is what lets startup reject a
-    ``[security].confirm_tools`` entry that names no real tool. This is the only place that recording
-    can happen once: every agent's registry-provided tools are built through this function, the entry
-    agent's and a spawned worker's alike, and a nested worker's are built by a recursion that lands here
-    too. Collecting at any of the callers instead would need one collector per call site and would miss
-    whichever depth was forgotten.
+    Each name is also recorded on ``ctx.state`` **under the toolset that offered it**, which is what
+    lets startup resolve a ``[security].confirm_tools`` entry written as ``toolset.tool`` and reject one
+    that names no real tool. This is the only place that recording can happen once: every agent's
+    registry-provided tools are built through this function, the entry agent's and a spawned worker's
+    alike, and a nested worker's are built by a recursion that lands here too. Collecting at any of the
+    callers instead would need one collector per call site and would miss whichever depth was forgotten.
+
+    Note the recording is deliberately wider than the returned list. A name the first-wins dedup drops
+    is still recorded under the toolset that offered it, because that toolset really does provide it and
+    would win for an agent declaring it first. Recording only the survivors would make a truthful gate
+    entry fail startup on the accident of one agent's declaration order.
     """
     tools: list = []
     seen: set[str] = set()
     for toolset in toolsets:
+        # Seeded even when the build returns nothing, so a workflow-only toolset like `planning` is
+        # known-and-empty to the gate check rather than indistinguishable from a name nobody declared.
+        provided = ctx.state.tools_by_toolset.setdefault(toolset.name, set())
         for fn in toolset.build(ctx):
             name = getattr(fn, "__name__", None)
-            if name and name not in seen:
+            if not name:
+                continue
+            provided.add(name)
+            if name not in seen:
                 seen.add(name)
                 tools.append(fn)
-    ctx.state.built_tool_names.update(seen)
     return tools
 
 

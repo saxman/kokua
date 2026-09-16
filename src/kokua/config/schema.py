@@ -159,13 +159,23 @@ class AssistantConfig:
     generate_titles: bool = True
     # Tools that require interactive confirmation before each call (see assistant._approve). These
     # run with full machine access; an empty list disables approval. Proactive turns auto-deny them.
+    # Each entry names the toolset providing the tool: "<toolset>" or "<toolset>.*" for all of them,
+    # "<toolset>.<tool>" for one, with "core" reserved for the tools no toolset provides. Resolved to
+    # tool names at startup by core.agents.resolve_confirm_tools, which rejects an entry gating nothing.
+    # `fs_write` is named bare where the others name a tool, and the asymmetry is the point: that toolset
+    # is `select(builtin.fs, include=builtin.unscoped)`, so it holds every writer AIMU puts in that group
+    # and nothing else. Naming its two tools would gate today's writers and leave tomorrow's ungated on
+    # an upgrade, which is the drift `toolsets/fs.py` selects by reach to avoid, reappearing one layer up.
+    # `compute` cannot be named bare for the same reason in reverse: it carries `calculate`, which no gate
+    # should stop.
     confirm_tools: list[str] = field(
         default_factory=lambda: [
-            "add_skill_script",
-            "add_mcp_server",
-            "execute_python",
-            "run_command",
-            "update_config",
+            "skills.add_skill_script",
+            "mcp.add_mcp_server",
+            "compute.execute_python",
+            "compute.run_command",
+            "fs_write",
+            "config.update_config",
         ]
     )
     # Which config keys update_config refuses. The user's to set: see store.locked_by for the pattern
@@ -324,6 +334,14 @@ class AssistantConfig:
         small; the bytes are re-read here and base64-inlined only when a turn is sent to the model. Kept
         out of ``documents_path`` because the DocumentStore scans that folder as UTF-8 text at startup."""
         return self.data_dir / "images"
+
+    @property
+    def payloads_path(self) -> Path:
+        """Oversized sub-agent tool responses the web UI serves at /payloads. Sessions store a short
+        ``/payloads/<name>`` reference plus a preview, never the whole response, so ``sessions.json``
+        stays small; see ``payloads.py``. Kept out of ``documents_path`` because the DocumentStore
+        scans that folder as UTF-8 text at startup and these are not documents the user wrote."""
+        return self.data_dir / "payloads"
 
     @property
     def logs_path(self) -> Path:

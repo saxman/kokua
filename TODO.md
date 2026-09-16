@@ -2,6 +2,9 @@
 
 Captured 2026-07-14; pruned and renumbered 2026-08-13 (three resolved items removed, three
 release-hygiene items added). Item 12, a security policy, was resolved 2026-08-23 by `SECURITY.md`.
+Item 19, `read_file`'s unreachable tail, was resolved upstream 2026-09-11 by AIMU 0.31.0, which gave
+every capped read an `offset` and a truncation notice naming the call that continues it; numbers are
+not reused, so the gap it left stays.
 Backlog only, not yet scheduled. File references point at current code.
 
 ## 1. Make session-level config overrides visible
@@ -89,6 +92,13 @@ model's context window. Decide on a mitigation: e.g. cap/trim the reused convers
 older firings), roll over to a fresh conversation past a size threshold, or expose the choice per task.
 No cap exists today; it is listed under Known limitations in `CHANGELOG.md`.
 
+Note what the sub-agent compaction added for AIMU 0.31.0 does *not* settle here. That trims a spawned
+worker's messages, which are built per spawn and discarded with it. A task conversation is stored, and
+the user can open it in the sidebar and read it, so trimming it would delete history that is on screen.
+The mechanism is now available (`core.agents.compaction_for_window` builds one from a declared
+`context_length`); what this item still owes is the decision about a *persisted* conversation, which is
+a product question rather than a plumbing one.
+
 ## 9. Change the default model to a local model
 `config.example.toml` already documents the fallback as "$AIMU_LANGUAGE_MODEL / a local model", but
 `AssistantConfig.model` defaults to `None`. Verify what `None` actually resolves to at agent-build time,
@@ -136,18 +146,6 @@ channel that prints as it goes, so the run would print into the reader's convers
 which one owns it. Decide those three together, or leave the fallback and the flag honest about why.
 Related: a `/switch` during a firing already points `/stop` at the wrong conversation, noted under
 invariant 7 in `core/turns.py`.
-
-## 13. `agents.*` writes silently drop a per-key converter's own checks
-`toolsets/config.py`'s cold-schema comprehension rebuilds every `agents.*` entry from `AGENT_SCHEMA` as
-`(target, types, label, agent_write)`, replacing each entry's fourth element (its per-key converter)
-wholesale instead of composing with it. Any check that lived only in that converter, and that
-`validate_agents`'s dry run does not repeat, is silently dropped on the write path. `max_iterations` is
-the first `agents.*` key where this costs anything, because its validity (an integer of 1 or more) is
-enforced only at parse time, in `config/file.py`, and nowhere `validate_agents` looks. The result:
-`update_config("agents.<name>", "max_iterations", "0")` is accepted, and the config it writes is refused
-at the next startup. Fix by composing `agent_write` with the discarded per-key converter rather than
-replacing it, or by moving the range check somewhere `validate_agents` reaches. This shape will silently
-cost the next range-checked `agents.*` key too, not just this one.
 
 ## 14. Reach conversation branching and truncation from the terminal
 The web UI forks a conversation at a turn (`ConversationBook.branch`, a control on each turn's
@@ -206,29 +204,31 @@ turn, or a client-supplied token echoed back on `turn_saved` so the queue matche
 the token is the stronger of the two, since it also survives a proactive turn's save landing in the
 conversation being viewed. Either one lets the page stop parsing commands it does not own.
 
-## 19. `read_file` can only ever read a file from its first line
-`aimu.tools.builtin.read_file(path, max_lines)` truncates from the top and takes no offset, and
-`list_directory` is the only other member of the `fs` group (`toolsets/fs.py` wraps the group unchanged
-and narrows nothing). An agent handed a file larger than its context can therefore read the beginning of
-that file and nothing else: the truncation notice honestly names the total line count and the parameter
-that would return more, but every larger `max_lines` starts again at line 1, so the only way to reach
-line 900 is to also carry lines 1 through 899. There is no search either, so an agent cannot locate the
-part it wants before paying for everything above it.
+## 20. Park a backgrounded turn at the tool gate instead of auto-denying it
+`HumanGate.approve` denies a gated tool outright when the calling turn's conversation is not the one
+being viewed (`interaction.py`, the `turn_conversation() != active_id()` branch), and switching away
+denies any prompt already standing (`abandon_all`, called by `select_conversation`). The turn then
+carries on without the tool. A user who switches tabs mid-turn therefore loses a capability silently,
+and the alert card that now reports the deny is a consolation rather than a fix: there is nothing to
+approve any more, only a run to repeat.
 
-Surfaced by conversation analysis: an agent that exports another conversation with `render_markdown` and
-hands the path to a delegate holding `fs` is reading a document whose full tool payloads run to tens of
-thousands of characters, and the turn worth debugging is rarely the first one. The failure is quiet,
-which is what makes it worth fixing: a truncated read of a transcript looks exactly like a complete read
-of a short one, so an analysis silently covers the opening turns and reports as though it covered the
-run.
+Fix direction: park such a call and let the user answer it from the conversation the alert card links
+to. That is a security-policy change as much as a UI one, so it needs its own design pass rather than
+riding a front-end change. What it has to answer:
 
-Note: the fix belongs upstream in the editable `../aimu` sibling. A Kokua-side slicing tool would sit
-beside the group's own `read_file` as a second, differently-shaped way to read a file, which is the
-duplication `toolsets/fs.py` exists to avoid. It raises the AIMU floor and moves the compat probe, in the
-shape that surface has taken four times already: a signature check on `read_file` for the new parameter,
-as `SkillManager(include=...)`, `script_env`, `stream_thinking`, and `events` each were.
+- `PendingRequest` is a single slot answered by a bare "y"/"n" (`interaction.py`), so two parked
+  conversations are not representable. Routing has to become per conversation.
+- `abandon_all` on switch exists so a reply typed after switching cannot be misrouted to the question
+  left behind. Parking removes the deny that made that safe, so the reply path needs the conversation
+  in it.
+- A parked turn holds its gate hold and its agent. It needs a timeout, or a rule for what happens when
+  the socket closes (the web front end builds one `Assistant` per connection, so today the whole
+  session goes with it).
+- Proactive firings must keep denying: parking one would hang a 3am task on its gate until morning, and
+  [SECURITY.md](SECURITY.md)'s claim that nothing gated runs unattended rests on that.
+- README, SECURITY.md, and `docs/explanation/architecture.md` all state the current rule, and it is
+  stated as a barrier rather than an accident, so all three move with the code.
 
-Fix direction: an `offset` parameter (a 1-indexed first line, defaulting to 1) beside `max_lines`, which
-makes a large file reachable in pages. Worth deciding at the same time whether paging alone is enough or
-whether the group also wants a search that returns matching line numbers, since paging makes a file
-reachable while search is what makes the right page findable without reading the wrong ones first.
+Approving from the card itself was considered and rejected in the same discussion: a card cannot hold
+`execute_python`'s body or `add_skill_script`'s script, and a truncated argument blob beside an Allow
+button trains the user to approve unread.

@@ -6,6 +6,7 @@ import asyncio
 import queue
 import threading
 import time
+from datetime import datetime
 
 import pytest
 
@@ -736,7 +737,21 @@ async def test_web_channel_send_notification_always_sends():
     channel = WebChannel(ws)
     channel.active_conversation_id = "viewed"
     await channel.send_notification("Task 'Digest' finished")
-    assert {"type": "notification", "text": "Task 'Digest' finished"} in ws.frames
+    (frame,) = ws.frames
+    assert frame["type"] == "notification" and frame["text"] == "Task 'Digest' finished"
+    assert frame["conversation_id"] is None and frame["url"] is None
+    datetime.fromisoformat(frame["ts"])  # stamped server-side, in the form the page's captions parse
+
+
+async def test_web_channel_notification_carries_its_link():
+    """The card offers a way to act on the alert, so the id and the URL ride the frame rather than
+    being dug out of the sentence."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_notification("Authorize access", conversation_id="c7", url="https://example.test/a")
+    (frame,) = ws.frames
+    assert frame["conversation_id"] == "c7"
+    assert frame["url"] == "https://example.test/a"
 
 
 async def test_web_channel_send_working_emits_frame_regardless_of_foreground():
@@ -2616,3 +2631,10 @@ def test_the_export_control_does_not_refresh_the_sidebar_or_history(tmp_path):
             if frame["type"] == "tasks":
                 break
     assert [f["type"] for f in frames] == ["download", "tasks"]
+
+
+async def test_web_channel_notification_carries_its_group():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_notification("Task 'Digest' finished", group="Digest")
+    assert ws.frames[0]["group"] == "Digest"

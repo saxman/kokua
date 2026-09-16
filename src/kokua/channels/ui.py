@@ -138,10 +138,45 @@ class ChannelUI:
         if self._turn_saved is not None:
             await self._turn_saved(conversation_id, message_index)
 
-    async def notify(self, text: str) -> None:
-        """Report a background turn's completion. Skipped by a channel that cannot background a turn."""
+    async def notify(self, text: str, *, conversation_id: Optional[str] = None) -> None:
+        """Report a background turn's completion. Skipped by a channel that cannot background a turn.
+
+        ``conversation_id`` is the conversation that finished, so a front end can offer a way into it
+        rather than leaving the user to find it by title. It doubles as the card's group: one turn runs
+        per conversation at a time, so a second completion notice for the same conversation supersedes
+        the first rather than stacking beside it.
+        """
         if self._notification is not None:
-            await self._notification(text)
+            await self._notification(text, conversation_id=conversation_id, url=None, group=conversation_id)
+
+    async def alert(
+        self,
+        text: str,
+        *,
+        conversation_id: Optional[str] = None,
+        url: Optional[str] = None,
+        group: Optional[str] = None,
+    ) -> None:
+        """Raise something the user has to deal with, outside whatever conversation they are reading.
+
+        Shares :meth:`notify`'s frame and differs in its fallback, which is the whole reason the two
+        are separate methods. A background turn's completion is worth nothing on a channel that never
+        backgrounds one, so ``notify`` there is silence; an alert is raised by work the user is *not*
+        watching (a scheduled task, an authorization the connect call is waiting on), so it has to land
+        somewhere, and a channel with no card surface prints the sentence instead.
+
+        That fallback is what makes ``text`` self-contained: it carries the URL, or names the
+        conversation, in words. ``conversation_id`` and ``url`` only let a richer front end turn those
+        words into a control.
+
+        ``group`` names what the alert is *about* (a task, a conversation), so that a repeating source
+        supersedes its own last card instead of stacking one per occurrence. Left None, the card stands
+        on its own and nothing ever replaces it.
+        """
+        if self._notification is not None:
+            await self._notification(text, conversation_id=conversation_id, url=url, group=group)
+        else:
+            await self._channel.send(text)
 
     async def ask_approval(self, name: str, arguments: Any) -> None:
         """Prompt for tool approval, as a frame or as a plain-text question."""

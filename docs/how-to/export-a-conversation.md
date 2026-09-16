@@ -120,10 +120,11 @@ The assistant finds the conversation (`list_conversations` or `search_conversati
 gets back a path plus how long the file is. What happens next depends on the length, and that is the
 part worth understanding.
 
-**A path, not the transcript.** The tool answers with a file path on purpose. AIMU's `fs` group offers
-`read_file(path, max_lines)` and no offset, so a file can be read from its first line and nowhere else,
-and a tool that returned the Markdown directly would spend the asking conversation's whole context on
-one run's tool output. So a long export is meant to be handed to a sub-agent whose fresh context
+**A path, not the transcript.** The tool answers with a file path on purpose. `read_file` returns 2,000
+lines per call and names the offset that continues the read, so a long file is reachable whole, in
+pages, and every page is paid for out of the context doing the paging. A tool that returned the Markdown
+directly would spend the asking conversation's whole context on one run's tool output in one go, and
+reading it here page by page is the same bill in instalments. So a long export is meant to be handed to a sub-agent whose fresh context
 absorbs the file, returning only the findings, and the assistant's guidance tells it to delegate rather
 than read once the file is past a few hundred lines. A short export it will usually just read itself,
 which is the right call: a delegation costs a spawn.
@@ -139,19 +140,21 @@ That worker holds the conversation tools itself, so the whole job is one delegat
 conversation, exports it, reads the file, and reports per criterion, quoting the transcript lines each
 judgment rests on. Nothing but its report enters your conversation. Three things it is instructed to be
 strict about: a criterion the transcript cannot settle is reported as unassessable rather than guessed
-at, a truncated read is reported as covering only part of the run, and if you give no criteria it
+at, a read it stopped short of finishing is reported as covering only part of the run, and if you give no criteria it
 evaluates against whether the run reached what you asked for, what it spent, and where it went wrong,
 saying up front that it chose them.
 
 **Ask for `full` detail when the tool result is the thing you are debugging.** The tool takes the same
 cap `--full` lifts, so "export it with the full tool output" gets you a file with nothing cut.
 
-**What it cannot do yet.** If the export is longer than the introspector's own context, the read stops
-part way and the analysis covers only the beginning of the run. It is instructed to say so rather than
-answer as if it had read the whole thing, so you get "I saw the first N lines" instead of a confident
-partial answer, but the underlying fix (paging into a file) is not there yet: it needs an
-`offset` on AIMU's `read_file`, which is item 19 in `TODO.md`. For a very long run, `kokua export` plus
-your own editor is still the more reliable read.
+**What it still cannot do.** Paging arrived with AIMU 0.31.0, so a read that stops part way now names
+the offset that continues it and the introspector is instructed to page through the rest. What paging
+does not fix is an export longer than the introspector's *own* context: pages accumulate in the worker's
+window rather than the asking conversation's, which is the point of the delegation, but a run whose
+transcript exceeds that window still cannot be held whole. The worker is instructed to say which part of
+the run it saw rather than answer as if it had read all of it, so you get a stated partial answer instead
+of a confident one. For a very long run, `kokua export` plus your own editor is still the more reliable
+read.
 
 **The current conversation is a blind spot, and it says so.** The export renders the *stored*
 transcript, and the turn you are in right now is not stored until it finishes. Exporting the

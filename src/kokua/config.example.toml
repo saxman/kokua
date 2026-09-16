@@ -47,7 +47,12 @@ generate_titles = true
 # replaces the card's value for that parameter alone. A parameter the backend cannot take (min_p on
 # Ollama, penalties on Anthropic) is dropped, warning only to data/logs/kokua.log. max_tokens caps
 # generated tokens; context_length sizes the window they share with the prompt, and applies per request
-# on Ollama only (elsewhere the window is fixed at model load or server launch).
+# on Ollama only (elsewhere the window is fixed at model load or server launch). It has a second job:
+# a spawned sub-agent trims its own messages before each model turn to fit the window declared for it,
+# so a long delegation bounds its own growth instead of failing when the window fills. Declaring no
+# context_length leaves that off, since nothing else states a window and guessing one would mean
+# rewriting a worker's messages against a number nobody wrote down. The conversation you are in is
+# never trimmed: it is yours to read, and Kokua saves it.
 # [assistant.generation]
 # temperature = 0.7          # 0.0 to 2.0
 # top_p = 0.9                # 0.0 to 1.0
@@ -61,12 +66,34 @@ generate_titles = true
 [security]
 # Tools requiring confirmation before each call (terminal y/N, or Allow/Deny in the web UI). These run
 # with full machine access. [] disables approval; proactive turns auto-deny these regardless. Gating is
-# by tool name, so a sub-agent's call is routed to you too. A name no configured agent provides fails
-# startup, naming it and suggesting the near misses: a gate matching nothing prompts for nothing, and a
-# prompt that never comes is not something you notice. Only what exists at startup can be listed, so a
-# tool the assistant brings in later with add_mcp_server, or one only compose_subagent would build from a
-# toolset no agent names, has to be reachable from an [agents.*] table first. Locked by default.
-confirm_tools = ["add_skill_script", "add_mcp_server", "execute_python", "run_command", "update_config"]
+# by tool name at call time, so a sub-agent's call is routed to you too. Every entry names the toolset
+# the tool comes from: "compute" (or "compute.*") gates every tool that capability provides,
+# "compute.execute_python" gates one, and the reserved "core" prefix holds the two tools no toolset
+# provides, spawn_subagent and activate_skill. A "*" anywhere but as the whole tool is rejected. An entry
+# that would gate nothing fails startup, naming it and suggesting the near misses: a gate matching
+# nothing prompts for nothing, and a prompt that never comes is not something you notice. So does a bare
+# tool name with no prefix, a real tool filed under the wrong toolset, a toolset no agent declares, and
+# one that provides no tools. Only what exists at startup can be listed, so a tool the assistant brings
+# in later with add_mcp_server, or one only compose_subagent would build from a toolset no agent names,
+# has to be reachable from an [agents.*] table first. Locked by default.
+#
+# Four of the six shipped entries write with this process's privileges: fs_write's two tools name the
+# path, execute_python and run_command name their own target, and update_config rewrites the file every
+# setting comes from. The other two sit one step further back, each installing something that will run
+# later.
+#
+# Note fs_write is named bare where the rest name a tool. That toolset is every writer AIMU puts in its
+# fs group and nothing else, so the bare name gates a writer added in a later release too; spelling out
+# write_file and edit_file would gate today's two and let tomorrow's third through in silence. compute
+# cannot be bare for the reverse reason: it carries calculate, which no gate should stop.
+confirm_tools = [
+    "skills.add_skill_script",
+    "mcp.add_mcp_server",
+    "compute.execute_python",
+    "compute.run_command",
+    "fs_write",
+    "config.update_config",
+]
 
 # Which config keys update_config refuses, so only a hand-edit here changes them. A pattern is
 # "section.key" for one key, "section.*" for a section and every table under it, or "*" for all of
@@ -91,7 +118,7 @@ locked_config_keys = [
 # the clock (declare "time" to get it).
 #
 # One namespace covers everything, so a `tools` entry may be an AIMU built-in group ("web", "fs",
-# "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own ("memory",
+# "fs_write", "compute", "time", "misc", "audio", "speech", "transcription"), one of Kokua's own ("memory",
 # "documents", "skills", "capabilities", "config", "conversations", "mcp", "planning",
 # "scheduling"), a plugin toolset ("aimu_agents", "benchmark", "github_backup", "image"), a skill by name, or an
 # MCP server by its [[mcp.server]] name. `kokua --list-toolsets` lists them; an unknown name fails
@@ -127,9 +154,14 @@ its sources."""
 # temperature = 0.2
 # context_length = 131072
 
+# `fs` reads and `fs_write` writes, and they are two entries because one name could not say both: with
+# the writers inside `fs`, every agent below declaring it to read a file would be able to rewrite one.
+# `write_file` and `edit_file` are in [security].confirm_tools above for the same reason
+# `execute_python` and `run_command` are: an ungated write beside a gated one is the shorter route to
+# the same outcome.
 [agents.coder]
 description = "Coding specialist: read/write files and run code to complete a task."
-tools = ["fs", "compute", "time"]
+tools = ["fs", "fs_write", "compute", "time"]
 system_message = """\
 You are a coding sub-agent. Complete the task by reading and writing files and running code (Python, \
 shell, or calculations). Report exactly what you did and the concrete result."""
@@ -138,8 +170,9 @@ shell, or calculations). Report exactly what you did and the concrete result."""
 # full reasoning and tool output would swallow the context of the conversation asking about it. It is
 # the one worker that reads history, because it is the one with a conversation as its subject. Two
 # grants worth knowing: `conversations` lets it read (and rename) any saved conversation, not only the
-# one it was asked about, and `fs` grants read of any file on this machine, not only an export. Drop
-# this agent (and its name from delegates_to above) if you would rather not have either.
+# one it was asked about, and `fs` grants read of any file on this machine, not only an export. It does
+# not declare `fs_write`, so it can read every file it can reach and change none of them. Drop this
+# agent (and its name from delegates_to above) if you would rather not have either.
 [agents.introspector]
 description = "Evaluates a past conversation against the criteria you specify: what was reasoned, called, delegated, and cost."
 tools = ["conversations", "fs", "time"]
@@ -157,8 +190,9 @@ Report against each criterion in turn, quoting the lines from the transcript tha
 on, so the user can check your reading against the evidence. Three things to be strict about, because \
 an evaluation that overstates its own reach is worse than a narrow one. A criterion the transcript \
 cannot settle is reported as unassessable, naming what would have settled it, rather than guessed at. \
-If `read_file` reports the file was truncated, say so and say which part of the run you saw: an answer \
-drawn from the opening turns must never be reported as an answer about the whole run. And if you were \
+If `read_file` reports the file was truncated, it names the offset that continues the read: page \
+through the rest before reporting, and if you stop early say which part of the run you saw, because an \
+answer drawn from the opening turns must never be reported as an answer about the whole run. And if you were \
 given no criteria, evaluate whether the run reached what the user asked for, how much it spent doing \
 so, and where it went wrong if it did, saying up front that those are the criteria you chose."""
 
@@ -277,7 +311,8 @@ level = "INFO"
 # Declared by the `capabilities` toolset: an agent's `tools` must list "capabilities" to get
 # list_capabilities (what else is installed) and compose_subagent (build a sub-agent holding exactly
 # what one task needs, and run it). A composed sub-agent runs on the [assistant] defaults and still
-# obeys [security].confirm_tools; composing itself is ungated unless you add compose_subagent there.
+# obeys [security].confirm_tools; composing itself is ungated unless you add "capabilities" or
+# "capabilities.compose_subagent" there.
 # max_depth bounds nesting: at 3 the last sub-agent in a chain holds neither tool, 0 switches composing
 # off. Applies live, to the next composition.
 # max_depth = 3

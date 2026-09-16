@@ -24,6 +24,7 @@ src/kokua/
   cli.py               argparse surface, CLI-over-TOML merge, `config init`, main()
   plugins.py           entry-point discovery for front ends and toolsets
   images.py            the on-disk image store and the /images/<name> reference
+  payloads.py          the on-disk store for oversized tool responses and the /payloads/<name> reference
   logging_setup.py     rotating file log + a SIGUSR1 thread-stack dump
   transcript_export.py render_markdown: a saved conversation as Markdown a person can read and judge,
                         imports no channel and no front end, so the CLI export works without `web`
@@ -109,7 +110,7 @@ Non-obvious control flow: the serve loop runs each reactive turn as a background
 the channel keeps reading during a turn. That is what lets a `/stop` cancel an in-flight reply, and
 what lets a web approval reply be routed back to the waiting tool call. Switching conversations does
 **not** cancel a running turn: each conversation owns its own agent and client, so a backgrounded turn
-persists to its own conversation, streams muted, and posts a notification when it finishes. Only
+persists to its own conversation, streams muted, and raises an alert card when it finishes. Only
 `delete_conversation` cancels, and only the deleted conversation's own turn.
 
 The three conversation commands (`/new`, `/conversations`, `/switch <id>`) are dispatched in that same
@@ -357,9 +358,9 @@ unconfigured, which is what `email-report` did on the entry agent until the seco
 
 #### The shipped entry agent's inventory
 
-All 33 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
+All 34 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
 `config.example.toml` declares, not a fixed list: a different `tools` line produces a different set.
-Twelve of the 32 come from AIMU, more than a third, and so are not greppable in this repository (more
+Thirteen of the 34 come from AIMU, more than a third, and so are not greppable in this repository (more
 once skills are installed, since AIMU injects a tool per skill script on top of this set), which is why
 this table exists rather than a naming convention alone:
 
@@ -367,7 +368,7 @@ this table exists rather than a naming convention alone:
 |---|---|---|
 | `author_skill`, `add_skill_script` | AIMU `make_skill_authoring_tool` / `make_skill_script_tool` | `skills` (entry agent only) |
 | `store_memory`, `search_memories`, `list_memories` | AIMU `make_memory_tools` | `memory` |
-| `save_document`, `read_document`, `list_documents`, `search_documents` | AIMU `make_document_tools` | `documents` |
+| `save_document`, `read_document`, `edit_document`, `list_documents`, `search_documents` | AIMU `make_document_tools` | `documents` |
 | `get_current_date_and_time`, `convert_time` | AIMU `builtin.time` | `time` |
 | `add_mcp_server`, `remove_mcp_server` | `toolsets/mcp.py` | `mcp` |
 | `read_config`, `update_config` | `toolsets/config.py` | `config` |
@@ -443,10 +444,16 @@ snapshot opens -- `turn_running` flags unsaved messages, and the active conversa
 one whose current turn the model should read out of its own context. A test constructs a book with no
 registry bound, so any accidental `agent_for` path fails rather than passing quietly.
 
-`ConversationBook.sessions()` is the single place the store's key-then-get walk and the `updated_at`
-ordering live; `list()` projects it and `most_recent_or_new` takes its head. It costs one store read per
-conversation, which is already what a sidebar push costs. A bulk read belongs in AIMU's store, and this
-is the seam it would land behind.
+`ConversationBook.summaries()` is the single place the store's bulk-metadata read and the `updated_at`
+ordering live: one call to `list_summaries()`, not one `get()` per stored conversation. `list()` projects
+it into the shape the sidebar wants, and `most_recent_or_new` (and `cli.py`'s `_export`, for `kokua
+export latest`) takes its head and fetches only that one winning conversation's messages with a single
+`get`. That is what makes a switch, a sidebar repaint, or an export independent of how many other
+conversations are stored: none of them costs more than the one conversation actually being shown.
+`sessions()` is the one method still paying for every conversation's messages, because it is the one
+question that genuinely needs all of them: `search_conversations` has to read what was actually said in
+each conversation to match a query against it, ids belong on `matching_ids`/the store's `list_keys`
+instead.
 
 ### Analyzing another conversation
 
@@ -458,11 +465,12 @@ effort, what it cost, and why a turn stopped when it stopped short. That is not 
 sidebar's download button, over the same `replay_items` the web channel replays a reload from, so the
 tool is a resolve, a render, and a write.
 
-It returns a path, not the document. That is the whole design, and it is forced by a limit worth
-understanding: AIMU's `fs` group is `list_directory` and `read_file(path, max_lines)`, with no offset and
-no search, so a file is readable from its first line downward and nowhere else. A tool that returned the
-Markdown itself would put a run's entire tool output into the context of the conversation asking about
-it, which is the one context that cannot afford it. Handing back a path lets the answer go to a
+It returns a path, not the document. That is the whole design, and the reason survived the limit that
+first forced it. AIMU's `read_file(path, max_lines, offset)` gained the offset in 0.31.0, so a long
+export is now readable past its first window; what has not changed is that every page a model turns is
+paid for out of the context it is turning them in. A tool that returned the Markdown itself would put a
+run's entire tool output into the context of the conversation asking about it, which is the one context
+that cannot afford it, and paging it there is the same bill in instalments. Handing back a path lets the answer go to a
 sub-agent instead, so the transcript is spent against a fresh context and only the findings come back.
 `config.example.toml` ships `[agents.introspector]` as that worker, and
 `test_the_shipped_introspector_can_both_export_a_conversation_and_read_the_export` pins the pairing,
@@ -479,10 +487,10 @@ answer.
 Three consequences to know before changing it. The answer reports the file's line count and size and
 advises delegating past `DELEGATE_ABOVE_LINES`, because a model cannot see how big a file is before
 reading it, and the advice is a sentence rather than a refusal: the tool does not know what the model
-has to delegate to. Nothing slices, so an export larger than the introspector's context is read from
-its top and no further; the introspector's own instructions tell it to report a truncated read as
-truncated, which converts a silent partial answer into a stated one, and the real fix is an `offset` on
-AIMU's `read_file` (item 19 in `TODO.md`). And the write is bounded by construction rather than by validation:
+has to delegate to. An export larger than one window is read in pages, since `read_file`'s truncation
+notice names the offset that continues it, and the introspector's own instructions tell it to page
+through the rest and to say which part of the run it saw if it stops early, which converts a silent
+partial answer into a stated one. And the write is bounded by construction rather than by validation:
 the directory comes from `AssistantConfig.downloads_path` and the filename from the resolved session's
 key, so no argument the model passes reaches the filesystem, which is why exporting the same
 conversation twice replaces one file instead of accumulating.
@@ -916,8 +924,8 @@ capability first shipped tagged 0.24.0, but the number collided with a different
 AIMU's own `main` released first; the branch carrying `events` rebased past it and renumbered to 0.25.0,
 so a real, released 0.24.0 correctly failed that probe rather than exposing a gap in it.)
 
-The floor is now `aimu>=0.28.0`, and unlike 0.27.0 it is a floor whose *reason* and whose *probe* are the
-same capability again. It moved for AIMU's `CONTINUING` chunk, the phase a streamed driver yields for a
+The floor was `aimu>=0.28.0` until 0.29.0, and unlike 0.27.0 it was a floor whose *reason* and whose
+*probe* were the same capability again. It moved for AIMU's `CONTINUING` chunk, the phase a streamed driver yields for a
 round the loop injected itself (a continuation nudge, or the forced wrap-up at the round cap) rather than
 one the model asked for. No other seam could carry it: Kokua constructs nothing differently against an
 older AIMU, so `channels/web.py` and `core/subagents.py` simply never see the phase, and nothing raises,
@@ -947,6 +955,60 @@ mid-session failure to pull forward. A probe there would buy the wording rather 
 why the one slot goes to the phase above, which has no such escape hatch, and this key is left to the
 floor. The global tier needed none of it: the factory argument behind `[assistant].max_iterations` has
 existed since 0.12.0.
+
+**0.29.0** moved the floor for `SessionStore.list_summaries`, a store's own answer to "every stored
+conversation's title, timestamp, and message count, without its messages". Asking that through
+`ConversationBook.sessions()` cost one whole-file JSON parse per stored conversation, 4,790 ms on a
+56.8 MB developer store to draw a list of titles; `summaries()` now calls the store method, and the
+sidebar, task ownership, and the startup pointer all read through it. The probe gripped it as a plain
+name lookup, structurally a half-step deeper than its predecessors since the symbol is a method on
+`SessionStore` rather than a name at module scope. What that could not see, and what the floor covers
+now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
+messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
+`TinyDBSessionStore`'s override from a plain inheritance of the default.
+
+The floor is now **`aimu>=0.31.0`**, and three capabilities in that release are Kokua's. `builtin.select`
+and `builtin.unscoped` are what [`toolsets/fs.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/fs.py)
+and `toolsets/fs_write.py` partition one group with, after AIMU put `write_file` and `edit_file` *into*
+`builtin.fs`: handing that group out unchanged would have granted a write to every agent already
+declaring `fs`, on an upgrade, with no config change and nothing reported. `edit_document` and a
+read-before-replace guard on `save_document` close the other silent one, since `read_document` now
+returns a window and replacing a whole document from a windowed read deleted everything past the window
+(a 3,000-line document came back 51 lines long). And `compaction` is a spec key `core/agents.py` writes
+per worker from a declared `context_length`, so a long delegation trims its own messages rather than
+dying in its window.
+
+The probe grips the third of those, `SUBAGENT_SPEC_KEYS`'s `"compaction"`, and the choice is the first
+time this preflight has passed over a *newer* handle on purpose. `select` landed earlier in the release
+and is a plain name lookup for a function Kokua calls directly, but the `save_document` guard landed two
+commits after it with no handle at all, while the windowing that makes an unguarded save destructive
+landed before it: a checkout in between would have passed a `select` probe and still truncated a
+document. `compaction` is in the release's last functional commit, so gripping it dates a checkout to
+all three. What it leaves to the floor is the *contents* of `builtin.unscoped`, since asking whether the
+group holds both writers needs a membership check over a list of callables, the shape declined twice
+before and asserted in `tests/test_aimu_compat.py` instead.
+
+The floor was **`aimu>=0.30.0`** until then, and that one was the first moved by a *rename*. `get_webpage` became
+`get_web_content`, and the point is not the name: the old tool never asked what it had fetched. It
+handed `response.text` to an HTML stripper, and `requests` decodes `.text` with `errors="replace"`, so a
+PDF behind a URL arrived as megabytes of replacement characters that a tag stripper passes through
+almost whole. Four such results, 6.28 MB of them, are in this developer's own stored transcripts, each
+having entered a model's context whole. The new tool classifies the response by `Content-Type` with the
+`%PDF-` magic bytes as tiebreaker, returns Markdown (a PDF under one `## Page N` heading per page), and
+caps what it returns, downloads, and extracts. Kokua needs the floor because it hands that group out
+unchanged: `toolsets/web.py` is `list(builtin.web)`, and `workflows/critics.py` mounts the same group
+for the reviewer, so on an older AIMU both quietly poison a context.
+
+That probe was a name lookup on `builtin.get_web_content`, the fourth time that shape has answered. What
+Kokua actually hands an agent is the *group*, so the stricter question is whether `web` contains it, and
+that check was declined for the reason `run_command`'s was at 0.24.0, this time without even that
+release's brief window: the rename moved the function and the group's entry for it in a single upstream
+commit, so no checkout exists where the name resolves and the group still holds the old tool. A
+membership check over a list of callables, matching on `__name__`, would be a new probe shape bought to
+close a window that does not exist; `tests/test_aimu_compat.py` asserts the group membership instead, as
+a fact about the release rather than as the preflight's shape. What the probe leaves to the floor is the
+behavior behind the name: a checkout could export `get_web_content` and classify nothing, and only
+fetching a PDF would prove otherwise.
 
 Two application facts worth knowing beyond the parameters themselves. `max_tokens` and `context_length`
 are different knobs that share one window: `max_tokens` caps *generated* tokens, `context_length` sizes
@@ -1004,8 +1066,8 @@ built out of bounded parts.
 
 Everything lives under `~/.kokua` (override with `KOKUA_HOME`). `config.toml` sits at the root;
 `data/` holds only content: `sessions.json`, `skills/`, `memory/`, `documents/`, `downloads/`,
-`images/`. Scheduled tasks are the one declared, user-editable exception to that split: they live in
-`config.toml` as `[scheduling.task.<name>]` tables, not under `data/`.
+`images/`, `payloads/`. Scheduled tasks are the one declared, user-editable exception to that split:
+they live in `config.toml` as `[scheduling.task.<name>]` tables, not under `data/`.
 
 ## Images
 
@@ -1015,6 +1077,48 @@ CLI `/attach`) and generated images live under `images_path`; the web server ser
 persisted session must stay small and a localhost URL is not fetchable by the provider, so
 `core/messages.py` rewrites data URLs to references on persist and re-inlines them before each
 `agent.restore`.
+
+## Payloads
+
+`payloads.py` solves the same problem `images.py` does, for oversized text instead of image bytes:
+content-addressed filenames under `payloads_path` (the sha256 of the UTF-8 text, so identical content
+is stored once), a `/payloads/<sha256>` reference stored in session metadata in place of the bytes, and
+a route (`frontends/web.py`) that serves the file when asked. Two parallel modules rather than one
+shared abstraction, since the generic part is about twenty lines and the rest of each is specific to
+its own payload kind.
+
+The one caller today is `core/subagents.py`. A sub-agent's tool result can be megabytes (a PDF fetched
+as text is the case that forced this), and recording it inline put 51.9 MB of one developer's 56.8 MB
+session file into a field that every store read re-parsed and every conversation switch replayed to
+the browser. `SubagentReporter` now caps what a recorded tool-call card holds inline at
+`subagents.RESPONSE_PREVIEW_CHARS` (4,000 characters, a module constant rather than a config key: it is
+not a security control and not a capability an agent declares, so it has no natural home in
+`config.toml`). A response at or under that length is recorded exactly as before. A longer one is
+recorded as the first `RESPONSE_PREVIEW_CHARS` characters plus `response_ref` (the payload's
+`/payloads/<sha256>` reference) and `response_bytes` (the full length), with the rest of the text
+written once to `payloads_path` via `payloads.save_text`. The cap is applied where the card is
+recorded, not where it is replayed, so the frame sent live and the entry a later `send_history` replays
+are the same dict; capping only on replay would make a card change shape when the user switched away
+and back, which is worse than the size problem it would be fixing.
+
+`payloads.save_text` can fail two independent ways, both of which `SubagentReporter` treats as a reason
+to skip the spill rather than let the turn fail. Encoding with strict UTF-8 raises `UnicodeEncodeError`
+on a Python `str` carrying lone surrogates, the shape upstream code leaves behind when it decoded bytes
+with `errors="surrogateescape"` (a binary file fetched as text is a realistic source). Separately, the
+write itself can fail on its own terms (a full disk, a permissions problem, a `payloads_path` that
+cannot be created), raising `OSError`; before this cap existed, the tool-calling path never touched
+disk at all, so this callback did not previously depend on a write succeeding. Either way, recording a
+spawn's activity sits on a live turn's path, so an exception there ends the turn, while falling back to
+the unbounded, pre-cap inline shape only leaves one oversized card.
+
+An entry carrying `response_ref` renders in `app.js` exactly like any other, plus one control below
+the preview: "Show full response" with `response_bytes` formatted as KB or MB. Activating it fetches
+the reference and swaps the fetched text in for the preview, once; a second activation is a no-op
+because the control is gone by then. The fetched text is exactly as untrusted as the preview already
+was (someone else's tool result), so it lands the same way the preview does, as a text node rather
+than markup. A fetch can fail, since payloads are never garbage collected but a user can clear the
+folder by hand; that leaves the preview in place and turns the control into a short disabled note
+instead of a button that would only fail again.
 
 ## MCP
 
@@ -1275,6 +1379,48 @@ switch into a background turn count on from its real age instead of restarting a
 on the wire keeps a boolean, because that is what the page branches on, with `elapsed` riding along
 only when there is a turn to time.
 
+### The alert layer
+
+Four things happen outside the conversation on screen: a scheduled task finishes, a background turn
+finishes, an MCP connect needs an authorization, and a backgrounded turn's gated tool call is
+auto-denied. All four used to arrive as text. Three of them were pushed with `Channel.send`, and AIMU's
+`WebChannel` turns a string sent with no `reply_to` into a `message` frame marked `proactive`, so they
+were rendered as bubbles in whichever conversation the user happened to be reading. A scheduled task's
+"open the 'Digest' conversation to review" could therefore land in the middle of an unrelated
+conversation, or inside 'Digest' itself, where it names the thing already on screen.
+
+They now share one route, `ChannelUI.alert`, and one frame, `notification`, which the page draws as a
+card in a fixed layer over the whole UI. `notification` is not in `_TURN_FRAMES`, so it is never muted:
+being about work the user is *not* watching is the entire point of it.
+
+Two methods sit on that one frame, and the split is deliberate. `ChannelUI.notify` keeps its old
+no-op fallback, because a background turn's completion is worth nothing on a channel that never
+backgrounds one: the terminal has already printed the reply where the user is. `ChannelUI.alert` falls
+back to a plain `send` instead, because a scheduled task's failure or an authorization link has to land
+somewhere. That fallback is the reason an alert's `text` is always self-contained, carrying the URL or
+naming the conversation in words; `conversation_id`, `url`, and `group` are additions a front end that
+can draw a control turns into one, not the only copy of the information.
+
+The card is a pointer, never a decision. Open switches to the conversation the alert names; Authorize
+is an anchor. Approving a tool call from a card was considered and rejected: the card cannot hold
+`execute_python`'s body or `add_skill_script`'s script, and a truncated argument blob beside an Allow
+button trains the user to approve unread, which is the one thing the gate exists to prevent.
+
+Three properties of the layer are worth stating, because each answers a failure this shape can have:
+
+- **Non-blocking.** The layer takes no pointer events; the cards do. A scheduled task fires whether or
+  not anyone is at the keyboard, so a modal here would let an unattended process seize the composer.
+- **Grouped.** A card supersedes an earlier card with the same `group`: the task for a firing's report,
+  the conversation for a completion, the conversation and tool name for a denial. Ungrouped, a task
+  firing every ten minutes overnight greets the user with a card per firing.
+- **Anchors are built from the `url` field, never from the text.** The authorization URL comes from a
+  remote MCP server's own metadata, and the page checks its scheme is `http(s)` before making a link of
+  it. Linkifying the sentence instead would let any text that ever reaches a card become a link.
+
+A card can outlive what it points at, since a task prunes its older runs. The page re-renders the layer
+on every `conversations` frame, and a card whose conversation is no longer in that list keeps its text
+and drops its Open control, rather than offering a switch that would land on nothing.
+
 ### The tasks section, and the settings frames behind it
 
 Two page surfaces are pure front-end concerns and deliberately absent from `RichChannel`: the
@@ -1341,8 +1487,9 @@ Grouping a task's conversations under it happens **on the page**, not in the cor
 rename has to move that stamp too: `update_scheduled_task`'s `new_name` path calls
 `ConversationBook.retag_task` to re-point every conversation the old name owned, right after the table
 itself is renamed, which is what lets the sidebar keep a task's history nested under it across a rename.
-`ConversationBook.list()` projects `task_id`, but nothing is filtered there -- the agent's read-only
-conversation tools walk `sessions()` and still see every conversation. The page nests a conversation under a task when its `task_id` matches a task *currently in
+`ConversationBook.list()` projects `task_id`, but nothing is filtered there: `list_conversations` walks
+`summaries()` (through `list()`) and still sees every conversation, task-minted or not. The page nests a
+conversation under a task when its `task_id` matches a task *currently in
 the list*. Requiring the task to be present is what makes
 deleting a task return its conversations to the chat list instead of hiding them: keying on `task_id`
 alone would leave an orphan unreachable from the sidebar. Because the nesting is client-side, a firing's
@@ -1410,7 +1557,7 @@ Muting a background turn happens per frame, in `WebChannel.send_frame`, which ev
 through. The rule is a property of the frame's *type*: the `_TURN_FRAMES` set is turn output (tokens,
 thinking, tool calls, the message, `done`, loop markers, images, plan bubbles, phases, sub-agent cards)
 and is dropped when `streaming_conversation` names a conversation other than the one being viewed;
-everything else is channel state (the sidebar, replayed history, settings, notifications, human-decision
+everything else is channel state (the sidebar, replayed history, settings, alerts, human-decision
 prompts) and always goes out. Neither half can be decided by task context alone. Hoisting the check out
 of a streaming loop -- taking it once when a reply starts -- is what let a switch mid-reply append the
 rest of the old turn's tokens to the conversation the user had just moved to, since the viewed

@@ -128,12 +128,15 @@ class _UI:
         self.asked.append(f"approve:{name}")
 
 
-class _Config:
-    confirm_tools = ["execute_python"]
-
-
 def _gate(ui):
-    return HumanGate(ui, _Config(), active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "c1")
+    """A gate as the composition root leaves it: wired, and with its gated set already resolved.
+
+    Startup resolves `[security].confirm_tools` (a list of `toolset.tool` entries) down to tool names
+    and assigns them here, so a test builds the gate the same way rather than handing it config.
+    """
+    gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "c1")
+    gate.gated_tools = frozenset({"execute_python"})
+    return gate
 
 
 async def test_a_decision_uses_the_askers_own_parser():

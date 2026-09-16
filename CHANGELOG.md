@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.31.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -57,11 +57,22 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   ordinary message as the end of a turn, so a notice on either side of that gap is lost or leaves a
   live turn reading as idle. The three words are reserved from a workflow's command at startup, exactly
   as `/stop` and `/diag` already were.
+- **Listing conversations no longer reads their transcripts.** The sidebar, task ownership, and the
+  startup pointer only ever asked about a conversation's title, timestamp, and message count, but
+  `ConversationBook.sessions()` answered that by fetching every stored session in full: one whole-file
+  JSON parse per conversation, 4,790 ms on a 56.8 MB real store just to draw a list of titles. The new
+  `ConversationBook.summaries()` calls AIMU's `SessionStore.list_summaries()` instead, which
+  `TinyDBSessionStore` answers from its own table without building a `Session` at all, and `list()`,
+  `sessions_for_task()`, and `most_recent_or_new()` all moved onto it. `sessions()` survives for the one
+  caller that genuinely needs message text, the agent's cross-conversation search; the `list_conversations`
+  tool's message count is now the raw stored count (including tool results and the loop's own injected
+  turns) rather than the filtered, human-readable one, so its wording says "stored messages" to keep the
+  two from being confused. Needs `aimu>=0.29.0`; see "Diagnostics and error reporting" below.
 - **Per-conversation agents.** Each conversation owns its AIMU `SkillAgent` and model client, built
   lazily and held in a bounded LRU registry (`agent_cache_cap`, default 8). Memory and documents stay
   shared across conversations.
 - **Concurrent conversations.** A turn keeps running when you switch away: it streams only into the
-  conversation you are viewing, persists to its own conversation, and posts a completion notification
+  conversation you are viewing, persists to its own conversation, and raises a completion alert card
   instead of streaming. Switching does not cancel it; only deleting a conversation does, and only its
   own turn. The invariants that make this safe are documented at the top of `core/turns.py`.
 - **Switching into a running turn shows the turn.** A turn's messages are not in the store until it
@@ -140,10 +151,15 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   front ends and the CLI can call it. Two rules keep it honest: a figure nobody reported prints as "not
   reported" rather than an invented zero, and a tool payload past
   `DEFAULT_MAX_PAYLOAD_CHARS` (4000 characters) is cut with a note saying how much was removed rather
-  than shown as if it were complete (`--full` lifts the cap). `kokua export [id-or-prefix] [-o path|-]
-  [--full]` reads the session store directly and writes the file: no `Assistant`, no model client, no
-  agent, so it works with the model server down. A read that races the daemon's own persist reports the
-  store as busy rather than parsing a torn file. See
+  than shown as if it were complete (`--full` lifts the cap). A sub-agent's tool response spilled to a
+  payload file (see "Payloads" below) is a third case the cap-and-note rule alone would miss: its
+  stored preview is already `RESPONSE_PREVIEW_CHARS`, the same value as the default cap, so it would
+  read as complete either way. It is therefore always noted, naming the real size and the reference,
+  and `--full` reads the payload file back and shows the whole thing rather than the preview, falling
+  back to the preview with an explicit note if the file is gone. `kokua export [id-or-prefix]
+  [-o path|-] [--full]` reads the session store directly and writes the file: no `Assistant`, no model
+  client, no agent, so it works with the model server down. A read that races the daemon's own persist
+  reports the store as busy rather than parsing a torn file. See
   [Export a conversation](https://saxman.info/kokua/how-to/export-a-conversation/).
 - **Branch a conversation at a turn.** Every turn in the web UI carries a branch control, on the
   message that opened it and beside the delete-from-here control:
@@ -232,6 +248,22 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     that the first rendered content displaced was on screen for 23ms against a local endpoint, whose
     first token lands about that fast, so what it answers has to be "is a turn running" (true until the
     turn ends) rather than "has anything arrived yet".
+  - **Alerts sit over the page, not in the transcript.** Everything raised outside the conversation on
+    screen is a card in a fixed layer: a scheduled task's report, an MCP authorization an in-flight
+    connect is waiting on, a background turn's completion, and a gated tool a backgrounded turn was
+    denied. Before this they were messages, pushed into whichever conversation the user happened to be
+    reading, which is how a task's "open the 'Digest' conversation to review" could land in the middle
+    of an unrelated one (or in 'Digest' itself). Each card carries the time the thing happened, one way
+    to act on it, and a dismiss control; Escape takes the newest. The action is a pointer rather than a
+    decision: Open switches to the conversation the card names, and Authorize is an anchor built from
+    the frame's own `url` field, only for `http(s)`, never by hunting for a URL in the text, since that
+    URL comes from a remote server's metadata. Nothing expires, and the layer takes no pointer events of
+    its own, so an unattended task can never block the composer. A later card supersedes an earlier one
+    with the same `group` (a task, a conversation, a conversation and tool pair), which keeps a task
+    firing all night from greeting you with one card per firing; a card whose conversation has since
+    been pruned keeps its text and drops its Open control. The terminal has no such layer, so
+    `ChannelUI.alert` prints the sentence there instead, which is why an alert's text always carries
+    its link in words.
   - **A Think picker beside the Plan toggle** sets the reasoning effort for the messages you send after
     it. Sticky like Plan and, like Plan, per request rather than a setting: it rides the message as an
     `input` frame field, writes nothing to `config.toml`, and resets to the configured default on reload.
@@ -278,6 +310,23 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     muted, and switching in later shows the work. A round the worker's own loop injected shows inside
     the card too, naming which one it was and quoting the prompt, so a worker that hit the round cap
     reads as an explained outcome rather than an answer that came back thinner for no visible reason.
+  - **An oversized tool response is recorded as a preview plus a reference, not held whole.** A PDF
+    fetched as text put 7.8 MB into a single recorded tool-call card, and 51.9 MB of one developer's
+    56.8 MB session file was this one field, re-parsed on every store read and replayed to the browser
+    on every conversation switch. `core/subagents.py` now caps what it keeps inline in a card at
+    `RESPONSE_PREVIEW_CHARS` (4,000 characters, a module constant rather than a config key: it is not
+    a security control and not a capability an agent declares). A response over that length is
+    recorded as the first `RESPONSE_PREVIEW_CHARS` characters, a `response_ref` (a `/payloads/<sha256>`
+    reference, see "Payloads" below), and `response_bytes` (the full length); the rest is written once
+    to `payloads_path`. The cap applies where the card is recorded, not where it is replayed, so a
+    reload never shows a card shaped differently than the one shown live. The card renders the preview
+    plus a "Show full response" control naming the size in KB or MB; activating it fetches the
+    reference and swaps the full text in for the preview, once, and a fetch that fails (the file was
+    cleared by hand; payloads are never garbage collected) leaves the preview in place with a short
+    note instead of a control that would only fail again. The row's own collapsed header states
+    `response_bytes` when the response was spilled, not the preview's own length, so a 7.8 MB result
+    reads as its real size before the card is even opened rather than as "4,000 chars" until it is
+    expanded twice.
   - **Rows carry a localized datetime caption**, revealed on hover (full precision in its tooltip) so
     the transcript is not dated line by line. Every kind of block carries it the same way: at the right
     edge of the row, on the block's first line, so the captions form one column down the page. On a
@@ -289,7 +338,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
     with the sidebar's rather than a second one that agrees until someone edits it. That cluster is a flex
     track beside the content rather than a float or a positioned corner, which is what lets it sit on
     the first line at all: content wraps *before* a track, so however long an answer runs it can never
-    end up underneath the caption. Ephemeral chrome (approval prompts, banners) is not stamped, and a
+    end up underneath the caption. Ephemeral chrome (approval prompts) is not stamped, an alert card
+    carries a stamp of its own outside the transcript, and a
     centered system notice keeps its caption below its text, having no right edge to align to.
     Messages persisted before timestamps existed render without a caption.
   - **A loop marker names which injection it was, live and on reload.** The loop injects two kinds of
@@ -499,15 +549,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   a long tool result is the thing being debugged.
 
   It answers with a path rather than the document, and that is the design rather than a limitation of
-  it. AIMU's `fs` group is `list_directory` and `read_file(path, max_lines)`, with no offset and no
-  search, so returning the Markdown itself would spend the asking conversation's whole context on one
-  run's tool output, in the one context that cannot afford it. A path can be handed onward instead:
-  `config.example.toml` ships `[agents.introspector]`, a delegate declaring `fs`, and the tool's answer
-  advises delegating once the file passes `DELEGATE_ABOVE_LINES`, so a long transcript is spent against
-  a worker's fresh context and only the findings come back. What it does not do is slice: an export
-  larger than the introspector's context is read from its top and no further, which the introspector is
-  instructed to report as a partial read rather than answer through. The fix is an `offset` on AIMU's
-  `read_file` (`TODO.md` item 19).
+  it. `read_file(path, max_lines, offset)` returns 2,000 lines per call, so returning the Markdown
+  itself would spend the asking conversation's whole context on one run's tool output, in the one
+  context that cannot afford it, and paging it there is the same bill in instalments. A path can be
+  handed onward instead: `config.example.toml` ships `[agents.introspector]`, a delegate declaring `fs`,
+  and the tool's answer advises delegating once the file passes `DELEGATE_ABOVE_LINES`, so a long
+  transcript is spent against a worker's fresh context and only the findings come back. Paging arrived
+  with AIMU 0.31.0 (`read_file`'s truncation notice now names the offset that continues the read, which
+  retired `TODO.md` item 19), and the introspector is instructed to use it and to say which part of the
+  run it saw if it stops short. What paging does not fix is an export longer than the introspector's
+  *own* context, which no offset makes holdable.
 
   The write is bounded by construction, not by validation: the directory is
   `AssistantConfig.downloads_path` and the filename is the resolved session's key, so no argument the
@@ -521,8 +572,10 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.28.0 or newer
   the criteria it was given, quoting the transcript lines each judgment rests on. The search results,
   the transcript, and the file all stay out of the asking conversation's context, and its instructions
   hold it to three honesty rules that mirror the export's own: a criterion the transcript cannot settle
-  is reported unassessable rather than guessed, a truncated read is reported as covering part of the
-  run, and with no criteria given it names the rubric it chose, since a worker cannot ask.
+  is reported unassessable rather than guessed, a read it stopped short of finishing is reported as
+  covering part of the run, and with no criteria given it names the rubric it chose, since a worker
+  cannot ask. It declares `fs` and not `fs_write`, so it reads every file it can reach and changes none
+  of them: a conversation is its subject, and evaluating one is no reason to rewrite one.
 
   That is a narrowing of the old rule, not an exception to it. Reading the user's other conversations is
   meaningless to an agent with no relationship to any of them, which is why `researcher` and `coder`
@@ -607,7 +660,7 @@ script is how the skill does its work.
 
 ### Toolsets
 
-**All 21 toolsets Kokua ships are one file each under `src/kokua/toolsets/`, named for the toolset, and
+**All 22 toolsets Kokua ships are one file each under `src/kokua/toolsets/`, named for the toolset, and
 registered in `pyproject.toml`'s `kokua.toolsets` entry-point table** -- the same table a third party's
 package writes into. There is no second route, no index in code, and no directory scan: that table is the
 index. Adding a toolset is a new file and one line, and `tests/toolsets/test_registration.py` fails until
@@ -622,6 +675,35 @@ collected into the wheel and importable by name).
 **`mcp-admin` is now `mcp`**, since a toolset's file name is its name. A `tools` list saying `"mcp-admin"`
 fails startup on the unknown name.
 
+**`fs` reads and the new `fs_write` writes, because one name could not say both.** AIMU 0.31.0 put
+`write_file` and `edit_file` *into* `builtin.fs`, and `toolsets/fs.py` was `list(builtin.fs)`, so the
+upgrade alone would have handed a write to every agent already declaring `fs` -- a capability arriving by
+dependency bump rather than by declaration, which is the one thing an agent's `tools` list is supposed to
+be the whole of. Two names, because Kokua's config has exactly one lever for a capability and with a
+single `fs` there is no way to write down "read a file and do not write one": the shipped
+`[agents.introspector]` declares `fs` to read a transcript it was asked to evaluate, and the shipped
+`[agents.coder]` declares both. Neither module names a tool. `fs` is
+`select(builtin.fs, exclude=builtin.unscoped)` and `fs_write` is
+`select(builtin.fs, include=builtin.unscoped)`, over AIMU's own group of tools whose target the *model*
+names, so the two partition one group by reach: a read tool AIMU adds later lands in `fs` on its own, a
+writer lands in `fs_write`, and `tests/toolsets/test_fs.py` pins that the halves are a partition rather
+than two hand-kept lists. **They arrive gated.** `config.example.toml` adds `write_file` and `edit_file`
+to `[security].confirm_tools` for the reason `run_command` is there: `coder` holds a shell that can write
+a file, so an ungated `write_file` beside it is the same outcome by a shorter route, and the gate would
+have been approving the long way round while waving the short one through. A `config.toml` scaffolded
+before this release gates neither; add them by hand, and note that adding them without also declaring
+`fs_write` somewhere fails startup, since a gate naming no real tool is refused. Needs `aimu>=0.31.0`,
+which is the release that added `builtin.select` and `builtin.unscoped` along with the writers.
+
+**`documents` gained `edit_document`, and `save_document` now refuses to replace a document it has not
+seen whole.** Both are AIMU 0.31.0's, arriving through `make_document_tools`, and the pair closes a
+destructive round trip that release opened: `read_document` began returning a 2,000-line window, while
+`save_document` replaces the whole document, so read-then-save on anything longer deleted everything past
+the window and answered `Saved`. A 3,000-line document came back 51 lines long with the truncation marker
+written in as content. `toolsets/documents.py` names `edit_document` in its guidance rather than leaving
+the refusal to do the teaching, because a refusal arrives only after the model has spent a turn deciding,
+and it tells the model that `read_document` windows at all, which nothing else would.
+
 **The `compute` toolset now carries a shell tool, `run_command`, alongside `calculate` and
 `execute_python`.** It runs a command line through `/bin/sh -c` and returns the exit code with stdout
 and stderr labelled separately; a nonzero exit comes back as output rather than an error, since `pytest`
@@ -629,7 +711,8 @@ exits 1 with the answer on stdout. The timeout is per call, defaulting to 30 sec
 The shipped `[agents.coder]` is the only agent declaring `compute`, and its `system_message` already told
 it to run "Python, shell, or calculations," which is true for the first time; the toolset module's
 identical docstring claim was equally aspirational and is now accurate. **It arrives gated**:
-`config.example.toml` adds `run_command` next to `execute_python` in `[security].confirm_tools`, so a
+`config.example.toml` adds `compute.run_command` next to `compute.execute_python` in
+`[security].confirm_tools`, so a
 command reaches you for approval before it runs, including one a sub-agent asked for, since a worker's
 gated call routes to the parent's gate rather than running unattended. A `config.toml` scaffolded before
 this release still gates `execute_python` alone; add `run_command` to it by hand. **The reviewer does not
@@ -949,7 +1032,7 @@ alone. The case that does cost something is a configured MCP server, which conne
   agent names cannot be enumerated ahead of time. Each is refused by the tool by default, and changeable
   only by hand-editing the list itself: `update_config` is a tool the assistant holds, so a writable
   agent table would let it widen its own reach. `update_config` is also in the default `confirm_tools`
-  list, so each write it *is* allowed goes through the approval prompt.
+  list, as `config.update_config`, so each write it *is* allowed goes through the approval prompt.
 - The `update_config` write policy is now yours to set. `[security].locked_config_keys` holds the
   patterns the assistant may not write, defaulting to what was previously hardcoded. The key is itself
   always locked, so the assistant cannot unlock itself in one call. A pattern that could never match
@@ -1048,6 +1131,30 @@ alone. The case that does cost something is a configured MCP server, which conne
   `[assistant.generation]` is the first dotted sub-table `config/file.py`'s section loader handles, which
   is what lets a schema entry per parameter serve it instead of the flat-key loop reading it as one
   `[assistant]` key holding a table.
+  **`context_length` has a second job, and it applies on every backend.** A spawned worker now trims its
+  own messages before each model turn to fit the window declared for it, so a long delegation bounds its
+  own growth instead of failing once the window fills. `core.agents.compaction_for_window` builds the
+  trimmer from the resolved `context_length` and `build_agent_specs` writes it into each worker's spec,
+  which means a worker declaring its own window compacts to that one and an undeclared worker to the
+  global one, never to its delegator's. Three quarters of the window is left for messages, since the
+  same window has to hold that worker's system message, its tool block, and the reply, and
+  `trim_messages` counts only the messages; a fraction rather than a subtraction of those three, because
+  two of them cannot be measured before the turn that needs them and a subtraction of guesses goes
+  negative on a small window, which would stop compacting exactly where a window fills soonest.
+  Declaring no `context_length` leaves it off: nothing else states a window (no client reports the one it
+  is talking to), and guessing one would mean rewriting a worker's messages against a number nobody
+  wrote down. What a worker with no declared window does instead is AIMU 0.31.0's doing rather than
+  Kokua's: a spawn that runs out of context now returns a tool result naming the *sub-agent's* window as
+  the one that filled, where it used to hand the parent a message about "the conversation" that the
+  parent read as its own and stopped delegating over. **The conversation you are in is never trimmed**,
+  whatever you declare: it is yours to read and Kokua stores it, so dropping from it would delete history
+  still on screen, silently and for the rest of that conversation's life. A worker's messages are built
+  per spawn and discarded with it, which is what makes an automatic rewrite of them safe at all, and
+  `tests/core/test_delegation.py` pins the asymmetry. Needs `aimu>=0.31.0`, which added the `compaction`
+  factory argument and the matching `"compaction"` entry in `SUBAGENT_SPEC_KEYS`; it is also the surface
+  the startup preflight's capability probe now grips. `TODO.md` item 8, bounding a `target="task"`
+  conversation, is *not* settled by this: a task conversation is stored and readable, so trimming it is
+  the product question that item still owes an answer to.
   Two things worth knowing about the parameters themselves: `max_tokens` caps *generated* tokens while
   `context_length` sizes the whole window prompt and output share, so a 32768 window with a 4096 cap
   leaves roughly 28k for the system prompt, the tool block, and history -- and AIMU's own weakest tier
@@ -1206,6 +1313,38 @@ alone. The case that does cost something is a configured MCP server, which conne
   store stays small; the bytes are re-inlined as base64 only when a turn is sent to the model, since a
   localhost URL is not fetchable by the provider.
 
+### Payloads
+
+- `payloads.py` is the same content-addressed shape as `images.py`, for oversized text instead of
+  image bytes. A payload is written under `data/payloads/` named by the sha256 of its UTF-8 bytes (so
+  identical text is stored once), served at `GET /payloads/<sha256>`, and referenced from session
+  metadata as `/payloads/<sha256>` rather than held inline. The one caller today is the sub-agent
+  reporter (see "An oversized tool response..." under Conversations and turns, above); other oversized
+  text a future feature wants to keep out of `sessions.json` can reuse it the same way.
+- **`scripts/migrate_subagent_payloads.py`** is a one-off, deletable migration for a `sessions.json`
+  written before the cap above existed: it walks every stored sub-agent tool response, spills anything
+  over `RESPONSE_PREVIEW_CHARS` to a payload file, and rewrites the entry to the same shape the live
+  recorder now writes. `--dry-run` reports what would change without touching disk; a real run backs
+  up `sessions.json` before its first write and is idempotent, so re-running it (including after an
+  interruption) changes nothing further. A response the recorder itself could not encode (a lone
+  surrogate from decoded binary content) is left inline exactly as the live recorder leaves it, counted
+  in the report rather than raised, so one unreadable entry cannot abort a migration of the rest of a
+  user's history. `--prune-orphans` is a separate pass, run only on request and never in a dry run,
+  that deletes payload files no session references, and refuses a custom sessions-file argument since
+  it always deletes from the one configured payloads directory. A real run (including
+  `--prune-orphans`) requires `--confirm-kokua-stopped`: the script has no reliable way to detect a
+  running Kokua from outside it, and a live instance writing to the same files at the same time can
+  silently lose data that would not show up in the backup either, in two distinct ways, both named in
+  the script's own docstring and `--help`. The reclaimed-bytes figure in the report is the actual
+  JSON-encoded size delta (measured with the same `ensure_ascii=True` TinyDB's storage writes with),
+  not a character count, since a character removed from a response could have cost up to six bytes on
+  disk as a `\uXXXX` escape. The default `sessions.json` and payloads directory are resolved by loading
+  `config.toml` the way `kokua` itself does, so a configured `[paths] data_dir` is honored rather than
+  silently scanning the built-in default. A `sessions_file` argument that is not the configured file
+  needs `--payloads-dir` too for a real (non-dry-run) run, or it is refused: writing `response_ref`
+  values under the default payloads directory while migrating a different file would point every
+  migrated card at blobs the app reading its own configured file would never find.
+
 ### Security
 
 Kokua can author and run Python and shell scripts as **real subprocesses with your user privileges and
@@ -1220,20 +1359,35 @@ notice on startup.
   recipient lock, and secret disclosure), and which behavior is the product working as documented (a
   model you configured running code you approved).
 - **Tool approval.** Configured risky tools require confirmation before each call -- terminal `y/N`, web
-  Allow/Deny -- built on AIMU's `ToolApproval` gate. The default set is `add_skill_script`,
-  `add_mcp_server`, `execute_python`, `run_command`, and `update_config`; adjust with `[security] confirm_tools` or
-  `--confirm-tools` (empty disables). Proactive and backgrounded turns auto-deny gated tools regardless,
+  Allow/Deny -- built on AIMU's `ToolApproval` gate. The default set is `skills.add_skill_script`,
+  `mcp.add_mcp_server`, `compute.execute_python`, `compute.run_command`, `fs_write`, and
+  `config.update_config`; adjust with `[security] confirm_tools` or `--confirm-tools` (empty disables).
+  Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
-  are currently viewing. The reply is routed through the single channel reader, so it is safe alongside
+  are currently viewing. **A backgrounded turn's auto-deny raises an alert card** naming the tool and
+  linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
+  the user is not reading told them nothing about their own turn losing a capability by their switching
+  away. A proactive firing denies silently still, since it reports itself when it ends and a task
+  calling a gated tool every firing would otherwise raise a card every firing.
+  The reply is routed through the single channel reader, so it is safe alongside
   `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
   cannot overwrite each other.
-- **A gate that names nothing fails startup.** `[security] confirm_tools` matches a tool by name, so an
-  entry no configured agent provides gates nothing, and the symptom is a prompt that never comes, which
-  nobody notices. Every unmatched entry is now named at startup with its near misses. The vocabulary is
-  every tool the config builds, not just the entry agent's: `execute_python` comes from `[agents.coder]`,
-  and `spawn_subagent` and a skill's script tools count too. A tool that arrives later (from a runtime
-  `add_mcp_server`, or built only by `compose_subagent` out of a toolset no agent names) cannot be listed
-  ahead of time, and the error says so.
+- **A gate names its toolset, and one that would gate nothing fails startup.** A `[security]
+  confirm_tools` entry is `<toolset>` for every tool a capability provides, `<toolset>.*` for the same
+  thing said with a wildcard, or `<toolset>.<tool>` for one; `*` anywhere else is refused. A reserved
+  `core` prefix holds the two tools no toolset provides, `spawn_subagent` and `activate_skill`, and a
+  skill's scripts sit under the skill, which is also its toolset name. What the prefix buys is a gate
+  that can hold back a whole capability in one line, and an error that can point at the right one; the
+  gate itself still matches a bare tool name at call time, resolved from these entries once every agent
+  is wired. An entry that gates nothing holds nothing back, and the symptom is a prompt that never
+  comes, which nobody notices, so every such entry is named at startup with its near misses: a bare tool
+  name with no prefix (the error gives the form to write), a real tool filed under the wrong toolset, a
+  toolset no agent declares, and a toolset that provides no tools are all refused. The vocabulary is
+  every tool the config builds, not just the entry agent's: `compute.execute_python` resolves because
+  `[agents.coder]` declares `compute`. A tool that arrives later (from a runtime `add_mcp_server`, or
+  built only by `compose_subagent` out of a toolset no agent names) cannot be listed ahead of time, and
+  the error says so. `core` is refused as a toolset name at registration, so the reservation cannot be
+  shadowed by a plugin.
 - **The reviewer toolset needs no gate.** An autonomous critic cannot pause to ask you mid-review, so
   rather than exempting it from the gate the reviewer is given nothing the gate exists to cover: web
   lookup, `calculate`, and the clock. A test pins this against the shipped `confirm_tools` default, so
@@ -1241,14 +1395,15 @@ notice on startup.
 - **Injection crosses conversations.** The assistant can read every saved conversation, and a transcript
   is untrusted text, so an injection that lands in one conversation can influence what the assistant
   does in another. The three read tools are ungated by default, since they only read and gating them
-  would make an unattended scheduled run that reads history fail silently; add `read_conversation` and
-  `search_conversations` to `[security] confirm_tools` to change that. `export_conversation` is ungated
+  would make an unattended scheduled run that reads history fail silently; add
+  `conversations.read_conversation` and `conversations.search_conversations` to
+  `[security] confirm_tools` to change that. `export_conversation` is ungated
   for a different reason: it changes no conversation, and the reason to gate it is what it leaves behind
   rather than what it reads, a whole transcript in the clear under `data/downloads/`.
 
 ### Diagnostics and error reporting
 
-- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.28.0`
+- **An AIMU too old to run Kokua fails with an instruction, not a traceback.** The `aimu>=0.31.0`
   requirement covers a normal install, but a development checkout installs the sibling `../aimu`
   editable and that checkout can sit on an older commit. `kokua.aimu_compat` preflights both the version
   floor and one capability probe -- the version string of an editable install says what its branch
@@ -1277,9 +1432,50 @@ notice on startup.
   `StreamingContentType.__members__` rather than a bare `in`, because `in` on an enum compares values on
   Python 3.12 and raises `TypeError` on 3.11, where the capability here is a member's name, not its
   value. 0.28.0's other capability, the `"max_iterations"` entry in `SUBAGENT_SPEC_KEYS` behind a
-  per-agent tool-loop cap, is the floor's job instead: that key set is closed and checked when a spawn
-  tool is built, so an AIMU predating 0.28.0 raises `ValueError` naming it at startup with or without a
-  probe, and the one slot goes to the capability that would otherwise fail silently.
+  per-agent tool-loop cap, was the floor's job instead: that key set is closed and checked when a spawn
+  tool is built, so an AIMU predating 0.28.0 raised `ValueError` naming it at startup with or without a
+  probe, and the one slot went to the capability that would otherwise fail silently. Today the floor is
+  0.29.0, and the probe returns to a plain name lookup, the third time (`resolve_default_text_model`,
+  then `ModelRefusalError`, now this): `aimu.sessions.SessionStore.list_summaries`, a session store's
+  own answer to "every stored conversation's title, timestamp, and message count, without its
+  messages", which is what `ConversationBook.summaries()` calls so the sidebar, task ownership, and the
+  startup pointer stop paying one whole-file parse per stored conversation just to draw a list of
+  titles (see "Conversations and turns" below). The one wrinkle on the usual name lookup: the symbol
+  lives on `SessionStore`, not at module scope, so the probe resolves the class first and looks the
+  method up there. What it cannot see is whether a concrete store still bothers to override the
+  default: the ABC's own `list_summaries` is correct but slow, `TinyDBSessionStore`'s override is what
+  makes it fast, and a name lookup on the ABC is satisfied by either, so a store that stopped
+  overriding it would still pass while paying the old cost in silence; `StreamingContentType.CONTINUING`
+  is the floor's job now, the same way every earlier probe surface became the floor's job once a newer
+  one took the slot. **0.30.0** was the floor until 0.31.0, the first one moved by a rename, and its probe was a
+  name lookup for the fourth time: `aimu.tools.builtin.get_web_content`, which replaces `get_webpage`.
+  The name is not the point. The old tool never asked what it had downloaded, handing `response.text`
+  to an HTML stripper, and since `requests` decodes `.text` with `errors="replace"`, a PDF behind a URL
+  became megabytes of replacement characters that the stripper passed through almost whole and into the
+  model's context. Kokua hands that group out unchanged (`toolsets/web.py` is `list(builtin.web)`, and
+  `workflows/critics.py` mounts the same group for the reviewer), so an older sibling poisons a context
+  with nothing raised anywhere. Group membership, not the bare name, is what Kokua depends on, and the
+  stricter check was declined the way `run_command`'s was at 0.24.0 and with even less to gain: the
+  rename moved the function and the group's entry for it in one upstream commit, so no checkout exists
+  where the name resolves and the group still holds the old tool. `list_summaries` joined the floor's
+  job then, and the behavior behind that name (a checkout could export `get_web_content` and classify
+  nothing) was what it left there in turn.
+  Today the floor is **0.31.0**, and it is the first release where the probe passed over a *newer*
+  handle on purpose. The probe is a membership check on `SUBAGENT_SPEC_KEYS` for `"compaction"` -- the
+  second time it has gripped that same set for a different member, which restates the point that set
+  keeps making: a published set's presence proves nothing and only its contents date a checkout.
+  `builtin.select` landed earlier in the release and would have been the obvious grip, a plain name
+  lookup on a function `toolsets/fs.py` calls directly. It was passed over because `save_document`'s
+  read-before-replace guard landed two commits *later* with no handle at all (a digest set private to
+  one `make_document_tools` call), while the `read_document` windowing that makes an unguarded save
+  destructive landed *earlier*: a sibling parked in between passes a `select` probe and still cuts a
+  3,000-line document to 51 lines. `"compaction"` is in the release's last functional commit, so
+  gripping it dates a checkout to `select`, `unscoped`, the writers in `builtin.fs`, `edit_document`,
+  and the guard together -- the reverse of the trade 0.20.0's `endpoint_kwargs` had to accept. What it
+  leaves to the floor is the *contents* of `builtin.unscoped`: the whole `fs` / `fs_write` split rests
+  on that group holding both writers, and asking it needs a membership check over a list of callables
+  matching on `__name__`, declined for the third time and asserted in `tests/test_aimu_compat.py`
+  instead. `get_web_content` joins the floor's job.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
   halves of that one decision cannot drift.

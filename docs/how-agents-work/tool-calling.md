@@ -169,7 +169,7 @@ model filled in, lives in `aimu.tools.builtin`:
     """
 ```
 
-That is the general case, not an exception. Twelve of the 33 tools the shipped assistant holds are
+That is the general case, not an exception. Thirteen of the 34 tools the shipped assistant holds are
 AIMU's rather than Kokua's, more than a third, and more once skills are installed, since AIMU injects a
 tool per skill script on top of that set. [How an agent's tools
 resolve](../explanation/architecture.md#how-an-agents-tools-resolve) carries the full inventory, and a
@@ -203,8 +203,9 @@ calls ([the turn loop](the-turn-loop.md)), a few self-corrections are the differ
 and a forced wrap-up.
 
 **Approval gates cost latency and buy control.** Kokua's `[security].confirm_tools` names the tools that
-stop and ask before running, and the shipped default includes `execute_python`, `run_command`, and
-`update_config`, since those run with full access to your machine. The cost is real and it is human
+stop and ask before running, each with the toolset that provides it in front, and the shipped default
+includes `compute.execute_python`, `compute.run_command`, and `config.update_config`, since those run
+with full access to your machine. A bare `compute` there would gate that whole capability instead. The cost is real and it is human
 latency, not compute: the turn is blocked on you, and a turn nobody is watching, such as a scheduled
 one, auto-denies rather than hanging forever. *Humans in the loop*, later in this catalogue, is that
 mechanism in full.
@@ -216,7 +217,7 @@ mechanism in full.
 - [Set up a toolset](../how-to/set-up-toolsets.md): writing one of these, end to end, including the
   `pyproject.toml` entry that registers it.
 - [How an agent's tools resolve](../explanation/architecture.md#how-an-agents-tools-resolve): the full
-  inventory of what the shipped assistant holds, and which twelve of the 33 tools come from AIMU.
+  inventory of what the shipped assistant holds, and which thirteen of the 34 tools come from AIMU.
 - AIMU: [Add a custom tool](https://saxman.info/aimu/how-to/add-custom-tool/) for the `@tool` decorator,
   [the tools API reference](https://saxman.info/aimu/reference/api/tools/) for what the decorator
   supports, and [Use MCP tools](https://saxman.info/aimu/how-to/use-mcp-tools/) for tools that live in

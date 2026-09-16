@@ -143,7 +143,7 @@ from typing import Optional, Union
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.aio import ModelConnectionError, ModelRefusalError, RunHandle
 from aimu.aio.channels.base import ChannelMessage
-from aimu.sessions import Session
+from aimu.sessions import SessionSummary
 
 from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.config.file import thinking_request
@@ -183,7 +183,7 @@ class ProactiveTarget:
     task_id: Optional[str] = None
 
 
-def _holds_no_report(session: Session) -> bool:
+def _holds_no_report(session: SessionSummary) -> bool:
     """Whether a task's conversation holds nothing the user would keep over another run's output.
 
     The retention order in :meth:`TurnRunner._prune_task_conversations` reads this: a run that has no
@@ -193,9 +193,12 @@ def _holds_no_report(session: Session) -> bool:
     Two ways to hold nothing, because a recorded failure only covers one of them. The reason is keyed
     to the turn's user message, so a firing that raised before its user turn reached the transcript --
     an agent that would not build, a client that failed to construct -- has no turn to key one to. An
-    empty transcript says the same thing on its own.
+    empty transcript says the same thing on its own, which is why this reads ``message_count`` rather
+    than ``messages``: ``_prune_task_conversations`` calls this over ``ConversationBook.sessions_for_task``,
+    which now hands back summaries rather than whole sessions, and a summary has no ``messages`` to be
+    empty.
     """
-    return bool(session.metadata.get("failure")) or not session.messages
+    return bool(session.metadata.get("failure")) or session.message_count == 0
 
 
 def _describe_refusal(exc: ModelRefusalError, subject: str) -> str:
@@ -489,9 +492,9 @@ class TurnRunner:
             return
         title = self._book.get(conversation_id).metadata.get("title") or "a conversation"
         if succeeded:
-            await self._ui.notify(f"Reply ready in '{title}'.")
+            await self._ui.notify(f"Reply ready in '{title}'.", conversation_id=conversation_id)
         else:
-            await self._ui.notify(f"A reply in '{title}' {failure_reason}.")
+            await self._ui.notify(f"A reply in '{title}' {failure_reason}.", conversation_id=conversation_id)
 
     # --- proactive ------------------------------------------------------------------------------
 
@@ -541,7 +544,7 @@ class TurnRunner:
         # on its conversation when it started.
         await self._push_conversations()
         if report:
-            await self._report(report)
+            await self._report(report, spec)
 
     async def _prune_task_conversations(self, spec: ProactiveTarget, cap: int) -> None:
         """Keep the firing task's newest ``cap`` conversations and delete the rest, once this run is done.
@@ -748,14 +751,21 @@ class TurnRunner:
         finally:
             current_metrics.reset(metrics_token)
 
-    async def _report(self, text: str) -> None:
-        """Send an unattended run's own status line, tolerating a channel that cannot take it.
+    async def _report(self, text: str, spec: ProactiveTarget) -> None:
+        """Raise an unattended run's own status line as an alert, tolerating a channel that cannot
+        take it.
+
+        An alert rather than a message in the transcript: the run happened outside whatever the user
+        is reading, so a bubble there is a sentence about somebody else's conversation.
+        The card is linked to the run's own conversation and grouped by the task, which is
+        deliberate: every firing mints a fresh conversation, so grouping by that would leave a card
+        per firing for a task that runs all night.
 
         Nobody is awaiting this turn, so a failed notification must not become the error that takes
         down the scheduler job (invariant 6).
         """
         try:
-            await self._ui.send(text)
+            await self._ui.alert(text, conversation_id=spec.conversation_id, group=spec.task_id)
         except Exception:
             logger.warning("A scheduled task ran; its notification could not be delivered", exc_info=True)
 

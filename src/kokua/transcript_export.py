@@ -16,8 +16,19 @@ than the longest one inside its own payload, and a payload longer than ``max_pay
 cut with a note saying how much was removed, rather than either breaking the rest of the document
 or silently showing an incomplete result as if it were complete.
 
-Pure: it takes a ``Session`` and returns a string. Both front ends and the CLI call it, which is
-why it lives here rather than under ``channels/`` or ``frontends/``, and why it imports neither.
+A sub-agent's tool result can be capped a second way, before this module ever sees it:
+``core/subagents.py`` spills anything past ``RESPONSE_PREVIEW_CHARS`` to a payload file and stores
+only a preview plus a ``response_ref``. That preview is already short enough that ``max_payload_chars``
+never re-triggers on it, so a caller relying on the cap-and-note above alone would render a complete
+looking result that is actually a quarter of one; an item carrying ``response_ref`` is therefore always
+noted regardless of length, and under ``max_payload_chars=None`` (``--full``) the blob is read back
+through ``payloads_path`` so the export is whole rather than merely uncapped.
+
+Mostly pure: given a ``Session`` it returns a string, except that a spilled tool response makes it
+read one payload file back off disk when the caller asks for the full text and supplies
+``payloads_path``. Both front ends and the CLI call it, which is why it lives here rather than under
+``channels/`` or ``frontends/``, and why it imports neither of those (``kokua.payloads`` is the
+shared, front-end-agnostic module the spill itself already depends on).
 
 This module renders the header and the per-turn structure: the user's words, the model's answer,
 its reasoning (both the plain ``thinking`` field and a verbose trace's ``reasoning`` segments), the
@@ -34,10 +45,12 @@ delegating turn read as cheap.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from aimu.sessions import Session
 
+from kokua import payloads
 from kokua.core.messages import derive_title
 from kokua.core.transcripts import replay_items, short_time
 
@@ -107,11 +120,24 @@ def _loop_line(item: dict, max_payload_chars: Optional[int]) -> str:
     return f"_[{label}: {_capped(item.get('text', ''), max_payload_chars)}]_"
 
 
-def render_markdown(session: Session, *, max_payload_chars: Optional[int] = DEFAULT_MAX_PAYLOAD_CHARS) -> str:
+def render_markdown(
+    session: Session,
+    *,
+    max_payload_chars: Optional[int] = DEFAULT_MAX_PAYLOAD_CHARS,
+    payloads_path: Optional[Path] = None,
+) -> str:
     """The conversation as a Markdown document: a header, then one section per turn.
 
     ``max_payload_chars`` bounds how much of a tool call's arguments or result is shown before
     it is cut with a note (see :func:`_capped`); pass ``None`` to lift the cap entirely.
+
+    ``payloads_path`` is where a spilled sub-agent tool response can be read back from (see
+    ``kokua.payloads`` and ``core/subagents.py``). It is a caller-supplied argument rather than
+    something this function resolves from config itself, matching the existing shape of every other
+    input here: a pure renderer taking exactly what it needs, so a caller with no such directory (a
+    test fixture, or config not yet loaded) can render without one. Passing it only matters when
+    ``max_payload_chars`` is ``None``; short of that, a spilled response is only ever previewed and
+    noted, never read back, so there is nothing to fetch it for.
     """
     lines = _render_header(session)
     if not session.messages:
@@ -126,7 +152,7 @@ def render_markdown(session: Session, *, max_payload_chars: Optional[int] = DEFA
         trace=metadata.get("trace"),
         failure=metadata.get("failure"),
     )
-    lines.extend(_render_body(items, metadata, max_payload_chars))
+    lines.extend(_render_body(items, metadata, max_payload_chars, payloads_path))
     return "\n".join(lines) + "\n"
 
 
@@ -318,7 +344,9 @@ def _turn_cost_blocks(message_index: Optional[int], metadata: dict) -> list[list
     return blocks
 
 
-def _render_subagent(events: list[dict], max_payload_chars: Optional[int]) -> list[str]:
+def _render_subagent(
+    events: list[dict], max_payload_chars: Optional[int], payloads_path: Optional[Path] = None
+) -> list[str]:
     """One spawn's whole lifecycle, grouped by its caller into a single card.
 
     ``events`` is every event recorded for one spawn id, in emission order (see
@@ -355,7 +383,7 @@ def _render_subagent(events: list[dict], max_payload_chars: Optional[int]) -> li
         kind = append.get("kind")
         lines.append("")
         if kind == "tool":
-            lines.extend(_render_tool(append, max_payload_chars))
+            lines.extend(_render_tool(append, max_payload_chars, payloads_path))
         elif kind == "reasoning":
             lines.append("**Reasoning:**")
             lines.append("")
@@ -401,28 +429,54 @@ def _render_verdict(event: dict, max_payload_chars: Optional[int]) -> list[str]:
     return lines
 
 
-def _render_tool(item: dict, max_payload_chars: Optional[int]) -> list[str]:
+def _render_tool(item: dict, max_payload_chars: Optional[int], payloads_path: Optional[Path] = None) -> list[str]:
     """A tool call's name, arguments, and result, each payload capped and fenced.
 
     The arguments block gets a ``json`` language hint because the model always emits that shape;
     the result's is left bare, since a tool can return anything from plain text to another
     language's source. A ``response`` of ``None`` means no result was recorded (a turn cancelled
     mid-call), which is worth showing as its own line rather than as an empty, easily-missed block.
+
+    A sub-agent's response can carry ``response_ref``: ``core/subagents.py`` already cut it to
+    ``RESPONSE_PREVIEW_CHARS`` before it ever reached storage, spilling the rest to a payload file
+    named by ``response_bytes``. That preview is short enough that ``_capped`` never finds it over
+    ``max_payload_chars`` (the two happen to share a value), so relying on the usual cap-and-note
+    here would silently present a quarter of a result as though it were the whole thing, which is
+    exactly what an export must never do. So a ``response_ref`` is always noted, independent of
+    length: under ``max_payload_chars=None`` (an export that asked for everything) the blob is read
+    back through ``payloads_path`` and shown whole; otherwise, or if the blob is missing, the stored
+    preview stands with a note giving its real size and where the rest lives.
     """
     lines = [f"**Tool call: `{item['name']}`**", ""]
     arguments = item.get("arguments")
     if arguments:
         lines.append(_fenced(_capped(arguments, max_payload_chars), "json"))
     response = item.get("response")
+    response_ref = item.get("response_ref")
     lines.append("")
     if response is None:
         lines.append("_(no result recorded)_")
+    elif response_ref:
+        full_text = None
+        if max_payload_chars is None and payloads_path is not None:
+            full_text = payloads.read_text(payloads_path, response_ref)
+        if full_text is not None:
+            lines.append(_fenced(full_text))
+        else:
+            lines.append(_fenced(response))
+            size = item.get("response_bytes")
+            size_text = f"{size:,} chars" if isinstance(size, int) else "an unrecorded size"
+            note = f"_[preview only: the full result is {size_text}, stored at `{response_ref}`"
+            if max_payload_chars is None:
+                note += "; the payload file could not be read back"
+            note += "]_"
+            lines.append(note)
     else:
         lines.append(_fenced(_capped(response, max_payload_chars)))
     return lines
 
 
-def _render_item(item: dict, max_payload_chars: Optional[int]) -> list[str]:
+def _render_item(item: dict, max_payload_chars: Optional[int], payloads_path: Optional[Path] = None) -> list[str]:
     """One replay item as Markdown lines, dispatched on its ``type``.
 
     ``subagent`` items are handled by ``_render_body`` before an item ever reaches here, since a
@@ -449,7 +503,7 @@ def _render_item(item: dict, max_payload_chars: Optional[int]) -> list[str]:
     if item_type == "loop":
         return [_loop_line(item, max_payload_chars)]
     if item_type == "tool":
-        return _render_tool(item, max_payload_chars)
+        return _render_tool(item, max_payload_chars, payloads_path)
     if item_type == "notice":
         # A blockquote, so the reason a turn stopped reads as an aside on whatever it produced
         # before stopping, not as more of that output.
@@ -458,7 +512,9 @@ def _render_item(item: dict, max_payload_chars: Optional[int]) -> list[str]:
     return [f"_(unrendered item type: {item_type})_"]
 
 
-def _render_subagent_run(items: list[dict], start: int, max_payload_chars: Optional[int]) -> tuple[list[str], int]:
+def _render_subagent_run(
+    items: list[dict], start: int, max_payload_chars: Optional[int], payloads_path: Optional[Path] = None
+) -> tuple[list[str], int]:
     """The contiguous run of ``subagent`` items starting at ``start``, as one card per spawn (or
     per reviewer verdict round).
 
@@ -499,11 +555,13 @@ def _render_subagent_run(items: list[dict], start: int, max_payload_chars: Optio
         if group[0].get("id") is None:
             lines.extend(_render_verdict(group[0], max_payload_chars))
         else:
-            lines.extend(_render_subagent(group, max_payload_chars))
+            lines.extend(_render_subagent(group, max_payload_chars, payloads_path))
     return lines, index
 
 
-def _render_body(items: list[dict], metadata: dict, max_payload_chars: Optional[int]) -> list[str]:
+def _render_body(
+    items: list[dict], metadata: dict, max_payload_chars: Optional[int], payloads_path: Optional[Path] = None
+) -> list[str]:
     """Every item, one per turn heading at the first item carrying a ``message_index`` and its content
     after.
 
@@ -521,7 +579,7 @@ def _render_body(items: list[dict], metadata: dict, max_payload_chars: Optional[
     while index < len(items):
         item = items[index]
         if item["type"] == "subagent":
-            card_lines, index = _render_subagent_run(items, index, max_payload_chars)
+            card_lines, index = _render_subagent_run(items, index, max_payload_chars, payloads_path)
             lines.extend(card_lines)
             continue
         lines.append("")
@@ -541,6 +599,6 @@ def _render_body(items: list[dict], metadata: dict, max_payload_chars: Optional[
         if item["type"] == "user":
             lines.append(f"**User:** {item['text']}")
         else:
-            lines.extend(_render_item(item, max_payload_chars))
+            lines.extend(_render_item(item, max_payload_chars, payloads_path))
         index += 1
     return lines

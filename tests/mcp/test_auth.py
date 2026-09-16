@@ -10,7 +10,7 @@ from kokua.mcp.auth import ChatOAuth, OAuthSettings, build_chat_oauth
 async def test_build_chat_oauth_creates_storage_and_provider(tmp_path: Path):
     posted: list[str] = []
 
-    async def notify(message: str) -> None:
+    async def notify(message: str, *, url: str | None = None) -> None:
         posted.append(message)
 
     storage = tmp_path / "oauth"
@@ -25,7 +25,7 @@ async def test_token_storage_survives_url_shaped_keys(tmp_path: Path):
     slashes/colons as nested directories (the original FileNotFoundError)."""
     posted: list[str] = []
 
-    async def notify(message: str) -> None:
+    async def notify(message: str, *, url: str | None = None) -> None:
         posted.append(message)
 
     provider = build_chat_oauth(
@@ -42,7 +42,7 @@ async def test_token_storage_survives_url_shaped_keys(tmp_path: Path):
 async def test_redirect_handler_posts_link_then_opens_browser(tmp_path: Path, monkeypatch):
     posted: list[str] = []
 
-    async def notify(message: str) -> None:
+    async def notify(message: str, *, url: str | None = None) -> None:
         posted.append(message)
 
     # Stub the parent's network pre-flight + webbrowser.open so the test is hermetic.
@@ -61,10 +61,31 @@ async def test_redirect_handler_posts_link_then_opens_browser(tmp_path: Path, mo
     assert opened == ["https://auth.svc/authorize?x=1"]  # browser-open path still runs after the chat post
 
 
+async def test_redirect_handler_passes_the_url_as_a_field(tmp_path: Path, monkeypatch):
+    """The sentence still carries the link, for a channel that can only print one. The field beside it
+    is what an alert card turns into a real anchor: a card renders its text verbatim rather than
+    hunting for URLs in it, which is what keeps a model-written sentence from becoming a link."""
+    posted: list[tuple[str, str | None]] = []
+
+    async def notify(message: str, *, url: str | None = None) -> None:
+        posted.append((message, url))
+
+    async def fake_super_redirect(self, authorization_url: str) -> None: ...
+
+    monkeypatch.setattr(OAuth, "redirect_handler", fake_super_redirect)
+
+    provider = build_chat_oauth("https://svc/mcp", notify=notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth"))
+    await provider.redirect_handler("https://auth.svc/authorize?x=1")
+
+    (message, url) = posted[0]
+    assert url == "https://auth.svc/authorize?x=1"
+    assert "https://auth.svc/authorize?x=1" in message
+
+
 def test_default_callback_is_a_loopback_url(tmp_path: Path):
     """With nothing configured, FastMCP's own default: loopback host, an arbitrary free port."""
 
-    async def notify(message: str) -> None: ...
+    async def notify(message: str, *, url: str | None = None) -> None: ...
 
     provider = build_chat_oauth("https://svc/mcp", notify=notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth"))
 
@@ -77,7 +98,7 @@ def test_configured_callback_host_and_port_shape_the_redirect_uri(tmp_path: Path
     """The fix for a Kokua running on a different machine than the browser: the redirect URI, and the
     listener behind it, are the user's to place."""
 
-    async def notify(message: str) -> None: ...
+    async def notify(message: str, *, url: str | None = None) -> None: ...
 
     provider = build_chat_oauth(
         "https://svc/mcp",
@@ -94,7 +115,7 @@ async def test_redirect_handler_names_the_callback_url(tmp_path: Path, monkeypat
     otherwise silent until the flow times out."""
     posted: list[str] = []
 
-    async def notify(message: str) -> None:
+    async def notify(message: str, *, url: str | None = None) -> None:
         posted.append(message)
 
     async def fake_super_redirect(self, authorization_url: str) -> None: ...

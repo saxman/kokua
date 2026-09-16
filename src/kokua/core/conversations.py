@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Callable, Optional, Union
 
 from aimu import aio
-from aimu.sessions import Session, TinyDBSessionStore
+from aimu.sessions import Session, SessionSummary, TinyDBSessionStore
 
 from kokua.core.agent_registry import AgentRegistry
 from kokua.config import AssistantConfig
@@ -192,9 +192,13 @@ class ConversationBook:
         return self._active_id
 
     def most_recent_or_new(self) -> Session:
-        """The most-recently-updated session, creating a fresh empty one if the store is empty."""
-        sessions = self.sessions()
-        return sessions[0] if sessions else self.new_session()
+        """The most-recently-updated session, creating a fresh empty one if the store is empty.
+
+        Reads summaries to pick the winner and fetches only that one, so choosing among many
+        conversations does not cost a read of each.
+        """
+        summaries = self.summaries()
+        return self.get(summaries[0].key) if summaries else self.new_session()
 
     def new_session(self, title: Optional[str] = None, task_id: Optional[str] = None) -> Session:
         """Mint and persist an empty session, optionally pre-titled and attributed to a task.
@@ -251,31 +255,47 @@ class ConversationBook:
 
     # --- CRUD ---------------------------------------------------------------------------------
 
+    def summaries(self) -> list[SessionSummary]:
+        """Every stored conversation without its messages, most-recently-updated first.
+
+        The path for every caller whose question is about metadata: the sidebar, task ownership, and
+        which conversation to open at startup. One store call rather than one per conversation, which
+        is the difference between a switch that repaints immediately and one that parses the whole
+        session file once per stored conversation first.
+
+        Re-read on every call, like :meth:`sessions`, so a conversation a background turn just
+        persisted shows up.
+        """
+        summaries = self._store.list_summaries()
+        summaries.sort(key=lambda summary: summary.metadata.get("updated_at", ""), reverse=True)
+        return summaries
+
     def sessions(self) -> list[Session]:
-        """Every stored conversation, most-recently-updated first.
+        """Every stored conversation with its messages, most-recently-updated first.
 
-        The one place the store's key-then-get walk and the ``updated_at`` ordering live: ``list()``
-        projects it for the sidebar, ``most_recent_or_new`` takes its head, and the agent's read-only
-        conversation tools scan it. Re-read on every call, which is the point -- a conversation a
-        background turn just persisted has to show up.
-
-        Costs one store read per conversation (TinyDB re-parses the file each time), which is already
-        what a sidebar push costs. If that ever matters, a bulk read belongs in AIMU's store, and this is
-        the single seam it would land behind.
+        Costs one store read per conversation, so this is for the one caller that genuinely needs
+        message text: ``search_conversations``, which has to read what was actually said to match a
+        query against it. Everything asking about titles, timestamps, or task ownership belongs on
+        :meth:`summaries` instead; everything asking about ids belongs on the store's ``list_keys``
+        (:meth:`matching_ids` wraps that for a caller explaining a ``resolve`` refusal); and a caller
+        that wants one particular conversation's messages, once it already knows which, calls
+        :meth:`get` rather than scanning every stored session to find it (see :meth:`most_recent_or_new`
+        and ``cli.py``'s ``_resolve_export_session`` for the shape: :meth:`summaries` picks the
+        conversation, then exactly one :meth:`get` fetches its messages).
         """
         sessions = [self._store.get(key) for key in self._store.list_keys()]
         sessions.sort(key=lambda session: session.metadata.get("updated_at", ""), reverse=True)
         return sessions
 
-    def sessions_for_task(self, task_id: str) -> list[Session]:
+    def sessions_for_task(self, task_id: str) -> list[SessionSummary]:
         """The conversations a scheduled task minted, oldest first.
 
-        Ordered by ``created_at`` rather than the ``updated_at`` :meth:`sessions` uses: retention
+        Ordered by ``created_at`` rather than the ``updated_at`` :meth:`summaries` uses: retention
         prunes a task's runs in the order they were minted, and a late turn or edit touching an older
         run must not make it look like the newest one. ``updated_at`` then the key break a tie, so a
         session stored before conversations recorded ``created_at`` still sorts deterministically.
         """
-        owned = [s for s in self.sessions() if s.metadata.get("task_id") == task_id]
+        owned = [s for s in self.summaries() if s.metadata.get("task_id") == task_id]
         owned.sort(key=lambda s: (s.metadata.get("created_at", ""), s.metadata.get("updated_at", ""), s.key))
         return owned
 
@@ -284,12 +304,17 @@ class ConversationBook:
 
         A task's name is its identity, so a rename would otherwise orphan its history: the sidebar
         stops nesting the runs under their task, and retention stops counting them against its cap.
+
+        ``sessions_for_task`` gives summaries now, which have no ``messages`` to save back, so this
+        re-fetches each matching conversation by key before mutating and saving it. Only a rename pays
+        that per-conversation cost; finding which conversations need it does not.
         """
-        sessions = self.sessions_for_task(old_task_id)
-        for session in sessions:
+        owned = self.sessions_for_task(old_task_id)
+        for summary in owned:
+            session = self._store.get(summary.key)
             session.metadata["task_id"] = new_task_id
             self._store.save(session)
-        return len(sessions)
+        return len(owned)
 
     def list(self) -> list[dict]:
         """All conversations as {id, title, updated_at, active, task_id}, most-recently-updated first.
@@ -300,13 +325,13 @@ class ConversationBook:
         """
         return [
             {
-                "id": session.key,
-                "title": session.metadata.get("title") or UNTITLED,
-                "updated_at": session.metadata.get("updated_at", ""),
-                "active": session.key == self._active_id,
-                "task_id": session.metadata.get("task_id"),
+                "id": summary.key,
+                "title": summary.metadata.get("title") or UNTITLED,
+                "updated_at": summary.metadata.get("updated_at", ""),
+                "active": summary.key == self._active_id,
+                "task_id": summary.metadata.get("task_id"),
             }
-            for session in self.sessions()
+            for summary in self.summaries()
         ]
 
     def create(self) -> str:
@@ -718,30 +743,36 @@ class ConversationBook:
         exists because a caller that saw a 32-hex id in a listing is apt to shorten it, and it is long
         enough that a prefix hit is not a coincidence.
 
+        Matched against ``list_keys`` and not ``sessions``: the question is about ids, and a store read
+        per stored conversation to answer it cost seconds on a large file. The exact-hit check is
+        inlined here rather than delegating to ``exists`` so the keys are read once instead of twice.
+
         Reads only the store, never ``agent_for``: resolving must stay cheap and side-effect-free, and
         building an agent is neither (see ``toolsets/conversations.py`` for the full reasoning).
         """
         wanted = _fragment(conversation_id)
         if not wanted:
             return None
-        if self.exists(wanted):
+        keys = self._store.list_keys()
+        if wanted in keys:
             return self.get(wanted)
         if len(wanted) < ID_PREFIX_MIN:
             return None
-        matches = [session for session in self.sessions() if session.key.startswith(wanted)]
-        return matches[0] if len(matches) == 1 else None
+        matches = [key for key in keys if key.startswith(wanted)]
+        return self.get(matches[0]) if len(matches) == 1 else None
 
     def matching_ids(self, fragment: str) -> list[str]:
         """Every conversation id starting with *fragment*, for a caller explaining a ``resolve`` refusal.
 
         Reads the fragment exactly as ``resolve`` does, so the explanation always describes the question
         that was actually asked, and applies no length floor: the point is to report what a fragment
-        ``resolve`` already rejected does match.
+        ``resolve`` already rejected does match. Reads ``list_keys`` for the same reason ``resolve``
+        does: the answer is a list of ids, and loading transcripts to produce it is pure waste.
         """
         wanted = _fragment(fragment)
         if not wanted:
             return []
-        return [session.key for session in self.sessions() if session.key.startswith(wanted)]
+        return [key for key in self._store.list_keys() if key.startswith(wanted)]
 
     def save(self, session: Session) -> None:
         self._store.save(session)

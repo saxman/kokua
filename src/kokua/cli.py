@@ -92,9 +92,11 @@ def build_arg_parser(prog: str = "kokua") -> argparse.ArgumentParser:
         "--confirm-tools",
         default=None,
         metavar="NAMES",
-        help="Comma-separated tool names that require interactive confirmation before each call. "
-        "Default: add_skill_script,add_mcp_server,execute_python,run_command,update_config. Pass an "
-        "empty string to disable.",
+        help="Comma-separated tools that require interactive confirmation before each call. Each entry "
+        "names its toolset: 'compute' (or 'compute.*') for every tool that capability provides, "
+        "'compute.execute_python' for one, with 'core' reserved for the tools no toolset provides. "
+        "Default: skills.add_skill_script,mcp.add_mcp_server,compute.execute_python,compute.run_command,"
+        "fs_write,config.update_config. Pass an empty string to disable.",
     )
 
     # Web front-end binding (ignored by other front ends).
@@ -388,8 +390,11 @@ def _resolve_export_session(args: argparse.Namespace, config: AssistantConfig) -
     store = TinyDBSessionStore(str(config.sessions_path))
     book = ConversationBook(store, TurnGate(lambda _cid: asyncio.Lock()), config, on_active_change=lambda _cid: None)
     if args.conversation == "latest":
-        sessions = book.sessions()
-        return (sessions[0] if sessions else None), 0
+        # Same shape as `most_recent_or_new`: pick the winner from metadata alone, then fetch only
+        # that one conversation's messages, rather than paying for every stored conversation's to
+        # find the single newest.
+        summaries = book.summaries()
+        return (book.get(summaries[0].key) if summaries else None), 0
 
     session = book.resolve(args.conversation)
     if session is not None:
@@ -398,7 +403,7 @@ def _resolve_export_session(args: argparse.Namespace, config: AssistantConfig) -
     fragment = args.conversation.strip().strip("'\"`")
     if len(fragment) < ID_PREFIX_MIN:
         return None, 0
-    match_count = sum(1 for stored in book.sessions() if stored.key.startswith(fragment))
+    match_count = len(book.matching_ids(fragment))
     return None, match_count
 
 
@@ -438,7 +443,11 @@ def _export(args: argparse.Namespace, config: AssistantConfig) -> int:
             print(f"no conversation found matching '{args.conversation}'", file=sys.stderr)
         return 2
 
-    markdown = render_markdown(session, max_payload_chars=None if args.full else DEFAULT_MAX_PAYLOAD_CHARS)
+    markdown = render_markdown(
+        session,
+        max_payload_chars=None if args.full else DEFAULT_MAX_PAYLOAD_CHARS,
+        payloads_path=config.payloads_path,
+    )
 
     if args.output == "-":
         print(markdown, end="")

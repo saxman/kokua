@@ -46,8 +46,20 @@ class RichChannel(Protocol):
         anything that acts on one (branching it, replaying its recorded cards). Sent after the write,
         so a front end offering an action on the turn is never offering one the store cannot serve."""
 
-    async def send_notification(self, text: str) -> None:
-        """Report that a background turn finished, without stealing the current view."""
+    async def send_notification(
+        self,
+        text: str,
+        *,
+        conversation_id: Optional[str] = None,
+        url: Optional[str] = None,
+        group: Optional[str] = None,
+    ) -> None:
+        """Raise an alert about something outside the conversation in view, without stealing it.
+
+        ``text`` always stands on its own, because ``ChannelUI.alert`` falls back to printing it. The
+        three optional fields are what a front end able to draw a control makes one from: the
+        conversation to open, the URL to follow, and the group whose next card supersedes this one.
+        """
 
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         """Prompt for tool-call approval. The reply arrives through the ordinary inbound path."""

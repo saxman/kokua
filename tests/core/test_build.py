@@ -22,6 +22,7 @@ _MEMORY_TOOL_NAMES = {
     "list_memories",
     "save_document",
     "read_document",
+    "edit_document",
     "list_documents",
     "search_documents",
 }
@@ -218,6 +219,7 @@ STORE_TOOLS = {
         "list_memories",
         "save_document",
         "read_document",
+        "edit_document",
         "list_documents",
         "search_documents",
     },

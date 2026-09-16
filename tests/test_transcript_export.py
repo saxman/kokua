@@ -237,6 +237,98 @@ def test_a_tool_call_with_no_result_says_so_rather_than_showing_an_empty_block()
     assert "no result" in out.lower()
 
 
+# --- a spilled sub-agent tool response (response_ref) -----------------------------------------
+
+
+def test_a_spilled_response_is_noted_even_though_its_preview_is_under_the_cap():
+    """core/subagents.py caps a spilled response's stored preview at RESPONSE_PREVIEW_CHARS, the
+    same value as DEFAULT_MAX_PAYLOAD_CHARS, so the ordinary cap-and-note in _capped never triggers
+    here: the preview already fits under the cap. A response_ref must be noted regardless of length,
+    or an abridged export reads as a complete one."""
+    events = [
+        {"id": "s1", "role": "worker", "task": "fetch", "status": "running"},
+        {
+            "id": "s1",
+            "append": {
+                "kind": "tool",
+                "name": "fetch_url",
+                "arguments": "{}",
+                "response": "preview text",
+                "response_ref": "/payloads/" + "a" * 64,
+                "response_bytes": 9000,
+            },
+        },
+        {"id": "s1", "status": "done"},
+    ]
+    out = "\n".join(_render_subagent(events, 4000))
+    assert "preview text" in out
+    assert "9,000 chars" in out
+    assert "/payloads/" + "a" * 64 in out
+
+
+def test_full_export_reads_a_spilled_response_back_from_its_payload_file(tmp_path):
+    """Under max_payload_chars=None (``--full``), the whole response is read back off disk rather
+    than leaving the reader with the RESPONSE_PREVIEW_CHARS preview, believing it complete."""
+    from kokua import payloads
+
+    full_text = "z" * 9000
+    reference = payloads.save_text(tmp_path, full_text)
+    session = _session(
+        [{"role": "user", "content": "go"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "s1", "role": "worker", "task": "fetch", "status": "running"},
+                    {
+                        "id": "s1",
+                        "append": {
+                            "kind": "tool",
+                            "name": "fetch_url",
+                            "arguments": "{}",
+                            "response": full_text[:4000],
+                            "response_ref": reference,
+                            "response_bytes": len(full_text),
+                        },
+                    },
+                    {"id": "s1", "status": "done"},
+                ]
+            }
+        },
+    )
+    out = render_markdown(session, max_payload_chars=None, payloads_path=tmp_path)
+    assert full_text in out
+
+
+def test_full_export_falls_back_to_the_preview_with_a_note_when_the_payload_file_is_gone(tmp_path):
+    """A payload folder is never garbage collected by Kokua itself, but a user can clear it by hand.
+    The export must say the full read failed rather than silently showing the preview as complete."""
+    session = _session(
+        [{"role": "user", "content": "go"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "s1", "role": "worker", "task": "fetch", "status": "running"},
+                    {
+                        "id": "s1",
+                        "append": {
+                            "kind": "tool",
+                            "name": "fetch_url",
+                            "arguments": "{}",
+                            "response": "preview text",
+                            "response_ref": "/payloads/" + "b" * 64,
+                            "response_bytes": 9000,
+                        },
+                    },
+                    {"id": "s1", "status": "done"},
+                ]
+            }
+        },
+    )
+    out = render_markdown(session, max_payload_chars=None, payloads_path=tmp_path)
+    assert "preview text" in out
+    assert "could not be read back" in out
+
+
 # --- item types the renderer dispatches on ---------------------------------------------------
 
 

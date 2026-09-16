@@ -198,6 +198,32 @@ def _validated_agent_write(config, registry, table) -> Callable[[str, str, Any],
     return convert
 
 
+def _also_dry_run(inner: Optional[Callable], agent_write: Callable) -> Callable:
+    """An agent key's own converter, then the dry run on the value it returns.
+
+    Composed rather than replaced, because the two answer different questions and neither covers the
+    other. ``agent_write`` asks whether the resulting *file* would still start, which is why it can catch
+    an unknown toolset or a delegation cycle that no single key's converter could see. What it
+    deliberately does not do is repeat any per-key check, so a key whose validity lives only in its own
+    converter had nothing checking it here at all: ``thinking``'s value set and ``max_iterations``' range
+    are both enforced at parse time in ``config/file.py`` and nowhere ``validate_agents`` reads. Writing
+    either one badly was accepted and then refused by the next startup, and that failure trapped itself,
+    since the dry run cannot parse the file it now needs to read and so refuses the repair too.
+
+    Inner first, and the order is load-bearing twice over. A converter transforms as well as checks
+    (``_thinking`` maps the string ``"true"`` to a bool), so the dry run's ``replace(agent, ...)`` has to
+    see the value the file would actually parse to rather than the raw one, and the persisted value is
+    then the typed one rather than a string standing in for it. It also puts the specific error first: a
+    per-key message names the key and its accepted values, where the dry run's wrapper speaks about every
+    agent at once.
+
+    ``None`` for a key with no converter of its own, which is most of them.
+    """
+    if inner is None:
+        return agent_write
+    return lambda section, key, value: agent_write(section, key, inner(section, key, value))
+
+
 def make_config_tools(
     apply_hot: Callable[[str, str, object], Awaitable[None]],
     table,
@@ -240,9 +266,11 @@ def make_config_tools(
         # own converter, undried-run, because `agent_write` rebuilds the candidate agent with
         # `replace(agent, **{key: value})` and `generation` is a sub-table rather than a field: a write
         # to `temperature` would raise TypeError out of the tool call instead of being validated.
+        # Each flat key keeps its own converter and gains the dry run on top, rather than trading one for
+        # the other; `_also_dry_run` says what each half catches and why neither covers the other.
         **{
-            location: (target, types, label, agent_write)
-            for location, (target, types, label, _) in settings.AGENT_SCHEMA.items()
+            location: (target, types, label, _also_dry_run(inner, agent_write))
+            for location, (target, types, label, inner) in settings.AGENT_SCHEMA.items()
             if location[0] == "agents.*"
         },
     }
