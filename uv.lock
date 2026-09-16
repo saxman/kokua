@@ -1656,6 +1656,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "httpx2" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-playwright" },
@@ -1674,6 +1675,7 @@ web = [
 [package.metadata]
 requires-dist = [
     { name = "aimu", extras = ["anthropic", "ollama", "openai-compat", "memory"], editable = "../aimu" },
+    { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.27" },
