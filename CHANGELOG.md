@@ -386,10 +386,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.31.0 or newer
     throughout, since neither typing nor sending ever depended on that half of boot finishing. Measured
     against a copy of a real `$KOKUA_HOME` (28 conversations, the same two remote servers declared), the
     sidebar itself, meaning `Assistant.create()` plus the conversation list, history, and settings reads
-    it renders, is on screen in about 1.5 seconds (three runs, 1.49-1.53s, roughly half spent in `create()`
-    and half in those reads), against about 8.5 seconds measured on the same config before this change.
-    That figure covers the sidebar only, not the whole connection: `start()` still has the remote servers
-    to connect, so the assistant behind the sidebar is ready later, not at the 1.5-second mark.
+    it renders, is on screen in about 0.1 seconds (three runs, 0.095-0.103s, roughly 0.063s in
+    `create()` and 0.040s in those reads), against about 8.2-8.8 seconds measured the same way before
+    this change. Most of that gap belongs to something else: listing conversations from a stored
+    summary rather than parsing each one's whole session file cuts the same `create()`-plus-reads path
+    from 1.499s to about 0.1s on its own, a savings of roughly 1.4 seconds that has nothing to do with
+    when the sidebar appears relative to `start()`. What this change is responsible for is the rest of
+    it: the sidebar used to wait behind the whole eight-second-plus boot, remote servers included, and
+    now waits behind none of that remote half. That figure covers the sidebar only, not the whole
+    connection: `start()` still has the remote servers to connect, so the assistant behind the sidebar
+    is ready later, not at the 0.1-second mark.
   - **A dropped socket reconnects on its own.** Restarting Kokua under an open browser used to leave a
     page that said "Disconnected." and could only be recovered by reloading. The page now retries with
     backoff (500ms doubling to a 10s ceiling, indefinitely) and shows one notice for the whole outage
