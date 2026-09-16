@@ -1778,6 +1778,15 @@ The pre-release development history is in the git log.</p>
   section whose owning toolset no agent declares is unaffected.</li>
 <li>The stable public import surface is <code>kokua.plugins</code>, <code>kokua.config</code>, <code>kokua.core</code>,
   <code>kokua.channels.web</code>, and <code>kokua.images</code>. Everything else is internal and may move.</li>
+<li><strong>The <code>web</code> extra's two dependencies are capped below their next major</strong>: <code>starlette&gt;=1.0,&lt;2</code> and
+  <code>uvicorn&gt;=0.30,&lt;1</code>. Nothing else in a resolved install bounds either one, since <code>mcp</code>,
+  <code>sse-starlette</code>, and <code>fastmcp-slim</code> all depend on a bare <code>starlette</code>, so these are the only bounds
+  there are. Left open, the first install after a Starlette 2.0 resolves a major nobody has run the web
+  front end against, and the breakage lands on a fresh clone rather than on a deliberate upgrade.
+  uvicorn is capped for the same reason and not a weaker one: Kokua calls it in two places, but it is
+  the half that implements the WebSocket handshake the UI lives on. The floors carry less information
+  than the caps do, naming the line <code>uv.lock</code> resolves and CI installs rather than a tested claim about
+  anything older.</li>
 </ul>
 <h3 id="conversations-and-turns">Conversations and turns<a class="headerlink" href="#conversations-and-turns" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3187,19 +3196,20 @@ notice on startup.</p>
   call, which Anthropic rejected outright and which made search-heavy sub-agents fail rather than
   answer), and that fix had no handle a probe could honestly grip: a private method on a private class
   is exactly what a later refactor renames, and a probe pointed at one becomes a wall in front of a
-  newer, working AIMU. Today the floor is 0.28.0, and for once reason and probe are the same capability
-  again: <code>StreamingContentType.CONTINUING</code> is the phase a streamed driver yields before a round the loop
+  newer, working AIMU. <strong>0.28.0</strong> was the floor until 0.29.0, and for once reason and probe were the same
+  capability again: <code>StreamingContentType.CONTINUING</code> is the phase a streamed driver yields before a round the loop
   injected on its own rather than one the model asked for, the same chunk a loop marker reads to say
   which injection it was (see "A loop marker names which injection it was" under Front ends, above). The
-  probe is a membership check again, the second time (<code>SUBAGENT_SPEC_KEYS</code> was the first), reading
+  probe was a membership check again, the second time (<code>SUBAGENT_SPEC_KEYS</code> was the first), reading
   <code>StreamingContentType.__members__</code> rather than a bare <code>in</code>, because <code>in</code> on an enum compares values on
   Python 3.12 and raises <code>TypeError</code> on 3.11, where the capability here is a member's name, not its
   value. 0.28.0's other capability, the <code>"max_iterations"</code> entry in <code>SUBAGENT_SPEC_KEYS</code> behind a
   per-agent tool-loop cap, was the floor's job instead: that key set is closed and checked when a spawn
   tool is built, so an AIMU predating 0.28.0 raised <code>ValueError</code> naming it at startup with or without a
-  probe, and the one slot went to the capability that would otherwise fail silently. Today the floor is
-  0.29.0, and the probe returns to a plain name lookup, the third time (<code>resolve_default_text_model</code>,
-  then <code>ModelRefusalError</code>, now this): <code>aimu.sessions.SessionStore.list_summaries</code>, a session store's
+  probe, and the one slot went to the capability that would otherwise fail silently. <strong>0.29.0</strong> was the
+  floor until 0.30.0, and the probe returned to a plain name lookup, the third time
+  (<code>resolve_default_text_model</code>, then <code>ModelRefusalError</code>, then this):
+  <code>aimu.sessions.SessionStore.list_summaries</code>, a session store's
   own answer to "every stored conversation's title, timestamp, and message count, without its
   messages", which is what <code>ConversationBook.summaries()</code> calls so the sidebar, task ownership, and the
   startup pointer stop paying one whole-file parse per stored conversation just to draw a list of
@@ -3209,8 +3219,8 @@ notice on startup.</p>
   default: the ABC's own <code>list_summaries</code> is correct but slow, <code>TinyDBSessionStore</code>'s override is what
   makes it fast, and a name lookup on the ABC is satisfied by either, so a store that stopped
   overriding it would still pass while paying the old cost in silence; <code>StreamingContentType.CONTINUING</code>
-  is the floor's job now, the same way every earlier probe surface became the floor's job once a newer
-  one took the slot. <strong>0.30.0</strong> was the floor until 0.31.0, the first one moved by a rename, and its probe was a
+  became the floor's job then, the same way every earlier probe surface became the floor's job once a
+  newer one took the slot. <strong>0.30.0</strong> was the floor until 0.31.0, the first one moved by a rename, and its probe was a
   name lookup for the fourth time: <code>aimu.tools.builtin.get_web_content</code>, which replaces <code>get_webpage</code>.
   The name is not the point. The old tool never asked what it had downloaded, handing <code>response.text</code>
   to an HTML stripper, and since <code>requests</code> decodes <code>.text</code> with <code>errors="replace"</code>, a PDF behind a URL
@@ -3241,7 +3251,12 @@ notice on startup.</p>
   instead. <code>get_web_content</code> joins the floor's job.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and <code>tests/test_aimu_compat.py</code> pins the floor against <code>pyproject.toml</code>'s specifier so the two
-  halves of that one decision cannot drift.</li>
+  halves of that one decision cannot drift. It pins the floor against the <em>prose</em> too: the README, the
+  docs index, this changelog, the architecture page, and CI's own comments each tell a reader which
+  AIMU to have, none of them is reachable from the specifier, and every one had fallen behind it, by as
+  much as seven releases in CI's case. What is held to the current floor is the present tense ("AIMU X
+  or newer", "Today the floor is X"), never the history beside it, which is correct as written and
+  would otherwise have to be rewritten on every bump.</li>
 <li><strong>A failed model request reports its actual cause.</strong> <code>kokua.core.errors.describe_error</code> walks the
   exception's <code>__cause__</code> chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.
