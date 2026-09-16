@@ -170,27 +170,38 @@ class Assistant:
         # end them: a task that outlives `self._store.close()` writes to a closed file, out of a task
         # nobody is watching -- the same failure invariant 7 in `core/turns.py` describes for turns.
         self._title_tasks: set[asyncio.Task] = set()
+        # Whether `start()` has run. Set before its body rather than after, so a failed start is
+        # terminal for this assistant instead of leaving a retry that would connect every MCP server
+        # a second time. Both front ends abort on that failure, which is what makes terminal the
+        # right shape: the user has a config to fix, not a transient to retry.
+        self._started = False
 
     @classmethod
     async def create(
         cls, config: AssistantConfig, channel: Channel, *, client=None, client_factory=None
     ) -> "Assistant":
+        """Build the assistant from local state: the registry validated, no agent built, no server reached.
+
+        The registry and its command map are built and validated first, before anything else touches
+        state: opening the session store here, and connecting to a remote server later, in
+        :meth:`start`. An unknown toolset name, a missing entry agent, or a delegation cycle therefore
+        fails naming the offending value before either half of boot writes or connects anything.
+
+        Returns an assistant that has read every local source it needs and reached no network. The
+        remote half of boot (MCP servers, the entry agent's model) is :meth:`start`, which `run`
+        awaits, so a front end can display a conversation list before paying for it.
+        """
         # Imported here, not at module level: kokua.core.agents pulls in kokua.toolsets.core, which
         # pulls in kokua.core.transcripts -- a submodule of this package -- and importing it triggers
         # kokua/core/__init__ to run, which imports this module. A top-level import here would close
         # that cycle.
-        from kokua.core.agents import (
-            build_command_map,
-            configured_but_undeclared,
-            undeclared_workflow_commands,
-            resolve_confirm_tools,
-            validated_registry,
-        )
+        from kokua.core.agents import build_command_map, undeclared_workflow_commands, validated_registry
 
         # Built and validated before anything else in this method, because everything else touches
-        # something: the next statements open a session store (which mints and persists an empty session)
-        # and connect to remote servers. An unknown toolset name, a missing entry agent, or a delegation
-        # cycle therefore fails naming the offending value, with nothing written and nothing connected.
+        # something: the next statements open a session store (which mints and persists an empty
+        # session); connecting to a remote server is later still, in start(). An unknown toolset name, a
+        # missing entry agent, or a delegation cycle therefore fails naming the offending value, before
+        # either half of boot writes or connects anything.
         registry = validated_registry(config)
         # Built here rather than in __init__ because it needs the validated registry, and here rather
         # than after the store is opened so a collision fails before anything is written.
@@ -280,11 +291,39 @@ class Assistant:
         )
         assistant._book.bind_registry(assistant._registry)
 
+        return assistant
+
+    async def start(self) -> None:
+        """Connect the remote servers and build the entry agent. Idempotent.
+
+        Split from :meth:`create` because the two halves cost wildly different amounts. Everything in
+        `create` reads local state and takes well under a second; everything here waits on a remote
+        MCP handshake or resolves a model, which on a real config is most of startup and is dominated
+        by round trips Kokua does not control. A front end that can display something calls `create`,
+        paints what it already knows (a conversation list, a history, the current settings, none of
+        which touch an agent), and calls this afterwards, so a browser reload no longer shows an empty
+        sidebar while two remote servers are asked for their tool lists. See
+        `docs/explanation/architecture.md`.
+
+        :meth:`run` awaits this before serving, so an assistant cannot serve a turn unstarted. A front
+        end still calls it explicitly when it wants the failure reported somewhere of its choosing:
+        both of Kokua's do, because a bad model string and an `[agents.*]` table naming a since
+        renamed toolset are user mistakes whose message has to reach the person, not a traceback.
+        """
+        if self._started:
+            return
+        self._started = True
+        # Imported here, not at module level, for the cycle `create` documents above.
+        from kokua.core.agents import configured_but_undeclared, resolve_confirm_tools
+
+        config, state = self._config, self._state
         # Reconnect MCP servers BEFORE building the first agent, so `connections` is populated when that
         # agent is built: the entry agent's spawn_subagent snapshots `connections` at build time to give
         # MCP-backed workers their tools. The fan-out is a no-op here (no agents are live yet); it just
         # fills `connections`.
-        await reconnect_mcp_servers(for_each_agent, connections, config, notify=assistant._ui.alert, oauth=oauth)
+        await reconnect_mcp_servers(
+            state.for_each_agent, state.connections, config, notify=state.notify, oauth=state.oauth
+        )
         for name in configured_but_undeclared(config):
             logger.warning(
                 "config.toml has a [%s] section, but no agent declares the %r toolset, so its settings are "
@@ -297,16 +336,15 @@ class Assistant:
             )
 
         # Build the active conversation's agent.
-        entry_agent = assistant._registry.get(assistant._active_id)
+        entry_agent = self._registry.get(self._active_id)
         # Last of the startup checks, because it is the first point where every tool this config builds
         # exists: the entry agent's own, and each worker's, built when the delegation tool above was.
         # It both validates and resolves: a `[security].confirm_tools` entry names a toolset, and the
         # gate matches a tool name, so the gate cannot answer at all until this has run (see
         # `HumanGate.gated_tools`).
-        assistant._human.gated_tools = resolve_confirm_tools(config, state, entry_agent)
+        self._human.gated_tools = resolve_confirm_tools(config, state, entry_agent)
 
         state.tasks.arm_all()
-        return assistant
 
     @property
     def _agent(self) -> aio.SkillAgent:
@@ -689,6 +727,7 @@ class Assistant:
 
     async def run(self) -> None:
         """Serve the channel and run the scheduler concurrently until the channel closes."""
+        await self.start()  # a no-op when the front end already paid for it
         try:
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(self._serve_channel())

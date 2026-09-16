@@ -117,12 +117,13 @@ class HumanGate:
         self._is_proactive = is_proactive
         self._turn_conversation = turn_conversation
         # The tool names [security].confirm_tools resolves to, assigned once every agent has been wired
-        # (core.agents.resolve_confirm_tools). None until then, deliberately, rather than an empty set:
-        # this gate is built in the composition root's __init__ because wiring needs `approve` to hand
-        # to each agent, while the vocabulary a config entry resolves against does not exist until that
-        # wiring finishes. An empty default would make the window between the two read as "nothing is
-        # gated", which is the exact silent failure the startup check exists to prevent, so `approve`
-        # raises in it instead.
+        # (core.agents.resolve_confirm_tools, called from Assistant.start). None until then,
+        # deliberately, rather than an empty set: this gate is built in the composition root's __init__
+        # because wiring needs `approve` to hand to each agent, while the vocabulary a config entry
+        # resolves against does not exist until that wiring finishes. An empty default would make the
+        # window between the two read as "nothing is gated", which is the exact silent failure the
+        # startup check exists to prevent, so `approve` raises in it instead. The window is wider than
+        # it looks: boot's remote half runs in `start`, so it spans every MCP handshake.
         self.gated_tools: Optional[frozenset[str]] = None
         self.approval: PendingRequest[bool] = PendingRequest(default=False)
         # One slot for whatever the running workflow asks. Single-slot and lock-guarded like approval:
@@ -158,7 +159,7 @@ class HumanGate:
             raise RuntimeError(
                 "the tool-approval gate was asked about a call before startup resolved "
                 f"[security].confirm_tools, so it cannot say whether {name!r} is gated. Nothing may run "
-                "a tool before Assistant.create has finished wiring."
+                "a tool before Assistant.start has finished wiring."
             )
         if name not in self.gated_tools:
             return True

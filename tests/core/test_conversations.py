@@ -225,6 +225,7 @@ async def test_select_conversation_reverts_active_id_on_build_failure(tmp_path):
         return MockAsyncModelClient([])
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    await assistant.start()
     original_id = assistant._active_id
 
     with pytest.raises(ModelClientError):
@@ -246,6 +247,7 @@ async def test_new_conversation_reverts_active_id_on_build_failure(tmp_path):
         return MockAsyncModelClient([])
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    await assistant.start()
     original_id = assistant._active_id
 
     with pytest.raises(ModelClientError):
@@ -274,6 +276,7 @@ async def test_delete_conversation_reverts_active_id_to_deleted_id_on_build_fail
         return MockAsyncModelClient([])
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    await assistant.start()
     original_id = assistant._active_id
 
     with pytest.raises(ModelClientError):
@@ -552,6 +555,7 @@ async def test_delete_does_not_wait_for_a_turn_on_another_conversation(tmp_path)
         return client
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    await assistant.start()
     busy_id = assistant._active_id
     blocking = clients[busy_id]
     await assistant.new_conversation()
@@ -630,6 +634,7 @@ async def test_retitle_waits_for_a_turn_running_on_its_conversation(tmp_path):
         return client
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    await assistant.start()
     busy_id = assistant._active_id
     blocking = clients[busy_id]
 
@@ -1233,6 +1238,7 @@ async def test_branch_conversation_reverts_active_id_on_build_failure(tmp_path):
         return MockAsyncModelClient([])
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    await assistant.start()
     parent = assistant._session
     parent.messages = [dict(message) for message in BRANCH_MESSAGES]
     parent.metadata["title"] = "Kauai trip"
@@ -1548,6 +1554,7 @@ async def test_truncate_conversation_allows_a_turn_running_elsewhere(tmp_path):
         return client
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client_factory=factory)
+    await assistant.start()
     busy_id = assistant._active_id
     blocking = clients[busy_id]
     await assistant.new_conversation()

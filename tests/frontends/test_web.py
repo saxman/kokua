@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import queue
+import threading
 import time
 from datetime import datetime
 
@@ -39,6 +41,79 @@ class _FakeWS:
 
     async def close(self):
         self.closed += 1
+
+
+# Enough for the whole connect sequence (conversations, history, working, settings, tasks, ready) with
+# room to spare, and far short of waiting forever for a frame the server may not send.
+_FRAME_LIMIT = 12
+
+# A mock-only test never legitimately waits this long for a frame, so a read stuck past this deadline
+# means the frame is never coming rather than merely running late.
+_RECEIVE_DEADLINE = 5.0
+
+
+def _receive_json(ws, type_, deadline=_RECEIVE_DEADLINE):
+    """Read one frame off `ws`, bounded by a wall-clock deadline instead of `ws.receive_json()`'s own.
+
+    `WebSocketTestSession.receive()` blocks on a queue with no timeout argument, so a frame the server
+    never sends again (the regression this exists to catch) would otherwise hang the read forever
+    rather than failing the test. The read runs on a daemon thread, not a `ThreadPoolExecutor`, because
+    a pool joins its workers at process exit and a read still blocked there would reintroduce the same
+    hang one step later. A `queue.Queue` of size 1 carries the outcome, success or a raised exception,
+    back to the caller, which is what applies the timeout the read itself cannot take. `type_` names the
+    frame the caller is waiting for, so a timeout can say what never arrived.
+    """
+    outcome: queue.Queue = queue.Queue(maxsize=1)
+
+    def read():
+        try:
+            outcome.put((True, ws.receive_json()))
+        except BaseException as exc:  # propagate a real failure (e.g. WebSocketDisconnect), don't swallow it
+            outcome.put((False, exc))
+
+    threading.Thread(target=read, daemon=True).start()
+    try:
+        ok, value = outcome.get(timeout=deadline)
+    except queue.Empty:
+        raise AssertionError(f"no {type_} frame arrived within the {deadline}s deadline") from None
+    if not ok:
+        raise value
+    return value
+
+
+def _drain_until_limit(ws, type_, limit=_FRAME_LIMIT):
+    """Receive at most `limit` frames, each bounded by `_RECEIVE_DEADLINE`, looking for one of the given type.
+
+    The count bound guards against a server that keeps sending other frames past the one under test;
+    the per-read deadline guards against a server that sends nothing further at all, which the count
+    alone would not catch, since a read blocked waiting for a frame that never comes never reaches the
+    next iteration to be counted.
+    """
+    for _ in range(limit):
+        frame = _receive_json(ws, type_)
+        if frame["type"] == type_:
+            return frame
+    raise AssertionError(f"no {type_} frame in the first {limit} frames")
+
+
+class _FakeMCPClient:
+    """A connected MCP client that reports a fixed tool list. Stands in for `aio.MCPClient`."""
+
+    def __init__(self, tool_names=()):
+        self._tool_names = list(tool_names)
+
+    async def as_tools(self):
+        def named(name):
+            def fn():
+                return None
+
+            fn.__name__ = name
+            return fn
+
+        return [named(name) for name in self._tool_names]
+
+    async def aclose(self):
+        return None
 
 
 def _config(tmp_path, **overrides) -> AssistantConfig:
@@ -190,6 +265,13 @@ async def test_web_channel_send_settings_emits_frame():
     values = {"planning.plan_review": True, "planning.show_reasoning": False}
     await channel.send_settings(values)
     assert ws.frames == [{"type": "settings", "values": values}]
+
+
+async def test_web_channel_send_ready_emits_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_ready()
+    assert ws.frames == [{"type": "ready"}]
 
 
 async def test_web_channel_stream_activity_shows_an_injected_round_and_withholds_the_answer():
@@ -904,6 +986,80 @@ def test_ws_connect_sends_conversations(tmp_path):
     assert any(item.get("active") for item in convs["items"])
 
 
+def test_ws_sends_the_conversation_list_before_connecting_mcp(tmp_path, monkeypatch):
+    """The whole point of the split: the sidebar does not wait on a remote handshake.
+
+    `connect_mcp` blocks here until the test has already read the conversation list off the socket, so
+    this can only pass if that frame is sent before the connect is attempted. A `threading.Event` and
+    not an `asyncio.Event` because TestClient runs the app in its own thread with its own loop, and
+    the frames it has already sent are queued for this one to read.
+    """
+    from starlette.testclient import TestClient
+
+    from kokua.config import MCPServerConfig
+    from kokua.mcp import servers
+
+    gate = threading.Event()
+
+    async def fake_connect(url, **kw):
+        # A blocking (not async) wait, so it also blocks the test's own event loop thread until it
+        # returns; the conversations read below only ever completes once this call does, whether that
+        # is because the test's own `gate.set()` unblocks it or because this timeout elapses on its
+        # own. It has to stay comfortably under `_RECEIVE_DEADLINE`, or that read fails on the deadline
+        # instead of on a real regression.
+        gate.wait(timeout=1)
+        return _FakeMCPClient(["remote_tool"]), "none"
+
+    monkeypatch.setattr(servers, "connect_mcp", fake_connect)
+    cfg = _config(tmp_path, mcp_servers=[MCPServerConfig(url="https://svc/mcp", name="svc")])
+    app = build_app(cfg, client=MockAsyncModelClient([]))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        convs = _drain_until_limit(ws, "conversations")
+        assert convs["items"]
+        gate.set()
+        _drain_until_limit(ws, "ready")
+
+
+def test_ws_connect_ends_with_ready_after_the_sidebar(tmp_path):
+    """`ready` is the marker the page hangs its "still starting" state on, so it has to come last."""
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
+    seen = []
+    with TestClient(app).websocket_connect("/ws") as ws:
+        for _ in range(_FRAME_LIMIT):
+            seen.append(_receive_json(ws, "ready")["type"])
+            if seen[-1] == "ready":
+                break
+
+    assert seen[-1] == "ready"
+    assert seen.index("conversations") < seen.index("ready")
+    assert seen.index("history") < seen.index("ready")
+    assert seen.index("settings") < seen.index("ready")
+    assert seen.index("tasks") < seen.index("ready")
+
+
+def test_ws_reports_a_start_failure_to_the_browser_and_closes(tmp_path):
+    """A gate naming no real tool is a `start()` error now rather than a `create()` one, and it still
+    has to arrive as words: a page whose socket merely closed can say only "Disconnected"."""
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    app = build_app(_config(tmp_path, confirm_tools=["execute_pythn"]), client=MockAsyncModelClient([]))
+    frames = []
+    with TestClient(app).websocket_connect("/ws") as ws:
+        try:
+            while True:
+                frames.append(ws.receive_json())
+        except WebSocketDisconnect:
+            pass
+
+    texts = [f.get("text", "") for f in frames if f["type"] == "message"]
+    assert any("execute_pythn" in text for text in texts)
+    assert not any(f["type"] == "ready" for f in frames)
+
+
 def test_ws_new_then_select_round_trip(tmp_path):
     import json
 
@@ -1052,7 +1208,7 @@ def test_the_duplicate_control_refreshes_the_sidebar_but_not_the_history(tmp_pat
     with TestClient(app).websocket_connect("/ws") as ws:
         convs = _drain_until(ws, "conversations")
         active_id = next(i["id"] for i in convs["items"] if i["active"])
-        _drain_until(ws, "tasks")  # the rest of the connect-time push: history, settings, tasks
+        _drain_until(ws, "ready")  # the rest of the connect-time push: history, settings, tasks, ready
         ws.send_text(json.dumps({"type": "duplicate", "id": active_id}))
         ws.send_text(json.dumps({"type": "get_tasks"}))
         frames = []
@@ -1113,7 +1269,7 @@ def test_the_rename_control_refreshes_the_sidebar_but_not_the_history(tmp_path):
     with TestClient(app).websocket_connect("/ws") as ws:
         convs = _drain_until(ws, "conversations")
         active_id = next(i["id"] for i in convs["items"] if i["active"])
-        _drain_until(ws, "tasks")
+        _drain_until(ws, "ready")  # the rest of the connect-time push: history, settings, tasks, ready
         ws.send_text(json.dumps({"type": "rename", "id": active_id, "title": "Kauai", "replacing": ""}))
         ws.send_text(json.dumps({"type": "get_tasks"}))
         frames = []

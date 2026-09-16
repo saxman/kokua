@@ -22,6 +22,9 @@ async def run(config: AssistantConfig, args: argparse.Namespace) -> None:
     channel = CLIChannel()
     try:
         assistant = await Assistant.create(config, channel)
+        # Inside the same `try` as `create`: resolving the model moved here, so this is now where a
+        # bad `[assistant].model` surfaces, and it has to print as a message rather than a traceback.
+        await assistant.start()
     except ModelClientError as e:
         print(f"[error] {e}", file=sys.stderr)
         raise SystemExit(1)

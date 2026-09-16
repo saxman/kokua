@@ -289,6 +289,7 @@ async def test_new_abandons_a_waiting_approval_rather_than_leaving_it_hanging(tm
     assistant = await Assistant.create(
         _config(tmp_path, confirm_tools=["skills.add_skill_script"]), channel, client=MockAsyncModelClient([])
     )
+    await assistant.start()
     token = streaming_conversation.set(assistant._active_id)
     try:
         asking = asyncio.create_task(assistant._approve("add_skill_script", {"skill_name": "x"}))

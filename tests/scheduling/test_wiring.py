@@ -86,7 +86,8 @@ async def test_create_arms_persisted_tasks_and_retires_past_once(tmp_path):
             "enabled": True,
         },
     )
-    await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     # Past-due one-shot was retired in place during boot arming, not deleted.
     record = store.load_tasks(cfg.config_path)[0]
     assert record["name"] == "o" and record["enabled"] is False

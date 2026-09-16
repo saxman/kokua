@@ -129,6 +129,7 @@ async def test_proactive_auto_denies_gated_tool_on_viewed_conversation(tmp_path)
     cfg = _config(tmp_path, confirm_tools=["config.update_config"])
     client = _RequestsToolOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    await assistant.start()
 
     # No streaming_conversation is set by the test; _proactive sets it to _active_id (the viewed
     # conversation) itself, so only the proactive marker keeps this from prompting.
@@ -144,6 +145,7 @@ async def test_proactive_new_session_auto_denies_gated_tool(tmp_path):
     client = _RequestsToolOnce("update_config", {"section": "planning", "key": "plan_review", "value": "true"})
     channel = _ConvCapturingChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: client)
+    await assistant.start()
 
     await asyncio.wait_for(assistant._proactive("do it", task_name="t"), timeout=2.0)
 
@@ -524,6 +526,7 @@ async def test_proactive_new_session_auto_denies_gated_tool_and_never_hijacks_ac
             "update_config", {"section": "planning", "key": "plan_review", "value": "true"}
         ),
     )
+    await assistant.start()
     viewed = assistant._active_id
 
     await assistant._proactive("run the report", task_name="report")
@@ -597,11 +600,12 @@ async def test_proactive_keeps_the_previous_run_when_the_new_one_fails(tmp_path)
 
     A cap of 1 is the case that pins the eviction order: both runs cannot survive it, and evicting
     strictly oldest-first would keep the failure and drop the report the user actually wants. The first
-    client goes to the conversation ``create`` opens, so the two firings take the second and third.
+    client goes to the conversation ``start`` builds, so the two firings take the second and third.
     """
     channel = _ConvCapturingChannel()
     clients = iter([MockAsyncModelClient([]), MockAsyncModelClient(["out1"]), _FailingClient([])])
     assistant = await Assistant.create(_config(tmp_path), channel, client_factory=lambda cid: next(clients))
+    await assistant.start()
 
     await assistant._proactive("first run", task_name="digest", task_id="t1", max_conversations=1)
     first_key = assistant._book.sessions_for_task("t1")[0].key

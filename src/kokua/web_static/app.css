@@ -80,6 +80,17 @@ body.resizing { user-select: none; }
 #conv-list li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px;
   cursor: pointer; border-left: 2px solid transparent; }
 #conv-list li:hover { background: var(--surface); }
+/* Still starting: the conversation and task lists are rendered from the store, but a click on a row
+   during this window would not be ignored, it would be buffered by the socket and applied seconds
+   later once `ready` arrives, with nothing on screen in between to say a row was even clicked. That
+   delayed, feedback-free landing is worse than not accepting the click at all, so the lists are dimmed
+   and made unclickable until then. `pointer-events` and not a `disabled` attribute per row, so the
+   dimming and the interactivity change together from one rule. The section headers stay interactive:
+   folding a section is a page-local act that never reaches the server. */
+#booting-notice { display: none; }
+body.booting #booting-notice { display: block; margin: 0; flex: none; color: var(--fg-dim);
+  font-size: 0.85em; }
+body.booting #conv-list, body.booting #task-list { opacity: 0.55; pointer-events: none; }
 #conv-list li.active { background: var(--surface); border-left-color: var(--accent); cursor: default; }
 .conv-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #conv-list .conv-title { font-size: 0.88em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

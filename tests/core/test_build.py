@@ -327,6 +327,7 @@ async def test_worker_receives_boot_connected_mcp_server(tmp_path, monkeypatch):
 
     cfg = _config(tmp_path, **_trading_via("stocks", url="https://broker/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     trader_tools = {fn.__name__ for fn in captured["agent_types"]["trader"]["tools"]}
     assert "get_quote" in trader_tools  # the worker got the boot-connected server's tool
     assert "get_quote" not in {fn.__name__ for fn in assistant._agent.tools}  # not on the entry agent
@@ -380,6 +381,7 @@ async def test_runtime_added_mcp_server_reaches_the_worker_that_declares_it(tmp_
 
     cfg = _config(tmp_path, **_trading_via("stocks", url="https://broker/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     # The server is declared but not connected at create, so the worker has none of its tools yet.
     assert "get_quote" not in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}
 
@@ -401,6 +403,7 @@ async def test_runtime_added_mcp_server_reaches_all_live_conversations(tmp_path,
 
     cfg = _config(tmp_path, **_trading_via("stocks", url="https://broker/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    await assistant.start()
     first = assistant._active_id
     await assistant.new_conversation()  # a second live conversation/agent
     await assistant.select_conversation(first)
@@ -424,6 +427,7 @@ async def test_runtime_removed_mcp_server_drops_from_the_worker(tmp_path, monkey
 
     cfg = _config(tmp_path, **_trading_via("stocks", url="https://broker/mcp"))
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     add_mcp = next(t for t in assistant._agent.tools if getattr(t, "__name__", "") == "add_mcp_server")
     await add_mcp(url="https://broker/mcp")
     assert "get_quote" in {fn.__name__ for fn in captured[-1]["trader"]["tools"]}
@@ -455,6 +459,7 @@ async def test_subagent_tool_routes_approval_to_parent(tmp_path, monkeypatch):
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", fake_make_async_subagent_tool)
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     assert captured["tool_approval"] == assistant._approve
 
 
@@ -488,6 +493,7 @@ async def test_declaring_the_store_toolsets_wires_both_stores(tmp_path):
 
 async def test_memory_stores_exist_when_an_agent_declares_them(tmp_path):
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     assert assistant._memory_store is not None
     assert assistant._document_store is not None
 
@@ -635,6 +641,7 @@ async def test_spawn_subagent_is_built_with_the_activity_reporter(tmp_path, monk
     monkeypatch.setattr(agents_mod, "make_async_subagent_tool", _observer_capturing_factory(captured))
 
     assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
 
     assert captured and captured[-1] is assistant._subagent_reporter
 

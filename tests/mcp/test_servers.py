@@ -1,5 +1,7 @@
 """Unit tests for the auth-required heuristic that gates the runtime-add OAuth fallback."""
 
+import asyncio
+
 import pytest
 from aimu import aio
 
@@ -89,6 +91,36 @@ async def test_connect_mcp_other_oauth_failure_reraises_unchanged(monkeypatch, t
         await mcp.connect_mcp(
             "https://svc/mcp", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
         )
+
+
+async def test_connect_mcp_serializes_the_oauth_branch_across_concurrent_connects(monkeypatch, tmp_path):
+    """Two servers each running an interactive OAuth flow at once would both try to bind the same
+    pinned callback port; the second bind's failure would then be misreported as that server being
+    unreachable rather than a port collision. Counted rather than timed, in the same style as the
+    connect-concurrency test: the peak number of OAuth connects in flight is exactly what the lock
+    bounds.
+    """
+    live = 0
+    peak = 0
+
+    async def fake_connect(*, url=None, auth=None, **kw):
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        await asyncio.sleep(0)  # yield, so a concurrent OAuth connect can start before this one returns
+        live -= 1
+        return "oauth-client"
+
+    monkeypatch.setattr(aio.MCPClient, "connect", fake_connect)
+
+    async def connect(url: str):
+        return await mcp.connect_mcp(
+            url, auth_mode="oauth", notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+        )
+
+    await asyncio.gather(connect("https://one/mcp"), connect("https://two/mcp"))
+
+    assert peak == 1
 
 
 def test_resolve_server_token_reads_env(monkeypatch):
@@ -340,3 +372,82 @@ async def test_boot_reconnect_through_an_auth_challenge_posts_nothing_to_the_cha
 
     assert posted == []
     assert [(c.url, c.auth_mode, c.tools) for c in connections] == [("https://svc/mcp", "oauth", ["get_positions"])]
+
+
+async def test_boot_reconnect_overlaps_the_handshakes(monkeypatch, tmp_path):
+    """Two servers used to cost the sum of their handshakes, which on a real config was most of startup.
+
+    Counted rather than timed: a wall-clock assertion on two sleeps is a flake waiting to happen, while
+    the peak number of connects in flight is exactly the property that changed.
+    """
+    live = 0
+    peak = 0
+
+    async def fake_connect(url, **kw):
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        await asyncio.sleep(0)  # yield, so a concurrent connect can start before this one returns
+        live -= 1
+        return _FakeClient(["tool"]), "none"
+
+    monkeypatch.setattr(mcp, "connect_mcp", fake_connect)
+    config = _boot_config(
+        MCPServerConfig(url="https://one/mcp", name="one"),
+        MCPServerConfig(url="https://two/mcp", name="two"),
+    )
+
+    await mcp.reconnect_mcp_servers(
+        lambda fn: None, [], config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+    )
+
+    assert peak == 2
+
+
+async def test_boot_reconnect_attaches_in_config_order_not_answer_order(monkeypatch, tmp_path):
+    """Which connection lands first in the list decides which server's tool wins a duplicate name when
+    an agent is built, so it must follow config.toml rather than whichever endpoint answered first. The
+    slow server is declared first, so an attach-as-they-answer implementation fails this.
+    """
+
+    async def fake_connect(url, **kw):
+        if "slow" in url:
+            await asyncio.sleep(0.05)
+            return _FakeClient(["slow_tool"]), "none"
+        return _FakeClient(["fast_tool"]), "none"
+
+    monkeypatch.setattr(mcp, "connect_mcp", fake_connect)
+    config = _boot_config(
+        MCPServerConfig(url="https://slow/mcp", name="slow"),
+        MCPServerConfig(url="https://fast/mcp", name="fast"),
+    )
+    connections = []
+
+    await mcp.reconnect_mcp_servers(
+        lambda fn: None, connections, config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+    )
+
+    assert [c.url for c in connections] == ["https://slow/mcp", "https://fast/mcp"]
+
+
+async def test_boot_reconnect_keeps_the_healthy_server_when_another_fails(monkeypatch, tmp_path):
+    """One unreachable server must not cost the others, which concurrency makes worth re-pinning: a
+    single gather with the wrong error handling loses every result to one failure."""
+
+    async def fake_connect(url, **kw):
+        if "down" in url:
+            raise RuntimeError("unreachable")
+        return _FakeClient(["good_tool"]), "none"
+
+    monkeypatch.setattr(mcp, "connect_mcp", fake_connect)
+    config = _boot_config(
+        MCPServerConfig(url="https://down/mcp", name="down"),
+        MCPServerConfig(url="https://good/mcp", name="good"),
+    )
+    connections = []
+
+    await mcp.reconnect_mcp_servers(
+        lambda fn: None, connections, config, notify=_noop_notify, oauth=OAuthSettings(storage_dir=tmp_path / "oauth")
+    )
+
+    assert [c.url for c in connections] == ["https://good/mcp"]

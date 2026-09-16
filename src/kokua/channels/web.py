@@ -450,6 +450,20 @@ class WebChannel(BaseWebChannel):
         """
         await self.send_frame({"type": "tasks", "items": items})
 
+    async def send_ready(self) -> None:
+        """Say that this connection's assistant has finished starting.
+
+        Sent once, after ``Assistant.start()``, and it is what makes the early sidebar honest: the page
+        renders its conversation list before the remote MCP servers are connected, so until this lands
+        it shows that state rather than offering rows that cannot act yet.
+
+        Like ``send_settings`` and ``send_tasks``, a front-end concern rather than part of
+        ``RichChannel``: the core never sends it, so there is no capability for ``ChannelUI`` to
+        degrade. A terminal has no half-loaded view to correct, so there would be nothing to degrade
+        it to either.
+        """
+        await self.send_frame({"type": "ready"})
+
     async def send_download(self, name: str, url: str) -> None:
         """Point the page at a file to download.
 

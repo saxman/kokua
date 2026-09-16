@@ -1123,7 +1123,24 @@ instead of a button that would only fail again.
 ## MCP
 
 All servers come from `[[mcp.server]]` at startup (`mcp.reconnect_mcp_servers` is a single pass over
-`config.mcp_servers`). Each one is also a toolset, named by its required `name`, which is how an agent
+`config.mcp_servers`, connecting them concurrently and attaching them in declaration order, so a
+duplicate tool name still resolves the same way every run). Two servers whose connects each take 1.5
+seconds finish their handshakes together in about 1.5 seconds rather than the roughly 3 a serial pass
+would take, but `attach_server` still awaits each server's `client.as_tools()` inside that same ordered
+attach pass, one `list_tools()` round trip per server, so the tool fetch itself stays serial and only
+the handshakes overlap. A module-level lock in `mcp/servers.py` serializes every OAuth-mode connect, not
+only an interactive authorization: fastmcp decides inside `connect` whether a stored token is reusable,
+so the lock cannot tell in advance which kind of connect it is about to hold and wraps the whole call
+either way. Two OAuth servers therefore never overlap each other, even when both hold valid cached
+tokens; a bearer-token connect and an unauthenticated probe never touch the lock and still overlap
+fully, so the common case of one bearer server plus one OAuth server keeps essentially the whole win.
+The lock exists because an interactive authorization's callback listener binds one pinned port, so two
+servers each needing a fresh authorization at once would collide on the bind and have that collision
+misreported as either server being unreachable; when the call it holds really is interactive, the wait
+is however long the person takes to approve it, not network time, so a second server's own authorization
+link is not even posted until the first server's flow completes.
+
+Each server is also a toolset, named by its required `name`, which is how an agent
 reaches it. The runtime `add_mcp_server` tool appends reconnectable servers there via
 `config/store.py` (no secret on disk), so config.toml stays the one source; it writes a name derived
 from the server's host and disambiguated against the names already on file, so a successful add can
@@ -1245,9 +1262,30 @@ genuinely down.
 
 Almost none of the work is on the client, because the server was already written for this: it resyncs its
 entire view on every connection (`_sync_view` sends the conversation list and the active conversation's
-history, followed by the settings and the tasks), and the page's `history` handler clears the transcript
-before replaying it. So a reconnected page repaints rather than appending a second copy of what it already
-showed, and the retry notice goes out with the rest of the old log.
+history, followed by the settings, then the tasks and a closing `ready` once the assistant has
+started), and the page's `history` handler clears the transcript before replaying it. So a reconnected
+page repaints rather than appending a second copy of what it already showed, and the retry notice goes
+out with the rest of the old log.
+
+Where that resync sits in the connection's own startup is the reason the sidebar is not empty while you
+wait. Boot has two halves. `Assistant.create` reads local state only: it validates the agent registry,
+opens the session store, adopts the most recently updated conversation, and builds the `LiveState` and
+the agent registry, reaching no network at all. `Assistant.start()` is the remainder, and it is the
+expensive one: it connects every configured MCP server, builds the entry agent (which resolves a
+model), checks `confirm_tools` against the tools that now exist, and arms the scheduled tasks. On a
+config with two remote servers that is most of startup, and it is dominated by round trips Kokua does
+not control. So `serve_connection` sends the conversation list, the history and the settings *between*
+the two calls, and the page renders them while the servers are still being asked for their tool lists.
+`run()` awaits `start()` itself, so serving a turn always implies a started assistant; a front end
+calls it explicitly, as both of Kokua's do, only to choose where its errors get reported. `start()` is
+also idempotent and terminal: it records that it ran before its body does anything, so a failed start is
+not retried, since a retry would reconnect a server that a first attempt already appended to the live
+connection list.
+
+The page shows that state rather than pretending to be ready: until the `ready` frame lands it marks
+itself as starting, dimming the conversation and task rows and disabling clicks on them, so a row that
+cannot act yet is visibly inert instead of silently ignoring you. The composer is left alone, since
+neither typing nor sending a message ever depended on the assistant having finished starting.
 
 What a reconnect does *not* restore is a turn that was in flight when the socket dropped. `build_app`
 constructs an `Assistant` per connection and `serve_connection` ties its serve loop to that connection's
@@ -1256,10 +1294,18 @@ lifetime, so the page comes back to what the turn persisted, not to the stream i
 Two of the ways a socket can close are not worth retrying, and the page tells them apart from a restart by
 whether anything arrived before the close. A server that is not up yet closes having sent nothing, which
 is the ordinary restart case and is exactly what the backoff is for. A server that answered and *refused*
-sends one message frame and closes without ever syncing: the one-connection guard's "busy in another tab",
-or a config error reported in place of a session. Retrying a refusal would thrash a server that is up and
-working, and every attempt would append the refusal again, burying the sentence that explains it under
-repetitions of itself. So a refused page says to reload, and stops.
+sends one message frame and closes without ever reaching `ready`: the one-connection guard's "busy in
+another tab", or a config error reported in place of a session. Retrying a refusal would thrash a server
+that is up and working, and every attempt would append the refusal again, burying the sentence that
+explains it under repetitions of itself. So a refused page says to reload, and stops.
+
+`ready`, not the `history` frame, is what marks a connection synced, precisely because a config error can
+now arrive *after* the history: the model is resolved in the half of boot that runs once the transcript
+is already on screen, so a page keyed on the transcript would treat that refusal as a drop and retry it
+forever. The honest cost of that choice is the same rule catching a case that is not a refusal at all: a
+server that dies partway through its own start, for any reason, looks identical from the socket's side to
+one that refused on purpose, so the page asks you to reload rather than retrying on its own. A drop
+before any frame arrives is still unambiguous and still retries.
 
 ### Streaming the answer
 

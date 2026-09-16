@@ -35,7 +35,7 @@ from aimu.models import StreamChunk, StreamingContentType  # noqa: E402
 from tests.channels import example_agents  # noqa: E402
 from tests.helpers import MockAsyncModelClient  # noqa: E402
 
-from kokua.config.schema import AssistantConfig  # noqa: E402
+from kokua.config.schema import AssistantConfig, MCPServerConfig  # noqa: E402
 from kokua.frontends.web import build_app  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -227,10 +227,57 @@ def restartable_server():
     stop()
 
 
+@pytest.fixture
+def slow_boot_server(monkeypatch):
+    """Factory: a server with one declared MCP connection that stays pending for a couple of seconds
+    before handing back a tool-less fake client.
+
+    `Assistant.start()` reconnects every configured MCP server before it can build the first agent, so
+    a boot window wide enough to observe requires at least one server and a slow connect: with
+    neither, `start()` returns before a test's first assertion could ever run, and the state this is
+    for would go untested regardless of what the page does. Patches `connect_mcp` on
+    `kokua.mcp.servers` in place rather than passing a delay through `AssistantConfig`, since
+    `reconnect_mcp_servers` looks the name up from that module's own globals at call time; scoped to
+    this fixture so no other test's boot timing moves.
+    """
+
+    class _FakeMCPClient:
+        async def as_tools(self) -> list:
+            return []
+
+    async def _slow_connect(url, *, bearer_token=None, auth_mode=None, notify, oauth):
+        await asyncio.sleep(1.5)
+        return _FakeMCPClient(), "none"
+
+    monkeypatch.setattr("kokua.mcp.servers.connect_mcp", _slow_connect)
+
+    started: list[tuple] = []
+
+    def start() -> str:
+        config = AssistantConfig(
+            agents=example_agents(),
+            entry_agent="assistant",
+            mcp_servers=[MCPServerConfig(url="http://mcp.invalid", name="slow")],
+        )
+        app = build_app(config, client_factory=lambda conversation_id: _SlowClient(0.0))
+        return _serve(app, _free_port(), started)
+
+    yield start
+
+    _stop(started)
+
+
 def _open(page, url: str) -> None:
-    """Load the page and wait until the WebSocket is up (the sidebar list has rendered)."""
+    """Load the page and wait until it is interactive.
+
+    Two waits, not one. The sidebar list renders as soon as the conversation frame lands, which is now
+    before the assistant has finished starting, and a row is deliberately not clickable until the
+    `ready` frame clears the starting state. Waiting only for the row would hand a test a sidebar that
+    ignores its click.
+    """
     page.goto(url)
     page.wait_for_selector("#conv-list li")
+    page.wait_for_selector("body:not(.booting)")
 
 
 def test_send_message_renders_reply(page, live_server):
@@ -578,6 +625,30 @@ def test_sidebar_collapse_resize_persist(page, live_server):
     page.reload()
     page.wait_for_selector("#conv-list li")
     assert abs(sidebar.bounding_box()["width"] - resized_width) < 2
+
+
+def test_the_sidebar_is_marked_starting_until_the_ready_frame(page, slow_boot_server):
+    """The page renders its conversation list before the assistant has finished starting, and says so
+    until the `ready` frame lands: both the mid-boot state and its clearing have to be observed, since
+    a test that only waits for the end state would pass identically with the feature missing entirely.
+
+    Needs `slow_boot_server` rather than the plain fixture: with no MCP server to wait on, `start()`
+    returns before a test could ever catch the mid-boot state, so every assertion below the first
+    `wait_for_selector` would be checking a boot that already finished.
+    """
+    page.goto(slow_boot_server())
+    page.wait_for_selector("#conv-list li")
+
+    # Still starting: the class is on, the notice exists and is shown, and the list cannot be clicked.
+    expect(page.locator("body")).to_have_class(re.compile(r"\bbooting\b"))
+    expect(page.locator("#booting-notice")).to_have_count(1)
+    expect(page.locator("#booting-notice")).to_be_visible()
+    expect(page.locator("#conv-list")).to_have_css("pointer-events", "none")
+
+    # The `ready` frame lands once the slow connection above finishes: starting state clears.
+    expect(page.locator("body")).not_to_have_class(re.compile(r"\bbooting\b"), timeout=10_000)
+    expect(page.locator("#booting-notice")).to_be_hidden()
+    expect(page.locator("#conv-list")).to_have_css("pointer-events", "auto")
 
 
 def test_sidebar_row_shows_the_conversation_age(page, live_server):
@@ -1898,6 +1969,10 @@ def test_a_refused_second_tab_does_not_retry(page, live_server):
         second.wait_for_timeout(2_000)  # long enough for several backoff attempts, had it retried
         expect(second.locator(".bubble", has_text="busy in another tab")).to_have_count(1)
         expect(second.locator("#msg")).to_be_disabled()
+        # The close that follows a refusal never sends `ready`, so the class has to come off on the
+        # close itself; left on, it would sit a "Starting up..." notice above "Reload the page" and
+        # keep the sidebar's rows inert with nothing left to lift `pointer-events: none`.
+        expect(second.locator("body")).not_to_have_class(re.compile(r"\bbooting\b"))
     finally:
         second.close()
 

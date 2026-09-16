@@ -1614,9 +1614,6 @@ function handleFrame(event) {
       }
     }
   } else if (frame.type === "history") {
-    // Also the marker that the server got past building an assistant for this connection, which is
-    // what tells a later close apart from a refusal that never synced (see connect()).
-    synced = true;
     // Replay a conversation (on connect or after switching), reusing the live renderers.
     log.innerHTML = "";  // replace any current transcript
     subagentCards = {};  // fresh view: drop any live sub-agent card references
@@ -1680,6 +1677,12 @@ function handleFrame(event) {
       else if (item.type === "notice") addBubble("notice", item.text, item.ts);
     }
     autoscroll();
+  } else if (frame.type === "ready") {
+    // The connect sequence is complete: the assistant has connected its remote servers and built its
+    // agent, so the sidebar's rows can act. Also the marker that this connection got that far, which
+    // is what tells a later close apart from a startup that failed (see connect()).
+    document.body.classList.remove("booting");
+    synced = true;
   }
 }
 
@@ -1859,6 +1862,9 @@ function attemptReconnect() {
 function connect() {
   synced = false;
   frameReceived = false;
+  // Every connection starts here, including a reconnect: the new server has its own assistant to
+  // start, so the page is un-ready again until that connection's `ready` frame lands.
+  document.body.classList.add("booting");
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onmessage = handleFrame;
   ws.onopen = () => {
@@ -1873,6 +1879,11 @@ function connect() {
     input.focus();
   };
   ws.onclose = () => {
+    // A closed socket is not a booting one, on any path that reaches here: the one-connection
+    // refusal below, a create()/start() failure the server closed on, or an ordinary outage.
+    // Leaving the class set would stack "Starting up..." above "Disconnected...", and freeze the
+    // sidebar's pointer-events: none with nothing left to lift it once no ready frame is coming.
+    document.body.classList.remove("booting");
     input.disabled = true;
     sendBtn.disabled = true;
     setProcessing(false);

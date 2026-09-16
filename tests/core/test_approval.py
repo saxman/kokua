@@ -26,6 +26,7 @@ async def test_approve_allows_ungated_tool_without_prompting(tmp_path):
     assistant = await Assistant.create(
         _config(tmp_path, confirm_tools=["skills.add_skill_script"]), channel, client=MockAsyncModelClient([])
     )
+    await assistant.start()
     assert await assistant._approve("get_weather", {}) is True
     assert channel.sent == []  # no prompt for an ungated tool
 
@@ -41,6 +42,7 @@ async def test_approve_gated_tool_waits_for_routed_answer(tmp_path):
     assistant = await Assistant.create(
         _config(tmp_path, confirm_tools=["skills.add_skill_script"]), channel, client=MockAsyncModelClient([])
     )
+    await assistant.start()
     # Foreground: the calling turn's conversation is the one currently viewed.
     token = streaming_conversation.set(assistant._active_id)
     try:
@@ -66,6 +68,7 @@ async def test_approve_backgrounded_auto_denies_without_prompting(tmp_path):
     assistant = await Assistant.create(
         _config(tmp_path, confirm_tools=["skills.add_skill_script"]), channel, client=MockAsyncModelClient([])
     )
+    await assistant.start()
     # Background: the calling turn's conversation ("elsewhere") isn't the one being viewed.
     token = streaming_conversation.set("elsewhere")
     try:
@@ -101,6 +104,7 @@ async def test_denied_gated_tool_does_not_run(tmp_path):
     cfg = _config(tmp_path, confirm_tools=["skills.add_skill_script"])
     client = _RequestsToolOnce("add_skill_script", {"skill_name": "disk", "filename": "u.py", "content": "print(1)\n"})
     assistant = await Assistant.create(cfg, FakeChannel(), client=client)
+    await assistant.start()
     # No streaming_conversation is set around this call, so it defaults to None -- not the viewed
     # conversation -- making _approve auto-deny without an interactive prompt. That exercises the real
     # dispatch path (the Agent's tool-loop engine + approval gate) via a normal run.
@@ -127,6 +131,7 @@ async def test_approve_serializes_concurrent_gated_calls(tmp_path):
 
     cfg = _config(tmp_path, confirm_tools=["compute.execute_python"])
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
 
     prompts: list[str] = []
     order: list[str] = []
@@ -164,6 +169,7 @@ async def test_background_turn_auto_denies_gated_tool(tmp_path):
 
     cfg = _config(tmp_path, confirm_tools=["compute.execute_python"])
     assistant = await Assistant.create(cfg, FakeChannel(), client_factory=lambda cid: MockAsyncModelClient([]))
+    await assistant.start()
     viewed = assistant._active_id
     await assistant.new_conversation()  # _active_id now the new (background) conversation
     background = assistant._active_id
@@ -182,6 +188,7 @@ async def test_foreground_turn_prompts_for_approval(tmp_path):
     cfg = _config(tmp_path, confirm_tools=["compute.execute_python"])
     channel = FakeChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient([]))
+    await assistant.start()
     viewed = assistant._active_id
     token = streaming_conversation.set(viewed)
     try:
@@ -227,6 +234,7 @@ async def test_the_shipped_gates_all_name_tools_that_exist(tmp_path):
     config = _config(tmp_path)
     assert config.confirm_tools == AssistantConfig().confirm_tools
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     assert assistant._human.gated_tools == {
         "add_skill_script",
         "add_mcp_server",
@@ -245,6 +253,7 @@ async def test_an_empty_gate_list_is_still_valid(tmp_path):
     assistant = await Assistant.create(
         _config(tmp_path, confirm_tools=[]), FakeChannel(), client=MockAsyncModelClient([])
     )
+    await assistant.start()
     assert assistant._human.gated_tools == frozenset()
 
 
@@ -253,6 +262,7 @@ async def _gated(tmp_path, entries) -> frozenset:
     assistant = await Assistant.create(
         _config(tmp_path, confirm_tools=entries), FakeChannel(), client=MockAsyncModelClient([])
     )
+    await assistant.start()
     return assistant._human.gated_tools
 
 
@@ -299,7 +309,8 @@ async def test_a_bare_tool_offered_under_two_prefixes_names_both(tmp_path):
     config = _config(tmp_path, confirm_tools=["activate_skill"])
     _write_skill(config)
     with pytest.raises(ConfigError) as error:
-        await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+        assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+        await assistant.start()
     assert "core.activate_skill" in str(error.value)
 
 
@@ -385,6 +396,7 @@ async def test_the_reserved_namespace_gates_both_of_its_members(tmp_path):
     config = _config(tmp_path, confirm_tools=["core"])
     _write_skill(config)
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     assert assistant._human.gated_tools == {"spawn_subagent", "activate_skill"}
     assistant._state.close()
 
@@ -396,6 +408,7 @@ async def test_a_skill_script_is_gateable(tmp_path):
     config = _config(tmp_path, confirm_tools=["weekly-digest.weekly_digest__collect_notes", "core.activate_skill"])
     _write_skill(config)
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     assert assistant._human.gated_tools == {"weekly_digest__collect_notes", "activate_skill"}
     assistant._state.close()
 
@@ -406,6 +419,7 @@ async def test_a_bare_skill_gates_its_scripts_and_not_activate_skill(tmp_path):
     config = _config(tmp_path, confirm_tools=["weekly-digest"])
     _write_skill(config)
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
     assert assistant._human.gated_tools == {"weekly_digest__collect_notes"}
     assistant._state.close()
 
@@ -430,7 +444,8 @@ async def test_the_confirm_tools_flag_is_checked_by_the_same_rule(tmp_path):
 
     config = resolve_config(build_arg_parser().parse_args(["--confirm-tools", "config.update_confg"]))
     with pytest.raises(ConfigError) as error:
-        await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+        assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
+        await assistant.start()
     assert "config.update_confg" in str(error.value) and "update_config" in str(error.value)
 
 
@@ -458,6 +473,7 @@ async def test_background_auto_deny_raises_an_alert(tmp_path):
     cfg = _config(tmp_path, confirm_tools=["compute.execute_python"])
     channel = AlertCapturingChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient([]))
+    await assistant.start()
     viewed = assistant._active_id
     await assistant.new_conversation()
     background = assistant._active_id
@@ -484,6 +500,7 @@ async def test_proactive_auto_deny_stays_silent(tmp_path):
     cfg = _config(tmp_path, confirm_tools=["compute.execute_python"])
     channel = AlertCapturingChannel()
     assistant = await Assistant.create(cfg, channel, client_factory=lambda cid: MockAsyncModelClient([]))
+    await assistant.start()
     token = proactive_turn.set(True)
     try:
         assert await assistant._approve("execute_python", {}) is False
