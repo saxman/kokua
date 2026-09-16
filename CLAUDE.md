@@ -59,7 +59,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.28.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.31.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -158,10 +158,15 @@ Consequences for working in this repo:
   `ModelRefusalError` second), a *signature* check for a keyword argument no `getattr` would notice
   (`SkillManager(include=...)` first, `script_env` second, `stream_thinking` third, `events` fourth), and
   a membership check for an entry in a published set (`SUBAGENT_SPEC_KEYS`'s `generate_kwargs` first,
-  `StreamingContentType`'s `CONTINUING` today).
+  `StreamingContentType`'s `CONTINUING` next, that same set's `compaction` today).
   What the current surface says nothing about, only the floor covers. `tests/test_aimu_compat.py` pins
   `MINIMUM_AIMU` against `pyproject.toml`'s specifier, since the two are halves of one decision and
-  neither can detect the other drifting. If you add
+  neither can detect the other drifting. It also pins every *stated* floor against that same number:
+  this file, `README.md`, `docs/index.md`, `CHANGELOG.md`, `docs/explanation/architecture.md`, and
+  `.github/workflows/ci.yml` each tell a reader which AIMU to have, and all of them had fallen behind
+  the specifier, CI's comments by seven releases. Only the present tense is held to the floor ("AIMU X
+  or newer", "Today the floor is X"); the history beside it is correct as written, so a bump recasts
+  the old claim into the past rather than editing it. If you add
   a Kokua feature needing a newer AIMU, raise `MINIMUM_AIMU` and the `pyproject.toml` floor in the same
   commit, and move the probe to whatever the new surface is. When a release genuinely offers no handle a
   probe can grip, leave the probe where it is and say so in `aimu_compat`'s docstring rather than moving it

@@ -270,6 +270,55 @@ def test_the_declared_floor_matches_the_packaged_requirement():
     )
 
 
+def test_every_stated_floor_matches_the_packaged_requirement():
+    """The floor is also written out in prose and in CI's comments, where nothing was checking it.
+
+    Five files tell a reader which AIMU to have: the README and the docs index open their install
+    instructions with it, the changelog states it for the release and again where it narrates the
+    preflight, the architecture page names it where it explains the probe, and CI's comments say what
+    the `package` job proves by naming the specifier it resolves. Most had gone stale by the time this
+    test was written, two floor bumps behind in one place and seven in another; the README contradicted
+    itself, saying 0.28.0 in its install section and 0.31.0 two paragraphs later; and one changelog
+    bullet claimed three different current floors, because each bump appended a fresh "Today the floor
+    is" without retiring the last one. Compared against ``MINIMUM_AIMU`` rather than ``pyproject.toml``
+    because the test above already ties those two together, so this one inherits that tie and stays
+    about the prose.
+
+    Each pattern below matches a claim about *today's* floor and nothing else, because the same files
+    carry real history that is correct and has to stay put ("Needs `aimu>=0.20.0`", "**0.30.0** was the
+    floor until 0.31.0"). Holding that to the current floor would demand rewriting true sentences on
+    every bump, so what is pinned is the present tense: "AIMU X or newer", "Today the floor is X", "The
+    floor is now X", and any specifier inside `ci.yml`, whose comments only ever describe what the
+    workflow does now.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    claims = (
+        ("README.md", r"AIMU\]\([^)]*\)\s+(\d+\.\d+\.\d+) or newer"),
+        ("CHANGELOG.md", r"AIMU\]\([^)]*\)\s+(\d+\.\d+\.\d+) or newer"),
+        ("docs/index.md", r"AIMU\]\([^)]*\)\s+(\d+\.\d+\.\d+) or newer"),
+        ("CHANGELOG.md", r"Today the floor is \*{0,2}(\d+\.\d+\.\d+)"),
+        ("docs/explanation/architecture.md", r"floor is now \*{0,2}`?aimu>=(\d+\.\d+\.\d+)"),
+        (".github/workflows/ci.yml", r"aimu>=(\d+\.\d+\.\d+)"),
+    )
+
+    found = {(name, pattern): re.findall(pattern, (root / name).read_text()) for name, pattern in claims}
+
+    # Guards the guard: every pattern is the shape of a sentence, so a rewrite could leave this test
+    # quietly asserting nothing, which is the failure mode a prose check has and a symbol check does not.
+    # Checked per pattern rather than on a total, since `ci.yml` states the floor twice and would
+    # otherwise cover for a pattern that had stopped matching anything.
+    silent = [f"{name} against {pattern!r}" for (name, pattern), versions in found.items() if not versions]
+    assert not silent, "a claim stopped matching its pattern, so nothing is checking it: " + ", ".join(silent)
+
+    stale = [
+        f"{name} says {version}" for (name, _), versions in found.items() for version in versions if version != AT_FLOOR
+    ]
+    assert not stale, f"the floor is {AT_FLOOR}: " + ", ".join(stale)
+
+
 def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
     """A keyword argument is one of the three shapes, and was the one in force for 0.25.0's `events`.
 

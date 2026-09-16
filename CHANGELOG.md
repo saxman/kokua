@@ -1445,19 +1445,20 @@ notice on startup.
   call, which Anthropic rejected outright and which made search-heavy sub-agents fail rather than
   answer), and that fix had no handle a probe could honestly grip: a private method on a private class
   is exactly what a later refactor renames, and a probe pointed at one becomes a wall in front of a
-  newer, working AIMU. Today the floor is 0.28.0, and for once reason and probe are the same capability
-  again: `StreamingContentType.CONTINUING` is the phase a streamed driver yields before a round the loop
+  newer, working AIMU. **0.28.0** was the floor until 0.29.0, and for once reason and probe were the same
+  capability again: `StreamingContentType.CONTINUING` is the phase a streamed driver yields before a round the loop
   injected on its own rather than one the model asked for, the same chunk a loop marker reads to say
   which injection it was (see "A loop marker names which injection it was" under Front ends, above). The
-  probe is a membership check again, the second time (`SUBAGENT_SPEC_KEYS` was the first), reading
+  probe was a membership check again, the second time (`SUBAGENT_SPEC_KEYS` was the first), reading
   `StreamingContentType.__members__` rather than a bare `in`, because `in` on an enum compares values on
   Python 3.12 and raises `TypeError` on 3.11, where the capability here is a member's name, not its
   value. 0.28.0's other capability, the `"max_iterations"` entry in `SUBAGENT_SPEC_KEYS` behind a
   per-agent tool-loop cap, was the floor's job instead: that key set is closed and checked when a spawn
   tool is built, so an AIMU predating 0.28.0 raised `ValueError` naming it at startup with or without a
-  probe, and the one slot went to the capability that would otherwise fail silently. Today the floor is
-  0.29.0, and the probe returns to a plain name lookup, the third time (`resolve_default_text_model`,
-  then `ModelRefusalError`, now this): `aimu.sessions.SessionStore.list_summaries`, a session store's
+  probe, and the one slot went to the capability that would otherwise fail silently. **0.29.0** was the
+  floor until 0.30.0, and the probe returned to a plain name lookup, the third time
+  (`resolve_default_text_model`, then `ModelRefusalError`, then this):
+  `aimu.sessions.SessionStore.list_summaries`, a session store's
   own answer to "every stored conversation's title, timestamp, and message count, without its
   messages", which is what `ConversationBook.summaries()` calls so the sidebar, task ownership, and the
   startup pointer stop paying one whole-file parse per stored conversation just to draw a list of
@@ -1467,8 +1468,8 @@ notice on startup.
   default: the ABC's own `list_summaries` is correct but slow, `TinyDBSessionStore`'s override is what
   makes it fast, and a name lookup on the ABC is satisfied by either, so a store that stopped
   overriding it would still pass while paying the old cost in silence; `StreamingContentType.CONTINUING`
-  is the floor's job now, the same way every earlier probe surface became the floor's job once a newer
-  one took the slot. **0.30.0** was the floor until 0.31.0, the first one moved by a rename, and its probe was a
+  became the floor's job then, the same way every earlier probe surface became the floor's job once a
+  newer one took the slot. **0.30.0** was the floor until 0.31.0, the first one moved by a rename, and its probe was a
   name lookup for the fourth time: `aimu.tools.builtin.get_web_content`, which replaces `get_webpage`.
   The name is not the point. The old tool never asked what it had downloaded, handing `response.text`
   to an HTML stripper, and since `requests` decodes `.text` with `errors="replace"`, a PDF behind a URL
@@ -1499,7 +1500,12 @@ notice on startup.
   instead. `get_web_content` joins the floor's job.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
-  halves of that one decision cannot drift.
+  halves of that one decision cannot drift. It pins the floor against the *prose* too: the README, the
+  docs index, this changelog, the architecture page, and CI's own comments each tell a reader which
+  AIMU to have, none of them is reachable from the specifier, and every one had fallen behind it, by as
+  much as seven releases in CI's case. What is held to the current floor is the present tense ("AIMU X
+  or newer", "Today the floor is X"), never the history beside it, which is correct as written and
+  would otherwise have to be rewritten on every bump.
 - **A failed model request reports its actual cause.** `kokua.core.errors.describe_error` walks the
   exception's `__cause__` chain to the root, so an unreachable local model server is diagnosable from
   the chat itself ("The request couldn't reach the model server: ModelConnectionError: Connection error.
