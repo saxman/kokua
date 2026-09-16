@@ -1541,7 +1541,11 @@ typo.</p>
 <code>~/.kokua/data/downloads/</code>), the same folder generated PDFs and other artifacts use, and the path
 is printed on success so a script can pick it up. <code>-o -</code> writes the Markdown to stdout instead, for
 piping into something else. <code>--full</code> lifts the truncation a plain export applies to long tool
-payloads (see below).</p>
+payloads (see below), and writes <code>&lt;conversation id&gt;.full.md</code> rather than sharing the plain export's
+name: the two files hold different amounts of the same conversation and read identically, so one
+name for both meant a later plain export replaced a <code>--full</code> one in place, with nothing in the
+result to say what had gone. Re-exporting at the same fidelity still overwrites, so a conversation
+has at most these two files. Take the path from the printed output rather than assembling it.</p>
 <h2 id="what-a-turns-block-shows">What a turn's block shows<a class="headerlink" href="#what-a-turns-block-shows" title="Permanent link">&para;</a></h2>
 <p>The file opens with a header: the conversation's title (falling back to its first message, then to
 "Untitled conversation"), its id, when it was created and last updated, and a running total of

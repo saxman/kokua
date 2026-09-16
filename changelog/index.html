@@ -1900,8 +1900,13 @@ The pre-release development history is in the git log.</p>
   and <code>--full</code> reads the payload file back and shows the whole thing rather than the preview, falling
   back to the preview with an explicit note if the file is gone. <code>kokua export [id-or-prefix]
   [-o path|-] [--full]</code> reads the session store directly and writes the file: no <code>Assistant</code>, no model
-  client, no agent, so it works with the model server down. A read that races the daemon's own persist
-  reports the store as busy rather than parsing a torn file. See
+  client, no agent, so it works with the model server down. Fidelity is part of the file's name
+  (<code>&lt;id&gt;.md</code> plain, <code>&lt;id&gt;.full.md</code> for <code>--full</code>, both from <code>transcript_export.export_filename</code>, which
+  the tool and the CLI share so they cannot drift): the two hold different amounts of one conversation
+  and read identically, so a single name for both let a plain export replace a full one in place with
+  nothing in the result to say what was lost. Re-exporting at one fidelity still overwrites, so a
+  conversation has at most two export files. A read that races the daemon's own persist reports the
+  store as busy rather than parsing a torn file. See
   <a href="https://saxman.info/kokua/how-to/export-a-conversation/">Export a conversation</a>.</li>
 <li><strong>Branch a conversation at a turn.</strong> Every turn in the web UI carries a branch control, on the
   message that opened it and beside the delete-from-here control:
@@ -2113,6 +2118,31 @@ The pre-release development history is in the git log.</p>
     lost it to whatever that section set. <code>[generation]</code> gets no special handling on the way out: it is now
     an unrecognized section, so a stale one left in a <code>config.toml</code> fails to load the way any unknown key
     does, and deleting it is the fix.</li>
+<li><strong>The sidebar appears before the assistant has finished starting.</strong> <code>Assistant.create</code> now reads
+    only local state (the session store, the validated agent registry) and reaches no network; connecting
+    every configured MCP server, building the entry agent, checking the approval gates against the tools
+    that connect contributed, and arming the scheduled tasks moved to a new <code>Assistant.start()</code>, which
+    <code>run()</code> awaits so serving a turn always implies a started assistant. <code>start()</code> is idempotent and
+    terminal: a failed start is not retried, since a retry would reconnect a server a first attempt
+    already appended to the live connection list. The web front end sends the conversation list, the
+    active conversation's history, and the current settings between the two calls, then the tasks, then a
+    closing <code>ready</code> frame, so the page renders what it already knows while the servers are still being
+    asked for their tool lists. Until <code>ready</code> lands, <code>&lt;body&gt;</code> carries a <code>booting</code> class that dims the
+    conversation and task lists and disables clicks on their rows, with a "Starting up..." line explaining
+    why, so a row that cannot act yet reads as inert rather than broken. The composer is left alone
+    throughout, since neither typing nor sending ever depended on that half of boot finishing. Measured
+    against a copy of a real <code>$KOKUA_HOME</code> (28 conversations, the same two remote servers declared), the
+    sidebar itself, meaning <code>Assistant.create()</code> plus the conversation list, history, and settings reads
+    it renders, is on screen in about 0.1 seconds (three runs, 0.095-0.103s, roughly 0.063s in
+    <code>create()</code> and 0.040s in those reads), against about 8.2-8.8 seconds measured the same way before
+    this change. Most of that gap belongs to something else: listing conversations from a stored
+    summary rather than parsing each one's whole session file cuts the same <code>create()</code>-plus-reads path
+    from 1.499s to about 0.1s on its own, a savings of roughly 1.4 seconds that has nothing to do with
+    when the sidebar appears relative to <code>start()</code>. What this change is responsible for is the rest of
+    it: the sidebar used to wait behind the whole eight-second-plus boot, remote servers included, and
+    now waits behind none of that remote half. That figure covers the sidebar only, not the whole
+    connection: <code>start()</code> still has the remote servers to connect, so the assistant behind the sidebar
+    is ready later, not at the 0.1-second mark.</li>
 <li><strong>A dropped socket reconnects on its own.</strong> Restarting Kokua under an open browser used to leave a
     page that said "Disconnected." and could only be recovered by reloading. The page now retries with
     backoff (500ms doubling to a 10s ceiling, indefinitely) and shows one notice for the whole outage
@@ -2122,16 +2152,21 @@ The pre-release development history is in the git log.</p>
     A manual retry deliberately does not reset the backoff, which only a connection that succeeded does,
     so clicking repeatedly at a server that is still down cannot drive it back to the base 500ms interval.
     Almost none of the work is on the client: the server already resyncs its
-    whole view on every connection (conversations, history, settings, tasks) and the <code>history</code> frame
-    replaces the transcript, so a reconnected page repaints rather than appending a second copy of what it
-    already showed. What a reconnect does not restore is a turn that was in flight when the socket
-    dropped, since the front end builds an <code>Assistant</code> per connection: the page comes back to what was
-    persisted, not to the stream it was watching. Two closes are not retried, and the page tells them
-    apart from a restart by whether anything arrived before the close: a server that answered and
-    <em>refused</em> sends one message and closes without syncing (the one-connection guard's "busy in another
-    tab", or a config error reported in place of a session), and retrying that would thrash a server that
-    is working while burying its explanation under repetitions of itself, so a refused page says to reload
-    and stops. Nothing having arrived at all is the ordinary restart case, and does retry.</li>
+    whole view on every connection (conversations, history, settings, tasks, then a closing <code>ready</code>) and
+    the <code>history</code> frame replaces the transcript, so a reconnected page repaints rather than appending a
+    second copy of what it already showed. What a reconnect does not restore is a turn that was in flight
+    when the socket dropped, since the front end builds an <code>Assistant</code> per connection: the page comes back
+    to what was persisted, not to the stream it was watching. Two closes are not retried, and the page
+    tells them apart from a restart by whether anything arrived before the close: a server that answered
+    and <em>refused</em> sends one message and closes without ever reaching <code>ready</code> (the one-connection guard's
+    "busy in another tab", or a config error reported in place of a session), and retrying that would
+    thrash a server that is working while burying its explanation under repetitions of itself, so a
+    refused page says to reload and stops. <code>ready</code>, not <code>history</code>, is what marks a connection synced,
+    because a config error is now reported from the half of boot that runs after the history has already
+    reached the page: a page still keyed on <code>history</code> would read that refusal as a drop and retry it
+    forever. The same rule catches a server that dies partway through starting for any other reason, which
+    looks identical from the socket's side, so that case also asks for a reload rather than retrying on
+    its own. Nothing having arrived at all is the ordinary restart case, and does retry.</li>
 <li>Reloading the page replays the prior conversation, reasoning and tool calls included. What was
     streamed live is what is replayed: nothing in the core decides which frames are worth sending, so a
     front end that wants to fold or hide a block does that with the block in hand.</li>
@@ -2264,7 +2299,8 @@ The pre-release development history is in the git log.</p>
   it stopped short. So "which tool call failed in yesterday's flight-price conversation, and what did it
   return?" is answerable, which <code>read_conversation</code> could never do at any <code>max_chars</code>. A <code>full</code>
   parameter lifts the payload cap, the same one <code>kokua export --full</code> lifts, for when the exact text of
-  a long tool result is the thing being debugged.</p>
+  a long tool result is the thing being debugged, and sends the result to its own <code>&lt;id&gt;.full.md</code> so it
+  cannot be overwritten by a later plain export of the same conversation.</p>
 <p>It answers with a path rather than the document, and that is the design rather than a limitation of
   it. <code>read_file(path, max_lines, offset)</code> returns 2,000 lines per call, so returning the Markdown
   itself would spend the asking conversation's whole context on one run's tool output, in the one
@@ -2966,6 +3002,21 @@ alone. The case that does cost something is a configured MCP server, which conne
   first agent is built so config-declared servers reach the agents that name them, and a runtime add or
   remove rebuilds each live agent's <code>spawn_subagent</code> so its workers pick the server up or drop it
   immediately.</li>
+<li><strong>Configured servers connect concurrently at boot, and still attach in <code>config.toml</code>'s order.</strong> A boot
+  with two remote servers used to pay the sum of their handshakes; the handshakes now overlap, while
+  <code>connections</code> (and so which server wins a duplicate tool name) stays in declaration order regardless of
+  which one answers first. Each server's tool fetch still happens inside that same ordered attach pass
+  (one <code>list_tools()</code> round trip per server), so it remains serial; only the handshake itself was made
+  concurrent. A lock serializes every OAuth-mode connect, not only an interactive authorization: fastmcp
+  decides inside <code>connect</code> whether a stored token is reusable, so the lock cannot tell in advance which
+  kind it is about to hold, and two OAuth servers with valid cached tokens still do not overlap each
+  other. When the held call really is an interactive authorization, its callback listener binds one
+  pinned port, so two servers both needing a fresh authorization at the same moment would race to bind
+  it, and the loser's bind failure would read as that server being unreachable rather than the port
+  collision it actually is; the wait there is however long the person takes to approve it, not network
+  time, so a second server's link is not posted until the first server's flow completes. A bearer-token
+  connect and an unauthenticated probe never touch the lock and still overlap fully, so the common shape
+  of one bearer server plus one OAuth server keeps essentially the whole win.</li>
 <li><strong>Each configured server is a toolset, named by its <code>name</code>.</strong> <code>name</code> is required: it is how the server
   enters the one namespace an agent declares against, so a server nothing can name reaches nothing. A
   runtime <code>add_mcp_server</code>, and the startup <code>--mcp &lt;url&gt;</code> flag, both derive a name from the server's host
@@ -3209,7 +3260,7 @@ notice on startup.</p>
 <li><strong>Model resolution failures surface cleanly.</strong> With no <code>model</code> set, AIMU resolves
   <code>AIMU_LANGUAGE_MODEL</code>, else the first already-running local model (Ollama, then a local
   OpenAI-compatible server), and never a cloud model. When nothing resolves, or the model string is
-  invalid, <code>Assistant.create</code> raises a <code>ModelClientError</code> carrying AIMU's actionable message: the CLI
+  invalid, <code>Assistant.start()</code> raises a <code>ModelClientError</code> carrying AIMU's actionable message: the CLI
   prints it and exits non-zero, the web UI shows it in the chat. Because agents are built lazily, the
   web UI's new / select / delete controls can hit the same error, and report it in the chat rather than
   tearing down the WebSocket. Any failure between taking the web front end's single-connection guard and
