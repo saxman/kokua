@@ -294,7 +294,7 @@ async def test_full_export_reads_a_spilled_sub_agent_response_back_off_disk(tmp_
         "active01", full=True
     )
 
-    destination = downloads / "active01.md"
+    destination = downloads / "active01.full.md"
     assert str(destination) in answer
     assert full_text in destination.read_text(encoding="utf-8")
 
@@ -603,7 +603,7 @@ async def test_export_full_keeps_a_long_tool_result_whole(tmp_path):
 
     await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1", full=True)
 
-    written = (tmp_path / "downloads" / "aaaaaaaa1.md").read_text(encoding="utf-8")
+    written = (tmp_path / "downloads" / "aaaaaaaa1.full.md").read_text(encoding="utf-8")
     assert "y" * 9000 in written
 
 
@@ -624,16 +624,27 @@ async def test_export_accepts_an_id_prefix(tmp_path):
     assert (tmp_path / "downloads" / "aaaaaaaa1.md").exists()
 
 
-async def test_re_exporting_overwrites_rather_than_piling_up(tmp_path):
-    """The name is the conversation id, so a second export of the same conversation replaces the
-    first instead of leaving the model to choose between two files."""
+async def test_re_exporting_at_one_fidelity_overwrites_rather_than_piling_up(tmp_path):
+    """Exports stay bounded and predictably named: re-exporting at the same fidelity replaces the
+    file rather than accumulating, so repeated exports never leave the model choosing between them.
+
+    Fidelity is the one split allowed, and `transcript_export.export_filename` says why: a full export
+    and a trimmed one are different artifacts that read identically, so one path for both let a
+    trimmed export silently destroy a full one. Two files is the ceiling, not a step toward per-call
+    names.
+    """
     book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages()))
     export = _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]
 
     await export("aaaaaaaa1")
+    await export("aaaaaaaa1")
+    await export("aaaaaaaa1", full=True)
     await export("aaaaaaaa1", full=True)
 
-    assert [path.name for path in (tmp_path / "downloads").iterdir()] == ["aaaaaaaa1.md"]
+    assert sorted(path.name for path in (tmp_path / "downloads").iterdir()) == [
+        "aaaaaaaa1.full.md",
+        "aaaaaaaa1.md",
+    ]
 
 
 async def test_export_of_a_conversation_with_a_running_turn_says_the_file_stops_short(tmp_path):
@@ -672,3 +683,30 @@ async def test_a_short_export_does_not_suggest_delegating(tmp_path):
     answer = await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1")
 
     assert LARGE_EXPORT_NOTE not in answer
+
+
+async def test_a_trimmed_export_does_not_overwrite_a_full_one(tmp_path):
+    """Fidelity is part of the file's identity, so the two exports are two files.
+
+    While both fidelities shared one path, a `full=False` call replaced a `full=True` export with a
+    trimmed copy that reads exactly like the whole thing: the capped tool results are gone and
+    nothing about the file says which version a reader has.
+    """
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages(tool_result="y" * 9000)))
+    tools = _tools(book, downloads_path=tmp_path / "downloads")
+
+    await tools["export_conversation"]("aaaaaaaa1", full=True)
+    await tools["export_conversation"]("aaaaaaaa1")
+
+    assert "y" * 9000 in (tmp_path / "downloads" / "aaaaaaaa1.full.md").read_text(encoding="utf-8")
+    assert "truncated" in (tmp_path / "downloads" / "aaaaaaaa1.md").read_text(encoding="utf-8")
+
+
+async def test_the_export_answer_names_the_file_it_actually_wrote(tmp_path):
+    """The model hands this path to a sub-agent, so the answer has to name the fidelity's own file
+    rather than the default one."""
+    book = _book(tmp_path, _session("aaaaaaaa1", messages=_detailed_messages()))
+
+    answer = await _tools(book, downloads_path=tmp_path / "downloads")["export_conversation"]("aaaaaaaa1", full=True)
+
+    assert str(tmp_path / "downloads" / "aaaaaaaa1.full.md") in answer

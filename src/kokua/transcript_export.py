@@ -63,6 +63,22 @@ DEFAULT_MAX_PAYLOAD_CHARS = 4000
 _MIN_FENCE = 3
 
 
+def export_filename(session_key: str, *, full: bool) -> str:
+    """The file an export of this conversation goes to, named for its fidelity as well as its id.
+
+    Fidelity is in the name because a full export and a trimmed one are different artifacts that read
+    identically. While both went to ``<key>.md``, a later trimmed export replaced a full one in place,
+    and nothing in the result announced the loss: a capped payload is marked where it was cut, so a
+    file whose caps were never needed and a file whose caps removed the answer look the same to
+    whoever opens it next. A trimmed export keeps the bare ``<key>.md`` that
+    ``docs/how-to/export-a-conversation.md`` documents, since it is the default the flag opts out of.
+
+    Both callers derive the path from here (the ``export_conversation`` tool and ``kokua export``) so
+    the two cannot drift into disagreeing about where one conversation's export lives.
+    """
+    return f"{session_key}.full.md" if full else f"{session_key}.md"
+
+
 def _fenced(payload: str, language: str = "") -> str:
     """``payload`` in a fenced block whose fence is longer than any backtick run inside it.
 

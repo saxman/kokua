@@ -484,3 +484,33 @@ def test_export_builds_no_assistant(monkeypatch, tmp_path):
 
     monkeypatch.setattr("kokua.core.assistant.Assistant.create", boom)
     _run_main(monkeypatch, ["export", "latest", "-o", "-"], expect_exit=0)
+
+
+def test_export_full_and_trimmed_land_in_different_files(monkeypatch, tmp_path, capsys):
+    """`kokua export X --full` then `kokua export X` must not leave one file.
+
+    The CLI derives its default path the same way the `export_conversation` tool does, so it had the
+    same collision: the second run replaced the full export with a trimmed one, under a name that
+    says nothing about which it is.
+    """
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+
+    _run_main(monkeypatch, ["export", "latest", "--full"], expect_exit=0)
+    full_path = capsys.readouterr().out.strip()
+    _run_main(monkeypatch, ["export", "latest"], expect_exit=0)
+    trimmed_path = capsys.readouterr().out.strip()
+
+    assert full_path != trimmed_path
+    assert Path(full_path).exists()
+    assert Path(trimmed_path).exists()
+
+
+def test_export_output_flag_still_wins_over_the_fidelity_name(monkeypatch, tmp_path, capsys):
+    """`-o` names the file outright, so fidelity never renames what the caller asked for."""
+    _seeded_home(monkeypatch, tmp_path, _TWO_MESSAGES)
+    target = tmp_path / "mine.md"
+
+    _run_main(monkeypatch, ["export", "latest", "--full", "-o", str(target)], expect_exit=0)
+
+    assert capsys.readouterr().out.strip() == str(target)
+    assert target.exists()

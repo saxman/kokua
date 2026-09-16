@@ -158,8 +158,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.31.0 or newer
   and `--full` reads the payload file back and shows the whole thing rather than the preview, falling
   back to the preview with an explicit note if the file is gone. `kokua export [id-or-prefix]
   [-o path|-] [--full]` reads the session store directly and writes the file: no `Assistant`, no model
-  client, no agent, so it works with the model server down. A read that races the daemon's own persist
-  reports the store as busy rather than parsing a torn file. See
+  client, no agent, so it works with the model server down. Fidelity is part of the file's name
+  (`<id>.md` plain, `<id>.full.md` for `--full`, both from `transcript_export.export_filename`, which
+  the tool and the CLI share so they cannot drift): the two hold different amounts of one conversation
+  and read identically, so a single name for both let a plain export replace a full one in place with
+  nothing in the result to say what was lost. Re-exporting at one fidelity still overwrites, so a
+  conversation has at most two export files. A read that races the daemon's own persist reports the
+  store as busy rather than parsing a torn file. See
   [Export a conversation](https://saxman.info/kokua/how-to/export-a-conversation/).
 - **Branch a conversation at a turn.** Every turn in the web UI carries a branch control, on the
   message that opened it and beside the delete-from-here control:
@@ -522,7 +527,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.31.0 or newer
   it stopped short. So "which tool call failed in yesterday's flight-price conversation, and what did it
   return?" is answerable, which `read_conversation` could never do at any `max_chars`. A `full`
   parameter lifts the payload cap, the same one `kokua export --full` lifts, for when the exact text of
-  a long tool result is the thing being debugged.
+  a long tool result is the thing being debugged, and sends the result to its own `<id>.full.md` so it
+  cannot be overwritten by a later plain export of the same conversation.
 
   It answers with a path rather than the document, and that is the design rather than a limitation of
   it. `read_file(path, max_lines, offset)` returns 2,000 lines per call, so returning the Markdown
