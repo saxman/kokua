@@ -380,10 +380,13 @@ async def run_review(reviewer: ResolvedReviewer, packet: str, *, timeout: float)
     tests identity as well, so the policy stays safe on its own if an answer ever reaches it by
     another route.
 
-    Building the client is inside that guarantee rather than a step before it, because
-    ``[reviewers.<name>].model`` is a user-written string nothing at startup builds from: a typo there
-    survives ``resolve_auto_approval`` and raises here instead, on every gated call, which is a reviewer
-    that could not be reached like any other. The one statement left outside the guard is the AIMU
+    Building the client is inside that guarantee rather than a step before it. A model name AIMU's
+    catalogue does not know no longer reaches here (``core.agents.validate_reviewers`` resolves every
+    declared ``[reviewers.<name>].model`` at startup), but a string that resolves can still fail to
+    build one: a provider whose optional dependency was uninstalled after the catalogue check, or an
+    endpoint form that parses and then cannot be constructed. Those are reviewers that could not be
+    reached like any other, and they belong on the same return value rather than raising out of a
+    function whose contract is that it does not. The one statement left outside the guard is the AIMU
     import, which ``aimu_compat.require_aimu`` has already established by the time a turn runs, and
     which ``review_call``'s own floor would catch even so.
     """
