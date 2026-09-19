@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.helpers import MockAsyncModelClient
+from kokua.config.schema import ReviewerConfig
 from kokua.config.settings_sources import build_settings_table
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import critics
@@ -176,7 +179,8 @@ async def test_review_result_includes_evidence_in_prompt(monkeypatch):
             "kokua.workflows.critics.reviewer_agent",
             lambda model, system, tools=None, **kwargs: aio.Agent(client, tools=[]),
         )
-        await review.review_result("mock", "do X", "PLAN", "ANSWER", evidence)
+        reviewer = AssistantConfig(model="mock").reviewer_for("result")
+        await review.review_result(reviewer, "do X", "PLAN", "ANSWER", evidence)
         first_user = client.messages[0]["content"]
         assert ("Evidence the agent gathered" in first_user) is expect
         assert ("SRC-XYZ" in first_user) is expect
@@ -196,7 +200,7 @@ async def test_reviewer_runs_tool_loop_then_extracts_verdict(monkeypatch):
 
     monkeypatch.setattr("kokua.workflows.critics.reviewer_agent", fake_reviewer_agent)
 
-    verdict = await review.review_plan("mock", "do X", "PLAN")
+    verdict = await review.review_plan(AssistantConfig(model="mock").reviewer_for("plan"), "do X", "PLAN")
 
     assert verdict.approved is True
     # The reviewer actually exercised a tool round before verdicting (not a single tool-less call).
@@ -217,7 +221,7 @@ async def test_streamed_reviewer_streams_then_extracts_verdict(monkeypatch):
         lambda model, system, tools=None, **kwargs: aio.Agent(client, tools=[]),
     )
 
-    rc, stream = await review.stream_plan_review("mock", "do X", "PLAN")
+    rc, stream = await review.stream_plan_review(AssistantConfig(model="mock").reviewer_for("plan"), "do X", "PLAN")
     parts = [ch.content async for ch in stream if ch.phase == StreamingContentType.GENERATING]
     verdict = await critics.finalize_verdict(rc)
 
@@ -408,8 +412,11 @@ def test_reviewer_agent_carries_the_thinking_it_is_given(monkeypatch):
 
 
 async def test_the_configured_thinking_reaches_every_planning_reviewer(monkeypatch):
-    """The default has to reach the reviewers through all four planning wrappers, not just the two
-    non-streamed ones, or a verbose planned turn would review at a different effort than a quiet one."""
+    """[assistant].thinking has to reach the reviewers through all four planning wrappers, not just the
+    two non-streamed ones, or a verbose planned turn would review at a different effort than a quiet
+    one. Effort now arrives through ``reviewer_for``, which falls back to ``[assistant].thinking`` when
+    no ``[reviewers.<name>]`` table declares its own, so driving the wrappers with its answer is what
+    exercises the real path rather than a value no caller actually produces."""
 
     class _StubAgent:
         def __init__(self):
@@ -430,10 +437,11 @@ async def test_the_configured_thinking_reaches_every_planning_reviewer(monkeypat
     monkeypatch.setattr(critics, "reviewer_agent", fake_reviewer)
     monkeypatch.setattr(critics, "finalize_verdict", fake_finalize)
 
-    await review.review_plan(None, "req", "plan", thinking="high")
-    await review.review_result(None, "req", "plan", "answer", thinking="high")
-    await review.stream_plan_review(None, "req", "plan", thinking="high")
-    await review.stream_result_review(None, "req", "plan", "answer", thinking="high")
+    config = AssistantConfig(thinking="high")
+    await review.review_plan(config.reviewer_for("plan"), "req", "plan")
+    await review.review_result(config.reviewer_for("result"), "req", "plan", "answer")
+    await review.stream_plan_review(config.reviewer_for("plan"), "req", "plan")
+    await review.stream_result_review(config.reviewer_for("result"), "req", "plan", "answer")
 
     assert seen == ["high"] * 4
 
@@ -473,7 +481,9 @@ def test_reviewer_agent_leaves_a_client_untouched_when_given_nothing(monkeypatch
 
 async def test_the_configured_generation_reaches_every_planning_reviewer(monkeypatch):
     """All four wrappers, not just the two non-streamed ones, or a verbose planned turn would review
-    with different parameters than a quiet one."""
+    with different parameters than a quiet one. Generation now arrives through ``reviewer_for``, which
+    merges ``[assistant.generation]`` with any ``[reviewers.<name>].generation`` per key, so driving the
+    wrappers with its answer exercises the real path."""
 
     class _StubAgent:
         def __init__(self):
@@ -495,9 +505,50 @@ async def test_the_configured_generation_reaches_every_planning_reviewer(monkeyp
     monkeypatch.setattr(critics, "finalize_verdict", fake_finalize)
 
     parameters = {"context_length": 32768}
-    await review.review_plan(None, "req", "plan", generate_kwargs=parameters)
-    await review.review_result(None, "req", "plan", "answer", generate_kwargs=parameters)
-    await review.stream_plan_review(None, "req", "plan", generate_kwargs=parameters)
-    await review.stream_result_review(None, "req", "plan", "answer", generate_kwargs=parameters)
+    config = AssistantConfig(generation=parameters)
+    await review.review_plan(config.reviewer_for("plan"), "req", "plan")
+    await review.review_result(config.reviewer_for("result"), "req", "plan", "answer")
+    await review.stream_plan_review(config.reviewer_for("plan"), "req", "plan")
+    await review.stream_result_review(config.reviewer_for("result"), "req", "plan", "answer")
 
     assert seen == [parameters] * 4
+
+
+# --- reviewer persona (config-declared model, effort, standard) ------------------------------
+
+
+@pytest.mark.asyncio
+async def test_plan_reviewer_uses_its_declared_persona(monkeypatch):
+    seen = {}
+
+    async def fake_review(model, system, user_input, thinking=None, generate_kwargs=None, name="reviewer"):
+        seen.update(model=model, system=system, thinking=thinking, generate_kwargs=generate_kwargs)
+        return review.critics.Verdict(approved=True)
+
+    monkeypatch.setattr(review.critics, "review", fake_review)
+    config = AssistantConfig(
+        model="ollama:a",
+        thinking="high",
+        reviewers={"plan": ReviewerConfig(model="ollama:b", thinking=False, system_message="my standard")},
+    )
+    await review.review_plan(config.reviewer_for("plan"), "do a thing", "the plan")
+    assert seen["model"] == "ollama:b"
+    assert seen["system"] == "my standard"
+    assert seen["thinking"] is False
+
+
+@pytest.mark.asyncio
+async def test_plan_reviewer_without_a_table_keeps_the_shipped_prompt(monkeypatch):
+    from kokua.workflows.planning.prompts import PLAN_REVIEW_SYSTEM
+
+    seen = {}
+
+    async def fake_review(model, system, user_input, thinking=None, generate_kwargs=None, name="reviewer"):
+        seen.update(model=model, system=system)
+        return review.critics.Verdict(approved=True)
+
+    monkeypatch.setattr(review.critics, "review", fake_review)
+    config = AssistantConfig(model="ollama:a")
+    await review.review_plan(config.reviewer_for("plan"), "do a thing", "the plan")
+    assert seen["model"] == "ollama:a"
+    assert seen["system"] == PLAN_REVIEW_SYSTEM
