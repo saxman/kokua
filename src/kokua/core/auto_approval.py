@@ -136,6 +136,10 @@ class ReviewContext:
 #: budget to spend and escalates on the fail-closed path, which is the same answer the proactive branch
 #: of ``HumanGate.approve`` already gives and a second reason for it. Any future turn path that forgets
 #: to open one therefore fails safe rather than reviewing with an unbounded budget and no request text.
+#: The edit that would take that guarantee away is worth naming outright, because it looks like tidying:
+#: adding a ``current_review_context.set(...)`` to the unattended path makes a gated call there
+#: reviewable, and a reviewer may approve it, so a shell command would run in a turn nobody is watching.
+#: The asymmetry is the feature.
 current_review_context: ContextVar[Optional[ReviewContext]] = ContextVar("current_review_context", default=None)
 
 
