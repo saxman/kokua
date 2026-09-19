@@ -203,7 +203,7 @@ class ChannelUI:
         that it was turned down.
         """
         if self._auto_approval is not None:
-            await self._auto_approval(name, arguments, approved, reason, model)
+            await self._auto_approval(name, arguments, approved=approved, reason=reason, model=model)
         elif approved:
             await self._channel.send(f"[auto-approval] {model} auto-approved {name}({arguments}): {reason}")
         else:

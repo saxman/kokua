@@ -788,7 +788,9 @@ async def test_web_channel_send_approval_request_emits_frame():
 async def test_web_channel_sends_an_auto_approval_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
-    await channel.send_auto_approval("run_command", {"command": "ls"}, True, "lists files", "ollama:b")
+    await channel.send_auto_approval(
+        "run_command", {"command": "ls"}, approved=True, reason="lists files", model="ollama:b"
+    )
     assert ws.frames == [
         {
             "type": "auto_approval",

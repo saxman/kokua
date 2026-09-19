@@ -42,7 +42,7 @@ class RichChannelDouble(BareChannel):
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         self.calls.append(("approval", (name, arguments)))
 
-    async def send_auto_approval(self, name: str, arguments: Any, approved: bool, reason: str, model: str) -> None:
+    async def send_auto_approval(self, name: str, arguments: Any, *, approved: bool, reason: str, model: str) -> None:
         self.calls.append(("auto_approval", (name, arguments, approved, reason, model)))
 
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
@@ -177,6 +177,7 @@ async def test_rich_channel_receives_every_frame():
     await ui.notify("done")
     await ui.alert("a scheduled task finished")
     await ui.ask_approval("execute_python", {"code": "1"})
+    await ui.show_auto_approval("run_command", {"command": "ls"}, approved=True, reason="lists files", model="m")
     await ui.ask_plan_review("step 1", ["too vague"])
     await ui.show_plan("step 1")
     await ui.show_phase("Planner", "drafting")
@@ -189,6 +190,7 @@ async def test_rich_channel_receives_every_frame():
         "notification",  # notify
         "notification",  # alert: one frame, two methods, differing only in their fallback
         "approval",
+        "auto_approval",
         "plan_review",
         "plan",
         "phase",
