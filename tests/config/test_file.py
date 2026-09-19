@@ -1015,8 +1015,22 @@ def test_reviewer_rejects_agent_only_keys(tmp_path, key, value):
 
 
 def test_reviewer_rejects_unknown_key(tmp_path):
-    with pytest.raises(settings.ConfigError, match=r"unknown config key \[reviewers.approval\].nope"):
-        _load_toml(tmp_path, "[reviewers.approval]\nnope = 1\n")
+    # A key nothing else in the schema shares (e.g. "nope") would answer with byte-identical text
+    # whether or not [reviewers.*] were a structured section: with no [logging]-style key to hint at,
+    # the generic flat-schema unknown-key error and _parse_reviewer's own say exactly the same thing.
+    # "level" discriminates because [logging].level is a real key: the flat path (what [reviewers.*]
+    # fell through to before it became a structured section) appends a "did you mean [logging].level?"
+    # hint that _parse_reviewer's own unknown-key branch never adds, so anchoring the match to the end
+    # of the message is what proves this is the reviewer table's own check and not the generic one.
+    with pytest.raises(settings.ConfigError, match=r"^unknown config key \[reviewers\.approval\]\.level$"):
+        _load_toml(tmp_path, "[reviewers.approval]\nlevel = 1\n")
+
+
+def test_reviewer_rejects_a_wrongly_typed_key(tmp_path):
+    # Discriminates against the flat path, which has no schema entry for a reviewer key and would
+    # answer "unknown config key" for the same input.
+    with pytest.raises(settings.ConfigError, match=r"\[reviewers.approval\].description must be a str"):
+        _load_toml(tmp_path, "[reviewers.approval]\ndescription = 1\n")
 
 
 def test_reviewer_table_must_be_a_table(tmp_path):

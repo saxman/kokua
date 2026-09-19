@@ -315,12 +315,17 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
     return AgentConfig(**fields)
 
 
+# `object`, not the real type, for the two keys _parse_reviewer intercepts before the isinstance
+# fallback below: `_AGENT_KEYS` makes the identical choice for the identical reason, spelled out there.
+# A real type here would look enforced and not be; `thinking` is checked by `_thinking` (a bool-or-string
+# union this map cannot express besides) and `generation` by `_generation`, both in `_parse_reviewer`'s
+# own `elif` branches, so a bad value never reaches the bare `isinstance(value, expected)` this map feeds.
 _REVIEWER_KEYS = {
     "description": str,
     "system_message": str,
     "model": str,
-    "thinking": (bool, str),
-    "generation": dict,
+    "thinking": object,  # value checked by _thinking; listed here so it is a known key
+    "generation": object,  # a sub-table, validated by _generation; listed here for the same reason
 }
 
 # Keys an [agents.<name>] table takes and a reviewer cannot. Rejected by name, with the reason, rather
