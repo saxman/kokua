@@ -167,7 +167,14 @@ def resolve_auto_approval(
                 "the prompt is required here rather than defaulted: it is the part of this feature you "
                 "are meant to read."
             )
-        if resolved.thinking:
+        # The value the reviewer's own table declared, not the resolved one. What this refuses is a key
+        # the user wrote for this reviewer that cannot take effect, which is the rule that an ignored key
+        # is worse than a rejected one. An effort inherited from [assistant].thinking makes no claim
+        # about this reviewer, and it is inert here rather than degraded: building a reviewer client
+        # reads only model, system_message, and generation. Refusing the inherited case would turn one
+        # unrelated global setting into an install-wide bar on enabling auto-approval, with an error
+        # telling the reader to remove a key their [reviewers.<name>] table does not contain.
+        if config.reviewers[name].thinking:
             raise ConfigError(
                 f"[reviewers.{name}].thinking is set, and an approval reviewer cannot reason: its answer "
                 "comes back through a structured call, which returns JSON and no reasoning on every "

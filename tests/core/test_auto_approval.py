@@ -186,6 +186,16 @@ async def test_thinking_reviewer_fails(tmp_path):
         await _resolve(tmp_path, reviewers=reviewers)
 
 
+async def test_inherited_thinking_is_not_a_declared_key(tmp_path):
+    """Reasoning on globally is a normal choice, and it says nothing about this reviewer. The refusal
+    above is about a key the user wrote here and that cannot take effect, so an inherited effort has to
+    resolve: it is inert for a reviewer, whose client is built from model, system_message, and
+    generation alone."""
+    auto = await _resolve(tmp_path, thinking="high")
+    assert auto.reviewers[0].thinking == "high"
+    assert auto.tools == frozenset({"run_command"})
+
+
 async def test_enabled_with_no_tools_fails(tmp_path):
     with pytest.raises(ConfigError, match="names no tool"):
         await _resolve(tmp_path, auto_approval_tools=[])
