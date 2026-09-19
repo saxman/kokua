@@ -17,6 +17,8 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
+from kokua.core.auto_approval import AutoApproval, review_call
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -125,6 +127,12 @@ class HumanGate:
         # startup check exists to prevent, so `approve` raises in it instead. The window is wider than
         # it looks: boot's remote half runs in `start`, so it spans every MCP handshake.
         self.gated_tools: Optional[frozenset[str]] = None
+        # The gate [security.auto_approval] resolves to, or None when it is off, assigned from the same
+        # place and at the same point as `gated_tools` above (core.auto_approval.resolve_auto_approval,
+        # called from Assistant.start). Unlike that one, None is a real answer here rather than a
+        # not-yet-wired sentinel: the feature ships off, and `gated_tools is None` already refuses every
+        # call made before wiring finishes, so one sentinel covers both.
+        self.auto_approval: Optional[AutoApproval] = None
         self.approval: PendingRequest[bool] = PendingRequest(default=False)
         # One slot for whatever the running workflow asks. Single-slot and lock-guarded like approval:
         # a second asker waits until the first is answered, so the serve loop can never resolve the
@@ -154,6 +162,15 @@ class HumanGate:
         Otherwise a reactive turn is approved only if its conversation is the one the user is
         currently viewing; a turn backgrounded by a switch auto-denies. Otherwise prompt over the
         channel and await the answer, which the serve loop routes here.
+
+        A gated tool named by ``[security.auto_approval]`` is reviewed just before that prompt, and
+        only there: both auto-denials above run first, so a review happens exactly where a human would
+        otherwise have been asked and nowhere else. The ordering is one of two independent guarantees
+        of that, since a reactive turn is also the only path that opens a review context, so a call in
+        an unattended turn reaching here would fail closed inside ``review_call`` anyway. A review can
+        only remove the prompt, never the capability: anything it withholds, and every way it can
+        fail, arrives at the same prompt this method would have shown. Both outcomes are reported as a
+        card, because an auto-approval nobody saw is a decision made on the user's behalf in silence.
         """
         if self.gated_tools is None:
             raise RuntimeError(
@@ -181,6 +198,15 @@ class HumanGate:
                 group=f"{turn_conversation}:{name}",
             )
             return False
+        if self.auto_approval is not None and name in self.auto_approval.tools:
+            # No `try`: `review_call` turns every failure into an outcome that escalates, so the fall
+            # through below is the only thing a failed review can reach.
+            outcome = await review_call(self.auto_approval, tool=name, arguments=arguments)
+            await self._ui.show_auto_approval(
+                name, arguments, approved=outcome.approved, reason=outcome.reason, model=outcome.model
+            )
+            if outcome.approved:
+                return True
         return await self.approval.ask(lambda: self._ui.ask_approval(name, arguments))
 
     async def decide(

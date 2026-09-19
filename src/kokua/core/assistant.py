@@ -37,6 +37,7 @@ from kokua.core.build import (
 )
 from kokua.config import AssistantConfig
 from kokua.core import conversation_commands
+from kokua.core.auto_approval import resolve_auto_approval
 from kokua.core.conversations import UNTITLED, ConversationBook, TurnInFlight
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
@@ -343,6 +344,9 @@ class Assistant:
         # gate matches a tool name, so the gate cannot answer at all until this has run (see
         # `HumanGate.gated_tools`).
         self._human.gated_tools = resolve_confirm_tools(config, state, entry_agent)
+        # Resolved from that same vocabulary and against that same answer, because an auto-approval set
+        # that is not a subset of the gated set describes a prompt that never existed.
+        self._human.auto_approval = resolve_auto_approval(config, state, entry_agent, self._human.gated_tools)
 
         state.tasks.arm_all()
 
