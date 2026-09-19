@@ -26,8 +26,16 @@ reach for first.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
+
+from kokua.config.file import ConfigError
+from kokua.config.schema import AssistantConfig, ResolvedReviewer
+from kokua.core.agents import gateable_tools, resolve_gate_entries
+from kokua.registry.context import LiveState
+
+logger = logging.getLogger(__name__)
 
 #: Longest any single packet field may be. A field over this escalates rather than being reviewed
 #: truncated: a reviewer shown the first two thousand characters of a payload is a reviewer the rest of
@@ -103,4 +111,124 @@ def build_packet(
         f"budget     {used} of {allowed} auto-approvals used this turn\n"
         f"request    {fenced_request}\n"
         f"arguments  {fenced_arguments}\n"
+    )
+
+
+@dataclass(frozen=True)
+class AutoApproval:
+    """The resolved gate: which tool names a reviewer may be asked about, and who is asked.
+
+    Built once at startup, after every agent is wired, because the vocabulary an entry resolves
+    against does not exist until then. ``toolset_of`` is resolved here rather than looked up per call
+    so the packet can name a capability without the gate reaching the registry mid-dispatch.
+    """
+
+    tools: frozenset[str]
+    toolset_of: Mapping[str, str]
+    reviewers: tuple[ResolvedReviewer, ...]
+    timeout_seconds: float
+    max_per_turn: int
+
+
+def resolve_auto_approval(
+    config: AssistantConfig, state: LiveState, entry_agent, gated: frozenset[str]
+) -> Optional[AutoApproval]:
+    """The gate ``[security.auto_approval]`` describes, or None when it is off.
+
+    Every fault here fails startup rather than warning, for the reason ``resolve_confirm_tools`` gives
+    about its own: the symptom of a broken gate is the absence of a symptom. A reviewer nobody declared,
+    a standard nobody wrote, or a tool nothing gates all present as a feature that silently is not
+    running, and a user who enabled it has no way to tell that from a reviewer that keeps approving.
+
+    ``gated`` is ``resolve_confirm_tools``' answer, passed in rather than recomputed: the two are halves
+    of one decision, and an auto-approval set that is not a subset of it would describe a prompt that
+    never existed.
+    """
+    if not config.auto_approval_enabled:
+        return None
+    if not config.auto_approval_reviewers:
+        raise ConfigError(
+            "[security.auto_approval] is enabled but names no reviewer, so every gated call would still "
+            'reach you. Add reviewers = ["approval"] and declare [reviewers.approval].'
+        )
+    reviewers: list[ResolvedReviewer] = []
+    for name in config.auto_approval_reviewers:
+        if name not in config.reviewers:
+            known = ", ".join(sorted(config.reviewers)) or "none"
+            raise ConfigError(
+                f"[security.auto_approval].reviewers names {name!r}, which has no [reviewers.{name}] "
+                f"table. Declared reviewers: {known}."
+            )
+        resolved = config.reviewer_for(name)
+        if not resolved.system_message.strip():
+            raise ConfigError(
+                f"[reviewers.{name}] has no system_message, and it is the reviewer deciding whether a "
+                "gated tool call reaches you. A reviewer with no stated standard reviews nothing, so "
+                "the prompt is required here rather than defaulted: it is the part of this feature you "
+                "are meant to read."
+            )
+        if resolved.thinking:
+            raise ConfigError(
+                f"[reviewers.{name}].thinking is set, and an approval reviewer cannot reason: its answer "
+                "comes back through a structured call, which returns JSON and no reasoning on every "
+                "provider. Remove it rather than leaving a key that does nothing."
+            )
+        if resolved.model == config.default_model:
+            logger.warning(
+                "[reviewers.%s] runs on the same model as [assistant], so the reviewer and the agent it "
+                "reviews can be talked out of the same judgement by the same text. A different model is "
+                "the point of the separation.",
+                name,
+            )
+        reviewers.append(resolved)
+    vocabulary = gateable_tools(state, entry_agent)
+    tools = resolve_gate_entries(
+        config.auto_approval_tools,
+        vocabulary,
+        state.registry,
+        setting="[security.auto_approval].tools",
+        effect="review nothing",
+        remedy=(
+            "An entry matching no tool cannot reduce a prompt, so the call it was written to wave "
+            "through still stops and asks."
+        ),
+    )
+    if not tools:
+        raise ConfigError(
+            "[security.auto_approval] is enabled but names no tool, so nothing would ever be reviewed. "
+            'Add the gated tools a reviewer may answer for, for instance tools = ["compute.run_command"].'
+        )
+    floor = resolve_gate_entries(
+        config.never_auto_approve,
+        vocabulary,
+        state.registry,
+        setting="[security].never_auto_approve",
+        effect="hold nothing back",
+        remedy="An entry matching no tool holds nothing back from a reviewer that can approve it.",
+    )
+    forbidden = sorted(tools & floor)
+    if forbidden:
+        raise ConfigError(
+            f"[security.auto_approval].tools reaches {', '.join(forbidden)}, which "
+            "[security].never_auto_approve holds back. Those tools change what may act later rather "
+            "than acting once, so approving one grants a capability and the arguments it was approved "
+            "for stop constraining anything. Drop them here, or take them out of never_auto_approve by "
+            "hand and understand that a waved update_config can widen this list."
+        )
+    ungated = sorted(tools - gated)
+    if ungated:
+        raise ConfigError(
+            f"[security.auto_approval].tools reaches {', '.join(ungated)}, which nothing gates: "
+            "[security].confirm_tools does not name it, so that call already runs with no prompt and "
+            "there is nothing for a reviewer to save you. Gate it first, or drop it here."
+        )
+    toolset_of = {
+        tool: ",".join(sorted(name for name, provided in vocabulary.items() if tool in provided)) for tool in tools
+    }
+    return AutoApproval(
+        tools=tools,
+        toolset_of=toolset_of,
+        reviewers=tuple(reviewers),
+        timeout_seconds=config.auto_approval_timeout_seconds,
+        max_per_turn=config.auto_approval_max_per_turn,
     )
