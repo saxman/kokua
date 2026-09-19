@@ -739,6 +739,14 @@ keeps the default's context length. See [`[assistant].model`](#model) for what a
 carry, including the endpoint suffix and the way a bare `provider:model` here drops an endpoint pinned
 there.
 
+A declared `model` is validated at startup, exactly as an agent's is: a name AIMU's catalogue does not
+know fails there, naming the table (`[reviewers.<name>].model`), rather than surfacing later as "the
+reviewer could not be reached" on the first gated call or plan review it is asked to do. This is a trap
+worth naming concretely, because it is easy to hit: a provider's model catalogue here is AIMU's own
+short id, not the dated id its API uses, so `anthropic:claude-haiku-4-5-20251001` (the API's id) fails
+where `anthropic:claude-haiku-4-5` (AIMU's) resolves. An undeclared `model` is never checked here, since
+it inherits `[assistant].model`, which is validated on its own path when it is set.
+
 `system_message` is the one that does **not** fall back to `[assistant].system_message`, and the
 difference is deliberate. An undeclared prompt leaves it empty, and what empty means is the consumer's
 to decide rather than this file's: the `/plan` critics substitute their own shipped standard, and the

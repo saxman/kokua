@@ -7,7 +7,7 @@ import pytest
 
 
 from kokua.config import MCPServerConfig
-from kokua.config.schema import AgentConfig
+from kokua.config.schema import AgentConfig, ReviewerConfig
 from kokua.core.assistant import Assistant
 from kokua.registry.context import LiveState
 from kokua.mcp.auth import OAuthSettings
@@ -135,6 +135,58 @@ async def test_an_unresolvable_declared_model_refuses_to_start(tmp_path):
     cfg = _config(tmp_path, agents={"assistant": AgentConfig(tools=[], model="nonsense:whatever")})
     with pytest.raises(ConfigError, match=r"\[agents.assistant\].model"):
         await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+
+async def test_an_unresolvable_reviewer_model_refuses_to_start(tmp_path):
+    """[reviewers.plan] is deep planning's critic and nothing [security.auto_approval] names, so this
+    proves a reviewer is checked whether or not the gate ever reads it."""
+    from kokua.config import ConfigError
+
+    cfg = _config(tmp_path, reviewers={"plan": ReviewerConfig(model="nonsense:whatever")})
+    with pytest.raises(ConfigError, match=r"\[reviewers.plan\].model"):
+        await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+
+async def test_an_unresolvable_approval_reviewer_model_refuses_to_start_with_the_gate_off(tmp_path):
+    """The gate being off used to mean a bad [reviewers.approval] model surfaced only on the first
+    gated call, as "reviewer could not be reached" with no hint why. It is checked regardless now,
+    the same way [agents.*] are checked whether or not anything delegates to them."""
+    from kokua.config import ConfigError
+
+    cfg = _config(
+        tmp_path,
+        auto_approval_enabled=False,
+        reviewers={"approval": ReviewerConfig(model="nonsense:whatever")},
+    )
+    with pytest.raises(ConfigError, match=r"\[reviewers.approval\].model"):
+        await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+
+async def test_a_valid_declared_reviewer_model_passes(tmp_path):
+    cfg = _config(tmp_path, reviewers={"plan": ReviewerConfig(model="ollama:qwen3:32b")})
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    assert assistant is not None
+
+
+async def test_a_reviewer_model_may_carry_an_endpoint_override(tmp_path):
+    """A reviewer's model accepts the same extended string an agent's does, endpoint included."""
+    cfg = _config(
+        tmp_path,
+        reviewers={"plan": ReviewerConfig(model="ollama:qwen3.5:9b@http://example.local:11434")},
+    )
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    assert assistant is not None
+
+
+async def test_a_reviewer_declaring_no_model_is_not_checked(tmp_path):
+    """A reviewer with no declared model inherits [assistant].model, which is validated on its own
+    path; re-checking the inherited value here would risk blaming the wrong table for someone else's
+    typo. [assistant].model is left unset here too, so this also proves the missing declaration is
+    never resolved just to be checked."""
+    cfg = _config(tmp_path, reviewers={"plan": ReviewerConfig()})
+    assert cfg.model is None
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    assert assistant is not None
 
 
 async def test_a_missing_entry_agent_refuses_to_start(tmp_path):

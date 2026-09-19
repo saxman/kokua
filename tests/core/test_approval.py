@@ -525,7 +525,7 @@ async def test_assistant_wires_the_auto_approval_gate(tmp_path):
         auto_approval_enabled=True,
         auto_approval_reviewers=["approval"],
         auto_approval_tools=["compute.run_command"],
-        reviewers={"approval": ReviewerConfig(model="ollama:b", system_message="judge it")},
+        reviewers={"approval": ReviewerConfig(model="ollama:qwen3:8b", system_message="judge it")},
     )
     assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
     await assistant.start()

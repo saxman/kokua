@@ -177,7 +177,7 @@ def _auto(**overrides) -> dict:
         auto_approval_enabled=True,
         auto_approval_reviewers=[_REVIEWER],
         auto_approval_tools=["compute.run_command"],
-        reviewers={_REVIEWER: ReviewerConfig(model="ollama:b", system_message="judge it")},
+        reviewers={_REVIEWER: ReviewerConfig(model="ollama:qwen3:8b", system_message="judge it")},
     )
     fields.update(overrides)
     return fields
@@ -223,7 +223,7 @@ async def test_resolves_tool_names_and_the_reviewer(tmp_path):
     assert auto.tools == frozenset({"run_command"})
     assert auto.toolset_of["run_command"] == "compute"
     assert [reviewer.name for reviewer in auto.reviewers] == [_REVIEWER]
-    assert auto.reviewers[0].model == "ollama:b"
+    assert auto.reviewers[0].model == "ollama:qwen3:8b"
     assert auto.reviewers[0].system_message == "judge it"
     assert auto.timeout_seconds == AssistantConfig().auto_approval_timeout_seconds
     assert auto.max_per_turn == AssistantConfig().auto_approval_max_per_turn
@@ -243,18 +243,18 @@ async def test_reviewer_without_a_standard_fails(tmp_path):
     """The prompt is the part of this feature a user is meant to read, so it is required rather than
     defaulted: a reviewer with no stated standard reviews nothing and approves whatever it is sent."""
     with pytest.raises(ConfigError, match="no system_message"):
-        await _resolve(tmp_path, reviewers={_REVIEWER: ReviewerConfig(model="ollama:b")})
+        await _resolve(tmp_path, reviewers={_REVIEWER: ReviewerConfig(model="ollama:qwen3:8b")})
 
 
 async def test_whitespace_is_not_a_standard(tmp_path):
     with pytest.raises(ConfigError, match="no system_message"):
-        await _resolve(tmp_path, reviewers={_REVIEWER: ReviewerConfig(model="ollama:b", system_message="  \n ")})
+        await _resolve(tmp_path, reviewers={_REVIEWER: ReviewerConfig(model="ollama:qwen3:8b", system_message="  \n ")})
 
 
 async def test_thinking_reviewer_fails(tmp_path):
     """A structured call cannot stream reasoning, so a truthy `thinking` here would be a key that does
     nothing. An ignored key is worse than a rejected one."""
-    reviewers = {_REVIEWER: ReviewerConfig(model="ollama:b", system_message="judge it", thinking="high")}
+    reviewers = {_REVIEWER: ReviewerConfig(model="ollama:qwen3:8b", system_message="judge it", thinking="high")}
     with pytest.raises(ConfigError, match="cannot reason"):
         await _resolve(tmp_path, reviewers=reviewers)
 
