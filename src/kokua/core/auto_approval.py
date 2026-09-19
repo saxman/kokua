@@ -333,11 +333,18 @@ async def run_review(reviewer: ResolvedReviewer, packet: str, *, timeout: float)
     Every failure is one return value, because every failure means the same thing here: nobody
     reviewed this call. The distinctions are kept in the log and in the sentence the caller shows,
     not in the control flow, so there is no path by which a broken reviewer becomes an approval.
+
+    Building the client is inside that guarantee rather than a step before it, because
+    ``[reviewers.<name>].model`` is a user-written string nothing at startup builds from: a typo there
+    survives ``resolve_auto_approval`` and raises here instead, on every gated call, which is a reviewer
+    that could not be reached like any other. The one statement left outside the guard is the AIMU
+    import, which ``aimu_compat.require_aimu`` has already established by the time a turn runs, and
+    which ``review_call``'s own floor would catch even so.
     """
     from aimu.aio import ModelRefusalError
 
-    client = _build_client(reviewer)
     try:
+        client = _build_client(reviewer)
         answer = await asyncio.wait_for(client.chat(f"{packet}\n{_QUESTION}", schema=Review, use_tools=False), timeout)
     except asyncio.TimeoutError:
         logger.warning("auto-approval reviewer %s timed out after %ss", reviewer.name, timeout)

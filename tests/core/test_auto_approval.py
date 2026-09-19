@@ -432,6 +432,27 @@ async def test_escalates_on_any_other_failure(monkeypatch, auto, in_turn, caplog
     assert _causes(caplog) == ["auto-approval reviewer approval could not be reached"]
 
 
+async def test_a_reviewer_model_that_cannot_be_built_reads_as_unreachable(auto, in_turn, caplog):
+    """`[reviewers.<name>].model` is a user-written string that startup validates the existence of but
+    never builds a client from, so a typo in it first shows up here, on every gated call. What the user
+    needs at that point is the reviewer's name, which points at the config line to fix; the generic
+    floor sentence points at nothing, and the log record is the only place the provider error survives.
+
+    `_build_client` is deliberately not patched: the real `aio.client` refusing an unknown provider is
+    the behaviour under test. It refuses while constructing, so this reaches no network.
+    """
+    misconfigured = dataclasses.replace(auto, reviewers=(_resolved(_REVIEWER, "nosuchprovider:model-x"),))
+    with caplog.at_level(logging.WARNING, logger="kokua.core.auto_approval"):
+        outcome = await review_call(misconfigured, tool="run_command", arguments={"command": "ls"})
+    assert outcome.approved is False
+    assert "'approval'" in outcome.reason
+    assert "did not answer" in outcome.reason
+    assert "failed unexpectedly" not in outcome.reason
+    assert outcome.model == "nosuchprovider:model-x"
+    assert in_turn.used == 1
+    assert _causes(caplog) == ["auto-approval reviewer approval could not be reached"]
+
+
 async def test_escalates_on_a_malformed_verdict(monkeypatch, auto, in_turn, caplog):
     # A provider that answers with the wrong shape is indistinguishable from one that answered nothing.
     _patch_client(monkeypatch, {"in_scope": True})
