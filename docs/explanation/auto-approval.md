@@ -106,10 +106,13 @@ nine return a value rather than raise, so no caller can forget to handle one.
    JSON whose fields came back as the wrong type (`"false"` for a boolean). The first two fail as they
    are parsed; the third parses cleanly and is rejected on arrival, since a plain dataclass enforces
    none of the types it annotates.
-9. **Anything else.** A catch-all around the whole of `review_call`, because rendering the packet runs
-   `__repr__` code from tool arguments a model chose. It logs a traceback, so a programming error
-   surfaces rather than being swallowed silently, and it catches `Exception` rather than
-   `BaseException`, so a `/stop` still cancels and Ctrl-C still ends the process.
+9. **Anything else.** A catch-all around `_outcome_for`, the function `review_call` wraps for exactly
+   this, because rendering the packet runs `__repr__` code from tool arguments a model chose. It logs a
+   traceback, so a programming error surfaces rather than being swallowed silently, and it catches
+   `Exception` rather than `BaseException`, so a `/stop` still cancels and Ctrl-C still ends the
+   process. This is what makes `review_call`'s promise not to raise real: whatever `_outcome_for`
+   returns, approval, escalation, or a caught failure, `review_call` only has one more thing left to do
+   with it, logging the outcome, before handing it back.
 
 A reviewer that answers and withholds approval is not one of these. That is the feature working: the
 call goes to the prompt, carrying the reviewer's sentence.

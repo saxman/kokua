@@ -78,7 +78,10 @@ class Review:
 #: What each :class:`Review` field has to *be*, checked by :func:`run_review` on every answer. A plain
 #: dataclass carries its annotations for a reader and enforces none of them, and the structured path
 #: that builds one from a model's JSON validates no types either, so this is where the annotations
-#: above become a rule. Kept beside the class rather than inside the function so the two cannot drift.
+#: above become a rule. Kept beside the class rather than inside the function so the two are read
+#: together; ``test_review_field_types_matches_the_dataclass`` in ``tests/core/test_auto_approval.py``
+#: is what actually keeps them from drifting apart, pinning this mapping against
+#: ``typing.get_type_hints(Review)`` so a field added to one and forgotten in the other fails the suite.
 _REVIEW_FIELD_TYPES: Mapping[str, type] = {
     "in_scope": bool,
     "reversible": bool,

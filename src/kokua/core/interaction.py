@@ -171,8 +171,12 @@ class HumanGate:
         opens a review context, so a call in an unattended turn reaching here would fail closed inside
         ``review_call`` anyway. A review can
         only remove the prompt, never the capability: anything it withholds, and every way it can
-        fail, arrives at the same prompt this method would have shown. Both outcomes are reported as a
-        card, because an auto-approval nobody saw is a decision made on the user's behalf in silence.
+        fail, arrives at the same prompt this method would have shown, with one exception: a switch
+        away during the review itself denies rather than prompts, since nobody is left watching the
+        turn a prompt would appear on. That denial is narrower than a prompt, not wider, and it is the
+        same answer the check above already gives for a switch that happened earlier. Both outcomes
+        are reported as a card, because an auto-approval nobody saw is a decision made on the user's
+        behalf in silence.
         """
         if self.gated_tools is None:
             raise RuntimeError(

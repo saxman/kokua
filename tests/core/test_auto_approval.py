@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import logging
+import typing
 
 import pytest
 from aimu.models import parse_json_response
@@ -14,6 +15,7 @@ from kokua.core.auto_approval import (
     Outcome,
     Review,
     ReviewContext,
+    _REVIEW_FIELD_TYPES,
     build_packet,
     current_review_context,
     decide,
@@ -461,6 +463,15 @@ async def test_a_forged_reason_cannot_write_a_second_record(monkeypatch, auto, i
     formatted = [formatter.format(record) for record in caplog.records if record.name == "kokua.core.auto_approval"]
     assert len(formatted) == 1
     assert "\n" not in formatted[0]
+
+
+def test_review_field_types_matches_the_dataclass():
+    """`_REVIEW_FIELD_TYPES` is kept beside `Review` "so the two cannot drift", a claim nothing else in
+    the module enforces: a field added to `Review` and forgotten here would go unchecked in silence,
+    which is this branch's recurring defect in the one place it would be least visible. This is what
+    makes the claim true.
+    """
+    assert _REVIEW_FIELD_TYPES == typing.get_type_hints(Review)
 
 
 async def test_escalates_outside_a_turn(monkeypatch, auto):
