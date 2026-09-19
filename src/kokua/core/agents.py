@@ -742,7 +742,7 @@ def resolve_confirm_tools(config: AssistantConfig, state: LiveState, entry_agent
     no tools is refused as firmly as a misspelling is.
 
     Called once every agent has been wired, because the vocabulary does not exist before then and is
-    wider than the entry agent's own tools. ``compute.execute_python`` is one of the five gates Kokua
+    wider than the entry agent's own tools. ``compute.execute_python`` is one of the six gates Kokua
     ships and no toolset the entry agent declares provides it: it comes from ``[agents.coder]``, whose
     tools are built when the delegation tool is.
 

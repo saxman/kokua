@@ -153,7 +153,7 @@ reason. That is the half of the record that outlives the page, and it is what yo
 
 ## What this does not do
 
-Four admissions, and they matter more than the feature's own description.
+Five admissions, and they matter more than the feature's own description.
 
 **There is no sandbox under it, and no shell parser in front of it.** The reviewer reads a raw command
 string and is the only layer between the model and your files. Kokua's `run_command` runs as your user
@@ -175,6 +175,17 @@ budget for: one extra model call per reviewed tool call per reviewer named, and 
 Weakening it weakens the reviewer, and nothing stops you. What it cannot do is change the decision:
 that is computed from three booleans in code, so no edit to the prompt can invent a fourth outcome or
 turn a withheld answer into an approval.
+
+**The agent being reviewed can read the reviewer's prompt.** `config.toml` is the single source of
+settings and it is yours, so the assistant's own `read_config` hands back the file unredacted; the
+shipped `[agents.assistant]` holds the `config` toolset, so the agent whose calls are being reviewed
+can read `[reviewers.approval].system_message` verbatim, along with `[security.auto_approval].tools`
+and `max_per_turn`. `[security].confirm_tools` was already readable the same way, and this is the same
+consequence of the same principle rather than a new one. It is a different claim from the admission
+above: that one is about *you* editing the standard, this one is about the reviewed model knowing which
+standard it will be held to, which tools it is worth trying, and how many attempts the budget allows.
+What it cannot do is change any of that: `[reviewers.*]` and the whole of `[security]` are locked
+against `update_config`, so reading is the whole of the reach.
 
 **A reviewer is one model call with no memory.** It sees the tool, the toolset, the budget line, your
 request, and the arguments. It does not see the conversation, the files on disk, or what the previous

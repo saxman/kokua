@@ -354,8 +354,9 @@ _REVIEWER_KEYS = {
 # from the agents table, and "unknown config key" would read as a typo in a key that really exists one
 # section over.
 _AGENT_ONLY_REVIEWER_KEYS = {
-    "tools": "A reviewer holds no tools. Its independence is the whole of what it offers, and a tool "
-    "that reads a page is a tool that can be told what to decide. Declare an agent instead.",
+    "tools": "A reviewer's tools are fixed in code by whatever consumes it, and this table has no key "
+    "to change them: the approval reviewer is asked with tools off, and a plan critic gets the curated "
+    "verification toolset in workflows/critics.py. Declare an agent instead.",
     "delegates_to": "A reviewer delegates to nothing: it is one model call, so there is nothing for a "
     "worker to be part of. Declare an agent instead.",
     "max_iterations": "A reviewer runs no tool loop, so there is no cap to set. Declare an agent instead.",

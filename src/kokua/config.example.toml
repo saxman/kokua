@@ -249,11 +249,13 @@ so, and where it went wrong if it did, saying up front that those are the criter
 
 # Reviewers: a context-free model call whose answer code consumes, declared here so you can read the
 # standard each one is held to. Five fields, the same five an agent table takes for its persona, and
-# none of the three that give an agent reach: a reviewer holds no tools, delegates to nothing, and runs
-# no tool loop, so `tools`, `delegates_to`, and `max_iterations` are startup errors here. (An agent
-# named "reviewer" is still just an agent; these tables are a different thing.) `description` is read by
-# nobody, unlike an agent's: it is a note to whoever opens this file. Locked by default, like
-# [agents.*] and for the same reason: a reviewer decides how this assistant's own work is judged.
+# none of the three that give an agent reach: a reviewer's tools are fixed in code by whatever consumes
+# it (the approval reviewer is asked with tools off; a plan critic gets a curated verification toolset),
+# nothing delegates to it, and it runs no tool loop, so `tools`, `delegates_to`, and `max_iterations`
+# are startup errors here. (An agent named "reviewer" is still just an agent; these tables are a
+# different thing.) `description` is read by nobody, unlike an agent's: it is a note to whoever opens
+# this file. Locked by default, like [agents.*] and for the same reason: a reviewer decides how this
+# assistant's own work is judged.
 # `model`, `thinking`, and `generation` resolve against [assistant] exactly as an agent's do.
 #
 # [reviewers.plan] and [reviewers.result] are deep planning's two critics (see [planning] below); leave

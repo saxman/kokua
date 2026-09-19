@@ -745,15 +745,15 @@ reader who wrote one was reasoning by analogy from the agents table:
 
 | Refused | Why |
 | --- | --- |
-| `tools` | a reviewer holds none. Its independence is the whole of what it offers, and a tool that reads a page is a tool that can be told what to decide. |
+| `tools` | whatever consumes a reviewer fixes its tools in code, and this table has no key to change them: the approval gate asks with tools off, and a `/plan` critic gets a curated verification toolset. |
 | `delegates_to` | it is one model call, so there is nothing for a worker to be part of. |
 | `max_iterations` | it runs no tool loop, so there is no cap to set. |
 
-Declare an agent if you want any of those. That absence is also why the approval reviewer cannot recurse
-into itself: a reviewer with no tools makes no call for the gate to be asked about while it is reviewing
-one. (The `/plan` critics are the one place a reviewer's answer is produced by a tool-using agent, over
-a curated read-only toolset the workflow fixes in code; this table gives it the persona, never the
-tools. See [Architecture](../explanation/architecture.md).)
+Declare an agent if you want any of those. The approval reviewer's own call being tool-less is also why
+that gate cannot recurse into itself: a reviewer making no tool call has no call for the gate to be
+asked about while it is reviewing one. (The `/plan` critics are the one place a reviewer's answer is
+produced by a tool-using agent, over a curated read-only toolset the workflow fixes in code; this table
+gives it the persona, never the tools. See [Architecture](../explanation/architecture.md).)
 
 `[reviewers.approval]` additionally refuses a declared `thinking`, and the error says why: its answer
 comes back through a structured call, which returns JSON and no reasoning on every provider, so a

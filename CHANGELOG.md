@@ -1028,10 +1028,11 @@ alone. The case that does cost something is a configured MCP server, which conne
   reviewer is one context-free model call whose answer code consumes, and the table carries the five
   fields that describe how a model is asked (`description`, `system_message`, `model`, `thinking`,
   `generation`) and none of the three that give an agent reach. `tools`, `delegates_to`, and
-  `max_iterations` are refused by name with the reason, rather than accepted and ignored: a reviewer
-  holds no tools (its independence is the whole of what it offers, and a tool that reads a page is a
-  tool that can be told what to decide), nothing delegates to it, and it runs no tool loop. That
-  absence is also why the approval reviewer cannot recurse into itself. `model`, `thinking`, and
+  `max_iterations` are refused by name with the reason, rather than accepted and ignored: a reviewer's
+  tools are fixed in code by whatever consumes it and this table has no key to change them (the
+  approval reviewer is asked with tools off; a plan critic gets the curated verification toolset in
+  `workflows/critics.py`), nothing delegates to it, and it runs no tool loop. The approval reviewer's
+  own tool-less call is also why it cannot recurse into itself. `model`, `thinking`, and
   `generation` resolve against the `[assistant]` tiers exactly as an agent's do; `system_message` is
   the one field with no `[assistant]` tier, because what an undeclared standard means is the consumer's
   to decide (deep planning substitutes its own shipped prompt, the approval gate refuses to start).

@@ -85,6 +85,12 @@ Inside, no asymmetry remains: every toolset keeps the `build` its author wrote, 
 import or to build stops startup naming itself, whoever wrote it. Kokua ships no third-party code, so it
 carries no special handling for code it does not ship.
 
+*Where this principle was hardest to hold:* auto-approval landed in `core/`, not in a toolset, and the
+argument for that is written out in [Auto-approval](auto-approval.md#is-this-a-core-change-or-a-plugin)
+rather than assumed. The short version is that it contributes no capability: it changes how one
+existing human decision point behaves, inside the single function that owns that decision, and a
+toolset contributes tools and settings rather than a fork in the gate every tool passes through.
+
 ### Corollary: a capability is declared, never defaulted
 
 An agent's capability is exactly what its `[agents.<name>].tools` table declares. **No code path adds a
@@ -215,7 +221,7 @@ can attach a debugger to, rather than a request landing in whichever worker happ
 The invariants block is a teaching artifact as much as a safety one.
 
 *How this cashes out:* [`core/turns.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py) opens with a
-`## Concurrency invariants` block -- eight rules, each stating what breaks without it, including a
+`## Concurrency invariants` block of eight rules, each stating what breaks without it, including a
 deadlock that a regression test still guards. [`TurnGate`](https://github.com/saxman/kokua/blob/main/src/kokua/core/turn_gate.py) is a
 documented writer-preferring readers-writer gate: turns read, a settings change writes, and which side an
 operation belongs on follows from its reach rather than from whether it mutates (a conversation delete

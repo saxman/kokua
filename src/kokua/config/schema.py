@@ -76,12 +76,16 @@ class ReviewerConfig:
 
     A reviewer is a context-free model call whose answer code consumes: a plan critic's verdict, or
     the approval gate's three booleans. It takes the five fields that describe *how a model is asked*
-    and none of the three that give an agent reach, because it has none. It holds no tools, nothing
-    delegates to it, nothing spawns it, and it runs no tool loop, so ``tools``, ``delegates_to``, and
-    ``max_iterations`` are rejected by name at parse time rather than accepted and ignored.
+    and none of the three that give an agent reach. What tools a reviewer holds is fixed in code by
+    whatever consumes it, and this table has no key to change them: the approval gate asks its reviewer
+    with tools off, and a plan critic runs the curated verification toolset
+    ``workflows.critics.REVIEWER_TOOLS``. Nothing delegates to a reviewer, nothing spawns it, and it
+    runs no tool loop, so ``tools``, ``delegates_to``, and ``max_iterations`` are rejected by name at
+    parse time rather than accepted and ignored.
 
-    That absence is also the structural reason the approval gate cannot recurse into itself: a
-    reviewer with no tools has no call for the gate to be asked about while it is reviewing one.
+    The approval reviewer's own call is tool-less (``use_tools=False``), which is the structural reason
+    that gate cannot recurse into itself: a reviewer making no tool call has no call for the gate to be
+    asked about while it is reviewing one.
 
     ``model``, ``thinking``, and ``generation`` resolve exactly as an agent's do, against the
     ``[assistant]`` tiers (see :meth:`AssistantConfig.reviewer_for`). Before this table existed those
