@@ -1,18 +1,23 @@
+import asyncio
+import dataclasses
 import logging
 
 import pytest
 
 from kokua.config import ConfigError
-from kokua.config.schema import AssistantConfig, ReviewerConfig
+from kokua.config.schema import AssistantConfig, ResolvedReviewer, ReviewerConfig
 from kokua.core.assistant import Assistant
 from kokua.core.auto_approval import (
     MAX_FIELD_CHARS,
+    AutoApproval,
+    Outcome,
     Review,
     ReviewContext,
     build_packet,
     current_review_context,
     decide,
     resolve_auto_approval,
+    review_call,
 )
 from tests.channels import FakeChannel, _config
 from tests.helpers import MockAsyncModelClient
@@ -257,3 +262,236 @@ def test_context_carries_the_request_and_counts_reviews():
         assert current_review_context.get().used == 1
     finally:
         current_review_context.reset(token)
+
+
+# --- asking the reviewer, and failing closed on every way that can go wrong ----------------------
+
+
+class _FakeClient:
+    """Stands in for `aio.client(...)`: only `chat(..., schema=...)` is ever called."""
+
+    def __init__(self, answer):
+        self._answer = answer
+        self.default_generate_kwargs = {}
+        self.calls = []
+
+    async def chat(self, prompt, schema=None, use_tools=None):
+        self.calls.append({"prompt": prompt, "schema": schema, "use_tools": use_tools})
+        if isinstance(self._answer, Exception):
+            raise self._answer
+        if callable(self._answer):
+            return await self._answer()
+        return self._answer
+
+
+def _resolved(name: str, model: str) -> ResolvedReviewer:
+    config = AssistantConfig(model="ollama:a", reviewers={name: ReviewerConfig(model=model, system_message="judge it")})
+    return config.reviewer_for(name)
+
+
+@pytest.fixture
+def auto() -> AutoApproval:
+    """One reviewer over one gated tool, the smallest table that resolves.
+
+    Constructed rather than resolved through a started assistant, because what these tests exercise is
+    the call, and a start would only supply a tool vocabulary nothing on this path reads.
+    """
+    return AutoApproval(
+        tools=frozenset({"run_command"}),
+        toolset_of={"run_command": "compute"},
+        reviewers=(_resolved(_REVIEWER, "ollama:b"),),
+        timeout_seconds=10.0,
+        max_per_turn=5,
+    )
+
+
+@pytest.fixture
+def auto_quorum(auto) -> AutoApproval:
+    return dataclasses.replace(auto, reviewers=(auto.reviewers[0], _resolved("second", "ollama:c")))
+
+
+@pytest.fixture
+def in_turn():
+    context = ReviewContext(request="fix the failing test")
+    token = current_review_context.set(context)
+    try:
+        yield context
+    finally:
+        current_review_context.reset(token)
+
+
+def _patch_client(monkeypatch, answer):
+    client = _FakeClient(answer)
+    monkeypatch.setattr("kokua.core.auto_approval._build_client", lambda reviewer: client)
+    return client
+
+
+def _causes(caplog) -> list[str]:
+    """The log lines saying *why* a review did not happen.
+
+    Asserted on in every reviewer-failure test, because `_failure_sentence` deliberately reads the same
+    for all of them: a test pinning only the user-facing reason passes whichever cause fired, so it
+    could not tell a timeout from a refusal from an unreachable endpoint from a malformed verdict.
+    """
+    return [record.getMessage() for record in caplog.records if record.name == "kokua.core.auto_approval"]
+
+
+async def test_approves_a_clean_review(monkeypatch, auto, in_turn):
+    client = _patch_client(monkeypatch, Review(True, True, False, "runs the test suite"))
+    outcome = await review_call(auto, tool="run_command", arguments={"command": "uv run pytest -q"})
+    assert outcome == Outcome(approved=True, reason="runs the test suite", model="ollama:b")
+    assert client.calls[0]["use_tools"] is False
+    assert client.calls[0]["schema"] is Review
+    assert in_turn.used == 1
+
+
+async def test_the_reviewer_is_asked_the_packet_and_the_question(monkeypatch, auto, in_turn):
+    """The question travels with the packet rather than in the reviewer's own system_message, which is
+    the user's to write: editing a standard must not be able to change what is being asked."""
+    client = _patch_client(monkeypatch, Review(True, True, False, "fine"))
+    await review_call(auto, tool="run_command", arguments={"command": "ls"})
+    prompt = client.calls[0]["prompt"]
+    assert "<untrusted>{'command': 'ls'}</untrusted>" in prompt
+    assert "<untrusted>fix the failing test</untrusted>" in prompt
+    assert "injection_suspected true" in prompt
+
+
+async def test_escalates_when_a_question_is_answered_no(monkeypatch, auto, in_turn):
+    _patch_client(monkeypatch, Review(False, True, False, "not what was asked"))
+    outcome = await review_call(auto, tool="run_command", arguments={"command": "rm -rf /"})
+    assert outcome.approved is False
+    assert "not what was asked" in outcome.reason
+
+
+async def test_escalates_outside_a_turn(monkeypatch, auto):
+    client = _patch_client(monkeypatch, Review(True, True, False, "fine"))
+    outcome = await review_call(auto, tool="run_command", arguments={"command": "ls"})
+    assert outcome.approved is False
+    assert "no turn" in outcome.reason
+    assert client.calls == []
+
+
+async def test_escalates_when_the_budget_is_spent(monkeypatch, auto, in_turn):
+    client = _patch_client(monkeypatch, Review(True, True, False, "fine"))
+    in_turn.used = auto.max_per_turn
+    outcome = await review_call(auto, tool="run_command", arguments={"command": "ls"})
+    assert outcome.approved is False
+    assert "budget" in outcome.reason
+    assert client.calls == []
+
+
+async def test_an_attempted_review_spends_the_budget_whatever_it_answers(monkeypatch, auto, in_turn):
+    """The cost is paid whether the answer approves or escalates, and a loop that keeps getting
+    escalated is exactly the loop the cap exists to stop paying for."""
+    _patch_client(monkeypatch, Review(False, True, False, "not what was asked"))
+    for expected in (1, 2, 3):
+        outcome = await review_call(auto, tool="run_command", arguments={"command": "ls"})
+        assert outcome.approved is False
+        assert in_turn.used == expected
+
+
+async def test_escalates_on_an_untruncatable_packet(monkeypatch, auto, in_turn):
+    client = _patch_client(monkeypatch, Review(True, True, False, "fine"))
+    outcome = await review_call(auto, tool="run_command", arguments={"command": "x" * (MAX_FIELD_CHARS + 1)})
+    assert outcome.approved is False
+    assert "too large" in outcome.reason
+    assert client.calls == []
+    assert in_turn.used == 0
+
+
+async def test_escalates_on_timeout(monkeypatch, auto, in_turn, caplog):
+    async def never():
+        await asyncio.sleep(3600)
+
+    _patch_client(monkeypatch, never)
+    impatient = dataclasses.replace(auto, timeout_seconds=0.01)
+    with caplog.at_level(logging.WARNING, logger="kokua.core.auto_approval"):
+        outcome = await review_call(impatient, tool="run_command", arguments={"command": "ls"})
+    assert outcome.approved is False
+    assert "timed out" in outcome.reason
+    assert _causes(caplog) == ["auto-approval reviewer approval timed out after 0.01s"]
+
+
+async def test_escalates_on_a_refusal(monkeypatch, auto, in_turn, caplog):
+    from aimu.aio import ModelRefusalError
+
+    _patch_client(monkeypatch, ModelRefusalError("declined"))
+    with caplog.at_level(logging.WARNING, logger="kokua.core.auto_approval"):
+        outcome = await review_call(auto, tool="run_command", arguments={"command": "ls"})
+    assert outcome.approved is False
+    assert "declined" in outcome.reason
+    assert _causes(caplog) == ["auto-approval reviewer approval declined to answer"]
+
+
+async def test_escalates_on_any_other_failure(monkeypatch, auto, in_turn, caplog):
+    _patch_client(monkeypatch, RuntimeError("connection reset"))
+    with caplog.at_level(logging.WARNING, logger="kokua.core.auto_approval"):
+        outcome = await review_call(auto, tool="run_command", arguments={"command": "ls"})
+    assert outcome.approved is False
+    assert "could not be reached" in outcome.reason
+    assert _causes(caplog) == ["auto-approval reviewer approval could not be reached"]
+
+
+async def test_escalates_on_a_malformed_verdict(monkeypatch, auto, in_turn, caplog):
+    # A provider that answers with the wrong shape is indistinguishable from one that answered nothing.
+    _patch_client(monkeypatch, {"in_scope": True})
+    with caplog.at_level(logging.WARNING, logger="kokua.core.auto_approval"):
+        outcome = await review_call(auto, tool="run_command", arguments={"command": "ls"})
+    assert outcome.approved is False
+    assert "did not answer" in outcome.reason
+    assert _causes(caplog) == [
+        "auto-approval reviewer approval answered a shape that is not a Review: {'in_scope': True}"
+    ]
+
+
+async def test_a_quorum_requires_every_reviewer(monkeypatch, auto_quorum, in_turn):
+    answers = [Review(True, True, False, "fine"), Review(True, False, False, "cannot be undone")]
+    asked = []
+
+    class _Sequenced:
+        def __init__(self, reviewer):
+            self.default_generate_kwargs = {}
+            asked.append(reviewer.name)
+
+        async def chat(self, prompt, schema=None, use_tools=None):
+            return answers.pop(0)
+
+    monkeypatch.setattr("kokua.core.auto_approval._build_client", _Sequenced)
+    outcome = await review_call(auto_quorum, tool="run_command", arguments={"command": "ls"})
+    assert outcome.approved is False
+    assert "cannot be undone" in outcome.reason
+    assert asked == [_REVIEWER, "second"]
+
+
+async def test_a_quorum_stops_at_the_first_withheld_answer(monkeypatch, auto_quorum, in_turn, caplog):
+    """Reviewers are asked in order and the first to withhold ends the round, so a quorum costs every
+    call only when the ones before it agreed."""
+    asked = []
+
+    class _Refusing:
+        def __init__(self, reviewer):
+            self.default_generate_kwargs = {}
+            asked.append(reviewer.name)
+
+        async def chat(self, prompt, schema=None, use_tools=None):
+            raise RuntimeError("connection reset")
+
+    monkeypatch.setattr("kokua.core.auto_approval._build_client", _Refusing)
+    with caplog.at_level(logging.WARNING, logger="kokua.core.auto_approval"):
+        outcome = await review_call(auto_quorum, tool="run_command", arguments={"command": "ls"})
+    assert outcome.approved is False
+    assert "'approval'" in outcome.reason
+    assert asked == [_REVIEWER]
+
+
+async def test_an_approving_quorum_names_every_model(monkeypatch, auto_quorum, in_turn):
+    class _Agreeing:
+        def __init__(self, reviewer):
+            self.default_generate_kwargs = {}
+
+        async def chat(self, prompt, schema=None, use_tools=None):
+            return Review(True, True, False, "safe enough")
+
+    monkeypatch.setattr("kokua.core.auto_approval._build_client", _Agreeing)
+    outcome = await review_call(auto_quorum, tool="run_command", arguments={"command": "ls"})
+    assert outcome == Outcome(approved=True, reason="safe enough", model="ollama:b,ollama:c")
