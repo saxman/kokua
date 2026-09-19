@@ -517,38 +517,55 @@ async def test_the_configured_generation_reaches_every_planning_reviewer(monkeyp
 # --- reviewer persona (config-declared model, effort, standard) ------------------------------
 
 
-@pytest.mark.asyncio
-async def test_plan_reviewer_uses_its_declared_persona(monkeypatch):
+_PERSONA_CASES = [
+    pytest.param("review_plan", "plan", ("do a thing", "the plan"), id="review_plan"),
+    pytest.param("review_result", "result", ("do a thing", "the plan", "the answer"), id="review_result"),
+    pytest.param("stream_plan_review", "plan", ("do a thing", "the plan"), id="stream_plan_review"),
+    pytest.param("stream_result_review", "result", ("do a thing", "the plan", "the answer"), id="stream_result_review"),
+]
+
+
+@pytest.mark.parametrize("wrapper_name, reviewer_name, call_args", _PERSONA_CASES)
+async def test_each_wrapper_carries_its_reviewers_persona_and_falls_back_to_its_own_prompt(
+    monkeypatch, wrapper_name, reviewer_name, call_args
+):
+    """Every one of the four wrappers has to both honor a declared ``[reviewers.<name>]`` table and, when
+    none is declared, fall back to *its own* shipped prompt: ``review_plan``/``stream_plan_review`` to
+    ``PLAN_REVIEW_SYSTEM``, ``review_result``/``stream_result_review`` to ``RESULT_REVIEW_SYSTEM``.
+
+    Asserting only that a declared ``system_message`` arrives would pass even if two wrappers' fallback
+    constants were swapped: a declared prompt overrides either way and never exercises the constant at
+    all. The fallback assertion below is what a swapped constant actually fails, since it pins each
+    wrapper's undeclared case to the one constant that wrapper owns, not just "some" shipped prompt.
+    """
+    from kokua.workflows.planning.prompts import PLAN_REVIEW_SYSTEM, RESULT_REVIEW_SYSTEM
+
+    fallback_system = PLAN_REVIEW_SYSTEM if reviewer_name == "plan" else RESULT_REVIEW_SYSTEM
     seen = {}
 
     async def fake_review(model, system, user_input, thinking=None, generate_kwargs=None, name="reviewer"):
-        seen.update(model=model, system=system, thinking=thinking, generate_kwargs=generate_kwargs)
+        seen.update(model=model, system=system, thinking=thinking)
         return review.critics.Verdict(approved=True)
 
+    async def fake_stream_review(model, system, user_input, thinking=None, generate_kwargs=None, name="reviewer"):
+        seen.update(model=model, system=system, thinking=thinking)
+        return None, None  # (client, chunk_stream); nothing here consumes either half
+
     monkeypatch.setattr(review.critics, "review", fake_review)
-    config = AssistantConfig(
+    monkeypatch.setattr(review.critics, "stream_review", fake_stream_review)
+    wrapper = getattr(review, wrapper_name)
+
+    declared = AssistantConfig(
         model="ollama:a",
         thinking="high",
-        reviewers={"plan": ReviewerConfig(model="ollama:b", thinking=False, system_message="my standard")},
+        reviewers={reviewer_name: ReviewerConfig(model="ollama:b", thinking=False, system_message="my standard")},
     )
-    await review.review_plan(config.reviewer_for("plan"), "do a thing", "the plan")
+    await wrapper(declared.reviewer_for(reviewer_name), *call_args)
     assert seen["model"] == "ollama:b"
-    assert seen["system"] == "my standard"
     assert seen["thinking"] is False
+    assert seen["system"] == "my standard"
 
-
-@pytest.mark.asyncio
-async def test_plan_reviewer_without_a_table_keeps_the_shipped_prompt(monkeypatch):
-    from kokua.workflows.planning.prompts import PLAN_REVIEW_SYSTEM
-
-    seen = {}
-
-    async def fake_review(model, system, user_input, thinking=None, generate_kwargs=None, name="reviewer"):
-        seen.update(model=model, system=system)
-        return review.critics.Verdict(approved=True)
-
-    monkeypatch.setattr(review.critics, "review", fake_review)
-    config = AssistantConfig(model="ollama:a")
-    await review.review_plan(config.reviewer_for("plan"), "do a thing", "the plan")
+    undeclared = AssistantConfig(model="ollama:a")
+    await wrapper(undeclared.reviewer_for(reviewer_name), *call_args)
     assert seen["model"] == "ollama:a"
-    assert seen["system"] == PLAN_REVIEW_SYSTEM
+    assert seen["system"] == fallback_system
