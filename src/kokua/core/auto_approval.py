@@ -170,8 +170,9 @@ def resolve_auto_approval(
         # The value the reviewer's own table declared, not the resolved one. What this refuses is a key
         # the user wrote for this reviewer that cannot take effect, which is the rule that an ignored key
         # is worse than a rejected one. An effort inherited from [assistant].thinking makes no claim
-        # about this reviewer, and it is inert here rather than degraded: building a reviewer client
-        # reads only model, system_message, and generation. Refusing the inherited case would turn one
+        # about this reviewer, and it is inert here rather than degraded: a structured (``schema=``) model
+        # call returns JSON and no reasoning on every provider, so a reasoning request cannot take effect
+        # on this reviewer no matter what builds its client. Refusing the inherited case would turn one
         # unrelated global setting into an install-wide bar on enabling auto-approval, with an error
         # telling the reader to remove a key their [reviewers.<name>] table does not contain.
         if config.reviewers[name].thinking:

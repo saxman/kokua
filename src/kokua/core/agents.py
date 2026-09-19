@@ -652,9 +652,9 @@ def _resolve_gate_entry(entry: str, vocabulary: dict[str, set[str]], registry: M
     """One gate entry as ``(tool names, fault)``, exactly one of which is empty.
 
     Split out from :func:`resolve_gate_entries` so each way an entry can match nothing gets its own
-    sentence naming the edit to make. A near-miss is worth more than a rejection here: the reader wrote a name meaning to
-    hold a tool back, and the difference between the name they wrote and the one that works is the whole
-    content of the error.
+    sentence naming the edit to make. A near-miss is worth more than a rejection here: the reader
+    wrote a name meaning to hold a tool back, and the difference between the name they wrote and the
+    one that works is the whole content of the error.
     """
     parts = entry.split(_GATE_SEPARATOR)
     if len(parts) > 2:
