@@ -785,6 +785,22 @@ async def test_web_channel_send_approval_request_emits_frame():
     assert ws.frames == [{"type": "approval", "name": "add_skill_script", "arguments": {"skill_name": "x"}}]
 
 
+async def test_web_channel_sends_an_auto_approval_frame():
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_auto_approval("run_command", {"command": "ls"}, True, "lists files", "ollama:b")
+    assert ws.frames == [
+        {
+            "type": "auto_approval",
+            "name": "run_command",
+            "arguments": {"command": "ls"},
+            "approved": True,
+            "reason": "lists files",
+            "model": "ollama:b",
+        }
+    ]
+
+
 async def test_web_channel_receive_ends_on_sentinel():
     channel = WebChannel(_FakeWS())
     await channel.feed("hello")

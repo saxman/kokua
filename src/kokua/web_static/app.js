@@ -1567,6 +1567,8 @@ function handleFrame(event) {
     setWorking(frame.active ? (frame.elapsed || 0) * 1000 : null);
   } else if (frame.type === "approval") {
     renderApproval(frame.name, frame.arguments);
+  } else if (frame.type === "auto_approval") {
+    renderAutoApproval(frame);
   } else if (frame.type === "plan") {
     renderPlan(frame.text);
   } else if (frame.type === "subagent") {
@@ -1715,6 +1717,26 @@ function renderApproval(name, args) {
   actions.appendChild(deny);
   el.appendChild(prompt);
   el.appendChild(actions);
+  appendToLog(el);
+  autoscroll();
+}
+
+// A reviewer answered for a gated tool call instead of the user, so this reports the decision rather
+// than asking one: nothing replies to it. It shares the approval prompt's warm styling with a modifier
+// class, so an auto-approval reads as the same kind of decision, just reached without the user. An
+// escalation reads as the preface to the ordinary approval prompt arriving right behind it, not as a
+// refusal, which is why it says the call is coming to the user rather than that it was turned down.
+function renderAutoApproval(frame) {
+  const el = document.createElement("div");
+  el.className = frame.approved ? "bubble approval auto-approved" : "bubble approval auto-escalated";
+  const prompt = document.createElement("div");
+  prompt.className = "prompt";
+  prompt.textContent = frame.approved ? `${frame.model} auto-approved ` : `${frame.model} is asking you to approve `;
+  const code = document.createElement("code");
+  code.textContent = toolLine(frame.name, frame.arguments);
+  prompt.appendChild(code);
+  prompt.appendChild(document.createTextNode(`: ${frame.reason}`));
+  el.appendChild(prompt);
   appendToLog(el);
   autoscroll();
 }

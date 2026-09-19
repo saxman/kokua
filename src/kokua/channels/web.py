@@ -483,6 +483,23 @@ class WebChannel(BaseWebChannel):
         """
         await self.send_frame({"type": "approval", "name": name, "arguments": arguments})
 
+    async def send_auto_approval(self, name: str, arguments: Any, approved: bool, reason: str, model: str) -> None:
+        """Show the page a reviewer's answer about a gated tool call. Nothing replies to this frame.
+
+        Unlike ``send_approval_request``, this is a report rather than a prompt: the page renders it
+        and moves on, whichever way the reviewer answered.
+        """
+        await self.send_frame(
+            {
+                "type": "auto_approval",
+                "name": name,
+                "arguments": arguments,
+                "approved": approved,
+                "reason": reason,
+                "model": model,
+            }
+        )
+
     async def send_plan(self, plan: str) -> None:
         """Show a deep-planning plan as its own bubble (rendered as markdown by the page).
 

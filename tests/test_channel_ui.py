@@ -42,6 +42,9 @@ class RichChannelDouble(BareChannel):
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         self.calls.append(("approval", (name, arguments)))
 
+    async def send_auto_approval(self, name: str, arguments: Any, approved: bool, reason: str, model: str) -> None:
+        self.calls.append(("auto_approval", (name, arguments, approved, reason, model)))
+
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
         self.calls.append(("plan_review", (plan, critique)))
 
@@ -277,3 +280,35 @@ async def test_alert_carries_the_group_that_supersedes_an_earlier_card():
     channel = RichChannelDouble()
     await ChannelUI(channel).alert("Scheduled task 'Digest' finished.", conversation_id="c7", group="Digest")
     assert channel.calls == [("notification", ("Scheduled task 'Digest' finished.", "c7", None, "Digest"))]
+
+
+# --- auto-approval: the one frame with no silent degradation --------------------------------------
+
+
+async def test_auto_approval_uses_the_frame_when_the_channel_has_one():
+    channel = RichChannelDouble()
+    ui = ChannelUI(channel)
+    await ui.show_auto_approval("run_command", {"command": "ls"}, approved=True, reason="lists files", model="ollama:b")
+    assert channel.calls[-1] == ("auto_approval", ("run_command", {"command": "ls"}, True, "lists files", "ollama:b"))
+
+
+async def test_auto_approval_degrades_to_a_self_contained_line():
+    channel = BareChannel()
+    ui = ChannelUI(channel)
+    await ui.show_auto_approval("run_command", {"command": "ls"}, approved=True, reason="lists files", model="ollama:b")
+    line = channel.sent[0]
+    # Self-contained, like `alert`'s fallback: a channel with no card surface has to carry the whole
+    # decision in words, because there is nothing else for the user to click on.
+    assert "auto-approved" in line
+    assert "run_command" in line
+    assert "lists files" in line
+    assert "ollama:b" in line
+
+
+async def test_an_escalation_says_it_is_going_to_the_user():
+    channel = BareChannel()
+    ui = ChannelUI(channel)
+    await ui.show_auto_approval(
+        "run_command", {"command": "ls"}, approved=False, reason="cannot be undone", model="ollama:b"
+    )
+    assert "asking you" in channel.sent[0]
