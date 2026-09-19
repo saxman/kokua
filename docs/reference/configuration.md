@@ -992,6 +992,14 @@ before doing the work. Every key here belongs to that toolset and is read only w
 `show_reasoning` shows the planner, each reviewer's prose reasoning and verdict, the executor, and every
 revision, including each intermediate version, which overrides `result_review`'s hide-until-vetted gate.
 
+**Which model each critic runs on, and the standard it holds a plan to, are yours to set.** Both flags
+above turn on a reviewer whose persona comes from [`[reviewers.<name>]`](#reviewersname):
+`[reviewers.plan]` for `plan_review_agent`, `[reviewers.result]` for `result_review`. Leave either
+table undeclared and planning's own shipped prompt applies, so a table there is an override rather than
+something you must write to keep the default. This is the place to give a critic a stronger (or
+cheaper) model than the agent it is reviewing, and the place to read the standard your plan was
+rejected against.
+
 ## `[capabilities]`
 
 Capability discovery is a toolset: an agent's `tools` must list `capabilities` for the agent to see what

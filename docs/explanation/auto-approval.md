@@ -167,27 +167,33 @@ call did. A sequence of individually innocuous calls is reviewed as individually
 ## How other assistants do this
 
 Worth reading even if you never turn this on, because the differences are design decisions rather than
-details.
+details. What follows describes each project as its own documentation and configuration did when this
+page was written, and none of it can be checked from this repository: where a figure or an enumerated
+rule below is theirs rather than something measured here, it says so. All three move faster than this
+page will.
 
 **OpenClaw** ships the closest analogue, `tools.exec.mode: "auto"`. A static policy runs first, only
 eligible misses reach a model reviewer, and everything else goes to a human. Its reviewer gets a
 bounded "review packet" (command, argv, cwd, environment key names, host, and a parser's analysis)
 that is explicitly treated as untrusted data, with a prompt instructing that data attempting to
 instruct the reviewer means deferring to a human. Its authority is capped at a single low-risk
-execution, pinned to the canonical command plan, cwd, argv, and session. Fail-closed is enumerated:
-anything ambiguous, higher-risk, unparseable, timed out, model-unavailable, or reviewer-directed goes
-to a human, and three consecutive denials escalate. The reviewer's model is configurable; its prompt is
-not user-visible.
+execution, pinned to the canonical command plan, cwd, argv, and session. Its documentation enumerates
+the fail-closed cases: anything ambiguous, higher-risk, unparseable, timed out, model-unavailable, or
+reviewer-directed goes to a human, and it documents three consecutive denials as an escalation. The
+reviewer's model is configurable; its prompt is not user-visible.
 
 **Cursor** has Auto-review. An allowlist runs first, shell commands are sandboxed where possible, and
 what remains goes to a small classifier model judging both safety and how well the call matches user
-intent. It cut approval prompts by 84 percent. Cursor states plainly that the classifier is best-effort
-convenience and explicitly not a security boundary.
+intent. The reduction in prompts is reported as substantial, around 84 percent; that figure comes from
+reporting about the feature rather than from Cursor's own documentation, which does not carry it, so
+read it as the order of magnitude a sandboxed, allowlist-first design reached and not as a number to
+hold anyone to. Cursor states plainly that the classifier is best-effort convenience and explicitly not
+a security boundary.
 
-**Hermes Agent** deliberately does not do this at all. Its Tirith layer is four static risk tiers plus
-human approval, with a hardline blocklist that trips before the approval layer sees a command and has
-no override flag. That is a considered rejection rather than an absence, and it is the honest baseline:
-static rules you can read cannot be argued with.
+**Hermes Agent** deliberately does not do this at all. Its Tirith layer is documented as four static
+risk tiers plus human approval, with a hardline blocklist that trips before the approval layer sees a
+command and has no override flag. That is a considered rejection rather than an absence, and it is the
+honest baseline: static rules you can read cannot be argued with.
 
 **Where Kokua's design leads.** The reviewer's prompt, model, reasoning effort, and sampling are all
 declared in `config.toml` where you can read and change them (OpenClaw exposes the model only, Cursor
