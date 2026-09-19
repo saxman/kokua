@@ -347,9 +347,12 @@ change. Full rationale, with the code that backs each claim, is in
    `config/store.py`'s `locked_by(section, key, patterns)`, which answers with the pattern that refused
    the write), because `update_config` is a tool the assistant holds and a writable agent table would
    let it widen its own reach; granting it that table takes a hand-edit removing the pattern from
-   `[security].locked_config_keys`. `[scheduling.task.*]` is locked by prefix too, but for routing
-   rather than capability: the assistant may change any task, only through the scheduling tools, since a
-   bare `update_config` write would skip the scheduler (un)arming a task write has to be paired with.
+   `[security].locked_config_keys`. `[reviewers.*]` is locked by prefix for the same reason one step
+   over: a reviewer's prompt and model decide how the assistant's own work is judged, including whether
+   a gated tool call reaches the user at all, so `update_config` refuses that section too.
+   `[scheduling.task.*]` is locked by prefix too, but for routing rather than capability: the assistant
+   may change any task, only through the scheduling tools, since a bare `update_config` write would skip
+   the scheduler (un)arming a task write has to be paired with.
 4. **All state under one directory the user owns.** `$KOKUA_HOME`, default `~/.kokua`. Every leaf
    below `data/` is a derived `AssistantConfig` property, never a new function in `config/paths.py`.
    Declared scheduled tasks are the one stated exception, living in `config.toml` rather than under
@@ -371,7 +374,20 @@ change. Full rationale, with the code that backs each claim, is in
    why a prefix cannot discriminate at call time and is not meant to. Prefer the bare toolset where the
    toolset is exactly the risky set: the shipped default names `fs_write` bare, so a writer a later AIMU
    adds to that group is gated on arrival, and names `compute.execute_python` explicitly, because
-   `compute` also carries `calculate`.
+   `compute` also carries `calculate`. **`[security.auto_approval]` (off by default) is the one layer
+   above that gate,** and it is a convenience layer rather than a boundary: a declared
+   `[reviewers.<name>]` may answer a gated call's prompt in the user's place, and its whole security
+   claim is that it can only turn a prompt into an approval. There is no deny verdict, so nothing it
+   does changes what the user could have approved; `core/auto_approval.py`'s `decide` computes the
+   outcome from three booleans, nine paths fail closed onto the same prompt, and an unattended turn is
+   excluded both by ordering in `HumanGate.approve` and by opening no review context (invariant 8 in
+   `core/turns.py`). **What a review can be about is an action, never a capability:** a review reasons
+   about one call's arguments, which holds for `run_command` and `write_file` and breaks for a tool
+   whose landing makes those arguments stop constraining anything, so `[security].never_auto_approve`
+   floors `config.update_config`, `skills.add_skill_script`, and `mcp.add_mcp_server`, and naming one of
+   them in the gate is a startup error. The whole argument, including what this design does not do (no
+   sandbox, no shell parsing, an uncounted reviewer cost) and how other assistants build the same idea,
+   is [docs/explanation/auto-approval.md](docs/explanation/auto-approval.md).
 
 Kokua inherits AIMU's six library-level principles on top of these.
 
@@ -392,6 +408,7 @@ model's context on every configuration question. A new or changed key goes in bo
 src/kokua/
   cli.py  plugins.py  images.py  payloads.py  logging_setup.py  transcript_export.py  config.example.toml  web_static/
   core/         assistant (composition root + serve loop), conversations, turns, interaction,
+                auto_approval (the optional model reviewer over the approval gate, and `decide`),
                 settings_runtime, diagnostics, build, agents (build_registry, validate_agents, prompt
                 assembly, delegation), agent_registry, turn_gate, turn_registry, messages, titles,
                 errors, transcripts, metrics (what a turn cost, accumulated from AIMU's run events)

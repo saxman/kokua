@@ -139,13 +139,16 @@ else. One file is also what makes a running system's whole configuration legible
 `tomlkit` writes; two writers (`add_mcp_server` and the assistant's own `update_config` tool) land in
 that one file. A `runtime-settings.json` store used to exist and was
 retired in favour of the file itself. `[security].locked_config_keys` is a user-set list of patterns
-naming what `update_config` refuses even behind the approval prompt, and it ships locking four things:
+naming what `update_config` refuses even behind the approval prompt, and it ships locking five things:
 `[security] confirm_tools` (the gate itself), `[email] to` (the locked recipient), `[paths] data_dir`
-(where all state lives), and the whole `[agents.*]` section. That last one is matched by section prefix
-rather than by a key entry, since agent names cannot be enumerated ahead of time, and it is locked by
-default for the obvious reason: `update_config` is a tool the assistant holds, so a writable agent table
-would let the assistant widen its own reach. `locked_config_keys` itself is the one entry the list can
-never remove; everything else, `agents.*` included, is a hand-edit away from being unlocked.
+(where all state lives), and the whole `[agents.*]` and `[reviewers.*]` sections. Those last two are
+matched by section prefix rather than by a key entry, since agent and reviewer names cannot be
+enumerated ahead of time, and each is locked by default for a reason of the same shape: `update_config`
+is a tool the assistant holds, so a writable agent table would let the assistant widen its own reach,
+and a writable reviewer table would let it rewrite the standard its own work is judged against,
+including (with [auto-approval](auto-approval.md) on) whether a gated tool call reaches the user at
+all. `locked_config_keys` itself is the one entry the list can never remove; everything else,
+`agents.*` included, is a hand-edit away from being unlocked.
 
 `config.toml` also holds Kokua's declared scheduled tasks, one `[scheduling.task.<name>]` table per
 task, and `[scheduling.task.*]` is app-written the same way `[[mcp.server]]` is: the assistant's own
@@ -250,6 +253,17 @@ hope about the group's contents. The writers are gated in `confirm_tools` beside
 related reason: `coder` holds a shell that can write a file, so an ungated `write_file` next to it would
 be the same outcome by a shorter route, with the gate approving the long way round and waving the short
 one through.
+
+**A control may sit above the gate as well as beside it, and it says which it is.**
+`[security.auto_approval]` (off by default) lets a declared reviewer answer a gated call's prompt in the
+user's place, and it is a convenience layer rather than a boundary: its whole security claim is that a
+review can only turn a prompt into an approval, never widen what the user could have approved
+themselves. The reason it belongs under this principle rather than beside it is that every part of it is
+a value in the file (which tools, which reviewers, which prompt, how long to wait, how many per turn),
+and a part that would do nothing is a startup error like any other control here. What a review can be
+about is one *action*, never a capability, so `[security].never_auto_approve` floors the three tools
+whose landing makes the reviewed arguments stop constraining anything. See
+[Auto-approval](auto-approval.md) for the argument and its limits.
 
 **You may loosen, not only tighten.** `locked_config_keys` is yours to empty. Strike `agents.*` from it
 and the assistant really can rewrite its own capability table on the next restart. The documentation

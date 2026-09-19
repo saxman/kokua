@@ -439,6 +439,46 @@ def test_shipped_example_loads_cleanly(caplog):
     assert cfg.concurrent_tools is True
 
 
+def test_the_shipped_example_declares_the_approval_reviewer_with_the_gate_off():
+    """The reviewer's standard ships in the file the user scaffolds, and the gate that uses it ships off.
+
+    The prompt is the part of auto-approval a reader is meant to read, so it lives here rather than in a
+    constant they would have to go find, and `[reviewers.approval]` therefore has to survive the ordinary
+    load: an approval reviewer that declared `thinking`, or none at all, is refused at startup.
+    """
+    _init()
+    cfg = _resolve()
+    assert cfg.auto_approval_enabled is False
+    assert cfg.reviewers["approval"].system_message.strip()
+    assert cfg.reviewers["approval"].thinking is None
+
+
+def test_the_shipped_gate_would_resolve_if_it_were_switched_on():
+    """Turning `enabled = true` on the shipped file must not then fail startup.
+
+    Every rule `resolve_auto_approval` enforces is a relationship between three lists in this one file,
+    so the example can express a gate that cannot start: a reviewer nothing declares, a tool nothing
+    gates, or a tool the floor holds back. Checked at the entry level, which is what the file says; the
+    resolution from entries to tool names needs a built registry and lives in tests/core/.
+    """
+    _init()
+    cfg = _resolve()
+    assert cfg.auto_approval_tools
+    for name in cfg.auto_approval_reviewers:
+        assert name in cfg.reviewers
+    for entry in cfg.auto_approval_tools:
+        assert entry in cfg.confirm_tools
+        assert entry not in cfg.never_auto_approve
+
+
+def test_the_shipped_example_floors_the_capability_granting_tools():
+    """The three tools no reviewer may ever approve, because each changes what may act later."""
+    _init()
+    cfg = _resolve()
+    for name in ("config.update_config", "skills.add_skill_script", "mcp.add_mcp_server"):
+        assert name in cfg.never_auto_approve
+
+
 def test_explicit_missing_file_is_also_an_error(tmp_path):
     """--config PATH pointing at nothing was already an error; the default location now behaves the
     same way, so the two paths do not disagree about whether a config is optional."""
