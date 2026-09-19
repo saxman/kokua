@@ -141,7 +141,16 @@ reviewers = ["approval"]
 # Which gated tools a reviewer may answer for, in confirm_tools' vocabulary above. Each must be gated
 # there (reviewing an ungated tool reviews nothing) and must not be in never_auto_approve above.
 # Enabled with an entry that matches no gated tool, or no entry at all, is a startup error.
-tools = ["compute.run_command", "fs_write"]
+#
+# Both compute tools are here, and leaving execute_python out would have been the incoherent choice
+# rather than the cautious one: run_command reaches unrestricted Python by a shorter route, so
+# excluding the Python tool withholds nothing and only routes the same capability through the less
+# contained of the two. execute_python runs in a subprocess under a timeout with an import allowlist
+# and restricted builtins, so `os`, `subprocess`, and even `open` are unavailable to it, and the
+# process environment (API keys included) is invisible. run_command has none of that: it is a shell,
+# and `python3 -c` from there reads any file this user can. run_command is the aggressive entry in
+# this list; if you want to narrow it, drop that one rather than the Python one.
+tools = ["compute.run_command", "compute.execute_python", "fs_write"]
 # Past this the review escalates rather than being waited on any longer.
 timeout_seconds = 10
 # Most auto-approvals one turn may collect, so a model retrying one call cannot collect one per attempt.

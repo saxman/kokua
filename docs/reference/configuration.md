@@ -557,7 +557,7 @@ default, and the whole sub-table is startup-only and locked under `security.*`.
 [security.auto_approval]
 enabled = false
 reviewers = ["approval"]
-tools = ["compute.run_command", "fs_write"]
+tools = ["compute.run_command", "compute.execute_python", "fs_write"]
 timeout_seconds = 10
 max_per_turn = 5
 ```
@@ -588,6 +588,14 @@ a symptom. An entry must name something `confirm_tools` gates (reviewing an unga
 nothing, because that call already runs without asking), and it must not name anything
 [`never_auto_approve`](#never_auto_approve) holds back. Enabling the gate with no reviewer, with no
 tool, or with an entry matching no tool is refused the same way, each with the config fix in the message.
+
+The shipped list names both `compute` execution tools, and leaving `execute_python` out would have been
+the incoherent choice rather than the cautious one. `run_command` is a shell, so `python3 -c` from there
+runs Python with no restrictions at all; excluding the Python tool withholds nothing and only routes the
+same capability through the less contained of the two. `execute_python` runs in a subprocess under a
+timeout, with an import allowlist and restricted builtins that put `os`, `subprocess`, and even `open`
+out of reach, and the process environment (API keys included) is invisible to it. If you want to narrow
+this list, `run_command` is the entry to drop.
 
 `max_per_turn` is per *turn*, and the budget is spent when a review is **attempted**, not when one
 approves. A model retrying the same rejected call cannot collect one approval per attempt, and a loop

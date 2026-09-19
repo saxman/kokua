@@ -1448,7 +1448,12 @@ notice on startup.
   spent, a packet field over 2,000 characters, a field forging the `<untrusted>` fence, a timeout, a
   refusal, an unreachable reviewer, an answer of the wrong shape or the wrong types, and a catch-all
   that logs its traceback), and an escalation carries the reviewer's sentence so a person deciding
-  gets its read for free. Both outcomes are reported as a card naming the tool, the arguments, the
+  gets its read for free. The shipped eligible list names `compute.run_command`,
+  `compute.execute_python`, and `fs_write`. Both compute tools are there deliberately: a shell already
+  reaches unrestricted Python by a shorter route, so excluding `execute_python`, which runs in a
+  subprocess under a timeout with an import allowlist, restricted builtins, and no view of the process
+  environment, would have withheld nothing and only routed the same capability through the weaker of
+  the two. Both outcomes are reported as a card naming the tool, the arguments, the
   model, and the reason, since an auto-approval nobody saw is a decision made on the user's behalf in
   silence. Both are logged as well, at `INFO`, because a card is a channel frame and not part of the
   saved transcript: after a reload the log under `logs_path` is the only thing that distinguishes a

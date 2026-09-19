@@ -80,6 +80,16 @@ Naming one of them in `[security.auto_approval].tools` is a startup error, not a
 yours to empty by hand, like every control in that section, and what emptying it buys is a reviewer
 that can approve a capability grant.
 
+Everything else a gate holds back is eligible, and the shipped list is worth reading as an argument
+rather than a setting. It names both `compute` execution tools, which looks like the less cautious
+choice and is not. `run_command` is a shell, so `python3 -c` from there runs Python with nothing
+withheld; excluding `execute_python` would withhold no capability and only route the same one through
+the weaker tool. `execute_python` is the more contained of the two by some distance: a subprocess under
+a timeout, an import allowlist and restricted builtins that put `os`, `subprocess`, and even `open` out
+of reach, and no view of the process environment or the API keys in it. `run_command` has none of that.
+The lesson generalizes past these two tools: eligibility is worth deciding by what a tool can reach,
+not by how dangerous its name sounds, and the entry to drop here is the shell, not the sandbox.
+
 ## Nine ways it fails closed
 
 "Fails closed" here means one specific thing: the call arrives at the approval prompt it would have
