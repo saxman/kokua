@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://saxman.info/kokua/how-to/add-mcp-services/">
+        <link rel="canonical" href="https://saxman.info/kokua/explanation/auto-approval/">
       
       
-        <link rel="prev" href="../add-skills/">
+        <link rel="prev" href="../architecture/">
       
       
-        <link rel="next" href="../back-up-to-github/">
+        <link rel="next" href="../design-principles/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Add an MCP service - Kokua</title>
+        <title>Auto-approval - Kokua</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#add-an-mcp-service" class="md-skip">
+        <a href="#auto-approval" class="md-skip">
           Skip to content
         </a>
       
@@ -113,7 +113,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Add an MCP service
+              Auto-approval
             
           </span>
         </div>
@@ -259,13 +259,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../how-to/" class="md-tabs__link">
           
   
   
@@ -305,11 +303,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../explanation/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
           
   
   
@@ -696,8 +696,6 @@
       
   
   
-    
-  
   
   
     
@@ -723,23 +721,20 @@
     
     
       
-        
-        
-      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../" class="md-nav__link ">
+            <a href="../../how-to/" class="md-nav__link ">
               
   
   
@@ -757,13 +752,13 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -783,7 +778,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../set-up-toolsets/" class="md-nav__link">
+      <a href="../../how-to/set-up-toolsets/" class="md-nav__link">
         
   
   
@@ -811,7 +806,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../install-a-third-party-toolset/" class="md-nav__link">
+      <a href="../../how-to/install-a-third-party-toolset/" class="md-nav__link">
         
   
   
@@ -839,7 +834,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../add-skills/" class="md-nav__link">
+      <a href="../../how-to/add-skills/" class="md-nav__link">
         
   
   
@@ -864,37 +859,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Add an MCP service
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../how-to/add-mcp-services/" class="md-nav__link">
         
   
   
@@ -910,131 +878,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#add-one-in-configtoml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Add one in config.toml
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authentication
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Authentication">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#authorizing-when-kokua-runs-on-another-machine" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authorizing when Kokua runs on another machine
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#add-one-mid-conversation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Add one mid-conversation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#check-that-it-reached-an-agent" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Check that it reached an agent
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#the-mcp-flag" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The --mcp flag
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#security" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Security
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#write-your-own-server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Write your own server
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        See also
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1047,7 +890,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../back-up-to-github/" class="md-nav__link">
+      <a href="../../how-to/back-up-to-github/" class="md-nav__link">
         
   
   
@@ -1075,7 +918,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../export-a-conversation/" class="md-nav__link">
+      <a href="../../how-to/export-a-conversation/" class="md-nav__link">
         
   
   
@@ -1211,6 +1054,8 @@
       
   
   
+    
+  
   
   
     
@@ -1230,20 +1075,23 @@
     
     
       
+        
+        
+      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../../explanation/" class="md-nav__link ">
+            <a href="../" class="md-nav__link ">
               
   
   
@@ -1261,13 +1109,13 @@
             </a>
             
               
-              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="">
                 <span class="md-nav__icon md-icon"></span>
               </label>
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1287,7 +1135,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../explanation/architecture/" class="md-nav__link">
+      <a href="../architecture/" class="md-nav__link">
         
   
   
@@ -1312,10 +1160,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../explanation/auto-approval/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-approval
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1331,6 +1206,147 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-security-claim-in-one-sentence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The security claim, in one sentence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-reviewer-answers-questions-instead-of-deciding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the reviewer answers questions instead of deciding
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#action-versus-capability-and-the-floor-beneath-the-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Action versus capability, and the floor beneath the gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nine-ways-it-fails-closed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nine ways it fails closed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-an-unattended-turn-is-never-auto-approved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why an unattended turn is never auto-approved
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-you-see" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you see
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-other-assistants-do-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How other assistants do this
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#is-this-a-core-change-or-a-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Is this a core change or a plugin?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#turning-it-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Turning it on
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1343,7 +1359,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../explanation/design-principles/" class="md-nav__link">
+      <a href="../design-principles/" class="md-nav__link">
         
   
   
@@ -1452,10 +1468,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#add-one-in-configtoml" class="md-nav__link">
+  <a href="#the-security-claim-in-one-sentence" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Add one in config.toml
+        The security claim, in one sentence
       
     </span>
   </a>
@@ -1463,38 +1479,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
+  <a href="#why-the-reviewer-answers-questions-instead-of-deciding" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Authentication
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Authentication">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#authorizing-when-kokua-runs-on-another-machine" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authorizing when Kokua runs on another machine
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#add-one-mid-conversation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Add one mid-conversation
+        Why the reviewer answers questions instead of deciding
       
     </span>
   </a>
@@ -1502,10 +1490,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#check-that-it-reached-an-agent" class="md-nav__link">
+  <a href="#action-versus-capability-and-the-floor-beneath-the-gate" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Check that it reached an agent
+        Action versus capability, and the floor beneath the gate
       
     </span>
   </a>
@@ -1513,10 +1501,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-mcp-flag" class="md-nav__link">
+  <a href="#nine-ways-it-fails-closed" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The --mcp flag
+        Nine ways it fails closed
       
     </span>
   </a>
@@ -1524,10 +1512,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#security" class="md-nav__link">
+  <a href="#why-an-unattended-turn-is-never-auto-approved" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Security
+        Why an unattended turn is never auto-approved
       
     </span>
   </a>
@@ -1535,10 +1523,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#write-your-own-server" class="md-nav__link">
+  <a href="#what-you-see" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Write your own server
+        What you see
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-other-assistants-do-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How other assistants do this
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#is-this-a-core-change-or-a-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Is this a core change or a plugin?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#turning-it-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Turning it on
       
     </span>
   </a>
@@ -1576,239 +1608,268 @@
   
 
 
-<h1 id="add-an-mcp-service">Add an MCP service<a class="headerlink" href="#add-an-mcp-service" title="Permanent link">&para;</a></h1>
-<p>Kokua connects to remote <a href="https://modelcontextprotocol.io">MCP</a> servers and hands their tools to the
-agents that ask for them. There are two ways in: a <code>[[mcp.server]]</code> table in <code>config.toml</code>, connected at
-startup, or the assistant's own <code>add_mcp_server</code> tool, called mid-conversation. Both end at the same
-place, and it is the step people miss:</p>
-<blockquote>
-<p>A configured server is a <strong>toolset</strong>, named by its <code>name</code>. It reaches an agent only when that agent's
-<code>tools</code> list in <code>[agents.&lt;name&gt;]</code> names it.</p>
-</blockquote>
-<p>Connect a server without naming it in an agent and you get a working connection nothing can use.</p>
-<h2 id="add-one-in-configtoml">Add one in <code>config.toml</code><a class="headerlink" href="#add-one-in-configtoml" title="Permanent link">&para;</a></h2>
-<p>Each server is its own array-of-tables entry. <code>url</code> and <code>name</code> are both required.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[[mcp.server]]</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://broker.example.com/mcp"</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"stocks"</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">[[mcp.server]]</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://api.githubcopilot.com/mcp/"</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"github"</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"GITHUB_MCP_TOKEN"</span>
-</span></code></pre></div>
+<h1 id="auto-approval">Auto-approval<a class="headerlink" href="#auto-approval" title="Permanent link">&para;</a></h1>
+<p>Kokua stops and asks you before it runs a shell command, executes Python, or writes a file. That is
+<a href="../../reference/configuration/#confirm_tools"><code>[security].confirm_tools</code></a>, and it is the control that
+makes a real assistant with real machine access something you can leave running. It is also the
+control you get tired of. A turn that reads six files and runs four commands is ten prompts, and a
+prompt you answer without reading is worse than no prompt at all.</p>
+<p>Auto-approval is an optional layer over that gate: a declared model reviewer, running on its own model
+with a prompt you wrote, may answer some of those prompts in your place. It ships <strong>off</strong>, and this
+page is meant to be read before you switch it on.</p>
+<h2 id="the-security-claim-in-one-sentence">The security claim, in one sentence<a class="headerlink" href="#the-security-claim-in-one-sentence" title="Permanent link">&para;</a></h2>
+<p><strong>A review can only turn a prompt into an approval, never widen what you could have approved
+yourself.</strong></p>
+<p>That is deliberately short, and everything else on this page is either a consequence of it or an
+admission of what it does not cover. There is no deny verdict anywhere in the feature. A reviewer that
+withholds approval has not blocked anything: the call arrives at the ordinary prompt, with the
+reviewer's sentence attached so you get its read for free. So the worst a compromised, confused, or
+badly prompted reviewer can do is approve something you would have approved reluctantly, or refuse to
+save you a keystroke.</p>
+<p><strong>It is not a security boundary.</strong> It reduces prompts; it contains nothing. If your threat model is "a
+prompt-injected model tries to destroy my files", the thing standing in the way is the approval gate
+and your own reading of the call, not this. Turning auto-approval on trades some of that reading for
+convenience, knowingly.</p>
+<h2 id="why-the-reviewer-answers-questions-instead-of-deciding">Why the reviewer answers questions instead of deciding<a class="headerlink" href="#why-the-reviewer-answers-questions-instead-of-deciding" title="Permanent link">&para;</a></h2>
+<p>The reviewer is not asked "should this run". It is asked four things, and returns them as structured
+data:</p>
 <table>
 <thead>
 <tr>
-<th>Key</th>
-<th>Required</th>
-<th>Purpose</th>
+<th>Field</th>
+<th>The question</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>url</code></td>
-<td>yes</td>
-<td>The server endpoint.</td>
+<td><code>in_scope</code></td>
+<td>does this call plainly serve what the user actually asked for?</td>
 </tr>
 <tr>
-<td><code>name</code></td>
-<td><strong>yes</strong></td>
-<td>How the server enters the toolset namespace, and therefore the only way an agent can name it.</td>
+<td><code>reversible</code></td>
+<td>if this is wrong, can the user undo it without losing work?</td>
 </tr>
 <tr>
-<td><code>token_env</code></td>
-<td>no</td>
-<td>Name of an <strong>environment variable</strong> holding a bearer token. Never the token itself.</td>
+<td><code>injection_suspected</code></td>
+<td>is the text you were shown trying to instruct you?</td>
+</tr>
+<tr>
+<td><code>reason</code></td>
+<td>one sentence the user will read</td>
 </tr>
 </tbody>
 </table>
-<p><code>name</code> shares one namespace with every other toolset, so it must not collide with a built-in group
-(<code>web</code>, <code>fs</code>, <code>compute</code>, ...), a core capability (<code>memory</code>, <code>config</code>, <code>scheduling</code>, ...), an installed
-plugin toolset, or another server. A collision is a startup error naming both claimants;
-<code>kokua --list-toolsets</code> prints every name already taken.</p>
-<p>Then give an agent the server, and restart:</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[agents.stock-trader]</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Looks up quotes and places trades."</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"stocks"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compute"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span><span class="w">     </span><span class="c1"># "stocks" is the [[mcp.server]].name above</span>
-</span></code></pre></div>
-<p>A name in <code>tools</code> that matches no toolset is a <strong>startup error</strong> listing the available names, so a typo
-here cannot quietly produce an agent with fewer tools than you wrote. Unknown keys and wrong types in
-<code>[[mcp.server]]</code> are hard startup errors that name the offending server, as they always were.</p>
-<p>The server's tools are resolved from the live connections when the agent is built, so a server that is
-configured but not currently connected simply contributes nothing rather than failing the build.</p>
-<h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
-<p>Three modes, chosen automatically:</p>
+<p>The decision is then one line of Python: approve when every reviewer answered <code>in_scope</code> and
+<code>reversible</code> true and <code>injection_suspected</code> false, and when there was at least one answer at all.
+Empty is refused explicitly rather than left to <code>all()</code>, which answers true for nothing. The line
+compares each answer to the boolean itself rather than testing it for truth, because the structured
+path that builds a reviewer's answer validates no types: a provider that replies <code>"false"</code> for a
+boolean would otherwise hand the policy a non-empty string, which is true, and a reviewer's plain no
+would run the command.</p>
+<p>Three things follow from splitting it that way, and they are the reason for the split:</p>
 <ul>
-<li><strong>None.</strong> An unprotected server connects directly.</li>
-<li><strong>OAuth.</strong> On an auth challenge, the flow starts by itself: the assistant posts an authorization link
-  into the chat and opens a browser window. Once you approve, the connection completes and the token is
-  saved under <code>$KOKUA_HOME/data/mcp-oauth/</code> for later sessions. The posted message names the address
-  your approval will be sent back to, which matters if you are not browsing from Kokua's own machine
-  (see below).</li>
-<li><strong>Bearer token.</strong> Set <code>token_env</code> to the name of an environment variable, exported however you already
-  manage secrets. It is read at connect time, so the token never enters <code>config.toml</code>.</li>
+<li><strong>The policy is readable and testable.</strong> What counts as approvable is a line of code you can point
+  at, not a sentence in a prompt you hope the model weighed.</li>
+<li><strong>A missing field is an escalation, not a coin flip.</strong> A model that returns two of three booleans
+  fails the schema, and a failed schema is a call that comes to you. So is a field of the wrong type,
+  which is checked rather than assumed: nothing between the model and the policy validates one.</li>
+<li><strong>You can audit an outcome against its inputs.</strong> The card says which model answered and what its
+  reason was, and the reason has to be consistent with three booleans you can reason about.</li>
 </ul>
-<p>Some servers require authentication but cannot use the automatic OAuth flow, because they do not support
-dynamic client registration. <code>add_mcp_server</code> detects this and returns a message asking for a token
-rather than failing opaquely; the assistant relays that request to you.</p>
-<h3 id="authorizing-when-kokua-runs-on-another-machine">Authorizing when Kokua runs on another machine<a class="headerlink" href="#authorizing-when-kokua-runs-on-another-machine" title="Permanent link">&para;</a></h3>
-<p>The OAuth handshake ends with the provider redirecting <em>your browser</em> to a callback address that Kokua
-is listening on, and by default that address is <code>http://localhost:&lt;random port&gt;/callback</code>. When the
-browser and Kokua are on the same machine this is invisible and correct. When they are not, <code>localhost</code>
-is your own computer, the approved code is delivered there, nothing is listening, and Kokua's own
-listener waits five minutes before failing. Nothing about the failure points at the cause, which is why
-the authorization message names the callback address.</p>
-<p>Fix it by pinning the callback to a port you can reach, in <code>[mcp]</code>:</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[mcp]</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">oauth_callback_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8765</span>
-</span></code></pre></div>
-<p>Then forward that port from the machine you browse on, before you ask for the connection:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ssh<span class="w"> </span>-L<span class="w"> </span><span class="m">8765</span>:localhost:8765<span class="w"> </span>kokua-host
-</span></code></pre></div>
-<p>The redirect URI stays <code>http://localhost:8765/callback</code>, which is what you want: OAuth providers
-routinely accept a loopback redirect and reject any other plain-HTTP one (RFC 8252's loopback
-exception), so tunnelling works where pointing the callback at a hostname may not.</p>
-<p>If your provider does accept a non-loopback redirect, you can skip the tunnel by naming the Kokua host
-instead:</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[mcp]</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">oauth_callback_host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"kokua.lan"</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">oauth_callback_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8765</span>
-</span></code></pre></div>
-<p>That value is both the interface the callback server binds and the host in the registered redirect URI,
-so it has to resolve to Kokua from your browser as well as from Kokua itself. The authorization code
-then crosses your network in cleartext, which is the trade for not tunnelling.</p>
-<p>Pinning the port is worth doing even on a single machine. Kokua caches the OAuth client registration
-across restarts, but a random port is chosen fresh in each process, so a re-authorization in a later
-session can present a redirect URI the provider has on file under the old port and be rejected.</p>
-<h2 id="add-one-mid-conversation">Add one mid-conversation<a class="headerlink" href="#add-one-mid-conversation" title="Permanent link">&para;</a></h2>
-<p>The shipped entry agent declares the <code>mcp</code> toolset, so it carries <code>add_mcp_server</code> and
-<code>remove_mcp_server</code> and you can just ask:</p>
-<blockquote>
-<p>"Connect to https://broker.example.com/mcp and use it to check my positions."</p>
-</blockquote>
-<p><code>add_mcp_server(url, bearer_token=None)</code> connects, reports the tool names it found, and rebuilds every
-live agent's <code>spawn_subagent</code>. It is gated by <code>[security] confirm_tools</code>, so it waits for your approval
-first.</p>
-<p><strong>What that connection can actually reach depends on whether the server was already in <code>config.toml</code> at
-startup, and the difference is the whole story of this section:</strong></p>
+<p>Note what the reviewer is <em>not</em> asked: whether the call is malicious. The common way an agent damages
+a machine is by acting competently on the wrong target, where there is no intent to detect at all.
+<code>in_scope</code> and <code>reversible</code> are aimed at that case. <code>injection_suspected</code> covers the rarer one.</p>
+<h2 id="action-versus-capability-and-the-floor-beneath-the-gate">Action versus capability, and the floor beneath the gate<a class="headerlink" href="#action-versus-capability-and-the-floor-beneath-the-gate" title="Permanent link">&para;</a></h2>
+<p>A review is about one call, with the arguments it has. That reasoning holds only for a tool that
+<em>acts</em>: <code>run_command</code> with a specific command, <code>write_file</code> at a specific path. It breaks for a tool
+that <em>grants</em>, because the moment such a call lands, the arguments it was reviewed for stop
+constraining anything.</p>
+<p>Three tools are therefore floored in
+<a href="../../reference/configuration/#never_auto_approve"><code>[security].never_auto_approve</code></a>, and no reviewer
+may ever answer for them:</p>
 <ul>
-<li><strong>A server already declared in <code>[[mcp.server]]</code></strong> (even one that was unreachable at startup, or that
-  you disconnected earlier in the session) already has a name in the toolset namespace, so an agent's
-  <code>tools</code> may already reference it. Connecting it reaches the next <strong>worker</strong> spawned by such an agent, in
-  the same turn. The agent you are talking to is the exception even here: it resolved its own tools when
-  it was built, so if <em>it</em> declares the server, it picks them up only the next time it is built (a new
-  conversation, or a restart).</li>
-<li><strong>A server new to this session reaches nothing at all until you restart.</strong> The toolset namespace is
-  built once, at startup, from the <code>[[mcp.server]]</code> tables as they were then. So a newly connected
-  server's name is not in that namespace, and nothing naming it resolves to anything before the next
-  start. You can write the <code>[agents.*]</code> table now, and so can the assistant if you have unlocked
-  <code>agents.*</code> (<code>update_config</code> rereads the file, so it sees the entry <code>add_mcp_server</code> just wrote and
-  accepts the name), but editing that file while Kokua runs changes nothing until it restarts.
-  <code>add_mcp_server</code> has recorded the server for you; the remaining two steps are yours.</li>
+<li><code>config.update_config</code> can widen <code>[security].confirm_tools</code>, or <code>never_auto_approve</code> itself.</li>
+<li><code>skills.add_skill_script</code> writes a script that becomes a tool the next turn can call.</li>
+<li><code>mcp.add_mcp_server</code> adds a whole source of tools.</li>
 </ul>
-<p>This is why the tool's own reply tells the model it cannot use the new tools itself, and it is worth
-knowing before you ask the assistant to "connect to X and use it": for a genuinely new X, it can do the
-first half and not the second.</p>
-<p>What persists differs by auth mode, and this is the one asymmetry to remember:</p>
-<table>
-<thead>
-<tr>
-<th>Auth mode</th>
-<th>Written to <code>config.toml</code>?</th>
-<th>Survives restart?</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>None</td>
-<td>yes, URL + a derived name</td>
-<td>yes</td>
-</tr>
-<tr>
-<td>OAuth</td>
-<td>yes, URL + a derived name</td>
-<td>yes (the saved token is reused)</td>
-</tr>
-<tr>
-<td>Bearer token</td>
-<td><strong>no</strong></td>
-<td><strong>no</strong>: the secret is not written to disk</td>
-</tr>
-</tbody>
-</table>
-<p>So a bearer-token server added at runtime is session-only by design. To keep it, add a <code>[[mcp.server]]</code>
-table with <code>token_env</code> by hand.</p>
-<p>Two consequences of the runtime path being real:</p>
+<p>Naming one of them in <code>[security.auto_approval].tools</code> is a startup error, not a warning. The list is
+yours to empty by hand, like every control in that section, and what emptying it buys is a reviewer
+that can approve a capability grant.</p>
+<p>Everything else a gate holds back is eligible, and the shipped list is worth reading as an argument
+rather than a setting. It names both <code>compute</code> execution tools, which looks like the less cautious
+choice and is not. <code>run_command</code> is a shell, so <code>python3 -c</code> from there runs Python with nothing
+withheld; excluding <code>execute_python</code> would withhold no capability and only route the same one through
+the weaker tool. <code>execute_python</code> is the more contained of the two by some distance: a subprocess under
+a timeout, an import allowlist and restricted builtins that put <code>os</code>, <code>subprocess</code>, and even <code>open</code> out
+of reach, and no view of the process environment or the API keys in it. <code>run_command</code> has none of that.
+The lesson generalizes past these two tools: eligibility is worth deciding by what a tool can reach,
+not by how dangerous its name sounds, and the entry to drop here is the shell, not the sandbox.</p>
+<h2 id="nine-ways-it-fails-closed">Nine ways it fails closed<a class="headerlink" href="#nine-ways-it-fails-closed" title="Permanent link">&para;</a></h2>
+<p>"Fails closed" here means one specific thing: the call arrives at the approval prompt it would have
+arrived at with the feature off. Nine paths lead there, and
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/auto_approval.py"><code>review_call</code></a> makes all
+nine return a value rather than raise, so no caller can forget to handle one.</p>
+<ol>
+<li><strong>No turn to review against.</strong> The per-turn budget is opened by a reactive turn and nothing else,
+   so a gated call reached from anywhere with no budget open escalates.</li>
+<li><strong>The turn's budget is spent.</strong> Five auto-approvals per turn by default.</li>
+<li><strong>A field too large to show whole.</strong> Over 2,000 characters, a packet field escalates rather than
+   being truncated: a reviewer shown the first two thousand characters of a payload is a reviewer the
+   rest was hidden from, and the part that gets cut is the part an attacker chooses.</li>
+<li><strong>A field that forges the fence.</strong> Model-written text is wrapped in <code>&lt;untrusted&gt;</code> tags, and a value
+   containing those tags could close the fence early and move the rest of itself back into instruction
+   position. Such a value is refused outright rather than escaped, because an escape the reviewer has
+   to understand is one more thing to get wrong.</li>
+<li><strong>The reviewer timed out</strong> (<code>timeout_seconds</code>, default 10).</li>
+<li><strong>The reviewer declined to answer.</strong> A provider refusal is a refusal to review, not a verdict.</li>
+<li><strong>The reviewer could not be reached.</strong> A dead endpoint, a bad API key, or a <code>model</code> string that
+   cannot build a client at all (that string is user-written and nothing at startup builds from it, so
+   a typo surfaces here, on every gated call, as a reviewer that could not be reached like any other).</li>
+<li><strong>The answer was not the shape asked for.</strong> A model that returns prose, JSON missing a field, or
+   JSON whose fields came back as the wrong type (<code>"false"</code> for a boolean). The first two fail as they
+   are parsed; the third parses cleanly and is rejected on arrival, since a plain dataclass enforces
+   none of the types it annotates.</li>
+<li><strong>Anything else.</strong> A catch-all around <code>_outcome_for</code>, the function <code>review_call</code> wraps for exactly
+   this, because rendering the packet runs <code>__repr__</code> code from tool arguments a model chose. It logs a
+   traceback, so a programming error surfaces rather than being swallowed silently, and it catches
+   <code>Exception</code> rather than <code>BaseException</code>, so a <code>/stop</code> still cancels and Ctrl-C still ends the
+   process. This is what makes <code>review_call</code>'s promise not to raise real: whatever <code>_outcome_for</code>
+   returns, approval, escalation, or a caught failure, <code>review_call</code> only has one more thing left to do
+   with it, logging the outcome, before handing it back.</li>
+</ol>
+<p>A reviewer that answers and withholds approval is not one of these. That is the feature working: the
+call goes to the prompt, carrying the reviewer's sentence.</p>
+<h2 id="why-an-unattended-turn-is-never-auto-approved">Why an unattended turn is never auto-approved<a class="headerlink" href="#why-an-unattended-turn-is-never-auto-approved" title="Permanent link">&para;</a></h2>
+<p>A scheduled task, or anything else the assistant starts unprompted, already auto-denies every gated
+tool: nobody is at the keyboard, and approving a call means reading it. Auto-approval does not change
+that, and it is excluded twice over, on purpose.</p>
+<p>The first guard is ordering.
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/interaction.py"><code>HumanGate.approve</code></a> runs
+both auto-denials (proactive, and a turn you switched away from) <em>before</em> it consults a reviewer, so a
+review happens exactly where a human would otherwise have been asked and nowhere else.</p>
+<p>The second is structural. The per-turn budget is a context variable opened only by a reactive turn
+(invariant 8 in <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py"><code>core/turns.py</code></a>),
+so a gated call in an unattended turn has no budget to spend and takes fail-closed path 1 above. The
+asymmetry is the feature, and it is worth naming the edit that would remove it, because it looks like
+tidying: opening a review context on the unattended path would make those calls reviewable, and a
+reviewer may approve one, so a shell command would run in a turn nobody is watching.</p>
+<h2 id="what-you-see">What you see<a class="headerlink" href="#what-you-see" title="Permanent link">&para;</a></h2>
+<p>Both outcomes are reported, every time. An approval and an escalation each arrive as a card naming the
+tool, its arguments, the model that answered, and its sentence. Where a quorum was asked and agreed,
+that field names every model in it, and where one reviewer alone is the reason for the outcome (it
+withheld approval, or it could not be reached) the card names that one. A channel with no card surface
+gets the same content as a line of text rather than silence, because this is the one frame whose
+absence would mean a gated tool ran on your machine with no record anywhere you can see.</p>
+<p>The two read differently on purpose. An approval is a record of something that already happened. An
+escalation is not a refusal: it is the preface to the ordinary approval prompt arriving right behind
+it.</p>
+<p><strong>And both are written down.</strong> A card is a channel frame rather than part of the saved transcript, so
+a reload leaves only a tool card indistinguishable from one you approved yourself. Every outcome is
+also logged at <code>INFO</code> to <code>kokua.log</code> under <code>logs_path</code>, naming the tool, the reviewer's model, and its
+reason. That is the half of the record that outlives the page, and it is what you would read to answer
+"did I approve this, or did something else?" a day later.</p>
+<h2 id="what-this-does-not-do">What this does not do<a class="headerlink" href="#what-this-does-not-do" title="Permanent link">&para;</a></h2>
+<p>Five admissions, and they matter more than the feature's own description.</p>
+<p><strong>There is no sandbox under it, and no shell parser in front of it.</strong> The reviewer reads a raw command
+string and is the only layer between the model and your files. Kokua's <code>run_command</code> runs as your user
+with no containment, which is true with or without this feature, but it is the reason the comparable
+gates elsewhere are built on top of something and this one is not.
+<strong>An argument-scoped allowlist would remove most prompts with no model at all, and is the better thing
+to reach for first</strong>: "<code>git status</code> and <code>ls</code> never ask" is a rule you can read, costs nothing, and
+cannot be talked out of its judgement.</p>
+<p><strong>The reviewer's token cost is not counted.</strong> AIMU's structured (<code>schema=</code>) path returns before a turn
+event is emitted, so no <code>TurnMetrics</code> sink can observe the call. The card tells you the model and the
+decision; it does not estimate the cost, because an estimate here would be invented.
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/workflows/critics.py"><code>workflows/critics.py</code></a>
+documents the same limitation for the <code>/plan</code> critics' verdict call, for the same reason. What to
+budget for: one extra model call per reviewed tool call per reviewer named, and no more than
+<code>max_per_turn</code> reviewed calls in a turn.</p>
+<p><strong>The reviewer's prompt is yours to edit, so it is documentation of what is asked, not a boundary.</strong>
+Weakening it weakens the reviewer, and nothing stops you. What it cannot do is change the decision:
+that is computed from three booleans in code, so no edit to the prompt can invent a fourth outcome or
+turn a withheld answer into an approval.</p>
+<p><strong>The agent being reviewed can read the reviewer's prompt.</strong> <code>config.toml</code> is the single source of
+settings and it is yours, so the assistant's own <code>read_config</code> hands back the file unredacted; the
+shipped <code>[agents.assistant]</code> holds the <code>config</code> toolset, so the agent whose calls are being reviewed
+can read <code>[reviewers.approval].system_message</code> verbatim, along with <code>[security.auto_approval].tools</code>
+and <code>max_per_turn</code>. <code>[security].confirm_tools</code> was already readable the same way, and this is the same
+consequence of the same principle rather than a new one. It is a different claim from the admission
+above: that one is about <em>you</em> editing the standard, this one is about the reviewed model knowing which
+standard it will be held to, which tools it is worth trying, and how many attempts the budget allows.
+What it cannot do is change any of that: <code>[reviewers.*]</code> and the whole of <code>[security]</code> are locked
+against <code>update_config</code>, so reading is the whole of the reach.</p>
+<p><strong>A reviewer is one model call with no memory.</strong> It sees the tool, the toolset, the budget line, your
+request, and the arguments. It does not see the conversation, the files on disk, or what the previous
+call did. A sequence of individually innocuous calls is reviewed as individually innocuous calls.</p>
+<h2 id="how-other-assistants-do-this">How other assistants do this<a class="headerlink" href="#how-other-assistants-do-this" title="Permanent link">&para;</a></h2>
+<p>Worth reading even if you never turn this on, because the differences are design decisions rather than
+details. What follows describes each project as its own documentation and configuration had it in
+September 2026, when this page was written. None of it can be checked from inside this repository, so
+every figure and every enumerated rule below is attributed to whoever published it. All three projects
+move faster than this page will: treat a claim here as a pointer to their documentation rather than as
+its current state.</p>
+<p><strong>OpenClaw</strong> ships the closest analogue, <code>tools.exec.mode: "auto"</code>. A static policy runs first, only
+eligible misses reach a model reviewer, and everything else goes to a human. Its reviewer gets a
+bounded "review packet" (command, argv, cwd, environment key names, host, and a parser's analysis)
+that is explicitly treated as untrusted data, with a prompt instructing that data attempting to
+instruct the reviewer means deferring to a human. Its authority is capped at a single low-risk
+execution, pinned to the canonical command plan, cwd, argv, and session. Its documentation enumerates
+the fail-closed cases: anything ambiguous, higher-risk, unparseable, timed out, model-unavailable, or
+reviewer-directed goes to a human, and it documents three consecutive denials as an escalation. The
+reviewer's model is configurable; its prompt is not user-visible.</p>
+<p><strong>Cursor</strong> has Auto-review. An allowlist runs first, shell commands are sandboxed where possible, and
+what remains goes to a small classifier model judging both safety and how well the call matches user
+intent. The reduction in prompts is reported as substantial, around 84 percent; that figure comes from
+reporting about the feature rather than from Cursor's own documentation, which does not carry it, so
+read it as the order of magnitude a sandboxed, allowlist-first design reached and not as a number to
+hold anyone to. Cursor states plainly that the classifier is best-effort convenience and explicitly not
+a security boundary.</p>
+<p><strong>Hermes Agent</strong> deliberately does not do this at all. Its Tirith layer is documented as four static
+risk tiers plus human approval, with a hardline blocklist that trips before the approval layer sees a
+command and has no override flag. That is a considered rejection rather than an absence, and it is the
+honest baseline: static rules you can read cannot be argued with.</p>
+<p><strong>Where Kokua's design leads.</strong> The reviewer's prompt, model, reasoning effort, and sampling are all
+declared in <code>config.toml</code> where you can read and change them (OpenClaw exposes the model only, Cursor
+neither), and the decision is computed by code from three booleans rather than taken as a model's
+verdict.</p>
+<p><strong>Where it trails, and this is the part to weigh.</strong> There is no shell parsing, so the packet carries a
+raw command string where OpenClaw's carries parsed argv and a static analysis. And there is no sandbox
+underneath, where both OpenClaw and Cursor have one. Kokua's reviewer is doing a harder job with less
+support than either.</p>
+<h2 id="is-this-a-core-change-or-a-plugin">Is this a core change or a plugin?<a class="headerlink" href="#is-this-a-core-change-or-a-plugin" title="Permanent link">&para;</a></h2>
+<p>Kokua's <a href="../design-principles/">design principles</a> say capability should arrive as a plugin, so a
+feature landing in <code>core/</code> owes an argument. This one is not a capability: it is a change to how an
+existing human decision point behaves, inside the one function that owns that decision
+(<code>HumanGate.approve</code>). A toolset cannot express it, because a toolset contributes tools and settings,
+not a fork in the gate every tool passes through.</p>
+<p>It also lands squarely inside principle 6 (security is explicit and user controlled) rather than beside
+it. Every part of it is a value in <code>config.toml</code> you can read: which tools, which reviewers, which
+prompt, how long to wait, how many per turn. A control that would do nothing (a reviewer nobody
+declared, a tool nothing gates, a prompt nobody wrote) is a hard startup error, because the symptom of
+a broken gate is the absence of a symptom.</p>
+<h2 id="turning-it-on">Turning it on<a class="headerlink" href="#turning-it-on" title="Permanent link">&para;</a></h2>
+<p>Read <a href="../../reference/configuration/#securityauto_approval"><code>[security.auto_approval]</code></a> and
+<a href="../../reference/configuration/#reviewersname"><code>[reviewers.&lt;name&gt;]</code></a> for every key, then edit
+<code>config.toml</code> by hand (the whole <code>[security]</code> section is locked against the assistant's own
+<code>update_config</code>, and this table is startup-only, so a hand-edit and a restart is the only route).</p>
+<p>The shipped
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/config.example.toml"><code>config.example.toml</code></a>
+already carries a <code>[reviewers.approval]</code> table with a real prompt, so switching on is <code>enabled = true</code>
+plus a decision about which tools and which model. Two suggestions worth taking:</p>
 <ul>
-<li><strong>Finishing a runtime add takes an edit and a restart.</strong> Since every server needs a name, the write
-  derives one from the server's host (<code>broker.example.com</code> becomes <code>broker-example-com</code>, with a numeric
-  suffix if that name is already taken), so the config it leaves behind always loads. Then:</li>
-<li>add that name (or rename it to something friendlier) to an agent's <code>tools</code> by hand. <code>[agents.*]</code> is
-     locked by default: <code>update_config</code> refuses the whole section, precisely so the assistant cannot
-     grant itself the capability it just connected;</li>
-<li><strong>restart Kokua</strong>, because the namespace and the agent tables are both read only at startup.</li>
+<li><strong>Point the reviewer at a different model from <code>[assistant].model</code>.</strong> A reviewer running the same
+  model as the agent it reviews can be talked out of the same judgement by the same text. Startup warns
+  when the two match.</li>
+<li><strong>Start with one tool.</strong> <code>tools = ["fs_write"]</code> on a machine where you have backups tells you what
+  the reviewer's judgement is actually like, at a cost you can see.</li>
 </ul>
-<p>Until you do, the server connects, reconnects on each start, and startup warns that nothing names it.
-- <code>remove_mcp_server</code> disconnects, drops the entry, and fans the rebuild out to every live agent. A worker
-  spawned after it will not have the server's tools.</p>
-<p>If you want a server the assistant can connect <em>and use</em> within one session, declare it in
-<code>[[mcp.server]]</code> and name it in an agent up front. It does not have to be reachable at startup: an
-unconnected server contributes no tools rather than failing the build, so a later <code>add_mcp_server</code> for the
-same URL reaches that agent's next worker immediately.</p>
-<h2 id="check-that-it-reached-an-agent">Check that it reached an agent<a class="headerlink" href="#check-that-it-reached-an-agent" title="Permanent link">&para;</a></h2>
-<p>A connected-but-unreachable server is the failure mode this design invites, and <strong>nothing warns you
-about it.</strong> A server configured here connects at startup, spends a handshake, and holds whatever
-credential its <code>token_env</code> names, whether or not any <code>[agents.*]</code> table reaches it.</p>
-<p>Kokua used to log a line about it. That warning is gone, along with the equivalent one for an unnamed
-toolset, because telling the two cases apart meant keeping a provenance rule for every capability in the
-namespace, and a toolset nobody declares costs nothing to leave unnamed. The cost of dropping it lands
-here rather than there: a server does cost something. So check your own work, by asking the assistant to
-delegate to the agent that should have it and list its tools.</p>
-<h2 id="the-mcp-flag">The <code>--mcp</code> flag<a class="headerlink" href="#the-mcp-flag" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>kokua<span class="w"> </span>--mcp<span class="w"> </span>https://broker.example.com/mcp<span class="w"> </span>--mcp<span class="w"> </span>https://other.example.com/mcp
-</span></code></pre></div>
-<p>Two caveats, both from the flag-over-file precedence rule:</p>
-<ul>
-<li>It <strong>replaces</strong> the entire <code>[[mcp.server]]</code> list for that run rather than adding to it, so any server
-  configured in the file is skipped, and an agent naming one of those servers then fails startup with an
-  unknown-toolset error.</li>
-<li>Flag-supplied servers get a name derived from their host and no <code>token_env</code>. That name is what an agent
-  must already declare for the server to reach anything, and a server needing a static bearer token needs
-  the config file instead. Two <code>--mcp</code> URLs on one host (a service exposing several MCP endpoints under
-  one domain) would derive the same base name; the flag disambiguates them against each other the same
-  way <code>add_mcp_server</code> disambiguates against names already on file, so the second gets a numeric suffix
-  rather than colliding with the first.</li>
-</ul>
-<h2 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h2>
-<p>An MCP server's tools run on your behalf, with whatever access the agent calling them has. The tool
-descriptions the server publishes are also model-visible text you did not write, which makes a hostile
-server an injection vector as well as an ordinary trust decision.</p>
-<ul>
-<li><strong>Only connect servers you trust.</strong> This is the same class of decision as installing a package.</li>
-<li>Because <code>add_mcp_server</code> lets the assistant expand its own reach, it is gated by default, and proactive
-  or backgrounded turns auto-deny it. A scheduled task cannot connect a new server unattended, and even an
-  approved connection cannot reach an agent without your hand-edit.</li>
-<li>A server reaches only the agents that name it. Prefer a narrow agent, or a worker composed for the one
-  task, over adding the server to a broad role every delegation can reach: that is the practical use of
-  the "an agent must name it" rule, rather than an obstacle to work around.</li>
-</ul>
-<h2 id="write-your-own-server">Write your own server<a class="headerlink" href="#write-your-own-server" title="Permanent link">&para;</a></h2>
-<p>Kokua consumes MCP over HTTP and has no opinion about how a server is built. AIMU's
-<a href="https://saxman.info/aimu/how-to/use-mcp-tools/">use MCP tools</a> covers standing one up with FastMCP and
-exposing tools over it; point Kokua at the result with a <code>[[mcp.server]]</code> table.</p>
-<p>If the capability you want is local Python rather than a separate process, a toolset plugin is less
-machinery for the same result. See
-<a href="../set-up-toolsets/#write-your-own-toolset">Set up a toolset</a>.</p>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../set-up-toolsets/">Set up a toolset</a>: the one namespace a server's <code>name</code> joins, and how an agent
-  declares what it holds.</li>
-<li><a href="../add-skills/">Add a skill</a>: the one capability only the entry agent can hold.</li>
-<li><a href="../../explanation/architecture/">Architecture</a>: where the MCP subsystem sits, and the connection
-  lifecycle.</li>
-<li>AIMU: <a href="https://saxman.info/aimu/how-to/use-mcp-tools/">use MCP tools</a> and
-  <a href="https://saxman.info/aimu/explanation/a2a-vs-mcp/">A2A vs MCP</a>.</li>
+<li><a href="../../reference/configuration/">Configuration reference</a>: every key, and who may change it.</li>
+<li><a href="../design-principles/">Design principles</a>: principle 6, and why a control lives in the config file.</li>
+<li><a href="../architecture/">Architecture</a>: where <code>HumanGate</code> sits, and how a turn reaches it.</li>
+<li><a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/auto_approval.py"><code>core/auto_approval.py</code></a>:
+  the module, whose docstring makes this argument to the next person changing the code.</li>
 </ul>
 
 

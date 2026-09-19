@@ -1320,6 +1320,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#never_auto_approve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        never_auto_approve
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#locked_config_keys" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1332,6 +1343,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#securityauto_approval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [security.auto_approval]
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1382,6 +1404,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reviewersname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [reviewers.&lt;name&gt;]
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1696,6 +1729,8 @@
       
         
       
+        
+      
     
     
     
@@ -1765,6 +1800,34 @@
     
   
     Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/auto-approval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-approval
   
 
     
@@ -2127,6 +2190,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#never_auto_approve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        never_auto_approve
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#locked_config_keys" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2139,6 +2213,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#securityauto_approval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [security.auto_approval]
+      
+    </span>
+  </a>
   
 </li>
       
@@ -2189,6 +2274,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reviewersname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [reviewers.&lt;name&gt;]
+      
+    </span>
+  </a>
   
 </li>
       
@@ -2513,7 +2609,8 @@ from its name.</p>
 <li><a href="#who-may-change-which-key">Who may change which key</a></li>
 <li><a href="#which-keys-apply-live">Which keys apply live</a></li>
 <li>Sections: <a href="#assistant"><code>[assistant]</code></a> · <a href="#assistantgeneration"><code>[assistant.generation]</code></a> ·
-  <a href="#security"><code>[security]</code></a> · <a href="#agentsname"><code>[agents.&lt;name&gt;]</code></a> ·
+  <a href="#security"><code>[security]</code></a> · <a href="#securityauto_approval"><code>[security.auto_approval]</code></a> ·
+  <a href="#agentsname"><code>[agents.&lt;name&gt;]</code></a> · <a href="#reviewersname"><code>[reviewers.&lt;name&gt;]</code></a> ·
   <a href="#mcpserver"><code>[[mcp.server]]</code></a> · <a href="#paths"><code>[paths]</code></a> · <a href="#frontend"><code>[frontend]</code></a> · <a href="#web"><code>[web]</code></a> ·
   <a href="#logging"><code>[logging]</code></a> · <a href="#email"><code>[email]</code></a> · <a href="#scheduling"><code>[scheduling]</code></a> ·
   <a href="#schedulingtaskname"><code>[scheduling.task.&lt;name&gt;]</code></a> · <a href="#planning"><code>[planning]</code></a> ·
@@ -2564,9 +2661,10 @@ by a tool outlives the conversation that wrote it.</p>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="s2">"email.to"</span><span class="p">,</span>
 </span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span><span class="s2">"paths.data_dir"</span><span class="p">,</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span><span class="s2">"agents.*"</span><span class="p">,</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="s2">"scheduling.task.*"</span><span class="p">,</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="s2">"compute.command_env_passthrough"</span><span class="p">,</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="p">]</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">    </span><span class="s2">"reviewers.*"</span><span class="p">,</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="s2">"scheduling.task.*"</span><span class="p">,</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="s2">"compute.command_env_passthrough"</span><span class="p">,</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="p">]</span>
 </span></code></pre></div>
 <p>A pattern takes one of three forms:</p>
 <table>
@@ -2630,6 +2728,10 @@ because the shipped <code>security.*</code> pattern was the only thing that was 
 <td>lets the assistant rewrite any agent's <code>tools</code>, <code>model</code>, <code>thinking</code>, <code>max_iterations</code>, <code>system_message</code>, <code>description</code>, and <code>delegates_to</code>, set its <code>[agents.&lt;name&gt;.generation]</code> parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart.</td>
 </tr>
 <tr>
+<td><code>reviewers.*</code></td>
+<td>changes the error message only. <code>update_config</code> refuses <code>[reviewers.*]</code> whatever the list says, for the reason it is listed here: a reviewer's prompt and model decide how the assistant's own work is judged, including (with <a href="#securityauto_approval"><code>[security.auto_approval]</code></a> on) whether a gated call reaches you at all. Hand-edit to change one.</td>
+</tr>
+<tr>
 <td><code>scheduling.task.*</code></td>
 <td>changes the error message only. <code>update_config</code> still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule.</td>
 </tr>
@@ -2680,7 +2782,7 @@ immediately. Everything else is <strong>startup-only</strong>: change it, then r
 </tr>
 <tr>
 <td><code>[capabilities].max_depth</code></td>
-<td>all of <code>[agents.*]</code>, <code>[mcp]</code> (including <code>[[mcp.server]]</code>), <code>[security]</code>, <code>[paths]</code>, <code>[frontend]</code>, <code>[web]</code>, <code>[logging]</code>, <code>[email]</code></td>
+<td>all of <code>[agents.*]</code> and <code>[reviewers.*]</code>, <code>[mcp]</code> (including <code>[[mcp.server]]</code>), <code>[security]</code> (including <code>[security.auto_approval]</code>), <code>[paths]</code>, <code>[frontend]</code>, <code>[web]</code>, <code>[logging]</code>, <code>[email]</code></td>
 </tr>
 <tr>
 <td><code>[scheduling].max_task_conversations</code></td>
@@ -2738,12 +2840,19 @@ auto-selected.</strong> If nothing resolves, startup fails with an actionable me
 natural way to share one <code>config.toml</code> across machines that serve different models:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">AIMU_LANGUAGE_MODEL</span><span class="o">=</span><span class="s2">"ollama:qwen3.8:27b@http://gpu-box:11434"</span>
 </span></code></pre></div>
-<p>Whichever route the default arrives by, it is resolved once and every agent gets the same string:
-sub-agents spawned through <code>spawn_subagent</code>, sub-agents built by <code>compose_subagent</code>, the prebuilt
-orchestrators in the <code>aimu_agents</code> toolset, and both <code>/plan</code> reviewers. An endpoint set here reaches all
-of them. (Before Kokua 0.1.0 it did not: with <code>model</code> unset, the endpoint was dropped for everything
-except the entry agent, so a remote default sent every sub-agent to the <em>local</em> server instead. It failed
-loudly only when nothing was listening there.)</p>
+<p>Whichever route the default arrives by, it is resolved once and everything Kokua builds gets the same
+string: sub-agents spawned through <code>spawn_subagent</code>, sub-agents built by <code>compose_subagent</code>, the
+prebuilt orchestrators in the <code>aimu_agents</code> toolset, and every reviewer (<code>/plan</code>'s two critics, and the
+approval reviewer if you declare one). An endpoint set here reaches all of them. (Before Kokua 0.1.0 it
+did not: with <code>model</code> unset, the endpoint was dropped for everything except the entry agent, so a remote
+default sent every sub-agent to the <em>local</em> server instead. It failed loudly only when nothing was
+listening there.)</p>
+<p>One thing to know about that last group, because it is the way an endpoint pinned here stops reaching
+one of them. A reviewer resolves <a href="#reviewersname"><code>[reviewers.&lt;name&gt;].model</code></a> first and falls back to
+this key, exactly as an agent resolves <code>[agents.&lt;name&gt;].model</code>. So a <code>[reviewers.plan]</code> table naming a
+bare <code>provider:model</code> drops the endpoint, and that one reviewer talks to the default server while
+everything else talks to the one you pinned. Pin the endpoint in the reviewer's table too, or leave its
+<code>model</code> unset.</p>
 <p>Note this pins the client, not discovery. The probe that picks a default when nothing is set at all
 looks at default endpoints only, so export <code>OLLAMA_HOST</code> as well when a remote server's models should be
 considered there too.</p>
@@ -3035,6 +3144,30 @@ message touched and nothing lost. The export is the one whose reason to gate is 
 conversation at all: it changes nothing and can only write inside <code>downloads_path</code> under a name taken
 from the conversation's own id, but what it writes there is a whole transcript in the clear, in a folder
 <code>/download/{name}</code> serves unauthenticated. Gate it if that folder is the part you are protecting.</p>
+<h3 id="never_auto_approve"><code>never_auto_approve</code><a class="headerlink" href="#never_auto_approve" title="Permanent link">&para;</a></h3>
+<p>Tools no reviewer may ever approve on your behalf, whatever
+<a href="#securityauto_approval"><code>[security.auto_approval]</code></a> names. Same vocabulary as <code>confirm_tools</code>.
+Default:</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">never_auto_approve</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">    </span><span class="s2">"config.update_config"</span><span class="p">,</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="s2">"skills.add_skill_script"</span><span class="p">,</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="s2">"mcp.add_mcp_server"</span><span class="p">,</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="p">]</span>
+</span></code></pre></div>
+<p>The three are the tools that change what may act <em>later</em> rather than acting once, so the arguments a
+review was about stop constraining anything the moment the write lands. A waved <code>update_config</code> can
+widen this very list, a waved <code>add_skill_script</code> writes a script that becomes a tool the next turn can
+call, and a waved <code>add_mcp_server</code> adds a whole source of tools. Reviewing the arguments of a call like
+that answers a question about one action, when what the call actually grants is a capability.</p>
+<p>Naming one of these in <code>[security.auto_approval].tools</code> is a startup error saying so, and so is an entry
+here that matches no tool at all: a floor holding nothing back is the same silent gap a gate matching
+nothing is. Both checks run only when the gate is enabled, which is worth knowing, because it means a
+typo in this list sits unreported until the day you switch the gate on (nothing reads the list before
+then, so there is nothing for it to fail to hold back). Startup-only, and locked by default under
+<code>security.*</code>, so only a hand-edit changes it. Emptying it is a hand-edit you may make, and what it buys
+is a reviewer that can approve a capability grant.</p>
+<p>This list is not a second approval gate: <code>confirm_tools</code> decides what stops and asks, and this decides
+what a reviewer may never answer for.</p>
 <h3 id="locked_config_keys"><code>locked_config_keys</code><a class="headerlink" href="#locked_config_keys" title="Permanent link">&para;</a></h3>
 <p>A list of patterns naming which keys <code>update_config</code> refuses. Default:
 <code>["security.*", "email.to", "paths.data_dir", "agents.*", "scheduling.task.*",
@@ -3055,6 +3188,92 @@ name one of them, which is what refuses <code>security.confirm_tool</code> while
 <code>[scheduling.task.&lt;name&gt;]</code> sections are yours to create, so <code>agents.resercher.*</code> is accepted and locks
 nothing until an agent by that name exists. Locking a section you are about to add is a legitimate thing
 to write; a misspelling of one is indistinguishable from it.</p>
+<h2 id="securityauto_approval"><code>[security.auto_approval]</code><a class="headerlink" href="#securityauto_approval" title="Permanent link">&para;</a></h2>
+<p>A declared model reviewer may approve a gated tool call in your place, so you are prompted less. Off by
+default, and the whole sub-table is startup-only and locked under <code>security.*</code>.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">[security.auto_approval]</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">reviewers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"approval"</span><span class="p">]</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute.run_command"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compute.execute_python"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs_write"</span><span class="p">]</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">max_per_turn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">5</span>
+</span></code></pre></div>
+<p><strong>This is a convenience layer, not a security boundary.</strong> It reduces prompts; it contains nothing. The
+one property it does guarantee is narrow and structural: a review can only turn a prompt into an
+approval. There is no deny verdict anywhere in it, so nothing here can change what you would have been
+able to decide, and every way a review can fall short arrives at the ordinary approval prompt with the
+reviewer's sentence attached. Read
+<a href="../../explanation/auto-approval/">Auto-approval</a> before switching it on: it says what the reviewer is
+asked, what it cannot see, and what this design does not do (no sandbox, no shell parsing, and a
+reviewer whose token cost is not counted).</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>whether any gated call is reviewed at all</td>
+</tr>
+<tr>
+<td><code>reviewers</code></td>
+<td>list of strings</td>
+<td><code>[]</code></td>
+<td>which <a href="#reviewersname"><code>[reviewers.&lt;name&gt;]</code></a> tables are asked</td>
+</tr>
+<tr>
+<td><code>tools</code></td>
+<td>list of strings</td>
+<td><code>[]</code></td>
+<td>which gated tools a reviewer may answer for, in <code>confirm_tools</code>' vocabulary</td>
+</tr>
+<tr>
+<td><code>timeout_seconds</code></td>
+<td>number &gt; 0</td>
+<td><code>10</code></td>
+<td>past this, the review escalates rather than being waited on</td>
+</tr>
+<tr>
+<td><code>max_per_turn</code></td>
+<td>integer &gt;= 1</td>
+<td><code>5</code></td>
+<td>most auto-approvals one turn may collect</td>
+</tr>
+</tbody>
+</table>
+<p>Name more than one reviewer and <strong>all of them must agree</strong>: they are asked in order, and the first
+withheld answer ends the round, so a quorum costs every reviewer only when the ones before it agreed.</p>
+<p><code>tools</code> is checked against two things at startup, and a fault in either is a hard error rather than a
+warning, for the reason every control in <code>[security]</code> is: the symptom of a broken gate is the absence of
+a symptom. An entry must name something <code>confirm_tools</code> gates (reviewing an ungated tool reviews
+nothing, because that call already runs without asking), and it must not name anything
+<a href="#never_auto_approve"><code>never_auto_approve</code></a> holds back. Enabling the gate with no reviewer, with no
+tool, or with an entry matching no tool is refused the same way, each with the config fix in the message.</p>
+<p>The shipped list names both <code>compute</code> execution tools, and leaving <code>execute_python</code> out would have been
+the incoherent choice rather than the cautious one. <code>run_command</code> is a shell, so <code>python3 -c</code> from there
+runs Python with no restrictions at all; excluding the Python tool withholds nothing and only routes the
+same capability through the less contained of the two. <code>execute_python</code> runs in a subprocess under a
+timeout, with an import allowlist and restricted builtins that put <code>os</code>, <code>subprocess</code>, and even <code>open</code>
+out of reach, and the process environment (API keys included) is invisible to it. If you want to narrow
+this list, <code>run_command</code> is the entry to drop.</p>
+<p><code>max_per_turn</code> is per <em>turn</em>, and the budget is spent when a review is <strong>attempted</strong>, not when one
+approves. A model retrying the same rejected call cannot collect one approval per attempt, and a loop
+that keeps being escalated stops costing reviews after the fifth. Each reactive turn gets its own
+budget, so one conversation's loop cannot spend another's.</p>
+<p>An unattended turn (a scheduled task, anything the assistant starts unprompted) is never auto-approved.
+Its gated calls are denied before a reviewer is consulted at all, which is the behavior
+<code>confirm_tools</code> already had and is unchanged by this table.</p>
+<p>Both outcomes are reported. An approval and an escalation each arrive as a card naming the tool, its
+arguments, the model that answered (every model in a quorum, or the one reviewer that is the reason for
+the outcome), and its sentence, because an auto-approval nobody saw is a decision made on your behalf
+in silence.</p>
 <h2 id="agentsname"><code>[agents.&lt;name&gt;]</code><a class="headerlink" href="#agentsname" title="Permanent link">&para;</a></h2>
 <p>Every agent, declared whole. The table name is the agent's name: it is what <code>[assistant].agent</code> selects,
 what another agent's <code>delegates_to</code> names, and what <code>spawn_subagent</code> takes as its <code>agent_type</code>.</p>
@@ -3149,16 +3368,16 @@ two are checked by different code (a worker's is parsed at startup, <code>[assis
 throwaway client), so a reader has no way to tell from the code alone that they accept the same thing.</p>
 <p><code>generation</code> merges per key rather than table for table, so an agent that wants only a colder temperature
 keeps the default's context length.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[agents.researcher]</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Research specialist: gather and verify information from the web."</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ollama:qwen3:32b"</span><span class="w">     </span><span class="c1"># this worker alone runs on a bigger model</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">thinking</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"high"</span><span class="w">              </span><span class="c1"># ...and reasons harder than the rest</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"You are a research sub-agent. ..."</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="k">[agents.researcher.generation]</span><span class="w">  </span><span class="c1"># last in the table, like [assistant.generation]</span>
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
-</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="n">context_length</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">131072</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">[agents.researcher]</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Research specialist: gather and verify information from the web."</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ollama:qwen3:32b"</span><span class="w">     </span><span class="c1"># this worker alone runs on a bigger model</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">thinking</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"high"</span><span class="w">              </span><span class="c1"># ...and reasons harder than the rest</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"You are a research sub-agent. ..."</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="k">[agents.researcher.generation]</span><span class="w">  </span><span class="c1"># last in the table, like [assistant.generation]</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="n">context_length</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">131072</span>
 </span></code></pre></div>
 <p>A model string AIMU cannot resolve fails startup naming the table it came from.</p>
 <p><code>max_iterations</code> follows that rule too, and it is worth spelling out. An assistant that declares
@@ -3166,10 +3385,138 @@ keeps the default's context length.</p>
 declaration if it has one, and <code>[assistant].max_iterations</code> otherwise. So raising a delegator's cap
 buys the delegator more rounds of <em>delegating</em>, not more rounds inside each worker. To give a worker a
 longer leash, declare it on that worker.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">[agents.researcher]</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">max_iterations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">25</span><span class="w">    </span><span class="c1"># a search-heavy worker: every round spends a tool call</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[agents.researcher]</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"web"</span><span class="p">,</span><span class="w"> </span><span class="s2">"misc"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">max_iterations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">25</span><span class="w">    </span><span class="c1"># a search-heavy worker: every round spends a tool call</span>
 </span></code></pre></div>
+<h2 id="reviewersname"><code>[reviewers.&lt;name&gt;]</code><a class="headerlink" href="#reviewersname" title="Permanent link">&para;</a></h2>
+<p>A reviewer is one context-free model call whose answer code consumes, declared here so you can read the
+standard it is held to. Three names are consumed today, and each is optional:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Asked by</th>
+<th>Undeclared</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plan</code></td>
+<td><code>/plan</code>'s plan critic, when <a href="#planning"><code>[planning].plan_review_agent</code></a> is on</td>
+<td>planning's own shipped prompt applies</td>
+</tr>
+<tr>
+<td><code>result</code></td>
+<td><code>/plan</code>'s result critic, when <a href="#planning"><code>[planning].result_review</code></a> is on</td>
+<td>planning's own shipped prompt applies</td>
+</tr>
+<tr>
+<td><code>approval</code></td>
+<td><a href="#securityauto_approval"><code>[security.auto_approval]</code></a>, when it is on</td>
+<td>the gate refuses to start</td>
+</tr>
+</tbody>
+</table>
+<p>So a table here is an override, not something you must restate to keep a default. <code>[reviewers.approval]</code>
+is the exception and says why in its own error: a security reviewer with no stated standard reviews
+nothing, so its <code>system_message</code> is required rather than defaulted. The shipped <code>config.example.toml</code>
+declares that one, with the gate off.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>what this reviewer is for. A note to yourself: nothing reads it</td>
+</tr>
+<tr>
+<td><code>system_message</code></td>
+<td>string</td>
+<td>the standard the reviewer is held to</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>string</td>
+<td>overrides <code>[assistant].model</code> for this reviewer alone</td>
+</tr>
+<tr>
+<td><code>thinking</code></td>
+<td>bool or level</td>
+<td>overrides <code>[assistant].thinking</code> for this reviewer alone</td>
+</tr>
+<tr>
+<td><code>generation</code></td>
+<td>sub-table</td>
+<td>overrides <code>[assistant.generation]</code>, <strong>per key</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Three of those resolve against the <code>[assistant]</code> tiers exactly as an agent's do: <code>model</code> on "is it
+set", <code>thinking</code> on "is it unset" (so <code>thinking = false</code> is a real declaration rather than one an <code>or</code>
+would swallow), and <code>generation</code> merged key by key, so a reviewer that wants only a colder temperature
+keeps the default's context length. See <a href="#model"><code>[assistant].model</code></a> for what a model string may
+carry, including the endpoint suffix and the way a bare <code>provider:model</code> here drops an endpoint pinned
+there.</p>
+<p><code>system_message</code> is the one that does <strong>not</strong> fall back to <code>[assistant].system_message</code>, and the
+difference is deliberate. An undeclared prompt leaves it empty, and what empty means is the consumer's
+to decide rather than this file's: the <code>/plan</code> critics substitute their own shipped standard, and the
+approval gate refuses to start. An agent's opener describes a persona, where a reviewer's describes a
+standard, and there is no sensible standard to inherit from an assistant's own greeting.</p>
+<p><code>description</code> is read by nobody: it is a label for whoever opens this file, which is why a reviewer's
+is worth writing even though no model ever sees it.</p>
+<p><strong>Three keys an <code>[agents.&lt;name&gt;]</code> table takes are refused by name</strong>, each with its reason, because a
+reader who wrote one was reasoning by analogy from the agents table:</p>
+<table>
+<thead>
+<tr>
+<th>Refused</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tools</code></td>
+<td>whatever consumes a reviewer fixes its tools in code, and this table has no key to change them: the approval gate asks with tools off, and a <code>/plan</code> critic gets a curated verification toolset.</td>
+</tr>
+<tr>
+<td><code>delegates_to</code></td>
+<td>it is one model call, so there is nothing for a worker to be part of.</td>
+</tr>
+<tr>
+<td><code>max_iterations</code></td>
+<td>it runs no tool loop, so there is no cap to set.</td>
+</tr>
+</tbody>
+</table>
+<p>Declare an agent if you want any of those. The approval reviewer's own call being tool-less is also why
+that gate cannot recurse into itself: a reviewer making no tool call has no call for the gate to be
+asked about while it is reviewing one. (The <code>/plan</code> critics are the one place a reviewer's answer is
+produced by a tool-using agent, over a curated read-only toolset the workflow fixes in code; this table
+gives it the persona, never the tools. See <a href="../../explanation/architecture/">Architecture</a>.)</p>
+<p><code>[reviewers.approval]</code> additionally refuses a declared <code>thinking</code>, and the error says why: its answer
+comes back through a structured call, which returns JSON and no reasoning on every provider, so a
+reasoning request there could never take effect. An effort inherited from <code>[assistant].thinking</code> is
+inert rather than refused, since that key makes no claim about this reviewer and refusing it would turn
+one global setting into an install-wide bar on enabling the gate.</p>
+<p><strong>This whole section is locked by default</strong>, like <code>[agents.*]</code> and for the same reason: <code>update_config</code>
+is a tool the assistant holds, and a reviewer's prompt decides how the assistant's own work is judged.
+See <a href="#who-may-change-which-key">who may change which key</a>.</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">[reviewers.plan]</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Reviews a plan against the request."</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">thinking</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"high"</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"ollama:qwen3:32b"</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">system_message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"""</span><span class="se">\</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="s2">Reject a plan that solves a different problem than the one asked, that cannot be checked when it is </span><span class="se">\</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="s2">done, or that spends a tool call it does not need."""</span>
+</span></code></pre></div>
+<p>Startup-only: a reviewer's client is built per call from the values this file had at startup.</p>
 <h2 id="mcpserver"><code>[[mcp.server]]</code><a class="headerlink" href="#mcpserver" title="Permanent link">&para;</a></h2>
 <p>Remote MCP servers to connect at startup. An array of tables: one <code>[[mcp.server]]</code> header per server.</p>
 <table>
@@ -3201,14 +3548,14 @@ longer leash, declare it on that worker.</p>
 <p><code>name</code> is what an agent lists in its <code>tools</code>, so a server no agent can name reaches no agent. Omit
 <code>token_env</code> for an unauthenticated server, or one using the OAuth flow, which triggers automatically on
 an auth challenge. The token stays in the environment, never in this file.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">[[mcp.server]]</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://api.githubcopilot.com/mcp/"</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"github"</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"GITHUB_MCP_TOKEN"</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">[[mcp.server]]</span>
-</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://broker.example.com/mcp"</span>
-</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"stocks"</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">[[mcp.server]]</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://api.githubcopilot.com/mcp/"</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"github"</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"GITHUB_MCP_TOKEN"</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="k">[[mcp.server]]</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://broker.example.com/mcp"</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"stocks"</span>
 </span></code></pre></div>
 <p>Servers added at runtime with the <code>add_mcp_server</code> tool are appended here automatically, with a <code>name</code>
 derived from the host and a numeric suffix if that name is taken, so the file always loads. That name
@@ -3239,8 +3586,8 @@ sends your browser once you approve, which is also where Kokua listens for the c
 </tr>
 </tbody>
 </table>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[mcp]</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">oauth_callback_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8765</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">[mcp]</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">oauth_callback_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8765</span>
 </span></code></pre></div>
 <p>The defaults assume the browser runs on the same machine as Kokua. If it does not, the provider sends
 your approval to <em>your</em> loopback, Kokua never receives it, and the connection fails only when the flow
@@ -3253,20 +3600,20 @@ covers both setups.</p>
 <h3 id="data_dir"><code>data_dir</code><a class="headerlink" href="#data_dir" title="Permanent link">&para;</a></h3>
 <p>Absolute override for where all transient and user content lives. Default: <code>$KOKUA_HOME/data</code>.
 Locked by default.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">data_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/path/to/kokua-data"</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">data_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/path/to/kokua-data"</span>
 </span></code></pre></div>
 <p>Every leaf derives from this one setting, so overriding it moves all of them together:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>$KOKUA_HOME/
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>  config.toml
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>  data/                  &lt;- data_dir
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    sessions.json        conversations
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    memory/              the memory store
-</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    documents/           the document store
-</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    skills/              installed skills
-</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    images/              uploaded and generated images, served at /images
-</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>    payloads/            oversized sub-agent tool responses, served at /payloads
-</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
-</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>    logs/kokua.log       the rotating diagnostic log
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>$KOKUA_HOME/
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>  config.toml
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>  data/                  &lt;- data_dir
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>    sessions.json        conversations
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>    memory/              the memory store
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>    documents/           the document store
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>    skills/              installed skills
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>    images/              uploaded and generated images, served at /images
+</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>    payloads/            oversized sub-agent tool responses, served at /payloads
+</span><span id="__span-15-10"><a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>    downloads/           generated artifacts (PDFs, exported conversation Markdown), served at /download
+</span><span id="__span-15-11"><a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>    logs/kokua.log       the rotating diagnostic log
 </span></code></pre></div>
 <p>To move the whole tree including <code>config.toml</code>, set <code>$KOKUA_HOME</code> instead. That one is an environment
 variable rather than a setting because the config file lives inside it, so it has to resolve before the
@@ -3420,20 +3767,20 @@ key</a>.</p>
 </tbody>
 </table>
 <p><code>schedule</code> is one of:</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"once"</span><span class="p">,</span><span class="w">     </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"2026-08-20T09:00:00"</span><span class="w"> </span><span class="p">}</span><span class="w">   </span><span class="c1"># ISO-8601 local datetime</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"interval"</span><span class="p">,</span><span class="w"> </span><span class="n">seconds</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">3600</span><span class="w"> </span><span class="p">}</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w">    </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"weekly"</span><span class="p">,</span><span class="w">   </span><span class="n">day</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"fri"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"16:00"</span><span class="w"> </span><span class="p">}</span><span class="w">    </span><span class="c1"># mon/tue/wed/thu/fri/sat/sun</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"once"</span><span class="p">,</span><span class="w">     </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"2026-08-20T09:00:00"</span><span class="w"> </span><span class="p">}</span><span class="w">   </span><span class="c1"># ISO-8601 local datetime</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"interval"</span><span class="p">,</span><span class="w"> </span><span class="n">seconds</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">3600</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w">    </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"weekly"</span><span class="p">,</span><span class="w">   </span><span class="n">day</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"fri"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"16:00"</span><span class="w"> </span><span class="p">}</span><span class="w">    </span><span class="c1"># mon/tue/wed/thu/fri/sat/sun</span>
 </span></code></pre></div>
 <p>A fired one-shot is <strong>not</strong> deleted. It is left in the file with <code>enabled = false</code> and a <code>fired_at</code>
 stamp, so the run stays on the record and re-running it is a one-character edit.</p>
 <p>A task's turn is proactive, which means gated tools auto-deny inside it. Give a task work its agent can
 finish unattended.</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">[scheduling.task.morning-brief]</span>
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">prompt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Summarize my calendar and any unread mail, and flag anything that needs a reply today."</span>
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
-</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">max_conversations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="k">[scheduling.task.morning-brief]</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">prompt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Summarize my calendar and any unread mail, and flag anything that needs a reply today."</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="n">schedule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"daily"</span><span class="p">,</span><span class="w"> </span><span class="n">at</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">"09:00"</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="n">max_conversations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
 </span></code></pre></div>
 <h2 id="planning"><code>[planning]</code><a class="headerlink" href="#planning" title="Permanent link">&para;</a></h2>
 <p>Deep planning is a toolset: an agent's <code>tools</code> must list <code>planning</code> for the <code>/plan &lt;task&gt;</code> command to
@@ -3490,6 +3837,13 @@ before doing the work. Every key here belongs to that toolset and is read only w
 <p><code>result_review</code> runs the answer non-streamed, since it has to exist in full before it can be checked.
 <code>show_reasoning</code> shows the planner, each reviewer's prose reasoning and verdict, the executor, and every
 revision, including each intermediate version, which overrides <code>result_review</code>'s hide-until-vetted gate.</p>
+<p><strong>Which model each critic runs on, and the standard it holds a plan to, are yours to set.</strong> Both flags
+above turn on a reviewer whose persona comes from <a href="#reviewersname"><code>[reviewers.&lt;name&gt;]</code></a>:
+<code>[reviewers.plan]</code> for <code>plan_review_agent</code>, <code>[reviewers.result]</code> for <code>result_review</code>. Leave either
+table undeclared and planning's own shipped prompt applies, so a table there is an override rather than
+something you must write to keep the default. This is the place to give a critic a stronger (or
+cheaper) model than the agent it is reviewing, and the place to read the standard your plan was
+rejected against.</p>
 <h2 id="capabilities"><code>[capabilities]</code><a class="headerlink" href="#capabilities" title="Permanent link">&para;</a></h2>
 <p>Capability discovery is a toolset: an agent's <code>tools</code> must list <code>capabilities</code> for the agent to see what
 is installed beyond its own tools. It gets two tools. <code>list_capabilities</code> reads the registry, every
@@ -3713,8 +4067,8 @@ reference, not inline data.</p>
 </tbody>
 </table>
 <p>Introspection, which exits without running the assistant:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>kokua<span class="w"> </span>--list-frontends<span class="w">    </span><span class="c1"># installed front ends</span>
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>kokua<span class="w"> </span>--list-toolsets<span class="w">     </span><span class="c1"># every name a tools list may use, grouped by provider</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>kokua<span class="w"> </span>--list-frontends<span class="w">    </span><span class="c1"># installed front ends</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>kokua<span class="w"> </span>--list-toolsets<span class="w">     </span><span class="c1"># every name a tools list may use, grouped by provider</span>
 </span></code></pre></div>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>

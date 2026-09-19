@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://saxman.info/kokua/explanation/design-principles/">
       
       
-        <link rel="prev" href="../architecture/">
+        <link rel="prev" href="../auto-approval/">
       
       
         <link rel="next" href="../../changelog/">
@@ -1069,6 +1069,8 @@
       
         
       
+        
+      
     
     
     
@@ -1141,6 +1143,34 @@
     
   
     Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auto-approval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-approval
   
 
     
@@ -1704,6 +1734,11 @@ change provider without touching an agent.
 Inside, no asymmetry remains: every toolset keeps the <code>build</code> its author wrote, and one that fails to
 import or to build stops startup naming itself, whoever wrote it. Kokua ships no third-party code, so it
 carries no special handling for code it does not ship.</p>
+<p><em>Where this principle was hardest to hold:</em> auto-approval landed in <code>core/</code>, not in a toolset, and the
+argument for that is written out in <a href="../auto-approval/#is-this-a-core-change-or-a-plugin">Auto-approval</a>
+rather than assumed. The short version is that it contributes no capability: it changes how one
+existing human decision point behaves, inside the single function that owns that decision, and a
+toolset contributes tools and settings rather than a fork in the gate every tool passes through.</p>
 <h3 id="corollary-a-capability-is-declared-never-defaulted">Corollary: a capability is declared, never defaulted<a class="headerlink" href="#corollary-a-capability-is-declared-never-defaulted" title="Permanent link">&para;</a></h3>
 <p>An agent's capability is exactly what its <code>[agents.&lt;name&gt;].tools</code> table declares. <strong>No code path adds a
 tool an agent did not name, and no flag can disagree with a declaration.</strong></p>
@@ -1750,13 +1785,22 @@ else. One file is also what makes a running system's whole configuration legible
 <code>tomlkit</code> writes; two writers (<code>add_mcp_server</code> and the assistant's own <code>update_config</code> tool) land in
 that one file. A <code>runtime-settings.json</code> store used to exist and was
 retired in favour of the file itself. <code>[security].locked_config_keys</code> is a user-set list of patterns
-naming what <code>update_config</code> refuses even behind the approval prompt, and it ships locking four things:
-<code>[security] confirm_tools</code> (the gate itself), <code>[email] to</code> (the locked recipient), <code>[paths] data_dir</code>
-(where all state lives), and the whole <code>[agents.*]</code> section. That last one is matched by section prefix
-rather than by a key entry, since agent names cannot be enumerated ahead of time, and it is locked by
-default for the obvious reason: <code>update_config</code> is a tool the assistant holds, so a writable agent table
-would let the assistant widen its own reach. <code>locked_config_keys</code> itself is the one entry the list can
-never remove; everything else, <code>agents.*</code> included, is a hand-edit away from being unlocked.</p>
+naming what <code>update_config</code> refuses even behind the approval prompt, and it ships with seven patterns.
+The first is the whole <code>[security]</code> section rather than any one key in it, which is the pattern worth
+reading closely, because what that section holds has grown: the approval gate (<code>confirm_tools</code>), the
+<code>[security.auto_approval]</code> sub-table and the <code>never_auto_approve</code> floor beneath it, and the lock list
+itself. Every control this principle is about is therefore hand-edit-only by default, not just the one
+that was there first. The rest are <code>[email] to</code> (the locked recipient), <code>[paths] data_dir</code> (where all
+state lives), the whole <code>[agents.*]</code> and <code>[reviewers.*]</code> sections, <code>[scheduling.task.*]</code> (see below,
+where the reason is routing rather than capability), and <code>[compute] command_env_passthrough</code>, which
+decides which environment variables a <code>run_command</code> child can see. The two section patterns are matched
+by prefix rather than by a key entry, since agent and reviewer names cannot be enumerated ahead of
+time, and each is locked by default for a reason of the same shape: <code>update_config</code> is a tool the
+assistant holds, so a writable agent table would let the assistant widen its own reach, and a writable
+reviewer table would let it rewrite the standard its own work is judged against, including (with
+<a href="../auto-approval/">auto-approval</a> on) whether a gated tool call reaches the user at all.
+<code>locked_config_keys</code> itself is the one entry the list can never remove; everything else, <code>agents.*</code>
+included, is a hand-edit away from being unlocked.</p>
 <p><code>config.toml</code> also holds Kokua's declared scheduled tasks, one <code>[scheduling.task.&lt;name&gt;]</code> table per
 task, and <code>[scheduling.task.*]</code> is app-written the same way <code>[[mcp.server]]</code> is: the assistant's own
 scheduling tools write it, so a hand-written or hand-edited task is still just TOML with the app's
@@ -1807,7 +1851,7 @@ it prevents. One process is also what makes a single turn followable end to end:
 can attach a debugger to, rather than a request landing in whichever worker happened to pick it up.
 The invariants block is a teaching artifact as much as a safety one.</p>
 <p><em>How this cashes out:</em> <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py"><code>core/turns.py</code></a> opens with a
-<code>## Concurrency invariants</code> block -- seven rules, each stating what breaks without it, including a
+<code>## Concurrency invariants</code> block of eight rules, each stating what breaks without it, including a
 deadlock that a regression test still guards. <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turn_gate.py"><code>TurnGate</code></a> is a
 documented writer-preferring readers-writer gate: turns read, a settings change writes, and which side an
 operation belongs on follows from its reach rather than from whether it mutates (a conversation delete
@@ -1846,6 +1890,16 @@ hope about the group's contents. The writers are gated in <code>confirm_tools</c
 related reason: <code>coder</code> holds a shell that can write a file, so an ungated <code>write_file</code> next to it would
 be the same outcome by a shorter route, with the gate approving the long way round and waving the short
 one through.</p>
+<p><strong>A control may sit above the gate as well as beside it, and it says which it is.</strong>
+<code>[security.auto_approval]</code> (off by default) lets a declared reviewer answer a gated call's prompt in the
+user's place, and it is a convenience layer rather than a boundary: its whole security claim is that a
+review can only turn a prompt into an approval, never widen what the user could have approved
+themselves. The reason it belongs under this principle rather than beside it is that every part of it is
+a value in the file (which tools, which reviewers, which prompt, how long to wait, how many per turn),
+and a part that would do nothing is a startup error like any other control here. What a review can be
+about is one <em>action</em>, never a capability, so <code>[security].never_auto_approve</code> floors the three tools
+whose landing makes the reviewed arguments stop constraining anything. See
+<a href="../auto-approval/">Auto-approval</a> for the argument and its limits.</p>
 <p><strong>You may loosen, not only tighten.</strong> <code>locked_config_keys</code> is yours to empty. Strike <code>agents.*</code> from it
 and the assistant really can rewrite its own capability table on the next restart. The documentation
 states that consequence plainly rather than preventing it, because a control you cannot release is not
