@@ -191,6 +191,14 @@ _GENERATION_KEYS: dict[str, tuple[tuple[type, ...], str, Callable[[Any], bool]]]
 # has no dot in it.
 _GENERATION_SECTION = "assistant.generation"
 
+# The sub-table of [security] the auto-approval gate's own keys live in. Also a dotted section, and safe
+# to route the same way `_GENERATION_SECTION` is: `security` is not one of `_STRUCTURED_SECTIONS`, so
+# `_sections` re-enters this nested table as the flat section "security.auto_approval" with its scalar
+# keys already separated out, which is exactly the shape the (section, key) schema lookup below takes. No
+# branch in `load` is needed, unlike `_GENERATION_SECTION`, because these keys each map to a field of
+# their own rather than into one shared dict.
+_AUTO_APPROVAL_SECTION = "security.auto_approval"
+
 
 def _generation_value(section: str, key: str, value: Any) -> Any:
     """Validate one generation parameter, naming the table it came from.
@@ -232,6 +240,19 @@ def _positive_int(section: str, key: str, value: Any) -> int:
     if value < 1:
         raise ConfigError(f"[{section}].{key} must be an integer >= 1, got {value!r}")
     return value
+
+
+def _positive_number(section: str, key: str, value: Any) -> float:
+    """Validate a duration that a wait can actually end on, naming the table it came from.
+
+    Zero would make every review time out instantly and read as a reviewer that never answers, which is
+    indistinguishable from one that is actually unreachable; the floor is what keeps the two apart. The
+    `bool` guard is the reason `_positive_int` carries the same one: `bool` is an `int` subclass, so
+    `timeout_seconds = true` would otherwise pass `isinstance(value, (int, float))` and coerce to `1.0`.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        raise ConfigError(f"[{section}].{key} must be a positive number of seconds")
+    return float(value)
 
 
 def _generation(section: str, key: str, value: Any) -> dict:
@@ -492,6 +513,22 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("email", "to"): ("email_to", (str,), "a string", None),
     ("email", "use_ssl"): ("email_use_ssl", (bool,), "a boolean", None),
     ("security", "confirm_tools"): ("confirm_tools", (list,), "a list of strings", _str_list),
+    ("security", "never_auto_approve"): ("never_auto_approve", (list,), "a list of strings", _str_list),
+    (_AUTO_APPROVAL_SECTION, "enabled"): ("auto_approval_enabled", (bool,), "true or false", None),
+    (_AUTO_APPROVAL_SECTION, "reviewers"): ("auto_approval_reviewers", (list,), "a list of strings", _str_list),
+    (_AUTO_APPROVAL_SECTION, "tools"): ("auto_approval_tools", (list,), "a list of strings", _str_list),
+    (_AUTO_APPROVAL_SECTION, "timeout_seconds"): (
+        "auto_approval_timeout_seconds",
+        (int, float),
+        "a positive number of seconds",
+        _positive_number,
+    ),
+    (_AUTO_APPROVAL_SECTION, "max_per_turn"): (
+        "auto_approval_max_per_turn",
+        (int,),
+        "a positive integer",
+        _positive_int,
+    ),
     (_LOCK_LIST_SECTION, _LOCK_LIST_KEY): (
         _LOCK_LIST_KEY,
         (list,),

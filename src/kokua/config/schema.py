@@ -230,6 +230,32 @@ class AssistantConfig:
             "config.update_config",
         ]
     )
+    # Tools no reviewer may ever approve, whatever [security.auto_approval].tools names, in the same
+    # vocabulary confirm_tools uses. These three change what may act *later* rather than acting once, so
+    # the arguments a review was about stop constraining anything the moment the write lands: a waved
+    # `update_config` can widen this very list, a waved `add_skill_script` writes a script that becomes a
+    # tool, and a waved `add_mcp_server` adds a tool source. Naming one in auto_approval_tools is a
+    # startup error. Editable, like every control in this section, and only by hand: the shipped
+    # `security.*` lock pattern keeps update_config out of here.
+    never_auto_approve: list[str] = field(
+        default_factory=lambda: [
+            "config.update_config",
+            "skills.add_skill_script",
+            "mcp.add_mcp_server",
+        ]
+    )
+    # Whether a declared reviewer may approve a gated tool call in place of the user, and which tools it
+    # may be asked about. Off by default, and startup-only: the whole table is locked by `security.*`, so
+    # only a hand-edit changes it, and a hand-edit can restart. A reviewer is named here and declared in
+    # [reviewers.<name>]; naming more than one requires all of them to agree.
+    auto_approval_enabled: bool = False
+    auto_approval_reviewers: list[str] = field(default_factory=list)
+    auto_approval_tools: list[str] = field(default_factory=list)
+    # Past this, the review escalates rather than being waited on any longer.
+    auto_approval_timeout_seconds: float = 10.0
+    # Most auto-approvals one turn may collect. A loop calling one tool twenty times must not collect
+    # twenty approvals, and the cap bounds what the feature can cost per turn at the same time.
+    auto_approval_max_per_turn: int = 5
     # Which config keys update_config refuses. The user's to set: see store.locked_by for the pattern
     # forms, and store.LOCK_AXIOM for the one key no list can unlock.
     locked_config_keys: list[str] = field(default_factory=lambda: list(DEFAULT_LOCKED_CONFIG_KEYS))

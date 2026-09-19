@@ -763,8 +763,16 @@ def test_unknown_agent_key_lists_what_an_agent_table_accepts():
 
 
 def test_agent_hint_names_a_placeholder_rather_than_the_wildcard():
-    """A model acts on a hint verbatim, and `section="agents.*"` writes an agent literally named `*`."""
-    with pytest.raises(settings.ConfigError, match=r"did you mean \[agents.<name>\].tools\?"):
+    """A model acts on a hint verbatim, and `section="agents.*"` writes an agent literally named `*`.
+
+    `tools` is now also a `[security.auto_approval]` key, so the hint offers both sections (sorted, like
+    `test_unknown_key_offers_every_section_that_has_it`); what this test still pins is that the agents
+    half reads `[agents.<name>].tools`, the placeholder, and not the wildcard `[agents.*].tools`.
+    """
+    with pytest.raises(
+        settings.ConfigError,
+        match=r"did you mean \[agents.<name>\].tools or \[security.auto_approval\].tools\?",
+    ):
         settings.coerce_config_string("display", "tools", "x", table=core_table())
 
 
@@ -1036,3 +1044,57 @@ def test_reviewer_rejects_a_wrongly_typed_key(tmp_path):
 def test_reviewer_table_must_be_a_table(tmp_path):
     with pytest.raises(settings.ConfigError, match=r"\[reviewers.approval\] must be a table"):
         _load_toml(tmp_path, 'reviewers = { approval = "nope" }\n')
+
+
+# --- [security.auto_approval] and [security].never_auto_approve --------------------------------
+
+
+def test_auto_approval_section_parses(tmp_path):
+    config = _load_toml(
+        tmp_path,
+        """
+        [security]
+        never_auto_approve = ["config.update_config"]
+        [security.auto_approval]
+        enabled = true
+        reviewers = ["approval"]
+        tools = ["compute.run_command"]
+        timeout_seconds = 4.5
+        max_per_turn = 2
+        """,
+    )
+    assert config.never_auto_approve == ["config.update_config"]
+    assert config.auto_approval_enabled is True
+    assert config.auto_approval_reviewers == ["approval"]
+    assert config.auto_approval_tools == ["compute.run_command"]
+    assert config.auto_approval_timeout_seconds == 4.5
+    assert config.auto_approval_max_per_turn == 2
+
+
+def test_auto_approval_defaults_are_off_and_floored():
+    from kokua.config.schema import AssistantConfig
+
+    config = AssistantConfig()
+    assert config.auto_approval_enabled is False
+    assert config.auto_approval_reviewers == []
+    assert config.auto_approval_tools == []
+    # The three that grant a capability rather than acting once.
+    assert config.never_auto_approve == [
+        "config.update_config",
+        "skills.add_skill_script",
+        "mcp.add_mcp_server",
+    ]
+
+
+@pytest.mark.parametrize("key, value", [("timeout_seconds", "0"), ("max_per_turn", "0")])
+def test_auto_approval_rejects_a_non_positive_bound(tmp_path, key, value):
+    with pytest.raises(settings.ConfigError, match="must be"):
+        _load_toml(tmp_path, f"[security.auto_approval]\n{key} = {value}\n")
+
+
+def test_auto_approval_is_locked_by_the_shipped_security_pattern():
+    from kokua.config.schema import DEFAULT_LOCKED_CONFIG_KEYS
+    from kokua.config.store import locked_by
+
+    assert locked_by("security.auto_approval", "enabled", list(DEFAULT_LOCKED_CONFIG_KEYS)) == "security.*"
+    assert locked_by("security", "never_auto_approve", list(DEFAULT_LOCKED_CONFIG_KEYS)) == "security.*"
