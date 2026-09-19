@@ -374,38 +374,57 @@ async def review_call(auto: AutoApproval, *, tool: str, arguments: dict) -> Outc
     call only when the ones before it agreed. The budget is spent when a review is *attempted*, not when
     one approves: the cost is paid either way, and a loop that keeps getting escalated is exactly the
     loop the cap exists to stop paying for.
+
+    **This does not raise.** Every failure, the ones below and the ones nobody thought of, comes back as
+    an ``Outcome`` that escalates, so a caller needs no ``try`` of its own and a second caller cannot
+    forget to write one. The guarantee lives here because the promise is made here: a propagating
+    exception would leave the gate's one claim, that a review it could not complete asks the user,
+    depending on whoever happened to call it.
     """
-    context = current_review_context.get()
-    if context is None:
-        return Outcome(False, "there is no turn to review against, so this call goes to you", auto.model_label)
-    if context.used >= auto.max_per_turn:
-        return Outcome(
-            False,
-            f"this turn's review budget of {auto.max_per_turn} is spent, so the rest of its gated calls come to you",
-            auto.model_label,
+    try:
+        context = current_review_context.get()
+        if context is None:
+            return Outcome(False, "there is no turn to review against, so this call goes to you", auto.model_label)
+        if context.used >= auto.max_per_turn:
+            return Outcome(
+                False,
+                f"this turn's review budget of {auto.max_per_turn} is spent, so the rest of its gated "
+                "calls come to you",
+                auto.model_label,
+            )
+        packet = build_packet(
+            tool=tool,
+            toolset=auto.toolset_of.get(tool, ""),
+            arguments=arguments,
+            request=context.request,
+            used=context.used,
+            allowed=auto.max_per_turn,
         )
-    packet = build_packet(
-        tool=tool,
-        toolset=auto.toolset_of.get(tool, ""),
-        arguments=arguments,
-        request=context.request,
-        used=context.used,
-        allowed=auto.max_per_turn,
-    )
-    if packet is None:
-        return Outcome(
-            False,
-            "this call is too large to review, or its arguments try to close the fence the reviewer "
-            "reads them inside, so it goes to you",
-            auto.model_label,
-        )
-    context.used += 1
-    reviews: list[Review] = []
-    for reviewer in auto.reviewers:
-        review = await run_review(reviewer, packet, timeout=auto.timeout_seconds)
-        if review is None:
-            return Outcome(False, _failure_sentence(reviewer), reviewer.model)
-        reviews.append(review)
-        if not decide([review]):
-            return Outcome(False, review.reason, reviewer.model)
-    return Outcome(decide(reviews), reviews[-1].reason, auto.model_label)
+        if packet is None:
+            return Outcome(
+                False,
+                "this call is too large to review, or its arguments try to close the fence the reviewer "
+                "reads them inside, so it goes to you",
+                auto.model_label,
+            )
+        context.used += 1
+        reviews: list[Review] = []
+        for reviewer in auto.reviewers:
+            review = await run_review(reviewer, packet, timeout=auto.timeout_seconds)
+            if review is None:
+                return Outcome(False, _failure_sentence(reviewer), reviewer.model)
+            reviews.append(review)
+            if not decide([review]):
+                return Outcome(False, review.reason, reviewer.model)
+        return Outcome(decide(reviews), reviews[-1].reason, auto.model_label)
+    # The floor beneath the specific paths above, not a replacement for them: each of those says
+    # something useful about what went wrong, and this one only promises the call still reaches the
+    # user. It is deliberately this broad because rendering the packet runs arbitrary ``__repr__`` code
+    # from tool arguments a model chose, and the alternative to catching everything is a gated call
+    # escaping the gate. ``exc_info`` is what keeps that honest: a catch this wide also swallows a
+    # programming error in this function, and the traceback is the only thing that would surface one.
+    # ``Exception`` rather than ``BaseException`` on purpose, so a cancellation still stops a review and
+    # KeyboardInterrupt and SystemExit still end the process.
+    except Exception:
+        logger.warning("auto-approval review of %s failed unexpectedly", tool, exc_info=True)
+        return Outcome(False, "reviewing this call failed unexpectedly, so it goes to you", auto.model_label)

@@ -444,6 +444,45 @@ async def test_escalates_on_a_malformed_verdict(monkeypatch, auto, in_turn, capl
     ]
 
 
+class _Unprintable:
+    """A tool argument the packet cannot render.
+
+    `build_packet` reaches `str(arguments)`, which runs `__repr__` on values a model chose, so this is
+    arbitrary code on the path to a review. A self-referential structure hitting `RecursionError` is the
+    same case with a different exception.
+    """
+
+    def __repr__(self):
+        raise ValueError("this value has no repr")
+
+
+async def test_escalates_rather_than_raising_when_nothing_else_caught_it(monkeypatch, auto, in_turn, caplog):
+    """`review_call` promises it does not raise, so the promise is tested rather than trusted: a caller
+    that has to remember a `try` is a caller that can forget one, and what escapes the gate then is a
+    gated call."""
+    client = _patch_client(monkeypatch, Review(True, True, False, "fine"))
+    with caplog.at_level(logging.WARNING, logger="kokua.core.auto_approval"):
+        outcome = await review_call(auto, tool="run_command", arguments={"command": _Unprintable()})
+    assert outcome == Outcome(False, "reviewing this call failed unexpectedly, so it goes to you", "ollama:b")
+    assert client.calls == []
+    assert in_turn.used == 0
+    assert _causes(caplog) == ["auto-approval review of run_command failed unexpectedly"]
+
+
+class _Stopped:
+    def __repr__(self):
+        raise asyncio.CancelledError()
+
+
+async def test_the_catch_all_does_not_swallow_a_cancellation(monkeypatch, auto, in_turn):
+    """The floor catches `Exception`, not `BaseException`, and the difference is the whole process: a
+    swallowed cancellation would turn `/stop` into an approval prompt left standing behind a turn the
+    user ended, and a swallowed KeyboardInterrupt would make a review unkillable."""
+    _patch_client(monkeypatch, Review(True, True, False, "fine"))
+    with pytest.raises(asyncio.CancelledError):
+        await review_call(auto, tool="run_command", arguments={"command": _Stopped()})
+
+
 async def test_a_quorum_requires_every_reviewer(monkeypatch, auto_quorum, in_turn):
     answers = [Review(True, True, False, "fine"), Review(True, False, False, "cannot be undone")]
     asked = []
