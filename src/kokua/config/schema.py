@@ -67,6 +67,50 @@ class AgentConfig:
 
 
 @dataclass
+class ReviewerConfig:
+    """One reviewer, declared whole in ``config.toml``.
+
+    A reviewer is a context-free model call whose answer code consumes: a plan critic's verdict, or
+    the approval gate's three booleans. It takes the five fields that describe *how a model is asked*
+    and none of the three that give an agent reach, because it has none. It holds no tools, nothing
+    delegates to it, nothing spawns it, and it runs no tool loop, so ``tools``, ``delegates_to``, and
+    ``max_iterations`` are rejected by name at parse time rather than accepted and ignored.
+
+    That absence is also the structural reason the approval gate cannot recurse into itself: a
+    reviewer with no tools has no call for the gate to be asked about while it is reviewing one.
+
+    ``model``, ``thinking``, and ``generation`` resolve exactly as an agent's do, against the
+    ``[assistant]`` tiers (see :meth:`AssistantConfig.reviewer_for`). Before this table existed those
+    tiers were the *only* ones a reviewer had, which is why deep planning's critics ran on
+    ``[assistant].model`` at ``[assistant].thinking`` whatever the plan needed.
+    """
+
+    description: str = ""
+    system_message: str = ""
+    model: Optional[str] = None
+    thinking: Optional[Union[bool, str]] = None
+    generation: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ResolvedReviewer:
+    """One reviewer with every tier already applied, ready to build a client from.
+
+    Total rather than optional, for the reason ``AssistantConfig.model_for`` is: "nothing declared
+    anywhere" is a question answered once, here, instead of by each caller again. ``system_message``
+    is the exception and is ``""`` when no table declared one, because what an undeclared prompt means
+    is the consumer's to decide: deep planning falls back to its own prompt constant, and the approval
+    gate refuses to start, since a security reviewer with no stated standard reviews nothing.
+    """
+
+    name: str
+    model: str
+    thinking: Optional[Union[bool, str]]
+    generation: dict
+    system_message: str
+
+
+@dataclass
 class MCPServerConfig:
     """A remote MCP server to connect at startup.
 
@@ -138,6 +182,10 @@ class AssistantConfig:
     # Every agent, keyed by name, read whole from [agents.*]. Nothing is defaulted in code: an agent's
     # capability is exactly what its table declares, and a capability no agent names reaches nothing.
     agents: dict[str, AgentConfig] = field(default_factory=dict)
+    # Every reviewer, keyed by name, read whole from [reviewers.*]. Locked by default like [agents.*]
+    # (see DEFAULT_LOCKED_CONFIG_KEYS): a reviewer's prompt is a declaration about how the assistant is
+    # judged, and update_config is a tool the assistant holds.
+    reviewers: dict[str, ReviewerConfig] = field(default_factory=dict)
     # The agent the user talks to, and the root of the delegation graph.
     entry_agent: str = "assistant"
     # Run independent tool calls in one turn concurrently, so several delegations overlap.
@@ -303,6 +351,30 @@ class AssistantConfig:
         agent = self.agents.get(agent_name)
         declared = agent.max_iterations if agent else None
         return self.max_iterations if declared is None else declared
+
+    def reviewer_for(self, name: str) -> ResolvedReviewer:
+        """The persona reviewer ``name`` runs with: its own ``[reviewers.<name>]`` table over the
+        ``[assistant]`` tiers.
+
+        Each field resolves by the same rule its agent counterpart does, and for the same reasons:
+        ``model`` on truthiness, ``thinking`` on ``is None`` (because ``thinking = false`` is a real
+        declaration an ``or`` would swallow), and ``generation`` merged per key so a reviewer that
+        wanted only a colder temperature keeps the default's context length. A fresh ``generation``
+        dict every call, because the caller assigns it to a live client's
+        ``default_generate_kwargs``, which that client may then mutate.
+
+        Answers for an undeclared name rather than raising: a consumer that requires a table says so
+        itself with an error naming the config fix, which is a better message than a KeyError from here.
+        """
+        reviewer = self.reviewers.get(name)
+        declared_thinking = reviewer.thinking if reviewer else None
+        return ResolvedReviewer(
+            name=name,
+            model=(reviewer.model if reviewer else None) or self.default_model,
+            thinking=self.thinking if declared_thinking is None else declared_thinking,
+            generation={**self.generation, **(reviewer.generation if reviewer else {})},
+            system_message=(reviewer.system_message if reviewer else ""),
+        )
 
     @property
     def skills_dir(self) -> Path:

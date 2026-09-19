@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from kokua.cli import build_arg_parser, resolve_config
 from kokua.config import AssistantConfig
-from kokua.config.schema import AgentConfig
+from kokua.config.schema import AgentConfig, ResolvedReviewer, ReviewerConfig
 
 
 def test_sessions_path_under_data_dir(tmp_path):
@@ -92,3 +92,40 @@ def test_model_for_falls_back_to_the_resolved_default(monkeypatch):
     _stub_resolver(monkeypatch)
     cfg = AssistantConfig(agents={"assistant": AgentConfig()}, entry_agent="assistant")
     assert cfg.model_for("assistant") == "ollama:qwen3.8:27b@http://gpu-box:11434"
+
+
+# --- reviewers: a persona resolved from the [reviewers.*] table and the [assistant] tiers -------
+
+
+def test_reviewer_for_falls_back_to_assistant_tiers():
+    config = AssistantConfig(model="ollama:a", thinking="high", generation={"temperature": 0.7})
+    resolved = config.reviewer_for("plan")
+    assert resolved == ResolvedReviewer(
+        name="plan", model="ollama:a", thinking="high", generation={"temperature": 0.7}, system_message=""
+    )
+
+
+def test_reviewer_for_prefers_its_own_declaration():
+    config = AssistantConfig(
+        model="ollama:a",
+        thinking="high",
+        generation={"temperature": 0.7, "context_length": 32768},
+        reviewers={
+            "plan": ReviewerConfig(
+                model="ollama:b", thinking=False, generation={"temperature": 0.0}, system_message="judge it"
+            )
+        },
+    )
+    resolved = config.reviewer_for("plan")
+    assert resolved.model == "ollama:b"
+    assert resolved.thinking is False
+    # Merged per key, like generation_for: the reviewer wanted a colder temperature, not a smaller window.
+    assert resolved.generation == {"temperature": 0.0, "context_length": 32768}
+    assert resolved.system_message == "judge it"
+
+
+def test_reviewer_generation_is_a_fresh_dict_per_call():
+    config = AssistantConfig(model="ollama:a", generation={"temperature": 0.7})
+    first = config.reviewer_for("plan").generation
+    first["temperature"] = 1.0
+    assert config.reviewer_for("plan").generation == {"temperature": 0.7}
