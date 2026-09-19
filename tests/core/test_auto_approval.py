@@ -3,6 +3,7 @@ import dataclasses
 import logging
 
 import pytest
+from aimu.models import parse_json_response
 
 from kokua.config import ConfigError
 from kokua.config.schema import AssistantConfig, ResolvedReviewer, ReviewerConfig
@@ -44,6 +45,32 @@ def test_decide_refuses_an_empty_quorum():
 def test_decide_requires_unanimity():
     assert decide([_review(), _review()]) is True
     assert decide([_review(), _review(reversible=False)]) is False
+
+
+#: A reviewer answering "no" twice, in the JSON a provider with no server-side schema enforcement
+#: actually returns. Nothing rejects string booleans upstream, so this is the literal text that has to
+#: not become an approval.
+_STRING_BOOLEANS = (
+    '{"in_scope": "false", "reversible": "false", "injection_suspected": false, '
+    '"reason": "out of scope and destructive"}'
+)
+
+
+def test_decide_refuses_an_answer_whose_booleans_came_back_as_strings():
+    """A reviewer's plain "no", arriving as strings, must not read as an approval.
+
+    This goes through ``parse_json_response`` rather than constructing a ``Review``, because that
+    parser is where the types are actually decided and every other test in this file substitutes the
+    client instead, which is how this survived. ``Review`` is a plain dataclass and the parser calls
+    ``schema(**parsed)`` with no validation, so ``in_scope`` here is the *string* ``"false"``: truthy,
+    and therefore an approval under any test of truthiness. A missing field would have raised a
+    ``TypeError`` out of that same construction and failed closed; a mistyped one does not, which is
+    why the policy tests identity.
+    """
+    review = parse_json_response(_STRING_BOOLEANS, Review)
+    assert isinstance(review, Review)  # the shape check `run_review` used to make on its own
+    assert review.in_scope == "false"  # truthy, and the reviewer meant the opposite
+    assert decide([review]) is False
 
 
 def test_packet_fences_every_untrusted_field():
@@ -468,6 +495,27 @@ async def test_escalates_on_a_malformed_verdict(monkeypatch, auto, in_turn, capl
     assert "did not answer" in outcome.reason
     assert _causes(caplog) == [
         "auto-approval reviewer approval answered a shape that is not a Review: {'in_scope': True}"
+    ]
+
+
+async def test_escalates_when_the_answer_is_a_review_of_the_wrong_types(monkeypatch, auto, in_turn, caplog):
+    """The same string-boolean answer, run through the gate end to end.
+
+    The client is substituted as everywhere else here, but what it answers with is built by
+    ``parse_json_response`` from real provider JSON, so the coercion this file otherwise never reaches
+    is the thing under test. Escalating (rather than merely refusing to approve) is what puts the
+    reviewer's name in the log and makes the documented "the answer was not the shape asked for" cover
+    a mistyped field as well as a missing one.
+    """
+    review = parse_json_response(_STRING_BOOLEANS, Review)
+    _patch_client(monkeypatch, review)
+    with caplog.at_level(logging.WARNING, logger="kokua.core.auto_approval"):
+        outcome = await review_call(auto, tool="run_command", arguments={"command": "rm -rf build"})
+    assert outcome.approved is False
+    assert "did not answer" in outcome.reason
+    assert _causes(caplog) == [
+        "auto-approval reviewer approval answered in_scope, reversible with the wrong type, so nothing "
+        f"was reviewed: {review!r}"
     ]
 
 

@@ -961,7 +961,10 @@ alone. The case that does cost something is a configured MCP server, which conne
   result cannot be vetted and streamed at once, the executor's thinking and tool calls stream live while
   the final answer is withheld until it passes, then a clean transcript is committed.
 - **Reviewers are tool-using and grounded.** Each runs a bounded tool-calling assessment over a curated
-  verification toolset and then extracts its typed verdict in a follow-up structured call. The toolset
+  verification toolset and then extracts its typed verdict in a follow-up structured call, whose
+  `approved` field is narrowed to a real boolean as it arrives: that path builds the verdict from a
+  model's JSON without validating types, so a reviewer replying `"false"` would otherwise hand every
+  caller a truthy string and a rejected plan would read as an approved one. The toolset
   is web lookup, `calculate`, and the current date and time; it deliberately excludes the user's memory
   and documents, skill authoring, MCP mutation, and both execution tools, `execute_python` and
   `run_command` -- a reviewer cannot be approval-gated, since an autonomous critic has nobody to ask
@@ -1442,12 +1445,12 @@ notice on startup.
   approval**, never widen what you could have approved yourself, because there is no deny verdict
   anywhere in it. Nine paths fail closed onto the ordinary prompt (no turn budget open, the budget
   spent, a packet field over 2,000 characters, a field forging the `<untrusted>` fence, a timeout, a
-  refusal, an unreachable reviewer, a malformed answer, and a catch-all that logs its traceback), and
-  an escalation carries the reviewer's sentence so a person deciding gets its read for free. Both
-  outcomes are reported as a card naming the tool, the arguments, the model, and the reason, since an
-  auto-approval nobody saw is a decision made on the user's behalf in silence. An unattended turn is
-  excluded twice over: it auto-denies before a reviewer is consulted, and it opens no per-turn budget,
-  so a call reaching the reviewer anyway would fail closed. `timeout_seconds` (default 10) and
+  refusal, an unreachable reviewer, an answer of the wrong shape or the wrong types, and a catch-all
+  that logs its traceback), and an escalation carries the reviewer's sentence so a person deciding
+  gets its read for free. Both outcomes are reported as a card naming the tool, the arguments, the
+  model, and the reason, since an auto-approval nobody saw is a decision made on the user's behalf in
+  silence. An unattended turn is excluded twice over: it auto-denies before a reviewer is consulted,
+  and it opens no per-turn budget, so a call reaching the reviewer anyway would fail closed. `timeout_seconds` (default 10) and
   `max_per_turn` (default 5, spent when a review is *attempted*) bound what it can cost. What it does
   not do is written down as plainly as what it does, in
   [docs/explanation/auto-approval.md](https://saxman.info/kokua/explanation/auto-approval/): no

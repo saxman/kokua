@@ -174,5 +174,17 @@ async def finalize_verdict(client) -> Verdict:
     is set to report to. A ``/plan`` turn's recorded cost is therefore short by exactly one model call
     per review round, with no qualifier able to say so, since the missing call never enters the count
     `_format_tokens` reports against.
+
+    ``approved`` is narrowed to a real boolean here, at the one boundary where the dataclass is built
+    from a model's JSON. That path constructs it with ``schema(**parsed)`` and validates no types, so a
+    reviewer answering ``{"approved": "false"}`` yields the string ``"false"``, which is truthy, and
+    every caller testing ``if verdict.approved`` would read a rejection as an approval. Narrowing at
+    the boundary rather than at each call site keeps the four readers of that field (two decisions and
+    two status labels in ``workflows.planning.runner``) from having to agree about it, and a value that
+    is not ``True`` becomes "not approved", so the plan reaches the user instead of proceeding on a
+    verdict nobody gave. The same coercion gap, with a sharper edge, is why
+    ``core.auto_approval.decide`` tests identity.
     """
-    return await client.chat(_VERDICT_PROMPT, schema=Verdict, use_tools=False)
+    verdict = await client.chat(_VERDICT_PROMPT, schema=Verdict, use_tools=False)
+    verdict.approved = verdict.approved is True
+    return verdict

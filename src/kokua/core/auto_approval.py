@@ -6,7 +6,7 @@ read web pages, files, and tool output. Two properties keep that honest, and bot
 rather than advisory:
 
 **The reviewer never grants.** It answers three questions and writes one sentence; :func:`decide`
-computes the outcome in four words of Python. So the policy is inspectable and testable, a verdict
+computes the outcome in one line of Python. So the policy is inspectable and testable, a verdict
 can be read against the answers it came from, and a missing field is an escalation rather than a coin
 flip. What the reviewer is asked is deliberately not "is this malicious": the common way an agent
 damages a machine is acting correctly on the wrong target, where there is no intent to detect, which
@@ -67,15 +67,39 @@ class Review:
     reason: str
 
 
+#: What each :class:`Review` field has to *be*, checked by :func:`run_review` on every answer. A plain
+#: dataclass carries its annotations for a reader and enforces none of them, and the structured path
+#: that builds one from a model's JSON validates no types either, so this is where the annotations
+#: above become a rule. Kept beside the class rather than inside the function so the two cannot drift.
+_REVIEW_FIELD_TYPES: Mapping[str, type] = {
+    "in_scope": bool,
+    "reversible": bool,
+    "injection_suspected": bool,
+    "reason": str,
+}
+
+
 def decide(reviews: Sequence[Review]) -> bool:
     """Whether a gated call may run without asking the user.
 
     Unanimous and non-empty. Empty is refused explicitly rather than left to ``all()``, which answers
     True for nothing: "no reviewer managed to answer" has to read as "nobody approved", and every
     fail-closed path in this module arrives here with an empty sequence.
+
+    **Identity, not truthiness, and that is not style.** :class:`Review` is a plain dataclass, and
+    AIMU's structured path builds it with ``schema(**parsed)`` and no type validation at all, so a
+    provider that answers ``{"in_scope": "false", "reversible": "false"}`` produces a ``Review`` whose
+    fields are non-empty strings. Every non-empty string is truthy, so ``review.in_scope and
+    review.reversible`` would read a reviewer's plain "no" as an approval and run the command. Testing
+    ``is True`` and ``is False`` makes this policy total instead: anything that is not the boolean
+    asked for is not an approval, whatever else in the chain failed to notice. :func:`run_review`
+    rejects such an answer before it reaches here, and this is deliberately the second of the two
+    checks, because it is the one that cannot be bypassed by a future caller assembling reviews
+    another way.
     """
     return bool(reviews) and all(
-        review.in_scope and review.reversible and not review.injection_suspected for review in reviews
+        review.in_scope is True and review.reversible is True and review.injection_suspected is False
+        for review in reviews
     )
 
 
@@ -334,6 +358,16 @@ async def run_review(reviewer: ResolvedReviewer, packet: str, *, timeout: float)
     reviewed this call. The distinctions are kept in the log and in the sentence the caller shows,
     not in the control flow, so there is no path by which a broken reviewer becomes an approval.
 
+    **An answer of the wrong type is one of those failures**, and it has to be checked here because
+    nothing upstream checks it: AIMU's structured path builds the dataclass with ``schema(**parsed)``
+    and validates no types, so a model answering ``"false"`` where a boolean was asked for passes
+    ``isinstance(answer, Review)`` while carrying strings. A *missing* field already fails closed, as a
+    ``TypeError`` out of that same construction, and the asymmetry between the two was the bug: only
+    one half of "the answer was not the shape asked for" was actually covered. Rejecting it here, one
+    return value like every other failure, is what puts the reviewer's name in the log; :func:`decide`
+    tests identity as well, so the policy stays safe on its own if an answer ever reaches it by
+    another route.
+
     Building the client is inside that guarantee rather than a step before it, because
     ``[reviewers.<name>].model`` is a user-written string nothing at startup builds from: a typo there
     survives ``resolve_auto_approval`` and raises here instead, on every gated call, which is a reviewer
@@ -357,6 +391,17 @@ async def run_review(reviewer: ResolvedReviewer, packet: str, *, timeout: float)
         return None
     if not isinstance(answer, Review):
         logger.warning("auto-approval reviewer %s answered a shape that is not a Review: %r", reviewer.name, answer)
+        return None
+    mistyped = [
+        name for name, expected in _REVIEW_FIELD_TYPES.items() if not isinstance(getattr(answer, name), expected)
+    ]
+    if mistyped:
+        logger.warning(
+            "auto-approval reviewer %s answered %s with the wrong type, so nothing was reviewed: %r",
+            reviewer.name,
+            ", ".join(mistyped),
+            answer,
+        )
         return None
     return answer
 
