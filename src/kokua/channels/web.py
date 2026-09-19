@@ -483,11 +483,27 @@ class WebChannel(BaseWebChannel):
         """
         await self.send_frame({"type": "approval", "name": name, "arguments": arguments})
 
-    async def send_auto_approval(self, name: str, arguments: Any, *, approved: bool, reason: str, model: str) -> None:
+    async def send_auto_approval(
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        approved: bool,
+        reason: str,
+        model: str,
+        conversation_id: Optional[str] = None,
+    ) -> None:
         """Show the page a reviewer's answer about a gated tool call. Nothing replies to this frame.
 
         Unlike ``send_approval_request``, this is a report rather than a prompt: the page renders it
         and moves on, whichever way the reviewer answered.
+
+        Never muted (``auto_approval`` is not in ``_TURN_FRAMES``), and it carries its conversation
+        instead, as ``notification`` does. Muting it would be wrong twice over: the core only sends it
+        for the conversation being viewed (``HumanGate.approve`` re-checks that after the review, which
+        takes a model call), and this is the one frame whose loss would mean a gated tool ran with no
+        record the user can see. The id is what lets the page drop a card that raced a switch anyway,
+        rather than drawing one turn's decision into another turn's transcript.
         """
         await self.send_frame(
             {
@@ -497,6 +513,7 @@ class WebChannel(BaseWebChannel):
                 "approved": approved,
                 "reason": reason,
                 "model": model,
+                "conversation_id": conversation_id,
             }
         )
 

@@ -1727,6 +1727,12 @@ function renderApproval(name, args) {
 // escalation reads as the preface to the ordinary approval prompt arriving right behind it, not as a
 // refusal, which is why it says the call is coming to the user rather than that it was turned down.
 function renderAutoApproval(frame) {
+  // The decision belongs to one turn, so a card that raced a conversation switch is dropped rather
+  // than drawn into the transcript now on screen. The server already re-checks this after the review
+  // and sends nothing for a turn you switched away from; this covers the gap between that check and
+  // the frame arriving. Same shape as `turn_saved` above.
+  const active = lastConversations.find((item) => item.active);
+  if (frame.conversation_id && active && active.id !== frame.conversation_id) return;
   const el = document.createElement("div");
   el.className = frame.approved ? "bubble approval auto-approved" : "bubble approval auto-escalated";
   const prompt = document.createElement("div");
@@ -1735,7 +1741,9 @@ function renderAutoApproval(frame) {
   const code = document.createElement("code");
   code.textContent = toolLine(frame.name, frame.arguments);
   prompt.appendChild(code);
-  prompt.appendChild(document.createTextNode(`: ${frame.reason}`));
+  // Only when there is a sentence: this is what a user reads about a call that was waved through, and
+  // a reviewer that answered with an empty reason should not leave it trailing a bare colon.
+  if (frame.reason) prompt.appendChild(document.createTextNode(`: ${frame.reason}`));
   el.appendChild(prompt);
   appendToLog(el);
   autoscroll();

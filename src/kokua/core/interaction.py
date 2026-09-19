@@ -165,9 +165,11 @@ class HumanGate:
 
         A gated tool named by ``[security.auto_approval]`` is reviewed just before that prompt, and
         only there: both auto-denials above run first, so a review happens exactly where a human would
-        otherwise have been asked and nowhere else. The ordering is one of two independent guarantees
-        of that, since a reactive turn is also the only path that opens a review context, so a call in
-        an unattended turn reaching here would fail closed inside ``review_call`` anyway. A review can
+        otherwise have been asked and nowhere else, and the switched-away one is asked again after the
+        review, since a review is a model call the user can switch conversations during. The ordering
+        is one of two independent guarantees of that, since a reactive turn is also the only path that
+        opens a review context, so a call in an unattended turn reaching here would fail closed inside
+        ``review_call`` anyway. A review can
         only remove the prompt, never the capability: anything it withholds, and every way it can
         fail, arrives at the same prompt this method would have shown. Both outcomes are reported as a
         card, because an auto-approval nobody saw is a decision made on the user's behalf in silence.
@@ -184,30 +186,54 @@ class HumanGate:
             return False
         turn_conversation = self._turn_conversation()
         if turn_conversation != self._active_id():
-            # Raised rather than denied in silence: the tool result recording the refusal lands on a
-            # transcript the user is not reading, and the turn carries on without the tool, so nothing
-            # tells them their own turn lost a capability by their switching away. Not raised for a
-            # proactive firing (above), which reports itself when it ends and would otherwise raise one
-            # of these on every firing.
-            await self._ui.alert(
-                f"A turn you switched away from asked to run {name}. It was denied automatically, "
-                "because approving a tool call means reading it, and that turn is not on screen.",
-                conversation_id=turn_conversation,
-                # One card per tool per conversation: a loop retrying the same call must not stack a
-                # card per attempt, while a second, different tool is genuinely something else to know.
-                group=f"{turn_conversation}:{name}",
-            )
-            return False
+            return await self._deny_switched_away(name, turn_conversation)
         if self.auto_approval is not None and name in self.auto_approval.tools:
             # No `try`: `review_call` turns every failure into an outcome that escalates, so the fall
             # through below is the only thing a failed review can reach.
             outcome = await review_call(self.auto_approval, tool=name, arguments=arguments)
+            # Asked again, because a review takes a model call (up to `timeout_seconds`, 10 by default)
+            # and the check above is that old by the time it returns. A user who switched conversations
+            # inside that window is owed the same answer they would have got without the feature: the
+            # reviewer may approve, and the tool would then run on a turn that is no longer on screen,
+            # which is the one thing that check exists to prevent. The denial comes before the card
+            # rather than after it on purpose: an "auto-approved" card beside a call that was denied
+            # would be a false record, and the alert below reports what actually happened. The review
+            # itself is not lost either way, since `review_call` logs its outcome.
+            if self._turn_conversation() != self._active_id():
+                return await self._deny_switched_away(name, turn_conversation)
             await self._ui.show_auto_approval(
-                name, arguments, approved=outcome.approved, reason=outcome.reason, model=outcome.model
+                name,
+                arguments,
+                approved=outcome.approved,
+                reason=outcome.reason,
+                model=outcome.model,
+                conversation_id=turn_conversation,
             )
             if outcome.approved:
                 return True
         return await self.approval.ask(lambda: self._ui.ask_approval(name, arguments))
+
+    async def _deny_switched_away(self, name: str, turn_conversation: Optional[str]) -> bool:
+        """Deny a gated call whose turn is not the conversation on screen, and say so. Always False.
+
+        Raised rather than denied in silence: the tool result recording the refusal lands on a
+        transcript the user is not reading, and the turn carries on without the tool, so nothing tells
+        them their own turn lost a capability by their switching away. Not raised for a proactive
+        firing, which reports itself when it ends and would otherwise raise one of these on every
+        firing.
+
+        One method, two callers, because the two are the same event at different times: the switch may
+        have happened before the call reached the gate, or during the review the gate ran.
+        """
+        await self._ui.alert(
+            f"A turn you switched away from asked to run {name}. It was denied automatically, "
+            "because approving a tool call means reading it, and that turn is not on screen.",
+            conversation_id=turn_conversation,
+            # One card per tool per conversation: a loop retrying the same call must not stack a
+            # card per attempt, while a second, different tool is genuinely something else to know.
+            group=f"{turn_conversation}:{name}",
+        )
+        return False
 
     async def decide(
         self,

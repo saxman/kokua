@@ -145,6 +145,12 @@ The two read differently on purpose. An approval is a record of something that a
 escalation is not a refusal: it is the preface to the ordinary approval prompt arriving right behind
 it.
 
+**And both are written down.** A card is a channel frame rather than part of the saved transcript, so
+a reload leaves only a tool card indistinguishable from one you approved yourself. Every outcome is
+also logged at `INFO` to `kokua.log` under `logs_path`, naming the tool, the reviewer's model, and its
+reason. That is the half of the record that outlives the page, and it is what you would read to answer
+"did I approve this, or did something else?" a day later.
+
 ## What this does not do
 
 Four admissions, and they matter more than the feature's own description.

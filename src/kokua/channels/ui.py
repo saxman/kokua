@@ -186,7 +186,16 @@ class ChannelUI:
         else:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
 
-    async def show_auto_approval(self, name: str, arguments: Any, *, approved: bool, reason: str, model: str) -> None:
+    async def show_auto_approval(
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        approved: bool,
+        reason: str,
+        model: str,
+        conversation_id: Optional[str] = None,
+    ) -> None:
         """Report a reviewer's answer about a gated tool call, as a card or as a plain-text line.
 
         The fallback is self-contained for the reason :meth:`alert`'s is: a channel with no card
@@ -201,13 +210,31 @@ class ChannelUI:
         already happened; an escalation is not a refusal, it is the preface to the ordinary approval
         prompt arriving right behind it, so its sentence says the call is coming to the user rather than
         that it was turned down.
+
+        ``conversation_id`` names the turn the call belongs to, as it does on :meth:`alert`, so a front
+        end drawing this as a card can file it against that turn rather than against whatever is on
+        screen when it arrives. The text fallback drops it: a channel with one conversation in view has
+        nowhere else it could have landed.
+
+        The reason is appended only when there is one. A reviewer that answered with an empty sentence
+        is unlikely and not impossible, and this line is what a user reads about a gated call that was
+        waved through, so it should not trail a bare colon.
         """
         if self._auto_approval is not None:
-            await self._auto_approval(name, arguments, approved=approved, reason=reason, model=model)
-        elif approved:
-            await self._channel.send(f"[auto-approval] {model} auto-approved {name}({arguments}): {reason}")
+            await self._auto_approval(
+                name,
+                arguments,
+                approved=approved,
+                reason=reason,
+                model=model,
+                conversation_id=conversation_id,
+            )
+            return
+        because = f": {reason}" if reason else ""
+        if approved:
+            await self._channel.send(f"[auto-approval] {model} auto-approved {name}({arguments}){because}")
         else:
-            await self._channel.send(f"[auto-approval] {model} is asking you to approve {name}({arguments}): {reason}")
+            await self._channel.send(f"[auto-approval] {model} is asking you to approve {name}({arguments}){because}")
 
     async def ask_plan_review(self, plan: str, critique: Optional[list[str]] = None) -> None:
         """Prompt for plan approve/edit/reject, surfacing any reviewer critique for the user to weigh."""

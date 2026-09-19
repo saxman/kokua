@@ -128,14 +128,14 @@ async def test_a_second_askers_default_does_not_leak_onto_the_first():
 class _UI:
     def __init__(self):
         self.asked: list[str] = []
-        self.auto_approvals: list[tuple[str, dict, bool, str, str]] = []
+        self.auto_approvals: list[tuple[str, dict, bool, str, str, str]] = []
         self.alerts: list[str] = []
 
     async def ask_approval(self, name, arguments):
         self.asked.append(f"approve:{name}")
 
-    async def show_auto_approval(self, name, arguments, *, approved, reason, model):
-        self.auto_approvals.append((name, arguments, approved, reason, model))
+    async def show_auto_approval(self, name, arguments, *, approved, reason, model, conversation_id=None):
+        self.auto_approvals.append((name, arguments, approved, reason, model, conversation_id))
 
     async def alert(self, text, *, conversation_id=None, group=None):
         self.alerts.append(text)
@@ -344,7 +344,7 @@ async def test_an_approved_review_needs_no_prompt(monkeypatch, in_turn):
     # Never silent: an auto-approval that replaced a visible prompt with an invisible decision is the
     # outcome this feature exists to avoid producing.
     assert ui.auto_approvals == [
-        ("run_command", {"command": "uv run pytest -q"}, True, "runs the test suite", "ollama:b")
+        ("run_command", {"command": "uv run pytest -q"}, True, "runs the test suite", "ollama:b", "c1")
     ]
 
 
@@ -359,7 +359,9 @@ async def test_an_escalated_review_still_prompts_and_carries_the_reason(monkeypa
     assert await _answer_the_prompt(gate, "run_command", {"command": "rm -rf build"}, with_answer=False) is False
 
     assert ui.asked == ["approve:run_command"]
-    assert ui.auto_approvals == [("run_command", {"command": "rm -rf build"}, False, "cannot be undone", "ollama:b")]
+    assert ui.auto_approvals == [
+        ("run_command", {"command": "rm -rf build"}, False, "cannot be undone", "ollama:b", "c1")
+    ]
 
 
 async def test_an_escalated_review_leaves_the_answer_to_the_user(monkeypatch, in_turn):
@@ -414,6 +416,35 @@ async def test_a_turn_switched_away_from_is_never_reviewed(monkeypatch, in_turn)
     assert len(ui.alerts) == 1  # the switched-away card, which says the call was denied
 
 
+async def test_a_switch_during_the_review_denies_instead_of_approving(monkeypatch, in_turn):
+    """The check above `review_call` is as old as the review by the time it answers.
+
+    A review is a model call, up to `timeout_seconds` (10 by default), and the user can switch
+    conversations inside that window. An approval reaching the tool then would run it on a turn that is
+    not on screen, which is precisely what the switched-away denial exists to prevent, so the question
+    is asked again afterwards. No card either: one saying "auto-approved" beside a call that was denied
+    would be a false record, and the alert is the true one.
+    """
+    viewing = {"id": "c1"}
+
+    async def switch_away_then_approve(auto, *, tool, arguments):
+        viewing["id"] = "another-conversation"
+        return Outcome(True, "runs the test suite", "ollama:b")
+
+    monkeypatch.setattr("kokua.core.interaction.review_call", switch_away_then_approve)
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: viewing["id"], is_proactive=lambda: False, turn_conversation=lambda: "c1")
+    gate.gated_tools = frozenset({"run_command"})
+    gate.auto_approval = _auto()
+
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "rm -rf build"}) is False
+
+    assert ui.asked == []
+    assert ui.auto_approvals == []
+    assert len(ui.alerts) == 1
+    assert "denied automatically" in ui.alerts[0]
+
+
 async def test_a_gate_with_no_auto_approval_prompts_as_before(monkeypatch, in_turn):
     """The feature ships off, and off means the gate behaves exactly as it did before it existed."""
     monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("the feature is off"))
@@ -455,5 +486,5 @@ async def test_an_approving_reviewer_removes_the_prompt_through_the_whole_chain(
 
     assert ui.asked == []
     assert ui.auto_approvals == [
-        ("run_command", {"command": "uv run pytest -q"}, True, "runs the test suite", "ollama:b")
+        ("run_command", {"command": "uv run pytest -q"}, True, "runs the test suite", "ollama:b", "c1")
     ]

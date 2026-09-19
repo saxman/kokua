@@ -1449,9 +1449,12 @@ notice on startup.
   that logs its traceback), and an escalation carries the reviewer's sentence so a person deciding
   gets its read for free. Both outcomes are reported as a card naming the tool, the arguments, the
   model, and the reason, since an auto-approval nobody saw is a decision made on the user's behalf in
-  silence. An unattended turn is excluded twice over: it auto-denies before a reviewer is consulted,
-  and it opens no per-turn budget, so a call reaching the reviewer anyway would fail closed. `timeout_seconds` (default 10) and
-  `max_per_turn` (default 5, spent when a review is *attempted*) bound what it can cost. What it does
+  silence. Both are logged as well, at `INFO`, because a card is a channel frame and not part of the
+  saved transcript: after a reload the log under `logs_path` is the only thing that distinguishes a
+  gated call a reviewer waved through from one the user approved. An unattended turn is excluded twice
+  over: it auto-denies before a reviewer is consulted, and it opens no per-turn budget, so a call
+  reaching the reviewer anyway would fail closed. `timeout_seconds` (default 10) and `max_per_turn`
+  (default 5, spent when a review is *attempted*) bound what it can cost. What it does
   not do is written down as plainly as what it does, in
   [docs/explanation/auto-approval.md](https://saxman.info/kokua/explanation/auto-approval/): no
   sandbox under it, no shell parsing in front of it, an argument-scoped allowlist would remove most

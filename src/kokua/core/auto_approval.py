@@ -52,6 +52,14 @@ MAX_FIELD_CHARS = 2000
 UNTRUSTED_OPEN = "<untrusted>"
 UNTRUSTED_CLOSE = "</untrusted>"
 
+#: What :func:`_fence` actually refuses: the two tags without their closing ``>``, compared against a
+#: casefolded value. Derived from the tags above so the two cannot drift apart. Wider than the tags
+#: themselves on purpose, because a reviewer is a model rather than a parser: ``</UNTRUSTED>``,
+#: ``</untrusted >``, and a bare unterminated ``<untrusted`` all read as the fence to whoever is being
+#: asked, so an exact, case-sensitive match would let a value close the fence the module's whole
+#: argument says it refuses to escape.
+_FENCE_PREFIXES = (UNTRUSTED_OPEN.removesuffix(">"), UNTRUSTED_CLOSE.removesuffix(">"))
+
 
 @dataclass
 class Review:
@@ -107,7 +115,8 @@ def _fence(value: str) -> Optional[str]:
     """``value`` wrapped as untrusted data, or None when it cannot be fenced safely."""
     if len(value) > MAX_FIELD_CHARS:
         return None
-    if UNTRUSTED_CLOSE in value or UNTRUSTED_OPEN in value:
+    folded = value.casefold()
+    if any(prefix in folded for prefix in _FENCE_PREFIXES):
         return None
     return f"{UNTRUSTED_OPEN}{value}{UNTRUSTED_CLOSE}"
 
@@ -422,16 +431,41 @@ def _failure_sentence(reviewer: ResolvedReviewer) -> str:
 async def review_call(auto: AutoApproval, *, tool: str, arguments: dict) -> Outcome:
     """Whether ``tool`` may run without asking, and what to tell the user either way.
 
+    **This does not raise.** Every failure, the ones in :func:`_outcome_for` and the ones nobody
+    thought of, comes back as an ``Outcome`` that escalates, so a caller needs no ``try`` of its own
+    and a second caller cannot forget to write one. The guarantee lives here because the promise is
+    made here: a propagating exception would leave the gate's one claim, that a review it could not
+    complete asks the user, depending on whoever happened to call it.
+
+    **Every outcome is recorded here, and that is why this function is a wrapper.** The card the user
+    sees is a channel frame: it is not in the persisted transcript, so after a reload the only surviving
+    evidence that a gated shell command ran without anyone being asked would be a tool card
+    indistinguishable from one the user approved. This line is the durable half of "an auto-approval
+    nobody saw is a decision made on the user's behalf in silence", in the rotating log under
+    ``logs_path``. Both directions are logged, because an escalation is a decision too (it says the
+    review happened and cost a call), and it sits in the one place every outcome passes through so a
+    later edge case added to :func:`_outcome_for` is recorded without anyone remembering to. The
+    arguments are left out: the call itself is in the conversation the user can read, and what this
+    adds is that nobody was asked.
+    """
+    outcome = await _outcome_for(auto, tool=tool, arguments=arguments)
+    logger.info(
+        "auto-approval %s %s, reviewer %s: %s",
+        "approved" if outcome.approved else "escalated",
+        tool,
+        outcome.model,
+        outcome.reason,
+    )
+    return outcome
+
+
+async def _outcome_for(auto: AutoApproval, *, tool: str, arguments: dict) -> Outcome:
+    """:func:`review_call`'s answer, before it is recorded. Does not raise, for the reason given there.
+
     Reviewers are asked in order and the first withheld answer ends the round, so a quorum costs every
     call only when the ones before it agreed. The budget is spent when a review is *attempted*, not when
     one approves: the cost is paid either way, and a loop that keeps getting escalated is exactly the
     loop the cap exists to stop paying for.
-
-    **This does not raise.** Every failure, the ones below and the ones nobody thought of, comes back as
-    an ``Outcome`` that escalates, so a caller needs no ``try`` of its own and a second caller cannot
-    forget to write one. The guarantee lives here because the promise is made here: a propagating
-    exception would leave the gate's one claim, that a review it could not complete asks the user,
-    depending on whoever happened to call it.
     """
     try:
         context = current_review_context.get()
