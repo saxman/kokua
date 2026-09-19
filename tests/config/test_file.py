@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import fields
 
 import pytest
 
@@ -469,6 +470,19 @@ def test_the_shipped_gate_would_resolve_if_it_were_switched_on():
     for entry in cfg.auto_approval_tools:
         assert entry in cfg.confirm_tools
         assert entry not in cfg.never_auto_approve
+
+
+def test_a_reviewers_description_reaches_no_consumer():
+    """A reviewer's `description` is a note to whoever opens config.toml, unlike an agent's.
+
+    `config.example.toml` and the configuration reference both state that nothing reads it, which is a
+    claim about code and so needs something behind it: every consumer is handed a `ResolvedReviewer`, so
+    a field absent from that type cannot reach a reviewer's client, its prompt, or a card. Wiring the
+    field up to something is a fine thing to do; doing it while that prose still says nothing reads it
+    is what this pins.
+    """
+    assert "description" in {field.name for field in fields(schema.ReviewerConfig)}
+    assert "description" not in {field.name for field in fields(schema.ResolvedReviewer)}
 
 
 def test_the_shipped_example_floors_the_capability_granting_tools():

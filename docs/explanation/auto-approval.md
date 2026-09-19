@@ -127,9 +127,11 @@ reviewer may approve one, so a shell command would run in a turn nobody is watch
 ## What you see
 
 Both outcomes are reported, every time. An approval and an escalation each arrive as a card naming the
-tool, its arguments, the reviewer's model, and its sentence. A channel with no card surface gets the
-same content as a line of text rather than silence, because this is the one frame whose absence would
-mean a gated tool ran on your machine with no record anywhere you can see.
+tool, its arguments, the model that answered, and its sentence. Where a quorum was asked and agreed,
+that field names every model in it, and where one reviewer alone is the reason for the outcome (it
+withheld approval, or it could not be reached) the card names that one. A channel with no card surface
+gets the same content as a line of text rather than silence, because this is the one frame whose
+absence would mean a gated tool ran on your machine with no record anywhere you can see.
 
 The two read differently on purpose. An approval is a record of something that already happened. An
 escalation is not a refusal: it is the preface to the ordinary approval prompt arriving right behind
@@ -167,10 +169,11 @@ call did. A sequence of individually innocuous calls is reviewed as individually
 ## How other assistants do this
 
 Worth reading even if you never turn this on, because the differences are design decisions rather than
-details. What follows describes each project as its own documentation and configuration did when this
-page was written, and none of it can be checked from this repository: where a figure or an enumerated
-rule below is theirs rather than something measured here, it says so. All three move faster than this
-page will.
+details. What follows describes each project as its own documentation and configuration had it in
+September 2026, when this page was written. None of it can be checked from inside this repository, so
+every figure and every enumerated rule below is attributed to whoever published it. All three projects
+move faster than this page will: treat a claim here as a pointer to their documentation rather than as
+its current state.
 
 **OpenClaw** ships the closest analogue, `tools.exec.mode: "auto"`. A static policy runs first, only
 eligible misses reach a model reviewer, and everything else goes to a human. Its reviewer gets a

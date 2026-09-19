@@ -1073,8 +1073,9 @@ alone. The case that does cost something is a configured MCP server, which conne
   `[email] to`, `[paths] data_dir`, and the whole `[agents.*]` and `[reviewers.*]` sections, matched by
   section prefix since agent and reviewer names cannot be enumerated ahead of time. Each is refused by
   the tool by default, and changeable only by hand-editing the list itself: `update_config` is a tool
-  the assistant holds, so a writable agent table would let it widen its own reach. `update_config` is also in the default `confirm_tools`
-  list, as `config.update_config`, so each write it *is* allowed goes through the approval prompt.
+  the assistant holds, so a writable agent table would let it widen its own reach. `update_config` is
+  also in the default `confirm_tools` list, as `config.update_config`, so each write it *is* allowed
+  goes through the approval prompt.
 - The `update_config` write policy is now yours to set. `[security].locked_config_keys` holds the
   patterns the assistant may not write, defaulting to what was previously hardcoded. The key is itself
   always locked, so the assistant cannot unlock itself in one call. A pattern that could never match

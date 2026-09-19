@@ -262,7 +262,7 @@ so, and where it went wrong if it did, saying up front that those are the criter
 # system_message is required rather than defaulted: it is the part of that feature you are meant to
 # read, and a security reviewer with no stated standard reviews nothing.
 [reviewers.approval]
-description = "Answers three questions about one gated tool call."
+description = "Answers three questions about one gated tool call, and writes the sentence you read."
 # A different model from [assistant].model is the point: a reviewer running the same model as the agent
 # it reviews can be talked out of the same judgement by the same text. Startup warns if they match.
 # model = "anthropic:claude-haiku-4-5-20251001"

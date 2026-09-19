@@ -599,8 +599,9 @@ Its gated calls are denied before a reviewer is consulted at all, which is the b
 `confirm_tools` already had and is unchanged by this table.
 
 Both outcomes are reported. An approval and an escalation each arrive as a card naming the tool, its
-arguments, the reviewer's model, and its sentence, because an auto-approval nobody saw is a decision
-made on your behalf in silence.
+arguments, the model that answered (every model in a quorum, or the one reviewer that is the reason for
+the outcome), and its sentence, because an auto-approval nobody saw is a decision made on your behalf
+in silence.
 
 ## `[agents.<name>]`
 

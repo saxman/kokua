@@ -102,7 +102,7 @@ serve loop, and little else. It owns:
 - **`ConversationBook`** -- the session store, the per-conversation agent cache, and which
   conversation is being viewed. These move together on a switch, which is why they are one object.
 - **`TurnRunner`** -- reactive turns (the user sent something) and proactive turns (a scheduled task
-  fired). The seven concurrency invariants are documented at the top of that module.
+  fired). The eight concurrency invariants are documented at the top of that module.
 - **`HumanGate`** -- tool approval and a workflow's own decision, each a lock-guarded single-slot request
   the serve loop resolves with the user's next message. With
   [`[security.auto_approval]`](../reference/configuration.md#securityauto_approval) on, a gated call

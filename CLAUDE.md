@@ -357,7 +357,7 @@ change. Full rationale, with the code that backs each claim, is in
    below `data/` is a derived `AssistantConfig` property, never a new function in `config/paths.py`.
    Declared scheduled tasks are the one stated exception, living in `config.toml` rather than under
    `data/`, because a task is a declaration a user should be able to write and comment.
-5. **A single user, one process, with concurrency rules written down.** The seven turn invariants live
+5. **A single user, one process, with concurrency rules written down.** The eight turn invariants live
    at the top of `core/turns.py`, each naming the bug it prevents. Update them in the same commit as
    any change to turn concurrency.
 6. **Security is explicit and user controlled.** Capability stays real; a control is added beside it
