@@ -16,7 +16,6 @@ from kokua.core.auto_approval import (
     build_packet,
     current_review_context,
     decide,
-    resolve_auto_approval,
     review_call,
 )
 from tests.channels import FakeChannel, _config
@@ -131,17 +130,24 @@ def _auto(**overrides) -> dict:
 
 
 async def _resolve(tmp_path, **overrides):
-    """What the auto-approval settings resolve to once every agent is wired.
+    """What a started assistant leaves on its gate for these settings.
 
-    Through a started assistant, because the vocabulary a tool entry resolves against is what the entry
-    agent and every worker actually built, and nothing short of a started assistant has that. The
-    resolved record is returned rather than read back off the assistant, which does not hold it yet.
+    Through a started assistant because the vocabulary a tool entry resolves against is what the entry
+    agent and every worker actually built, and nothing short of a started assistant has that. Read back
+    off `_human.auto_approval` rather than resolved again here, which is the difference between testing
+    the resolver and testing the feature: startup assigning that field is the whole of what makes this
+    layer reachable, and calling the resolver directly leaves the assignment unasserted, so deleting it
+    ships the feature permanently off with nothing failing.
+
+    `start()` is inside the `try` because it is what raises `ConfigError` for a bad table, and the
+    state has to be closed on that path too: a released portal cannot be stopped during interpreter
+    finalization (see `registry/context.py`), so a leaked one is a process that never exits.
     """
     config = _config(tmp_path, **_auto(**overrides))
     assistant = await Assistant.create(config, FakeChannel(), client=MockAsyncModelClient([]))
-    await assistant.start()
     try:
-        return resolve_auto_approval(config, assistant._state, assistant._agent, assistant._human.gated_tools)
+        await assistant.start()
+        return assistant._human.auto_approval
     finally:
         assistant._state.close()
 

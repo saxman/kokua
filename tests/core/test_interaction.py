@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 
@@ -301,10 +302,16 @@ async def _answer_the_prompt(gate, name, arguments, *, with_answer: bool) -> boo
     task = asyncio.create_task(gate.approve(name, arguments))
     try:
         async with asyncio.timeout(_SETTLE_TIMEOUT):
+            # Slept rather than spun: on the failure path this polls for the whole timeout, and a busy
+            # `sleep(0)` would burn a core for two seconds to reach an assertion that already failed.
             while not gate.approval.pending:
-                await asyncio.sleep(0)
+                await asyncio.sleep(0.001)
     except TimeoutError:
         task.cancel()
+        # Awaited, so the cancellation lands before this returns: a task left pending is collected
+        # later and prints "Task was destroyed but it is pending" over the failure being reported.
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
         raise AssertionError(f"approve({name!r}) never stopped to ask") from None
     gate.approval.resolve(with_answer)
     return await task
