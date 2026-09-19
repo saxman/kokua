@@ -198,7 +198,8 @@ class HumanGate:
             # which is the one thing that check exists to prevent. The denial comes before the card
             # rather than after it on purpose: an "auto-approved" card beside a call that was denied
             # would be a false record, and the alert below reports what actually happened. The review
-            # itself is not lost either way, since `review_call` logs its outcome.
+            # itself is not lost either way, since `review_call` already logged what the reviewer
+            # answered, whether or not this re-check goes on to deny the call.
             if self._turn_conversation() != self._active_id():
                 return await self._deny_switched_away(name, turn_conversation)
             await self._ui.show_auto_approval(

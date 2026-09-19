@@ -447,15 +447,20 @@ async def review_call(auto: AutoApproval, *, tool: str, arguments: dict) -> Outc
     later edge case added to :func:`_outcome_for` is recorded without anyone remembering to. The
     arguments are left out: the call itself is in the conversation the user can read, and what this
     adds is that nobody was asked.
+
+    **The line reports what the reviewer answered, not what the gate did with it.** This is written
+    before ``HumanGate.approve`` re-checks whether the user switched conversations during the review,
+    which can still deny a call this line calls approved. Framing it as the reviewer's answer keeps the
+    line true at the moment it is written; the gate's own denial, when it happens, reaches the user
+    through the alert ``_deny_switched_away`` raises, not through a second log call here.
     """
     outcome = await _outcome_for(auto, tool=tool, arguments=arguments)
-    logger.info(
-        "auto-approval %s %s, reviewer %s: %s",
-        "approved" if outcome.approved else "escalated",
-        tool,
-        outcome.model,
-        outcome.reason,
-    )
+    verb = "recommended approving" if outcome.approved else "escalated"
+    # `%r` rather than `%s` on the reason: it is model-written text, and `logging_setup.py` formats one
+    # record per line, so an `%s` reason containing a newline plus a plausible-looking record would
+    # write a second, forged line indistinguishable from a genuine one. `%r` quotes the value and
+    # escapes the newline instead of emitting it.
+    logger.info("auto-approval reviewer %s %s %s: %r", outcome.model, verb, tool, outcome.reason)
     return outcome
 
 

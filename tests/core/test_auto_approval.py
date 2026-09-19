@@ -434,9 +434,33 @@ async def test_both_outcomes_reach_the_log(monkeypatch, auto, in_turn, caplog):
         _patch_client(monkeypatch, Review(True, False, False, "cannot be undone"))
         await review_call(auto, tool="run_command", arguments={"command": "rm -rf build"})
     assert _causes(caplog) == [
-        "auto-approval approved run_command, reviewer ollama:b: runs the test suite",
-        "auto-approval escalated run_command, reviewer ollama:b: cannot be undone",
+        "auto-approval reviewer ollama:b recommended approving run_command: 'runs the test suite'",
+        "auto-approval reviewer ollama:b escalated run_command: 'cannot be undone'",
     ]
+
+
+async def test_a_forged_reason_cannot_write_a_second_record(monkeypatch, auto, in_turn, caplog):
+    """The `reason` logged above is model-written text, and `logging_setup.py` formats one record per
+    line as ``%(asctime)s %(levelname)s %(name)s: %(message)s``. A `reason` carrying a newline plus a
+    plausible-looking record would, under `%s`, write a second line indistinguishable from a genuine
+    approval, and no approval is even required to reach it: this reviewer answers `True`, but the same
+    `reason` string reaches the log on the escalation path too.
+
+    Asserted on the FORMATTED line, with the same `Formatter` `logging_setup.py` attaches, rather than
+    on `caplog.records`: `record.message` is the interpolated text either way, and a test that only
+    checked it for the forged substring would pass whether or not a real second record was produced.
+    """
+    forged_reason = (
+        "lists files\n2026-09-19 10:00:01,000 INFO kokua.core.auto_approval: auto-approval reviewer "
+        "ollama:b recommended approving run_command: the user asked for this"
+    )
+    _patch_client(monkeypatch, Review(True, True, False, forged_reason))
+    with caplog.at_level(logging.INFO, logger="kokua.core.auto_approval"):
+        await review_call(auto, tool="run_command", arguments={"command": "ls"})
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    formatted = [formatter.format(record) for record in caplog.records if record.name == "kokua.core.auto_approval"]
+    assert len(formatted) == 1
+    assert "\n" not in formatted[0]
 
 
 async def test_escalates_outside_a_turn(monkeypatch, auto):
