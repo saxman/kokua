@@ -444,6 +444,12 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 /* Deny is the safe answer, so it is the quiet one: allowing a gated call is the deliberate act. */
 .approval button.deny { background: none; border-color: var(--attention-border); color: var(--fg-dim); }
 .approval button.deny:hover { color: var(--fg); }
+/* A record rather than a prompt: the warm fill only invites a click when one is possible, so an
+   auto-approval (nothing left to decide) settles onto the page's plain surface instead. */
+.approval.auto-approved { background: var(--surface); border-color: var(--border); }
+/* An escalation keeps the warm surface because the ordinary prompt is arriving right behind it, but a
+   dashed border marks this card as the reviewer's note rather than the prompt itself. */
+.approval.auto-escalated { border-style: dashed; }
 /* One bordered box holding the text area and its controls, so the composer reads as a single field
    rather than a row of five peers. */
 form { display: flex; flex-direction: column; gap: 8px; margin: 8px 16px 16px; padding: 10px 12px;

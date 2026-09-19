@@ -42,6 +42,11 @@ class RichChannelDouble(BareChannel):
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         self.calls.append(("approval", (name, arguments)))
 
+    async def send_auto_approval(
+        self, name: str, arguments: Any, *, approved: bool, reason: str, model: str, conversation_id=None
+    ) -> None:
+        self.calls.append(("auto_approval", (name, arguments, approved, reason, model, conversation_id)))
+
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
         self.calls.append(("plan_review", (plan, critique)))
 
@@ -174,6 +179,7 @@ async def test_rich_channel_receives_every_frame():
     await ui.notify("done")
     await ui.alert("a scheduled task finished")
     await ui.ask_approval("execute_python", {"code": "1"})
+    await ui.show_auto_approval("run_command", {"command": "ls"}, approved=True, reason="lists files", model="m")
     await ui.ask_plan_review("step 1", ["too vague"])
     await ui.show_plan("step 1")
     await ui.show_phase("Planner", "drafting")
@@ -186,6 +192,7 @@ async def test_rich_channel_receives_every_frame():
         "notification",  # notify
         "notification",  # alert: one frame, two methods, differing only in their fallback
         "approval",
+        "auto_approval",
         "plan_review",
         "plan",
         "phase",
@@ -277,3 +284,55 @@ async def test_alert_carries_the_group_that_supersedes_an_earlier_card():
     channel = RichChannelDouble()
     await ChannelUI(channel).alert("Scheduled task 'Digest' finished.", conversation_id="c7", group="Digest")
     assert channel.calls == [("notification", ("Scheduled task 'Digest' finished.", "c7", None, "Digest"))]
+
+
+# --- auto-approval: the one frame with no silent degradation --------------------------------------
+
+
+async def test_auto_approval_uses_the_frame_when_the_channel_has_one():
+    """The conversation rides along, as it does on `alert`: the decision belongs to one turn, and a
+    front end with a conversation list has to be able to file it against that turn rather than against
+    whatever is on screen when the card arrives."""
+    channel = RichChannelDouble()
+    ui = ChannelUI(channel)
+    await ui.show_auto_approval(
+        "run_command", {"command": "ls"}, approved=True, reason="lists files", model="ollama:b", conversation_id="c1"
+    )
+    assert channel.calls[-1] == (
+        "auto_approval",
+        ("run_command", {"command": "ls"}, True, "lists files", "ollama:b", "c1"),
+    )
+
+
+async def test_an_empty_reason_does_not_trail_a_colon():
+    """The sentence a user reads about a call that was waved through, so it should read as a sentence.
+
+    Both directions, because the fallback builds them separately.
+    """
+    channel = BareChannel()
+    ui = ChannelUI(channel)
+    await ui.show_auto_approval("run_command", {"command": "ls"}, approved=True, reason="", model="ollama:b")
+    await ui.show_auto_approval("run_command", {"command": "ls"}, approved=False, reason="", model="ollama:b")
+    assert [line.endswith("run_command({'command': 'ls'})") for line in channel.sent] == [True, True]
+
+
+async def test_auto_approval_degrades_to_a_self_contained_line():
+    channel = BareChannel()
+    ui = ChannelUI(channel)
+    await ui.show_auto_approval("run_command", {"command": "ls"}, approved=True, reason="lists files", model="ollama:b")
+    line = channel.sent[0]
+    # Self-contained, like `alert`'s fallback: a channel with no card surface has to carry the whole
+    # decision in words, because there is nothing else for the user to click on.
+    assert "auto-approved" in line
+    assert "run_command" in line
+    assert "lists files" in line
+    assert "ollama:b" in line
+
+
+async def test_an_escalation_says_it_is_going_to_the_user():
+    channel = BareChannel()
+    ui = ChannelUI(channel)
+    await ui.show_auto_approval(
+        "run_command", {"command": "ls"}, approved=False, reason="cannot be undone", model="ollama:b"
+    )
+    assert "asking you" in channel.sent[0]

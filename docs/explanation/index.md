@@ -7,6 +7,8 @@ elsewhere in the documentation looks arbitrary.
   that goal, each with the code backing it and what it therefore rules out. Start here.
 - **[Architecture](architecture.md)**: the whole map. Module layout, control flow, configuration
   layering, images, MCP, planning, and the web front end.
+- **[Auto-approval](auto-approval.md)**: the optional model reviewer that can answer an approval
+  prompt in your place, what it can and cannot do, and how the same idea is built elsewhere.
 
 For task-oriented recipes see the [how-to guides](../how-to/index.md); for exhaustive settings see the
 [reference](../reference/index.md).

@@ -649,12 +649,12 @@ def gateable_tools(state: LiveState, entry_agent) -> dict[str, set[str]]:
 
 
 def _resolve_gate_entry(entry: str, vocabulary: dict[str, set[str]], registry: Mapping[str, Toolset]) -> tuple:
-    """One ``[security].confirm_tools`` entry as ``(tool names, fault)``, exactly one of which is empty.
+    """One gate entry as ``(tool names, fault)``, exactly one of which is empty.
 
-    Split out from the loop below so each way an entry can gate nothing gets its own sentence naming the
-    edit to make. A near-miss is worth more than a rejection here: the reader wrote a name meaning to
-    hold a tool back, and the difference between the name they wrote and the one that works is the whole
-    content of the error.
+    Split out from :func:`resolve_gate_entries` so each way an entry can match nothing gets its own
+    sentence naming the edit to make. A near-miss is worth more than a rejection here: the reader
+    wrote a name meaning to hold a tool back, and the difference between the name they wrote and the
+    one that works is the whole content of the error.
     """
     parts = entry.split(_GATE_SEPARATOR)
     if len(parts) > 2:
@@ -700,6 +700,38 @@ def _resolve_gate_entry(entry: str, vocabulary: dict[str, set[str]], registry: M
     return {tool}, ""
 
 
+def resolve_gate_entries(
+    entries: Sequence[str],
+    vocabulary: dict[str, set[str]],
+    registry: Mapping[str, Toolset],
+    *,
+    setting: str,
+    effect: str,
+    remedy: str,
+) -> frozenset[str]:
+    """The tool names ``entries`` resolve to, rejecting any entry that would match nothing.
+
+    Shared by every setting written in the ``<toolset>``/``<toolset>.<tool>`` vocabulary, so a
+    misspelling in one of them gets the same "did you mean" as a misspelling in another. ``effect`` and
+    ``remedy`` are the caller's own words, because what a dead entry does and what it costs both differ:
+    a dead ``confirm_tools`` entry gates nothing, and a tool with full machine access then runs
+    unprompted, while a dead ``[security.auto_approval].tools`` entry reviews nothing, and a prompt
+    somebody meant to stop receiving still arrives.
+    """
+    names: set[str] = set()
+    faults: list[str] = []
+    for entry in entries:
+        resolved, fault = _resolve_gate_entry(entry, vocabulary, registry)
+        if fault:
+            faults.append(fault)
+        else:
+            names.update(resolved)
+    if faults:
+        noun = "entry" if len(faults) == 1 else "entries"
+        raise ConfigError(f"{setting} has {len(faults)} {noun} that would {effect}: {'; '.join(faults)}. {remedy}")
+    return frozenset(names)
+
+
 def resolve_confirm_tools(config: AssistantConfig, state: LiveState, entry_agent) -> frozenset[str]:
     """The tool names ``[security].confirm_tools`` gates, rejecting an entry that would gate nothing.
 
@@ -710,7 +742,7 @@ def resolve_confirm_tools(config: AssistantConfig, state: LiveState, entry_agent
     no tools is refused as firmly as a misspelling is.
 
     Called once every agent has been wired, because the vocabulary does not exist before then and is
-    wider than the entry agent's own tools. ``compute.execute_python`` is one of the five gates Kokua
+    wider than the entry agent's own tools. ``compute.execute_python`` is one of the six gates Kokua
     ships and no toolset the entry agent declares provides it: it comes from ``[agents.coder]``, whose
     tools are built when the delegation tool is.
 
@@ -720,23 +752,17 @@ def resolve_confirm_tools(config: AssistantConfig, state: LiveState, entry_agent
     the 21 toolsets a bare name came from. What it cannot buy is telling two toolsets' same-named tools
     apart at the moment of the call: gating either prefix gates that name wherever it is called.
     """
-    vocabulary = gateable_tools(state, entry_agent)
-    gated: set[str] = set()
-    faults: list[str] = []
-    for entry in config.confirm_tools:
-        names, fault = _resolve_gate_entry(entry, vocabulary, state.registry)
-        if fault:
-            faults.append(fault)
-        else:
-            gated.update(names)
-    if faults:
-        noun = "entry" if len(faults) == 1 else "entries"
-        raise ConfigError(
-            f"[{_CONFIRM_TOOLS_SECTION}].{_CONFIRM_TOOLS_KEY} has {len(faults)} {noun} that would gate "
-            f"nothing: {'; '.join(faults)}. An entry matching no tool holds nothing back, so the call it "
-            "was written to stop runs with no prompt and nothing reports it. Only tools that exist at "
-            "startup can be gated, so a tool from a server the assistant connects later with "
-            "add_mcp_server cannot be listed ahead of time: give the server a [[mcp.server]] table in "
-            "config.toml and name it in an agent's tools, and its tools are gateable from the next start."
-        )
-    return frozenset(gated)
+    return resolve_gate_entries(
+        config.confirm_tools,
+        gateable_tools(state, entry_agent),
+        state.registry,
+        setting=f"[{_CONFIRM_TOOLS_SECTION}].{_CONFIRM_TOOLS_KEY}",
+        effect="gate nothing",
+        remedy=(
+            "An entry matching no tool holds nothing back, so the call it was written to stop runs with "
+            "no prompt and nothing reports it. Only tools that exist at startup can be gated, so a tool "
+            "from a server the assistant connects later with add_mcp_server cannot be listed ahead of "
+            "time: give the server a [[mcp.server]] table in config.toml and name it in an agent's "
+            "tools, and its tools are gateable from the next start."
+        ),
+    )

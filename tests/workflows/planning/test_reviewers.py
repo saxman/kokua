@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.helpers import MockAsyncModelClient
+from kokua.config.schema import ReviewerConfig
 from kokua.config.settings_sources import build_settings_table
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import critics
@@ -176,7 +179,8 @@ async def test_review_result_includes_evidence_in_prompt(monkeypatch):
             "kokua.workflows.critics.reviewer_agent",
             lambda model, system, tools=None, **kwargs: aio.Agent(client, tools=[]),
         )
-        await review.review_result("mock", "do X", "PLAN", "ANSWER", evidence)
+        reviewer = AssistantConfig(model="mock").reviewer_for("result")
+        await review.review_result(reviewer, "do X", "PLAN", "ANSWER", evidence)
         first_user = client.messages[0]["content"]
         assert ("Evidence the agent gathered" in first_user) is expect
         assert ("SRC-XYZ" in first_user) is expect
@@ -196,7 +200,7 @@ async def test_reviewer_runs_tool_loop_then_extracts_verdict(monkeypatch):
 
     monkeypatch.setattr("kokua.workflows.critics.reviewer_agent", fake_reviewer_agent)
 
-    verdict = await review.review_plan("mock", "do X", "PLAN")
+    verdict = await review.review_plan(AssistantConfig(model="mock").reviewer_for("plan"), "do X", "PLAN")
 
     assert verdict.approved is True
     # The reviewer actually exercised a tool round before verdicting (not a single tool-less call).
@@ -217,7 +221,7 @@ async def test_streamed_reviewer_streams_then_extracts_verdict(monkeypatch):
         lambda model, system, tools=None, **kwargs: aio.Agent(client, tools=[]),
     )
 
-    rc, stream = await review.stream_plan_review("mock", "do X", "PLAN")
+    rc, stream = await review.stream_plan_review(AssistantConfig(model="mock").reviewer_for("plan"), "do X", "PLAN")
     parts = [ch.content async for ch in stream if ch.phase == StreamingContentType.GENERATING]
     verdict = await critics.finalize_verdict(rc)
 
@@ -408,8 +412,11 @@ def test_reviewer_agent_carries_the_thinking_it_is_given(monkeypatch):
 
 
 async def test_the_configured_thinking_reaches_every_planning_reviewer(monkeypatch):
-    """The default has to reach the reviewers through all four planning wrappers, not just the two
-    non-streamed ones, or a verbose planned turn would review at a different effort than a quiet one."""
+    """[assistant].thinking has to reach the reviewers through all four planning wrappers, not just the
+    two non-streamed ones, or a verbose planned turn would review at a different effort than a quiet
+    one. Effort now arrives through ``reviewer_for``, which falls back to ``[assistant].thinking`` when
+    no ``[reviewers.<name>]`` table declares its own, so driving the wrappers with its answer is what
+    exercises the real path rather than a value no caller actually produces."""
 
     class _StubAgent:
         def __init__(self):
@@ -430,10 +437,11 @@ async def test_the_configured_thinking_reaches_every_planning_reviewer(monkeypat
     monkeypatch.setattr(critics, "reviewer_agent", fake_reviewer)
     monkeypatch.setattr(critics, "finalize_verdict", fake_finalize)
 
-    await review.review_plan(None, "req", "plan", thinking="high")
-    await review.review_result(None, "req", "plan", "answer", thinking="high")
-    await review.stream_plan_review(None, "req", "plan", thinking="high")
-    await review.stream_result_review(None, "req", "plan", "answer", thinking="high")
+    config = AssistantConfig(thinking="high")
+    await review.review_plan(config.reviewer_for("plan"), "req", "plan")
+    await review.review_result(config.reviewer_for("result"), "req", "plan", "answer")
+    await review.stream_plan_review(config.reviewer_for("plan"), "req", "plan")
+    await review.stream_result_review(config.reviewer_for("result"), "req", "plan", "answer")
 
     assert seen == ["high"] * 4
 
@@ -473,7 +481,9 @@ def test_reviewer_agent_leaves_a_client_untouched_when_given_nothing(monkeypatch
 
 async def test_the_configured_generation_reaches_every_planning_reviewer(monkeypatch):
     """All four wrappers, not just the two non-streamed ones, or a verbose planned turn would review
-    with different parameters than a quiet one."""
+    with different parameters than a quiet one. Generation now arrives through ``reviewer_for``, which
+    merges ``[assistant.generation]`` with any ``[reviewers.<name>].generation`` per key, so driving the
+    wrappers with its answer exercises the real path."""
 
     class _StubAgent:
         def __init__(self):
@@ -495,9 +505,67 @@ async def test_the_configured_generation_reaches_every_planning_reviewer(monkeyp
     monkeypatch.setattr(critics, "finalize_verdict", fake_finalize)
 
     parameters = {"context_length": 32768}
-    await review.review_plan(None, "req", "plan", generate_kwargs=parameters)
-    await review.review_result(None, "req", "plan", "answer", generate_kwargs=parameters)
-    await review.stream_plan_review(None, "req", "plan", generate_kwargs=parameters)
-    await review.stream_result_review(None, "req", "plan", "answer", generate_kwargs=parameters)
+    config = AssistantConfig(generation=parameters)
+    await review.review_plan(config.reviewer_for("plan"), "req", "plan")
+    await review.review_result(config.reviewer_for("result"), "req", "plan", "answer")
+    await review.stream_plan_review(config.reviewer_for("plan"), "req", "plan")
+    await review.stream_result_review(config.reviewer_for("result"), "req", "plan", "answer")
 
     assert seen == [parameters] * 4
+
+
+# --- reviewer persona (config-declared model, effort, standard) ------------------------------
+
+
+_PERSONA_CASES = [
+    pytest.param("review_plan", "plan", ("do a thing", "the plan"), id="review_plan"),
+    pytest.param("review_result", "result", ("do a thing", "the plan", "the answer"), id="review_result"),
+    pytest.param("stream_plan_review", "plan", ("do a thing", "the plan"), id="stream_plan_review"),
+    pytest.param("stream_result_review", "result", ("do a thing", "the plan", "the answer"), id="stream_result_review"),
+]
+
+
+@pytest.mark.parametrize("wrapper_name, reviewer_name, call_args", _PERSONA_CASES)
+async def test_each_wrapper_carries_its_reviewers_persona_and_falls_back_to_its_own_prompt(
+    monkeypatch, wrapper_name, reviewer_name, call_args
+):
+    """Every one of the four wrappers has to both honor a declared ``[reviewers.<name>]`` table and, when
+    none is declared, fall back to *its own* shipped prompt: ``review_plan``/``stream_plan_review`` to
+    ``PLAN_REVIEW_SYSTEM``, ``review_result``/``stream_result_review`` to ``RESULT_REVIEW_SYSTEM``.
+
+    Asserting only that a declared ``system_message`` arrives would pass even if two wrappers' fallback
+    constants were swapped: a declared prompt overrides either way and never exercises the constant at
+    all. The fallback assertion below is what a swapped constant actually fails, since it pins each
+    wrapper's undeclared case to the one constant that wrapper owns, not just "some" shipped prompt.
+    """
+    from kokua.workflows.planning.prompts import PLAN_REVIEW_SYSTEM, RESULT_REVIEW_SYSTEM
+
+    fallback_system = PLAN_REVIEW_SYSTEM if reviewer_name == "plan" else RESULT_REVIEW_SYSTEM
+    seen = {}
+
+    async def fake_review(model, system, user_input, thinking=None, generate_kwargs=None, name="reviewer"):
+        seen.update(model=model, system=system, thinking=thinking)
+        return review.critics.Verdict(approved=True)
+
+    async def fake_stream_review(model, system, user_input, thinking=None, generate_kwargs=None, name="reviewer"):
+        seen.update(model=model, system=system, thinking=thinking)
+        return None, None  # (client, chunk_stream); nothing here consumes either half
+
+    monkeypatch.setattr(review.critics, "review", fake_review)
+    monkeypatch.setattr(review.critics, "stream_review", fake_stream_review)
+    wrapper = getattr(review, wrapper_name)
+
+    declared = AssistantConfig(
+        model="ollama:a",
+        thinking="high",
+        reviewers={reviewer_name: ReviewerConfig(model="ollama:b", thinking=False, system_message="my standard")},
+    )
+    await wrapper(declared.reviewer_for(reviewer_name), *call_args)
+    assert seen["model"] == "ollama:b"
+    assert seen["thinking"] is False
+    assert seen["system"] == "my standard"
+
+    undeclared = AssistantConfig(model="ollama:a")
+    await wrapper(undeclared.reviewer_for(reviewer_name), *call_args)
+    assert seen["model"] == "ollama:a"
+    assert seen["system"] == fallback_system

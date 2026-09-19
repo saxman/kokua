@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import fields
 
 import pytest
 
@@ -439,6 +440,59 @@ def test_shipped_example_loads_cleanly(caplog):
     assert cfg.concurrent_tools is True
 
 
+def test_the_shipped_example_declares_the_approval_reviewer_with_the_gate_off():
+    """The reviewer's standard ships in the file the user scaffolds, and the gate that uses it ships off.
+
+    The prompt is the part of auto-approval a reader is meant to read, so it lives here rather than in a
+    constant they would have to go find, and `[reviewers.approval]` therefore has to survive the ordinary
+    load: an approval reviewer that declared `thinking`, or none at all, is refused at startup.
+    """
+    _init()
+    cfg = _resolve()
+    assert cfg.auto_approval_enabled is False
+    assert cfg.reviewers["approval"].system_message.strip()
+    assert cfg.reviewers["approval"].thinking is None
+
+
+def test_the_shipped_gate_would_resolve_if_it_were_switched_on():
+    """Turning `enabled = true` on the shipped file must not then fail startup.
+
+    Every rule `resolve_auto_approval` enforces is a relationship between three lists in this one file,
+    so the example can express a gate that cannot start: a reviewer nothing declares, a tool nothing
+    gates, or a tool the floor holds back. Checked at the entry level, which is what the file says; the
+    resolution from entries to tool names needs a built registry and lives in tests/core/.
+    """
+    _init()
+    cfg = _resolve()
+    assert cfg.auto_approval_tools
+    for name in cfg.auto_approval_reviewers:
+        assert name in cfg.reviewers
+    for entry in cfg.auto_approval_tools:
+        assert entry in cfg.confirm_tools
+        assert entry not in cfg.never_auto_approve
+
+
+def test_a_reviewers_description_reaches_no_consumer():
+    """A reviewer's `description` is a note to whoever opens config.toml, unlike an agent's.
+
+    `config.example.toml` and the configuration reference both state that nothing reads it, which is a
+    claim about code and so needs something behind it: every consumer is handed a `ResolvedReviewer`, so
+    a field absent from that type cannot reach a reviewer's client, its prompt, or a card. Wiring the
+    field up to something is a fine thing to do; doing it while that prose still says nothing reads it
+    is what this pins.
+    """
+    assert "description" in {field.name for field in fields(schema.ReviewerConfig)}
+    assert "description" not in {field.name for field in fields(schema.ResolvedReviewer)}
+
+
+def test_the_shipped_example_floors_the_capability_granting_tools():
+    """The three tools no reviewer may ever approve, because each changes what may act later."""
+    _init()
+    cfg = _resolve()
+    for name in ("config.update_config", "skills.add_skill_script", "mcp.add_mcp_server"):
+        assert name in cfg.never_auto_approve
+
+
 def test_explicit_missing_file_is_also_an_error(tmp_path):
     """--config PATH pointing at nothing was already an error; the default location now behaves the
     same way, so the two paths do not disagree about whether a config is optional."""
@@ -763,8 +817,16 @@ def test_unknown_agent_key_lists_what_an_agent_table_accepts():
 
 
 def test_agent_hint_names_a_placeholder_rather_than_the_wildcard():
-    """A model acts on a hint verbatim, and `section="agents.*"` writes an agent literally named `*`."""
-    with pytest.raises(settings.ConfigError, match=r"did you mean \[agents.<name>\].tools\?"):
+    """A model acts on a hint verbatim, and `section="agents.*"` writes an agent literally named `*`.
+
+    `tools` is now also a `[security.auto_approval]` key, so the hint offers both sections (sorted, like
+    `test_unknown_key_offers_every_section_that_has_it`); what this test still pins is that the agents
+    half reads `[agents.<name>].tools`, the placeholder, and not the wildcard `[agents.*].tools`.
+    """
+    with pytest.raises(
+        settings.ConfigError,
+        match=r"did you mean \[agents.<name>\].tools or \[security.auto_approval\].tools\?",
+    ):
         settings.coerce_config_string("display", "tools", "x", table=core_table())
 
 
@@ -964,3 +1026,129 @@ def test_thinking_request_and_the_file_validator_agree_on_the_levels():
     """One vocabulary, two entry points. A level the file accepts must be a level a message can ask for."""
     for level in settings._THINKING_LEVELS:
         assert settings.thinking_request(level) == settings._thinking("assistant", "thinking", level)
+
+
+# --- [reviewers.<name>] ------------------------------------------------------------------------
+
+
+def _load_toml(tmp_path, text: str) -> AssistantConfig:
+    """Write ``text`` as config.toml under ``tmp_path`` and return the resulting ``AssistantConfig``.
+
+    A local helper rather than ``_write_config``/``_resolve``, because those two go through the whole
+    CLI arg-parsing path for a config at the fixed ``$KOKUA_HOME`` location; a reviewer test only needs
+    ``settings.load`` fed straight into the dataclass it builds.
+    """
+    path = tmp_path / "config.toml"
+    path.write_text(text, encoding="utf-8")
+    overrides = settings.load(str(path), table=core_table())
+    return AssistantConfig(**overrides)
+
+
+def test_reviewer_table_parses(tmp_path):
+    config = _load_toml(
+        tmp_path,
+        """
+        [reviewers.approval]
+        description = "Answers three questions about one gated tool call."
+        model = "ollama:b"
+        thinking = false
+        system_message = "judge it"
+        [reviewers.approval.generation]
+        temperature = 0.0
+        """,
+    )
+    assert config.reviewers["approval"].model == "ollama:b"
+    assert config.reviewers["approval"].thinking is False
+    assert config.reviewers["approval"].generation == {"temperature": 0.0}
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [("tools", '["web"]'), ("delegates_to", '["coder"]'), ("max_iterations", "6")],
+)
+def test_reviewer_rejects_agent_only_keys(tmp_path, key, value):
+    with pytest.raises(settings.ConfigError) as caught:
+        _load_toml(tmp_path, f"[reviewers.approval]\n{key} = {value}\n")
+    message = str(caught.value)
+    assert f"[reviewers.approval].{key}" in message
+    # The message has to say why, not just that: this is the one place a reader learns a reviewer has
+    # no reach, and "unknown config key" would read as a typo.
+    assert "agent" in message
+
+
+def test_reviewer_rejects_unknown_key(tmp_path):
+    # A key nothing else in the schema shares (e.g. "nope") would answer with byte-identical text
+    # whether or not [reviewers.*] were a structured section: with no [logging]-style key to hint at,
+    # the generic flat-schema unknown-key error and _parse_reviewer's own say exactly the same thing.
+    # "level" discriminates because [logging].level is a real key: the flat path (what [reviewers.*]
+    # fell through to before it became a structured section) appends a "did you mean [logging].level?"
+    # hint that _parse_reviewer's own unknown-key branch never adds, so anchoring the match to the end
+    # of the message is what proves this is the reviewer table's own check and not the generic one.
+    with pytest.raises(settings.ConfigError, match=r"^unknown config key \[reviewers\.approval\]\.level$"):
+        _load_toml(tmp_path, "[reviewers.approval]\nlevel = 1\n")
+
+
+def test_reviewer_rejects_a_wrongly_typed_key(tmp_path):
+    # Discriminates against the flat path, which has no schema entry for a reviewer key and would
+    # answer "unknown config key" for the same input.
+    with pytest.raises(settings.ConfigError, match=r"\[reviewers.approval\].description must be a str"):
+        _load_toml(tmp_path, "[reviewers.approval]\ndescription = 1\n")
+
+
+def test_reviewer_table_must_be_a_table(tmp_path):
+    with pytest.raises(settings.ConfigError, match=r"\[reviewers.approval\] must be a table"):
+        _load_toml(tmp_path, 'reviewers = { approval = "nope" }\n')
+
+
+# --- [security.auto_approval] and [security].never_auto_approve --------------------------------
+
+
+def test_auto_approval_section_parses(tmp_path):
+    config = _load_toml(
+        tmp_path,
+        """
+        [security]
+        never_auto_approve = ["config.update_config"]
+        [security.auto_approval]
+        enabled = true
+        reviewers = ["approval"]
+        tools = ["compute.run_command"]
+        timeout_seconds = 4.5
+        max_per_turn = 2
+        """,
+    )
+    assert config.never_auto_approve == ["config.update_config"]
+    assert config.auto_approval_enabled is True
+    assert config.auto_approval_reviewers == ["approval"]
+    assert config.auto_approval_tools == ["compute.run_command"]
+    assert config.auto_approval_timeout_seconds == 4.5
+    assert config.auto_approval_max_per_turn == 2
+
+
+def test_auto_approval_defaults_are_off_and_floored():
+    from kokua.config.schema import AssistantConfig
+
+    config = AssistantConfig()
+    assert config.auto_approval_enabled is False
+    assert config.auto_approval_reviewers == []
+    assert config.auto_approval_tools == []
+    # The three that grant a capability rather than acting once.
+    assert config.never_auto_approve == [
+        "config.update_config",
+        "skills.add_skill_script",
+        "mcp.add_mcp_server",
+    ]
+
+
+@pytest.mark.parametrize("key, value", [("timeout_seconds", "0"), ("max_per_turn", "0")])
+def test_auto_approval_rejects_a_non_positive_bound(tmp_path, key, value):
+    with pytest.raises(settings.ConfigError, match="must be"):
+        _load_toml(tmp_path, f"[security.auto_approval]\n{key} = {value}\n")
+
+
+def test_auto_approval_is_locked_by_the_shipped_security_pattern():
+    from kokua.config.schema import DEFAULT_LOCKED_CONFIG_KEYS
+    from kokua.config.store import locked_by
+
+    assert locked_by("security.auto_approval", "enabled", list(DEFAULT_LOCKED_CONFIG_KEYS)) == "security.*"
+    assert locked_by("security", "never_auto_approve", list(DEFAULT_LOCKED_CONFIG_KEYS)) == "security.*"

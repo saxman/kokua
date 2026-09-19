@@ -785,6 +785,52 @@ async def test_web_channel_send_approval_request_emits_frame():
     assert ws.frames == [{"type": "approval", "name": "add_skill_script", "arguments": {"skill_name": "x"}}]
 
 
+async def test_web_channel_sends_an_auto_approval_frame():
+    """The conversation rides on the frame, as it does on a notification: the page files the card
+    against the turn the reviewed call belongs to rather than against whatever is on screen."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_auto_approval(
+        "run_command", {"command": "ls"}, approved=True, reason="lists files", model="ollama:b", conversation_id="c1"
+    )
+    assert ws.frames == [
+        {
+            "type": "auto_approval",
+            "name": "run_command",
+            "arguments": {"command": "ls"},
+            "approved": True,
+            "reason": "lists files",
+            "model": "ollama:b",
+            "conversation_id": "c1",
+        }
+    ]
+
+
+async def test_an_auto_approval_frame_is_never_muted_by_a_switch():
+    """`auto_approval` is not a turn frame, deliberately: muting it would mean a gated tool ran with
+    no record the user can see, which is the one outcome this feature must not produce. The core only
+    sends it for the conversation in view (`HumanGate.approve` re-checks after the review), and the
+    conversation on the frame is what lets the page drop one that raced a switch."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "on-screen"
+    token = streaming_conversation.set("elsewhere")
+    try:
+        await channel.send_auto_approval(
+            "run_command",
+            {"command": "ls"},
+            approved=False,
+            reason="cannot be undone",
+            model="ollama:b",
+            conversation_id="elsewhere",
+        )
+    finally:
+        streaming_conversation.reset(token)
+    assert [frame["type"] for frame in ws.frames] == ["auto_approval"]
+
+
 async def test_web_channel_receive_ends_on_sentinel():
     channel = WebChannel(_FakeWS())
     await channel.feed("hello")

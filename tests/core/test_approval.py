@@ -9,7 +9,7 @@ import pytest
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.config import ConfigError
-from kokua.config.schema import AssistantConfig
+from kokua.config.schema import AssistantConfig, ReviewerConfig
 from kokua.core.assistant import Assistant
 from tests.channels import AlertCapturingChannel, FakeChannel, _config
 from tests.fakes import _RequestsToolOnce
@@ -507,3 +507,39 @@ async def test_proactive_auto_deny_stays_silent(tmp_path):
     finally:
         proactive_turn.reset(token)
     assert channel.alerts == []
+
+
+async def test_assistant_wires_the_auto_approval_gate(tmp_path):
+    """Startup resolves `[security.auto_approval]` onto the gate, which is what makes it reachable.
+
+    Asserted here beside `test_assistant_wires_approval_policy` for the reason that one exists: every
+    other test of the review layer either assigns `HumanGate.auto_approval` by hand or reaches the
+    resolver through a helper, so the line in `start` that connects the two is the kind of thing a
+    refactor drops with the suite still green and no symptom but a feature that never runs.
+
+    The subset assertion is the pairing the resolver enforces: an auto-approval set reaching a tool
+    nothing gates would describe a prompt that never existed.
+    """
+    cfg = _config(
+        tmp_path,
+        auto_approval_enabled=True,
+        auto_approval_reviewers=["approval"],
+        auto_approval_tools=["compute.run_command"],
+        reviewers={"approval": ReviewerConfig(model="ollama:b", system_message="judge it")},
+    )
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    auto = assistant._human.auto_approval
+    assert auto is not None
+    assert auto.tools == frozenset({"run_command"})
+    assert auto.tools <= assistant._human.gated_tools
+
+
+async def test_an_assistant_holds_no_gate_when_the_feature_is_off(tmp_path):
+    """The shipped default: a started assistant gates tools and reviews none of them."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    await assistant.start()
+
+    assert assistant._human.gated_tools is not None
+    assert assistant._human.auto_approval is None

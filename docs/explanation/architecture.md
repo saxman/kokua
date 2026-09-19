@@ -39,6 +39,8 @@ src/kokua/
                           the Markdown export
     turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
     interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
+    auto_approval.py     the optional model reviewer that may answer an approval prompt in the user's
+                          place, and the code that decides whether it did (explanation/auto-approval.md)
     settings_runtime.py  SettingsApplier: read, apply live, persist
     commands: /stop, /diag, and the three conversation commands are parsed inline in
               assistant._serve_channel; a workflow's own command (e.g. /plan) dispatches through
@@ -100,9 +102,11 @@ serve loop, and little else. It owns:
 - **`ConversationBook`** -- the session store, the per-conversation agent cache, and which
   conversation is being viewed. These move together on a switch, which is why they are one object.
 - **`TurnRunner`** -- reactive turns (the user sent something) and proactive turns (a scheduled task
-  fired). The seven concurrency invariants are documented at the top of that module.
+  fired). The eight concurrency invariants are documented at the top of that module.
 - **`HumanGate`** -- tool approval and a workflow's own decision, each a lock-guarded single-slot request
-  the serve loop resolves with the user's next message.
+  the serve loop resolves with the user's next message. With
+  [`[security.auto_approval]`](../reference/configuration.md#securityauto_approval) on, a gated call
+  named there is reviewed by a declared model reviewer just before that prompt, and only there.
 - **`SettingsApplier`** -- reading, applying, and persisting the runtime-mutable settings.
 - **`ChannelUI`** -- the only view of the outside world.
 
@@ -112,6 +116,19 @@ what lets a web approval reply be routed back to the waiting tool call. Switchin
 **not** cancel a running turn: each conversation owns its own agent and client, so a backgrounded turn
 persists to its own conversation, streams muted, and raises an alert card when it finishes. Only
 `delete_conversation` cancels, and only the deleted conversation's own turn.
+
+The approval gate has one optional layer above it, off by default:
+[`core/auto_approval.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/auto_approval.py).
+A declared reviewer answers three questions and writes one sentence about a gated call, and
+`decide()` computes the outcome from those answers, so the policy is code rather than a model's
+verdict. It sits where it does for a reason worth knowing before changing this module: both
+auto-denials (a proactive turn, and a turn the user switched away from) run *first*, so a review
+happens exactly where a human would otherwise have been asked and nowhere else, and the per-turn
+budget is a context variable a reactive turn opens and an unattended one does not, so an unattended
+turn fails closed a second way. A review can only turn a prompt into an approval: there is no deny
+verdict, and every way a review can fall short arrives at the same prompt. It is a convenience layer
+rather than a boundary, and [Auto-approval](auto-approval.md) is the argument for it, including what
+it does not do.
 
 The three conversation commands (`/new`, `/conversations`, `/switch <id>`) are dispatched in that same
 loop, beside `/stop` and `/diag`, and go through the same `new_conversation` / `select_conversation`
@@ -1667,6 +1684,7 @@ not errored, when those are absent, and it does not gate the default suite.
 ## See also
 
 - [Design principles](design-principles.md): why the shape above is the shape.
+- [Auto-approval](auto-approval.md): the optional reviewer over the approval gate, and its limits.
 - [AIMU documentation](https://saxman.info/aimu/): the library everything above is built on --
   [providers and model strings](https://saxman.info/aimu/how-to/switch-providers/),
   [tools](https://saxman.info/aimu/reference/api/tools/),

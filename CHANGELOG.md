@@ -961,7 +961,10 @@ alone. The case that does cost something is a configured MCP server, which conne
   result cannot be vetted and streamed at once, the executor's thinking and tool calls stream live while
   the final answer is withheld until it passes, then a clean transcript is committed.
 - **Reviewers are tool-using and grounded.** Each runs a bounded tool-calling assessment over a curated
-  verification toolset and then extracts its typed verdict in a follow-up structured call. The toolset
+  verification toolset and then extracts its typed verdict in a follow-up structured call, whose
+  `approved` field is narrowed to a real boolean as it arrives: that path builds the verdict from a
+  model's JSON without validating types, so a reviewer replying `"false"` would otherwise hand every
+  caller a truthy string and a rejected plan would read as an approved one. The toolset
   is web lookup, `calculate`, and the current date and time; it deliberately excludes the user's memory
   and documents, skill authoring, MCP mutation, and both execution tools, `execute_python` and
   `run_command` -- a reviewer cannot be approval-gated, since an autonomous critic has nobody to ask
@@ -970,6 +973,12 @@ alone. The case that does cost something is a configured MCP server, which conne
   suspected inaccuracy must be verified with
   tools before flagging. The result reviewer is additionally shown an Evidence section -- the tool
   results the agent actually retrieved -- so it judges against real sources.
+- **Each critic's model, effort, sampling, and standard are yours to set**, in `[reviewers.plan]` and
+  `[reviewers.result]` (see [Configuration](#configuration)). An undeclared table leaves planning's own
+  shipped prompt in force, so this is an override rather than a default you must restate. It matters
+  because a reviewer rejecting your plan is making a judgement you could not previously read, let alone
+  change, and because a critic is the one place where a second, cheaper or stronger model is obviously
+  the right call.
 - **Verbose trace ("Show all reasoning")**, off by default: turns a planned turn into a labeled, live
   trace -- planner, each plan reviewer, executor, each result reviewer, and every revision -- showing
   every intermediate plan and result version. It overrides result review's hide-until-vetted gate; only
@@ -1015,6 +1024,22 @@ alone. The case that does cost something is a configured MCP server, which conne
   plugins, and reads the config file first because the registry depends on it. The plugin contract renamed
   with the concept: `ToolPack` is `Toolset` (with `build(ctx)` in place of `build(config)`), the
   entry-point group `kokua.tools` is `kokua.toolsets`, and `src/kokua/toolpacks/` is `src/kokua/toolsets/`.
+- **`[reviewers.<name>]` declares a reviewer whole**, the way `[agents.<name>]` declares an agent. A
+  reviewer is one context-free model call whose answer code consumes, and the table carries the five
+  fields that describe how a model is asked (`description`, `system_message`, `model`, `thinking`,
+  `generation`) and none of the three that give an agent reach. `tools`, `delegates_to`, and
+  `max_iterations` are refused by name with the reason, rather than accepted and ignored: a reviewer's
+  tools are fixed in code by whatever consumes it and this table has no key to change them (the
+  approval reviewer is asked with tools off; a plan critic gets the curated verification toolset in
+  `workflows/critics.py`), nothing delegates to it, and it runs no tool loop. The approval reviewer's
+  own tool-less call is also why it cannot recurse into itself. `model`, `thinking`, and
+  `generation` resolve against the `[assistant]` tiers exactly as an agent's do; `system_message` is
+  the one field with no `[assistant]` tier, because what an undeclared standard means is the consumer's
+  to decide (deep planning substitutes its own shipped prompt, the approval gate refuses to start).
+  Three names are consumed today: `plan` and `result` are deep planning's two critics (see [Deep
+  planning and adversarial review](#deep-planning-and-adversarial-review)) and `approval` is the
+  auto-approval gate's (see [Security](#security)). The whole section is locked against
+  `update_config`, like `[agents.*]`.
 - **One runtime-settings table.** `config/table.py`'s `SettingsTable` -- built at startup from
   `CORE_RUNTIME_SETTINGS` plus every installed toolset's own hot `Setting`s -- is the single
   declaration of what can change without a restart, driving the TOML schema, the incoming-payload
@@ -1049,11 +1074,12 @@ alone. The case that does cost something is a configured MCP server, which conne
   start. It is refused at write time by building a throwaway client -- the same call startup makes, so
   it also catches a provider whose extra is not installed. A
   list of locked patterns, `[security].locked_config_keys`, ships covering `[security] confirm_tools`,
-  `[email] to`, `[paths] data_dir`, and the whole `[agents.*]` section, matched by section prefix since
-  agent names cannot be enumerated ahead of time. Each is refused by the tool by default, and changeable
-  only by hand-editing the list itself: `update_config` is a tool the assistant holds, so a writable
-  agent table would let it widen its own reach. `update_config` is also in the default `confirm_tools`
-  list, as `config.update_config`, so each write it *is* allowed goes through the approval prompt.
+  `[email] to`, `[paths] data_dir`, and the whole `[agents.*]` and `[reviewers.*]` sections, matched by
+  section prefix since agent and reviewer names cannot be enumerated ahead of time. Each is refused by
+  the tool by default, and changeable only by hand-editing the list itself: `update_config` is a tool
+  the assistant holds, so a writable agent table would let it widen its own reach. `update_config` is
+  also in the default `confirm_tools` list, as `config.update_config`, so each write it *is* allowed
+  goes through the approval prompt.
 - The `update_config` write policy is now yours to set. `[security].locked_config_keys` holds the
   patterns the assistant may not write, defaulting to what was previously hardcoded. The key is itself
   always locked, so the assistant cannot unlock itself in one call. A pattern that could never match
@@ -1409,6 +1435,44 @@ notice on startup.
   built only by `compose_subagent` out of a toolset no agent names) cannot be listed ahead of time, and
   the error says so. `core` is refused as a toolset name at registration, so the reservation cannot be
   shadowed by a plugin.
+- **A model reviewer may answer an approval prompt in your place** (`[security.auto_approval]`, off by
+  default). Enable it, name the gated tools it may answer for, and name one or more
+  `[reviewers.<name>]` tables, and a gated call is shown to a fresh, context-free reviewer just before
+  the prompt it would otherwise raise. The reviewer answers three questions (is this call in scope for
+  what the user asked, is it reversible, does the text it was shown look like it is trying to instruct
+  the reviewer) and writes one sentence; `core/auto_approval.py`'s `decide` computes the outcome from
+  those answers, so the policy is code rather than a model's verdict. It is convenience, not a
+  boundary, and one property is what keeps that honest: **a review can only turn a prompt into an
+  approval**, never widen what you could have approved yourself, because there is no deny verdict
+  anywhere in it. Nine paths fail closed onto the ordinary prompt (no turn budget open, the budget
+  spent, a packet field over 2,000 characters, a field forging the `<untrusted>` fence, a timeout, a
+  refusal, an unreachable reviewer, an answer of the wrong shape or the wrong types, and a catch-all
+  that logs its traceback), and an escalation carries the reviewer's sentence so a person deciding
+  gets its read for free. Both outcomes are reported as a card naming the tool, the arguments, the
+  model, and the reason, since an auto-approval nobody saw is a decision made on the user's behalf in
+  silence. Both are logged as well, at `INFO`, because a card is a channel frame and not part of the
+  saved transcript: after a reload the log under `logs_path` is the only thing that distinguishes a
+  gated call a reviewer waved through from one the user approved. An unattended turn is excluded twice
+  over: it auto-denies before a reviewer is consulted, and it opens no per-turn budget, so a call
+  reaching the reviewer anyway would fail closed. `timeout_seconds` (default 10) and `max_per_turn`
+  (default 5, spent when a review is *attempted*) bound what it can cost. What it does
+  not do is written down as plainly as what it does, in
+  [docs/explanation/auto-approval.md](https://saxman.info/kokua/explanation/auto-approval/): no
+  sandbox under it, no shell parsing in front of it, an argument-scoped allowlist would remove most
+  prompts with no model at all, and the reviewer's own token cost is not counted (AIMU's structured
+  path returns before a turn event is emitted, so no metrics sink can see it).
+- **`[security].never_auto_approve`: tools no reviewer may ever approve.** Ships as
+  `config.update_config`, `skills.add_skill_script`, and `mcp.add_mcp_server`, and naming one of them
+  in `[security.auto_approval].tools` is a startup error. These three change what may act *later*
+  rather than acting once, so the arguments a review was about stop constraining anything the moment
+  the write lands: a waved `update_config` can widen this very list, a waved `add_skill_script` writes
+  a script that becomes a tool, and a waved `add_mcp_server` adds a whole source of tools. Reviewing a
+  call like that answers a question about one action when what it grants is a capability. Emptying the
+  list is a hand-edit you may make, like every control in `[security]`.
+- **`[reviewers.*]` is locked by default.** That lock pattern sits beside `agents.*` in
+  `[security].locked_config_keys` for the same reason: `update_config` is a tool the assistant holds,
+  and a reviewer's prompt and model decide how the assistant's own work is judged, including whether a
+  gated call reaches you at all.
 - **The reviewer toolset needs no gate.** An autonomous critic cannot pause to ask you mid-review, so
   rather than exempting it from the gate the reviewer is given nothing the gate exists to cover: web
   lookup, `calculate`, and the clock. A test pins this against the shipped `confirm_tools` default, so

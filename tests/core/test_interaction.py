@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
+import pytest
+
+from kokua.config.schema import AssistantConfig, ReviewerConfig
+from kokua.core.auto_approval import AutoApproval, Outcome, Review, ReviewContext, current_review_context
 from kokua.core.interaction import HumanGate, PendingRequest
 
 
@@ -123,9 +128,17 @@ async def test_a_second_askers_default_does_not_leak_onto_the_first():
 class _UI:
     def __init__(self):
         self.asked: list[str] = []
+        self.auto_approvals: list[tuple[str, dict, bool, str, str, str]] = []
+        self.alerts: list[str] = []
 
     async def ask_approval(self, name, arguments):
         self.asked.append(f"approve:{name}")
+
+    async def show_auto_approval(self, name, arguments, *, approved, reason, model, conversation_id=None):
+        self.auto_approvals.append((name, arguments, approved, reason, model, conversation_id))
+
+    async def alert(self, text, *, conversation_id=None, group=None):
+        self.alerts.append(text)
 
 
 def _gate(ui):
@@ -221,3 +234,257 @@ async def test_a_raising_parser_abandons_the_decision_instead_of_crashing_the_se
     await asyncio.sleep(0)
     assert gate.resolve_reply("ok", "ok") is True
     assert await followup == "OK"
+
+
+# --- the auto-approval review, and where it sits in the gate's order ----------------------------
+
+
+def _auto() -> AutoApproval:
+    """The gate `[security.auto_approval]` resolves to, built rather than resolved.
+
+    Nothing on this path reads the reviewer beyond handing it to `review_call`, which every test here
+    replaces, so a started assistant would only supply a tool vocabulary none of them consult.
+    """
+    config = AssistantConfig(reviewers={"approval": ReviewerConfig(model="ollama:b", system_message="judge it")})
+    return AutoApproval(
+        tools=frozenset({"run_command"}),
+        toolset_of={"run_command": "compute"},
+        reviewers=(config.reviewer_for("approval"),),
+        timeout_seconds=10.0,
+        max_per_turn=5,
+    )
+
+
+@pytest.fixture
+def in_turn():
+    """The budget a reactive turn opens, which `review_call` reads and fails closed without.
+
+    Opened in every test here, including the ones asserting no review happens, so what those prove is
+    the branch order rather than a missing context they would have failed closed on anyway.
+    """
+    token = current_review_context.set(ReviewContext(request="fix the failing test"))
+    try:
+        yield
+    finally:
+        current_review_context.reset(token)
+
+
+def _answers(outcome: Outcome):
+    """A stand-in for `review_call` giving `outcome`, so these tests exercise the wiring."""
+
+    async def review(auto, *, tool, arguments):
+        return outcome
+
+    return review
+
+
+def _never_called(why: str):
+    def review(*args, **kwargs):
+        raise AssertionError(why)
+
+    return review
+
+
+#: How long a helper here waits for the state it expects before calling the test failed. Generous
+#: enough that a slow machine does not decide the outcome, and short enough that the failure arrives.
+_SETTLE_TIMEOUT = 2.0
+
+
+async def _answer_the_prompt(gate, name, arguments, *, with_answer: bool) -> bool:
+    """Run `approve`, wait for the prompt it must raise, and route `with_answer` the way the loop does.
+
+    The wait is bounded and polled rather than a fixed number of loop turns, because a review can sit
+    in front of the prompt and how many turns that costs is not this helper's business. It fails
+    rather than hanging when no prompt arrives, which is what a gate that answered for the user on its
+    own would produce: nobody would resolve the request, and a suite that hangs says less than one
+    that fails.
+    """
+    task = asyncio.create_task(gate.approve(name, arguments))
+    try:
+        async with asyncio.timeout(_SETTLE_TIMEOUT):
+            # Slept rather than spun: on the failure path this polls for the whole timeout, and a busy
+            # `sleep(0)` would burn a core for two seconds to reach an assertion that already failed.
+            while not gate.approval.pending:
+                await asyncio.sleep(0.001)
+    except TimeoutError:
+        task.cancel()
+        # Awaited, so the cancellation lands before this returns: a task left pending is collected
+        # later and prints "Task was destroyed but it is pending" over the failure being reported.
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        raise AssertionError(f"approve({name!r}) never stopped to ask") from None
+    gate.approval.resolve(with_answer)
+    return await task
+
+
+async def _settle_without_a_prompt(gate, name, arguments) -> bool:
+    """`approve`'s answer on a path that must not stop to ask, bounded so a regression fails.
+
+    A plain `await` here would hang instead: these paths raise no prompt, so nothing in the test is
+    waiting to answer one, and a gate that started asking would leave the request outstanding forever.
+    """
+    try:
+        return await asyncio.wait_for(gate.approve(name, arguments), timeout=_SETTLE_TIMEOUT)
+    except TimeoutError:
+        raise AssertionError(f"approve({name!r}) stopped to ask instead of settling") from None
+
+
+async def test_an_approved_review_needs_no_prompt(monkeypatch, in_turn):
+    monkeypatch.setattr(
+        "kokua.core.interaction.review_call", _answers(Outcome(True, "runs the test suite", "ollama:b"))
+    )
+    ui = _UI()
+    gate = _gate(ui)
+    gate.gated_tools = frozenset({"run_command"})
+    gate.auto_approval = _auto()
+
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "uv run pytest -q"}) is True
+
+    assert ui.asked == []
+    # Never silent: an auto-approval that replaced a visible prompt with an invisible decision is the
+    # outcome this feature exists to avoid producing.
+    assert ui.auto_approvals == [
+        ("run_command", {"command": "uv run pytest -q"}, True, "runs the test suite", "ollama:b", "c1")
+    ]
+
+
+async def test_an_escalated_review_still_prompts_and_carries_the_reason(monkeypatch, in_turn):
+    """A reviewer cannot deny, so what it withholds arrives at the prompt an ungated build would show."""
+    monkeypatch.setattr("kokua.core.interaction.review_call", _answers(Outcome(False, "cannot be undone", "ollama:b")))
+    ui = _UI()
+    gate = _gate(ui)
+    gate.gated_tools = frozenset({"run_command"})
+    gate.auto_approval = _auto()
+
+    assert await _answer_the_prompt(gate, "run_command", {"command": "rm -rf build"}, with_answer=False) is False
+
+    assert ui.asked == ["approve:run_command"]
+    assert ui.auto_approvals == [
+        ("run_command", {"command": "rm -rf build"}, False, "cannot be undone", "ollama:b", "c1")
+    ]
+
+
+async def test_an_escalated_review_leaves_the_answer_to_the_user(monkeypatch, in_turn):
+    """The prompt behind an escalation is the ordinary one, so a yes still runs the call."""
+    monkeypatch.setattr("kokua.core.interaction.review_call", _answers(Outcome(False, "cannot be undone", "ollama:b")))
+    gate = _gate(_UI())
+    gate.gated_tools = frozenset({"run_command"})
+    gate.auto_approval = _auto()
+
+    assert await _answer_the_prompt(gate, "run_command", {"command": "rm -rf build"}, with_answer=True) is True
+
+
+async def test_an_ineligible_gated_tool_is_never_reviewed(monkeypatch, in_turn):
+    monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("update_config must never be reviewed"))
+    ui = _UI()
+    gate = _gate(ui)
+    gate.gated_tools = frozenset({"run_command", "update_config"})
+    gate.auto_approval = _auto()  # its tools name run_command only
+
+    assert await _answer_the_prompt(gate, "update_config", {"section": "security"}, with_answer=False) is False
+
+    assert ui.asked == ["approve:update_config"]
+    assert ui.auto_approvals == []
+
+
+async def test_a_proactive_turn_is_never_reviewed(monkeypatch, in_turn):
+    """An unattended turn has nobody to escalate to, so it is not offered a way to skip asking."""
+    monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("an unattended turn is not reviewable"))
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: True, turn_conversation=lambda: "c1")
+    gate.gated_tools = frozenset({"run_command"})
+    gate.auto_approval = _auto()
+
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}) is False
+
+    assert ui.asked == []
+    assert ui.auto_approvals == []
+
+
+async def test_a_turn_switched_away_from_is_never_reviewed(monkeypatch, in_turn):
+    """Approving a call means reading it, and that turn is not on screen."""
+    monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("a backgrounded turn is not reviewable"))
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "elsewhere")
+    gate.gated_tools = frozenset({"run_command"})
+    gate.auto_approval = _auto()
+
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "ls"}) is False
+
+    assert ui.asked == []
+    assert ui.auto_approvals == []
+    assert len(ui.alerts) == 1  # the switched-away card, which says the call was denied
+
+
+async def test_a_switch_during_the_review_denies_instead_of_approving(monkeypatch, in_turn):
+    """The check above `review_call` is as old as the review by the time it answers.
+
+    A review is a model call, up to `timeout_seconds` (10 by default), and the user can switch
+    conversations inside that window. An approval reaching the tool then would run it on a turn that is
+    not on screen, which is precisely what the switched-away denial exists to prevent, so the question
+    is asked again afterwards. No card either: one saying "auto-approved" beside a call that was denied
+    would be a false record, and the alert is the true one.
+    """
+    viewing = {"id": "c1"}
+
+    async def switch_away_then_approve(auto, *, tool, arguments):
+        viewing["id"] = "another-conversation"
+        return Outcome(True, "runs the test suite", "ollama:b")
+
+    monkeypatch.setattr("kokua.core.interaction.review_call", switch_away_then_approve)
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: viewing["id"], is_proactive=lambda: False, turn_conversation=lambda: "c1")
+    gate.gated_tools = frozenset({"run_command"})
+    gate.auto_approval = _auto()
+
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "rm -rf build"}) is False
+
+    assert ui.asked == []
+    assert ui.auto_approvals == []
+    assert len(ui.alerts) == 1
+    assert "denied automatically" in ui.alerts[0]
+
+
+async def test_a_gate_with_no_auto_approval_prompts_as_before(monkeypatch, in_turn):
+    """The feature ships off, and off means the gate behaves exactly as it did before it existed."""
+    monkeypatch.setattr("kokua.core.interaction.review_call", _never_called("the feature is off"))
+    ui = _UI()
+    gate = _gate(ui)
+
+    assert await _answer_the_prompt(gate, "execute_python", {"code": "1"}, with_answer=True) is True
+
+    assert ui.asked == ["approve:execute_python"]
+    assert ui.auto_approvals == []
+
+
+class _ApprovingClient:
+    """Stands in for the reviewer's own model client: only `chat(..., schema=...)` is ever called."""
+
+    def __init__(self):
+        self.default_generate_kwargs = {}
+
+    async def chat(self, prompt, schema=None, use_tools=None):
+        return Review(in_scope=True, reversible=True, injection_suspected=False, reason="runs the test suite")
+
+
+async def test_an_approving_reviewer_removes_the_prompt_through_the_whole_chain(monkeypatch, in_turn):
+    """The gate and the real `review_call` together, with nothing in this module replaced.
+
+    Every test above substitutes `review_call` itself, which is what makes them read the wiring rather
+    than the reviewer, and it leaves them unable to notice `review_call` changing shape underneath the
+    call site. This one reaches the reviewer's client instead, the seam
+    `tests/core/test_auto_approval.py` uses, so the gate's call has to still fit the function it names
+    and the outcome's fields have to still reach the card.
+    """
+    monkeypatch.setattr("kokua.core.auto_approval._build_client", lambda reviewer: _ApprovingClient())
+    ui = _UI()
+    gate = _gate(ui)
+    gate.gated_tools = frozenset({"run_command"})
+    gate.auto_approval = _auto()
+
+    assert await _settle_without_a_prompt(gate, "run_command", {"command": "uv run pytest -q"}) is True
+
+    assert ui.asked == []
+    assert ui.auto_approvals == [
+        ("run_command", {"command": "uv run pytest -q"}, True, "runs the test suite", "ollama:b", "c1")
+    ]

@@ -23,7 +23,8 @@ Two rules run through the whole file and explain most of what follows:
 - [Who may change which key](#who-may-change-which-key)
 - [Which keys apply live](#which-keys-apply-live)
 - Sections: [`[assistant]`](#assistant) · [`[assistant.generation]`](#assistantgeneration) ·
-  [`[security]`](#security) · [`[agents.<name>]`](#agentsname) ·
+  [`[security]`](#security) · [`[security.auto_approval]`](#securityauto_approval) ·
+  [`[agents.<name>]`](#agentsname) · [`[reviewers.<name>]`](#reviewersname) ·
   [`[[mcp.server]]`](#mcpserver) · [`[paths]`](#paths) · [`[frontend]`](#frontend) · [`[web]`](#web) ·
   [`[logging]`](#logging) · [`[email]`](#email) · [`[scheduling]`](#scheduling) ·
   [`[scheduling.task.<name>]`](#schedulingtaskname) · [`[planning]`](#planning) ·
@@ -90,6 +91,7 @@ locked_config_keys = [
     "email.to",
     "paths.data_dir",
     "agents.*",
+    "reviewers.*",
     "scheduling.task.*",
     "compute.command_env_passthrough",
 ]
@@ -126,6 +128,7 @@ Everything else is yours to remove, and here is what removing each shipped patte
 | `email.to` | lets the assistant mail someone other than you |
 | `paths.data_dir` | lets the assistant move its own state out from under you |
 | `agents.*` | lets the assistant rewrite any agent's `tools`, `model`, `thinking`, `max_iterations`, `system_message`, `description`, and `delegates_to`, set its `[agents.<name>.generation]` parameters, and create new agents (under a name of letters, digits, hyphens, or underscores). It can widen its own reach, effective on the next restart. |
+| `reviewers.*` | changes the error message only. `update_config` refuses `[reviewers.*]` whatever the list says, for the reason it is listed here: a reviewer's prompt and model decide how the assistant's own work is judged, including (with [`[security.auto_approval]`](#securityauto_approval) on) whether a gated call reaches you at all. Hand-edit to change one. |
 | `scheduling.task.*` | changes the error message only. `update_config` still cannot write a task: the scheduling tools are the write path, because a task write has to be paired with the scheduler arming or disarming to match, and a bare config write would leave the running scheduler firing the old schedule. |
 | `compute.command_env_passthrough` | lets the assistant name its own credentials for a `run_command` child to see; because the key is cold, that exposure is persistent, surviving into every later session rather than one command |
 
@@ -161,7 +164,7 @@ immediately. Everything else is **startup-only**: change it, then restart.
 | --- | --- |
 | `[assistant].generate_titles` | the rest of `[assistant]`, including `[assistant.generation]`, and `[planning].review_rounds` |
 | `[planning].plan_review`, `plan_review_agent`, `result_review`, `show_reasoning` | |
-| `[capabilities].max_depth` | all of `[agents.*]`, `[mcp]` (including `[[mcp.server]]`), `[security]`, `[paths]`, `[frontend]`, `[web]`, `[logging]`, `[email]` |
+| `[capabilities].max_depth` | all of `[agents.*]` and `[reviewers.*]`, `[mcp]` (including `[[mcp.server]]`), `[security]` (including `[security.auto_approval]`), `[paths]`, `[frontend]`, `[web]`, `[logging]`, `[email]` |
 | `[scheduling].max_task_conversations` | |
 
 The model, the reasoning effort, and the tool-loop cap read like runtime settings and are not. Nothing
@@ -215,12 +218,20 @@ natural way to share one `config.toml` across machines that serve different mode
 export AIMU_LANGUAGE_MODEL="ollama:qwen3.8:27b@http://gpu-box:11434"
 ```
 
-Whichever route the default arrives by, it is resolved once and every agent gets the same string:
-sub-agents spawned through `spawn_subagent`, sub-agents built by `compose_subagent`, the prebuilt
-orchestrators in the `aimu_agents` toolset, and both `/plan` reviewers. An endpoint set here reaches all
-of them. (Before Kokua 0.1.0 it did not: with `model` unset, the endpoint was dropped for everything
-except the entry agent, so a remote default sent every sub-agent to the *local* server instead. It failed
-loudly only when nothing was listening there.)
+Whichever route the default arrives by, it is resolved once and everything Kokua builds gets the same
+string: sub-agents spawned through `spawn_subagent`, sub-agents built by `compose_subagent`, the
+prebuilt orchestrators in the `aimu_agents` toolset, and every reviewer (`/plan`'s two critics, and the
+approval reviewer if you declare one). An endpoint set here reaches all of them. (Before Kokua 0.1.0 it
+did not: with `model` unset, the endpoint was dropped for everything except the entry agent, so a remote
+default sent every sub-agent to the *local* server instead. It failed loudly only when nothing was
+listening there.)
+
+One thing to know about that last group, because it is the way an endpoint pinned here stops reaching
+one of them. A reviewer resolves [`[reviewers.<name>].model`](#reviewersname) first and falls back to
+this key, exactly as an agent resolves `[agents.<name>].model`. So a `[reviewers.plan]` table naming a
+bare `provider:model` drops the endpoint, and that one reviewer talks to the default server while
+everything else talks to the one you pinned. Pin the endpoint in the reviewer's table too, or leave its
+`model` unset.
 
 Note this pins the client, not discovery. The probe that picks a default when nothing is set at all
 looks at default endpoints only, so export `OLLAMA_HOST` as well when a remote server's models should be
@@ -482,6 +493,37 @@ conversation at all: it changes nothing and can only write inside `downloads_pat
 from the conversation's own id, but what it writes there is a whole transcript in the clear, in a folder
 `/download/{name}` serves unauthenticated. Gate it if that folder is the part you are protecting.
 
+### `never_auto_approve`
+
+Tools no reviewer may ever approve on your behalf, whatever
+[`[security.auto_approval]`](#securityauto_approval) names. Same vocabulary as `confirm_tools`.
+Default:
+
+```toml
+never_auto_approve = [
+    "config.update_config",
+    "skills.add_skill_script",
+    "mcp.add_mcp_server",
+]
+```
+
+The three are the tools that change what may act *later* rather than acting once, so the arguments a
+review was about stop constraining anything the moment the write lands. A waved `update_config` can
+widen this very list, a waved `add_skill_script` writes a script that becomes a tool the next turn can
+call, and a waved `add_mcp_server` adds a whole source of tools. Reviewing the arguments of a call like
+that answers a question about one action, when what the call actually grants is a capability.
+
+Naming one of these in `[security.auto_approval].tools` is a startup error saying so, and so is an entry
+here that matches no tool at all: a floor holding nothing back is the same silent gap a gate matching
+nothing is. Both checks run only when the gate is enabled, which is worth knowing, because it means a
+typo in this list sits unreported until the day you switch the gate on (nothing reads the list before
+then, so there is nothing for it to fail to hold back). Startup-only, and locked by default under
+`security.*`, so only a hand-edit changes it. Emptying it is a hand-edit you may make, and what it buys
+is a reviewer that can approve a capability grant.
+
+This list is not a second approval gate: `confirm_tools` decides what stops and asks, and this decides
+what a reviewer may never answer for.
+
 ### `locked_config_keys`
 
 A list of patterns naming which keys `update_config` refuses. Default:
@@ -505,6 +547,61 @@ Neither check can see a name that does not exist yet, and neither tries to. The 
 `[scheduling.task.<name>]` sections are yours to create, so `agents.resercher.*` is accepted and locks
 nothing until an agent by that name exists. Locking a section you are about to add is a legitimate thing
 to write; a misspelling of one is indistinguishable from it.
+
+## `[security.auto_approval]`
+
+A declared model reviewer may approve a gated tool call in your place, so you are prompted less. Off by
+default, and the whole sub-table is startup-only and locked under `security.*`.
+
+```toml
+[security.auto_approval]
+enabled = false
+reviewers = ["approval"]
+tools = ["compute.run_command", "fs_write"]
+timeout_seconds = 10
+max_per_turn = 5
+```
+
+**This is a convenience layer, not a security boundary.** It reduces prompts; it contains nothing. The
+one property it does guarantee is narrow and structural: a review can only turn a prompt into an
+approval. There is no deny verdict anywhere in it, so nothing here can change what you would have been
+able to decide, and every way a review can fall short arrives at the ordinary approval prompt with the
+reviewer's sentence attached. Read
+[Auto-approval](../explanation/auto-approval.md) before switching it on: it says what the reviewer is
+asked, what it cannot see, and what this design does not do (no sandbox, no shell parsing, and a
+reviewer whose token cost is not counted).
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | bool | `false` | whether any gated call is reviewed at all |
+| `reviewers` | list of strings | `[]` | which [`[reviewers.<name>]`](#reviewersname) tables are asked |
+| `tools` | list of strings | `[]` | which gated tools a reviewer may answer for, in `confirm_tools`' vocabulary |
+| `timeout_seconds` | number > 0 | `10` | past this, the review escalates rather than being waited on |
+| `max_per_turn` | integer >= 1 | `5` | most auto-approvals one turn may collect |
+
+Name more than one reviewer and **all of them must agree**: they are asked in order, and the first
+withheld answer ends the round, so a quorum costs every reviewer only when the ones before it agreed.
+
+`tools` is checked against two things at startup, and a fault in either is a hard error rather than a
+warning, for the reason every control in `[security]` is: the symptom of a broken gate is the absence of
+a symptom. An entry must name something `confirm_tools` gates (reviewing an ungated tool reviews
+nothing, because that call already runs without asking), and it must not name anything
+[`never_auto_approve`](#never_auto_approve) holds back. Enabling the gate with no reviewer, with no
+tool, or with an entry matching no tool is refused the same way, each with the config fix in the message.
+
+`max_per_turn` is per *turn*, and the budget is spent when a review is **attempted**, not when one
+approves. A model retrying the same rejected call cannot collect one approval per attempt, and a loop
+that keeps being escalated stops costing reviews after the fifth. Each reactive turn gets its own
+budget, so one conversation's loop cannot spend another's.
+
+An unattended turn (a scheduled task, anything the assistant starts unprompted) is never auto-approved.
+Its gated calls are denied before a reviewer is consulted at all, which is the behavior
+`confirm_tools` already had and is unchanged by this table.
+
+Both outcomes are reported. An approval and an escalation each arrive as a card naming the tool, its
+arguments, the model that answered (every model in a quorum, or the one reviewer that is the reason for
+the outcome), and its sentence, because an auto-approval nobody saw is a decision made on your behalf
+in silence.
 
 ## `[agents.<name>]`
 
@@ -602,6 +699,83 @@ longer leash, declare it on that worker.
 tools = ["web", "misc", "time"]
 max_iterations = 25    # a search-heavy worker: every round spends a tool call
 ```
+
+## `[reviewers.<name>]`
+
+A reviewer is one context-free model call whose answer code consumes, declared here so you can read the
+standard it is held to. Three names are consumed today, and each is optional:
+
+| Name | Asked by | Undeclared |
+| --- | --- | --- |
+| `plan` | `/plan`'s plan critic, when [`[planning].plan_review_agent`](#planning) is on | planning's own shipped prompt applies |
+| `result` | `/plan`'s result critic, when [`[planning].result_review`](#planning) is on | planning's own shipped prompt applies |
+| `approval` | [`[security.auto_approval]`](#securityauto_approval), when it is on | the gate refuses to start |
+
+So a table here is an override, not something you must restate to keep a default. `[reviewers.approval]`
+is the exception and says why in its own error: a security reviewer with no stated standard reviews
+nothing, so its `system_message` is required rather than defaulted. The shipped `config.example.toml`
+declares that one, with the gate off.
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `description` | string | what this reviewer is for. A note to yourself: nothing reads it |
+| `system_message` | string | the standard the reviewer is held to |
+| `model` | string | overrides `[assistant].model` for this reviewer alone |
+| `thinking` | bool or level | overrides `[assistant].thinking` for this reviewer alone |
+| `generation` | sub-table | overrides `[assistant.generation]`, **per key** |
+
+Three of those resolve against the `[assistant]` tiers exactly as an agent's do: `model` on "is it
+set", `thinking` on "is it unset" (so `thinking = false` is a real declaration rather than one an `or`
+would swallow), and `generation` merged key by key, so a reviewer that wants only a colder temperature
+keeps the default's context length. See [`[assistant].model`](#model) for what a model string may
+carry, including the endpoint suffix and the way a bare `provider:model` here drops an endpoint pinned
+there.
+
+`system_message` is the one that does **not** fall back to `[assistant].system_message`, and the
+difference is deliberate. An undeclared prompt leaves it empty, and what empty means is the consumer's
+to decide rather than this file's: the `/plan` critics substitute their own shipped standard, and the
+approval gate refuses to start. An agent's opener describes a persona, where a reviewer's describes a
+standard, and there is no sensible standard to inherit from an assistant's own greeting.
+
+`description` is read by nobody: it is a label for whoever opens this file, which is why a reviewer's
+is worth writing even though no model ever sees it.
+
+**Three keys an `[agents.<name>]` table takes are refused by name**, each with its reason, because a
+reader who wrote one was reasoning by analogy from the agents table:
+
+| Refused | Why |
+| --- | --- |
+| `tools` | whatever consumes a reviewer fixes its tools in code, and this table has no key to change them: the approval gate asks with tools off, and a `/plan` critic gets a curated verification toolset. |
+| `delegates_to` | it is one model call, so there is nothing for a worker to be part of. |
+| `max_iterations` | it runs no tool loop, so there is no cap to set. |
+
+Declare an agent if you want any of those. The approval reviewer's own call being tool-less is also why
+that gate cannot recurse into itself: a reviewer making no tool call has no call for the gate to be
+asked about while it is reviewing one. (The `/plan` critics are the one place a reviewer's answer is
+produced by a tool-using agent, over a curated read-only toolset the workflow fixes in code; this table
+gives it the persona, never the tools. See [Architecture](../explanation/architecture.md).)
+
+`[reviewers.approval]` additionally refuses a declared `thinking`, and the error says why: its answer
+comes back through a structured call, which returns JSON and no reasoning on every provider, so a
+reasoning request there could never take effect. An effort inherited from `[assistant].thinking` is
+inert rather than refused, since that key makes no claim about this reviewer and refusing it would turn
+one global setting into an install-wide bar on enabling the gate.
+
+**This whole section is locked by default**, like `[agents.*]` and for the same reason: `update_config`
+is a tool the assistant holds, and a reviewer's prompt decides how the assistant's own work is judged.
+See [who may change which key](#who-may-change-which-key).
+
+```toml
+[reviewers.plan]
+description = "Reviews a plan against the request."
+thinking = "high"
+model = "ollama:qwen3:32b"
+system_message = """\
+Reject a plan that solves a different problem than the one asked, that cannot be checked when it is \
+done, or that spends a tool call it does not need."""
+```
+
+Startup-only: a reviewer's client is built per call from the values this file had at startup.
 
 ## `[[mcp.server]]`
 
@@ -818,6 +992,14 @@ before doing the work. Every key here belongs to that toolset and is read only w
 `result_review` runs the answer non-streamed, since it has to exist in full before it can be checked.
 `show_reasoning` shows the planner, each reviewer's prose reasoning and verdict, the executor, and every
 revision, including each intermediate version, which overrides `result_review`'s hide-until-vetted gate.
+
+**Which model each critic runs on, and the standard it holds a plan to, are yours to set.** Both flags
+above turn on a reviewer whose persona comes from [`[reviewers.<name>]`](#reviewersname):
+`[reviewers.plan]` for `plan_review_agent`, `[reviewers.result]` for `result_review`. Leave either
+table undeclared and planning's own shipped prompt applies, so a table there is an override rather than
+something you must write to keep the default. This is the place to give a critic a stronger (or
+cheaper) model than the agent it is reviewing, and the place to read the standard your plan was
+rejected against.
 
 ## `[capabilities]`
 

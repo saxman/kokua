@@ -28,9 +28,10 @@ someone changing the wiring in (1) and its own test in the same change would not
 """
 
 from aimu.events import ModelTurnFinished
+from aimu.models import parse_json_response
 
 from kokua.core.metrics import TurnMetrics, current_metrics, record_event
-from kokua.workflows.critics import reviewer_agent
+from kokua.workflows.critics import finalize_verdict, reviewer_agent
 
 
 def test_reviewer_agent_names_itself_reviewer_by_default():
@@ -87,3 +88,22 @@ def test_the_forwarder_attributes_a_reviewers_cost_to_the_reviewer():
         current_metrics.reset(token)
     record = metrics.record(wall_seconds=2.5)
     assert record["by_agent"]["reviewer"]["input_tokens"] == 300
+
+
+async def test_a_verdict_whose_boolean_came_back_as_a_string_is_not_approved():
+    """A reviewer's "no" arriving as the string ``"false"`` must not read as an approval.
+
+    ``Verdict`` is a plain dataclass and AIMU's structured path builds it with ``schema(**parsed)``,
+    validating no types, so a provider whose server ignores ``response_format`` can hand back a
+    ``Verdict`` whose ``approved`` is a truthy string. Every caller tests ``if verdict.approved``, so
+    the narrowing belongs at this boundary. Built through ``parse_json_response`` rather than by hand,
+    because the parser is where the type is actually decided.
+    """
+
+    class _Client:
+        async def chat(self, prompt, schema=None, use_tools=None):
+            return parse_json_response('{"approved": "false", "issues": ["destructive"]}', schema)
+
+    verdict = await finalize_verdict(_Client())
+    assert verdict.approved is False
+    assert verdict.issues == ["destructive"]

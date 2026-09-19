@@ -64,6 +64,31 @@ class RichChannel(Protocol):
     async def send_approval_request(self, name: str, arguments: Any) -> None:
         """Prompt for tool-call approval. The reply arrives through the ordinary inbound path."""
 
+    async def send_auto_approval(
+        self,
+        name: str,
+        arguments: Any,
+        *,
+        approved: bool,
+        reason: str,
+        model: str,
+        conversation_id: Optional[str] = None,
+    ) -> None:
+        """Report that a reviewer answered for a gated tool call, whichever way it answered.
+
+        Both directions ride one frame, because the user is owed the same record either way: an
+        approval they did not have to give, and an escalation that arrived with a reason attached.
+
+        ``conversation_id`` is the turn the reviewed call belongs to, carried for the reason
+        ``send_notification`` carries it: a front end with more than one conversation can file the card
+        against that turn instead of against whatever is being viewed when it arrives.
+
+        ``approved``, ``reason``, ``model``, and ``conversation_id`` are keyword-only, matching
+        ``send_notification``'s trailing fields: a bare positional bool next to two bare strings is
+        exactly the shape an outside implementer transposes without either call raising, so this frame
+        protects it the same way that one does.
+        """
+
     async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
         """Prompt for plan approve/edit/reject. The reply arrives through the ordinary inbound path."""
 

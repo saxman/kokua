@@ -24,6 +24,10 @@ DEFAULT_LOCKED_CONFIG_KEYS: tuple[str, ...] = (
     "email.to",
     "paths.data_dir",
     "agents.*",
+    # A reviewer's prompt and model decide how the assistant's own work is judged, including whether a
+    # gated tool call is waved through, so it is locked for the reason [agents.*] is: update_config is a
+    # tool the assistant holds.
+    "reviewers.*",
     "scheduling.task.*",
     # decides which environment variables a run_command child can see; the assistant naming its own
     # API key here would hand a shell child the credential the allowlist exists to keep out of reach.
@@ -64,6 +68,54 @@ class AgentConfig:
     # AssistantConfig.max_iterations_for). None means undeclared. The parse layer rejects anything
     # below 1, so every value that reaches here is a real cap.
     max_iterations: Optional[int] = None
+
+
+@dataclass
+class ReviewerConfig:
+    """One reviewer, declared whole in ``config.toml``.
+
+    A reviewer is a context-free model call whose answer code consumes: a plan critic's verdict, or
+    the approval gate's three booleans. It takes the five fields that describe *how a model is asked*
+    and none of the three that give an agent reach. What tools a reviewer holds is fixed in code by
+    whatever consumes it, and this table has no key to change them: the approval gate asks its reviewer
+    with tools off, and a plan critic runs the curated verification toolset
+    ``workflows.critics.REVIEWER_TOOLS``. Nothing delegates to a reviewer, nothing spawns it, and it
+    runs no tool loop, so ``tools``, ``delegates_to``, and ``max_iterations`` are rejected by name at
+    parse time rather than accepted and ignored.
+
+    The approval reviewer's own call is tool-less (``use_tools=False``), which is the structural reason
+    that gate cannot recurse into itself: a reviewer making no tool call has no call for the gate to be
+    asked about while it is reviewing one.
+
+    ``model``, ``thinking``, and ``generation`` resolve exactly as an agent's do, against the
+    ``[assistant]`` tiers (see :meth:`AssistantConfig.reviewer_for`). Before this table existed those
+    tiers were the *only* ones a reviewer had, which is why deep planning's critics ran on
+    ``[assistant].model`` at ``[assistant].thinking`` whatever the plan needed.
+    """
+
+    description: str = ""
+    system_message: str = ""
+    model: Optional[str] = None
+    thinking: Optional[Union[bool, str]] = None
+    generation: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ResolvedReviewer:
+    """One reviewer with every tier already applied, ready to build a client from.
+
+    Total rather than optional, for the reason ``AssistantConfig.model_for`` is: "nothing declared
+    anywhere" is a question answered once, here, instead of by each caller again. ``system_message``
+    is the exception and is ``""`` when no table declared one, because what an undeclared prompt means
+    is the consumer's to decide: deep planning falls back to its own prompt constant, and the approval
+    gate refuses to start, since a security reviewer with no stated standard reviews nothing.
+    """
+
+    name: str
+    model: str
+    thinking: Optional[Union[bool, str]]
+    generation: dict
+    system_message: str
 
 
 @dataclass
@@ -138,6 +190,10 @@ class AssistantConfig:
     # Every agent, keyed by name, read whole from [agents.*]. Nothing is defaulted in code: an agent's
     # capability is exactly what its table declares, and a capability no agent names reaches nothing.
     agents: dict[str, AgentConfig] = field(default_factory=dict)
+    # Every reviewer, keyed by name, read whole from [reviewers.*]. Locked by default like [agents.*]
+    # (see DEFAULT_LOCKED_CONFIG_KEYS): a reviewer's prompt is a declaration about how the assistant is
+    # judged, and update_config is a tool the assistant holds.
+    reviewers: dict[str, ReviewerConfig] = field(default_factory=dict)
     # The agent the user talks to, and the root of the delegation graph.
     entry_agent: str = "assistant"
     # Run independent tool calls in one turn concurrently, so several delegations overlap.
@@ -178,6 +234,32 @@ class AssistantConfig:
             "config.update_config",
         ]
     )
+    # Tools no reviewer may ever approve, whatever [security.auto_approval].tools names, in the same
+    # vocabulary confirm_tools uses. These three change what may act *later* rather than acting once, so
+    # the arguments a review was about stop constraining anything the moment the write lands: a waved
+    # `update_config` can widen this very list, a waved `add_skill_script` writes a script that becomes a
+    # tool, and a waved `add_mcp_server` adds a tool source. Naming one in auto_approval_tools is a
+    # startup error. Editable, like every control in this section, and only by hand: the shipped
+    # `security.*` lock pattern keeps update_config out of here.
+    never_auto_approve: list[str] = field(
+        default_factory=lambda: [
+            "config.update_config",
+            "skills.add_skill_script",
+            "mcp.add_mcp_server",
+        ]
+    )
+    # Whether a declared reviewer may approve a gated tool call in place of the user, and which tools it
+    # may be asked about. Off by default, and startup-only: the whole table is locked by `security.*`, so
+    # only a hand-edit changes it, and a hand-edit can restart. A reviewer is named here and declared in
+    # [reviewers.<name>]; naming more than one requires all of them to agree.
+    auto_approval_enabled: bool = False
+    auto_approval_reviewers: list[str] = field(default_factory=list)
+    auto_approval_tools: list[str] = field(default_factory=list)
+    # Past this, the review escalates rather than being waited on any longer.
+    auto_approval_timeout_seconds: float = 10.0
+    # Most auto-approvals one turn may collect. A loop calling one tool twenty times must not collect
+    # twenty approvals, and the cap bounds what the feature can cost per turn at the same time.
+    auto_approval_max_per_turn: int = 5
     # Which config keys update_config refuses. The user's to set: see store.locked_by for the pattern
     # forms, and store.LOCK_AXIOM for the one key no list can unlock.
     locked_config_keys: list[str] = field(default_factory=lambda: list(DEFAULT_LOCKED_CONFIG_KEYS))
@@ -303,6 +385,30 @@ class AssistantConfig:
         agent = self.agents.get(agent_name)
         declared = agent.max_iterations if agent else None
         return self.max_iterations if declared is None else declared
+
+    def reviewer_for(self, name: str) -> ResolvedReviewer:
+        """The persona reviewer ``name`` runs with: its own ``[reviewers.<name>]`` table over the
+        ``[assistant]`` tiers.
+
+        Each field resolves by the same rule its agent counterpart does, and for the same reasons:
+        ``model`` on truthiness, ``thinking`` on ``is None`` (because ``thinking = false`` is a real
+        declaration an ``or`` would swallow), and ``generation`` merged per key so a reviewer that
+        wanted only a colder temperature keeps the default's context length. A fresh ``generation``
+        dict every call, because the caller assigns it to a live client's
+        ``default_generate_kwargs``, which that client may then mutate.
+
+        Answers for an undeclared name rather than raising: a consumer that requires a table says so
+        itself with an error naming the config fix, which is a better message than a KeyError from here.
+        """
+        reviewer = self.reviewers.get(name)
+        declared_thinking = reviewer.thinking if reviewer else None
+        return ResolvedReviewer(
+            name=name,
+            model=(reviewer.model if reviewer else None) or self.default_model,
+            thinking=self.thinking if declared_thinking is None else declared_thinking,
+            generation={**self.generation, **(reviewer.generation if reviewer else {})},
+            system_message=(reviewer.system_message if reviewer else ""),
+        )
 
     @property
     def skills_dir(self) -> Path:

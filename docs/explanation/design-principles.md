@@ -85,6 +85,12 @@ Inside, no asymmetry remains: every toolset keeps the `build` its author wrote, 
 import or to build stops startup naming itself, whoever wrote it. Kokua ships no third-party code, so it
 carries no special handling for code it does not ship.
 
+*Where this principle was hardest to hold:* auto-approval landed in `core/`, not in a toolset, and the
+argument for that is written out in [Auto-approval](auto-approval.md#is-this-a-core-change-or-a-plugin)
+rather than assumed. The short version is that it contributes no capability: it changes how one
+existing human decision point behaves, inside the single function that owns that decision, and a
+toolset contributes tools and settings rather than a fork in the gate every tool passes through.
+
 ### Corollary: a capability is declared, never defaulted
 
 An agent's capability is exactly what its `[agents.<name>].tools` table declares. **No code path adds a
@@ -139,13 +145,22 @@ else. One file is also what makes a running system's whole configuration legible
 `tomlkit` writes; two writers (`add_mcp_server` and the assistant's own `update_config` tool) land in
 that one file. A `runtime-settings.json` store used to exist and was
 retired in favour of the file itself. `[security].locked_config_keys` is a user-set list of patterns
-naming what `update_config` refuses even behind the approval prompt, and it ships locking four things:
-`[security] confirm_tools` (the gate itself), `[email] to` (the locked recipient), `[paths] data_dir`
-(where all state lives), and the whole `[agents.*]` section. That last one is matched by section prefix
-rather than by a key entry, since agent names cannot be enumerated ahead of time, and it is locked by
-default for the obvious reason: `update_config` is a tool the assistant holds, so a writable agent table
-would let the assistant widen its own reach. `locked_config_keys` itself is the one entry the list can
-never remove; everything else, `agents.*` included, is a hand-edit away from being unlocked.
+naming what `update_config` refuses even behind the approval prompt, and it ships with seven patterns.
+The first is the whole `[security]` section rather than any one key in it, which is the pattern worth
+reading closely, because what that section holds has grown: the approval gate (`confirm_tools`), the
+`[security.auto_approval]` sub-table and the `never_auto_approve` floor beneath it, and the lock list
+itself. Every control this principle is about is therefore hand-edit-only by default, not just the one
+that was there first. The rest are `[email] to` (the locked recipient), `[paths] data_dir` (where all
+state lives), the whole `[agents.*]` and `[reviewers.*]` sections, `[scheduling.task.*]` (see below,
+where the reason is routing rather than capability), and `[compute] command_env_passthrough`, which
+decides which environment variables a `run_command` child can see. The two section patterns are matched
+by prefix rather than by a key entry, since agent and reviewer names cannot be enumerated ahead of
+time, and each is locked by default for a reason of the same shape: `update_config` is a tool the
+assistant holds, so a writable agent table would let the assistant widen its own reach, and a writable
+reviewer table would let it rewrite the standard its own work is judged against, including (with
+[auto-approval](auto-approval.md) on) whether a gated tool call reaches the user at all.
+`locked_config_keys` itself is the one entry the list can never remove; everything else, `agents.*`
+included, is a hand-edit away from being unlocked.
 
 `config.toml` also holds Kokua's declared scheduled tasks, one `[scheduling.task.<name>]` table per
 task, and `[scheduling.task.*]` is app-written the same way `[[mcp.server]]` is: the assistant's own
@@ -206,7 +221,7 @@ can attach a debugger to, rather than a request landing in whichever worker happ
 The invariants block is a teaching artifact as much as a safety one.
 
 *How this cashes out:* [`core/turns.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py) opens with a
-`## Concurrency invariants` block -- seven rules, each stating what breaks without it, including a
+`## Concurrency invariants` block of eight rules, each stating what breaks without it, including a
 deadlock that a regression test still guards. [`TurnGate`](https://github.com/saxman/kokua/blob/main/src/kokua/core/turn_gate.py) is a
 documented writer-preferring readers-writer gate: turns read, a settings change writes, and which side an
 operation belongs on follows from its reach rather than from whether it mutates (a conversation delete
@@ -250,6 +265,17 @@ hope about the group's contents. The writers are gated in `confirm_tools` beside
 related reason: `coder` holds a shell that can write a file, so an ungated `write_file` next to it would
 be the same outcome by a shorter route, with the gate approving the long way round and waving the short
 one through.
+
+**A control may sit above the gate as well as beside it, and it says which it is.**
+`[security.auto_approval]` (off by default) lets a declared reviewer answer a gated call's prompt in the
+user's place, and it is a convenience layer rather than a boundary: its whole security claim is that a
+review can only turn a prompt into an approval, never widen what the user could have approved
+themselves. The reason it belongs under this principle rather than beside it is that every part of it is
+a value in the file (which tools, which reviewers, which prompt, how long to wait, how many per turn),
+and a part that would do nothing is a startup error like any other control here. What a review can be
+about is one *action*, never a capability, so `[security].never_auto_approve` floors the three tools
+whose landing makes the reviewed arguments stop constraining anything. See
+[Auto-approval](auto-approval.md) for the argument and its limits.
 
 **You may loosen, not only tighten.** `locked_config_keys` is yours to empty. Strike `agents.*` from it
 and the assistant really can rewrite its own capability table on the next restart. The documentation

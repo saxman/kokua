@@ -24,7 +24,7 @@ from typing import Any, Callable, Optional, Sequence, Union
 
 from kokua.config import paths as paths
 from kokua.config import table as runtime_settings
-from kokua.config.schema import AgentConfig, MCPServerConfig
+from kokua.config.schema import AgentConfig, MCPServerConfig, ReviewerConfig
 
 EXAMPLE_FILENAME = "config.example.toml"
 
@@ -191,6 +191,14 @@ _GENERATION_KEYS: dict[str, tuple[tuple[type, ...], str, Callable[[Any], bool]]]
 # has no dot in it.
 _GENERATION_SECTION = "assistant.generation"
 
+# The sub-table of [security] the auto-approval gate's own keys live in. Also a dotted section, and safe
+# to route the same way `_GENERATION_SECTION` is: `security` is not one of `_STRUCTURED_SECTIONS`, so
+# `_sections` re-enters this nested table as the flat section "security.auto_approval" with its scalar
+# keys already separated out, which is exactly the shape the (section, key) schema lookup below takes. No
+# branch in `load` is needed, unlike `_GENERATION_SECTION`, because these keys each map to a field of
+# their own rather than into one shared dict.
+_AUTO_APPROVAL_SECTION = "security.auto_approval"
+
 
 def _generation_value(section: str, key: str, value: Any) -> Any:
     """Validate one generation parameter, naming the table it came from.
@@ -232,6 +240,19 @@ def _positive_int(section: str, key: str, value: Any) -> int:
     if value < 1:
         raise ConfigError(f"[{section}].{key} must be an integer >= 1, got {value!r}")
     return value
+
+
+def _positive_number(section: str, key: str, value: Any) -> float:
+    """Validate a duration that a wait can actually end on, naming the table it came from.
+
+    Zero would make every review time out instantly and read as a reviewer that never answers, which is
+    indistinguishable from one that is actually unreachable; the floor is what keeps the two apart. The
+    `bool` guard is the reason `_positive_int` carries the same one: `bool` is an `int` subclass, so
+    `timeout_seconds = true` would otherwise pass `isinstance(value, (int, float))` and coerce to `1.0`.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        raise ConfigError(f"[{section}].{key} must be a positive number of seconds")
+    return float(value)
 
 
 def _generation(section: str, key: str, value: Any) -> dict:
@@ -313,6 +334,57 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
         else:
             fields[key] = value
     return AgentConfig(**fields)
+
+
+# `object`, not the real type, for the two keys _parse_reviewer intercepts before the isinstance
+# fallback below: `_AGENT_KEYS` makes the identical choice for the identical reason, spelled out there.
+# A real type here would look enforced and not be; `thinking` is checked by `_thinking` (a bool-or-string
+# union this map cannot express besides) and `generation` by `_generation`, both in `_parse_reviewer`'s
+# own `elif` branches, so a bad value never reaches the bare `isinstance(value, expected)` this map feeds.
+_REVIEWER_KEYS = {
+    "description": str,
+    "system_message": str,
+    "model": str,
+    "thinking": object,  # value checked by _thinking; listed here so it is a known key
+    "generation": object,  # a sub-table, validated by _generation; listed here for the same reason
+}
+
+# Keys an [agents.<name>] table takes and a reviewer cannot. Rejected by name, with the reason, rather
+# than caught by the unknown-key branch below: a reader who wrote one of these was reasoning by analogy
+# from the agents table, and "unknown config key" would read as a typo in a key that really exists one
+# section over.
+_AGENT_ONLY_REVIEWER_KEYS = {
+    "tools": "A reviewer's tools are fixed in code by whatever consumes it, and this table has no key "
+    "to change them: the approval reviewer is asked with tools off, and a plan critic gets the curated "
+    "verification toolset in workflows/critics.py. Declare an agent instead.",
+    "delegates_to": "A reviewer delegates to nothing: it is one model call, so there is nothing for a "
+    "worker to be part of. Declare an agent instead.",
+    "max_iterations": "A reviewer runs no tool loop, so there is no cap to set. Declare an agent instead.",
+}
+
+
+def _parse_reviewer(name: str, spec: Any) -> ReviewerConfig:
+    """Validate one [reviewers.<name>] table into a ``ReviewerConfig``."""
+    if not isinstance(spec, dict):
+        raise ConfigError(f"[reviewers.{name}] must be a table")
+    fields: dict = {}
+    for key, value in spec.items():
+        if key in _AGENT_ONLY_REVIEWER_KEYS:
+            raise ConfigError(
+                f"[reviewers.{name}].{key} is an agent key, not a reviewer key. {_AGENT_ONLY_REVIEWER_KEYS[key]}"
+            )
+        expected = _REVIEWER_KEYS.get(key)
+        if expected is None:
+            raise ConfigError(f"unknown config key [reviewers.{name}].{key}")
+        if key == "thinking":
+            fields[key] = _thinking(f"reviewers.{name}", key, value)
+        elif key == "generation":
+            fields[key] = _generation(f"reviewers.{name}", key, value)
+        elif not isinstance(value, expected):
+            raise ConfigError(f"[reviewers.{name}].{key} must be a {expected.__name__}")
+        else:
+            fields[key] = value
+    return ReviewerConfig(**fields)
 
 
 # The dotted section `_sections` yields for the [scheduling.task.<name>] tables. Not a member of
@@ -442,6 +514,22 @@ _STARTUP_SCHEMA: dict[tuple[str, str], tuple[str, tuple[type, ...], str, Optiona
     ("email", "to"): ("email_to", (str,), "a string", None),
     ("email", "use_ssl"): ("email_use_ssl", (bool,), "a boolean", None),
     ("security", "confirm_tools"): ("confirm_tools", (list,), "a list of strings", _str_list),
+    ("security", "never_auto_approve"): ("never_auto_approve", (list,), "a list of strings", _str_list),
+    (_AUTO_APPROVAL_SECTION, "enabled"): ("auto_approval_enabled", (bool,), "true or false", None),
+    (_AUTO_APPROVAL_SECTION, "reviewers"): ("auto_approval_reviewers", (list,), "a list of strings", _str_list),
+    (_AUTO_APPROVAL_SECTION, "tools"): ("auto_approval_tools", (list,), "a list of strings", _str_list),
+    (_AUTO_APPROVAL_SECTION, "timeout_seconds"): (
+        "auto_approval_timeout_seconds",
+        (int, float),
+        "a positive number of seconds",
+        _positive_number,
+    ),
+    (_AUTO_APPROVAL_SECTION, "max_per_turn"): (
+        "auto_approval_max_per_turn",
+        (int,),
+        "a positive integer",
+        _positive_int,
+    ),
     (_LOCK_LIST_SECTION, _LOCK_LIST_KEY): (
         _LOCK_LIST_KEY,
         (list,),
@@ -553,7 +641,7 @@ AGENT_SCHEMA: dict[tuple[str, str], tuple] = {
 
 # The tables ``load`` parses itself, key by key, rather than through the flat schema above: each has its
 # own branch in ``load`` because it maps to one dict/list field or a nested table, not to one field per key.
-_STRUCTURED_SECTIONS = frozenset({"subagents", "agents", "mcp"})
+_STRUCTURED_SECTIONS = frozenset({"subagents", "agents", "mcp", "reviewers"})
 
 
 def core_sections() -> frozenset[str]:
@@ -763,6 +851,11 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
     # and removed through the mcp tools, which connect it as well as write it.
     if section == "mcp" and key == "server":
         raise ConfigError("[[mcp.server]] is not editable with update_config; use the MCP tools")
+    if section == "reviewers" or section.startswith("reviewers."):
+        raise ConfigError(
+            "[reviewers.<name>] is not editable with update_config. A reviewer's prompt and model decide "
+            "how this assistant's own work is judged, so they are a hand-edit in config.toml."
+        )
     schema = build_schema(table, {**AGENT_SCHEMA, **(extra_schema or {})})
     spec = schema.get((_schema_section(section), key))
     if spec is None:
@@ -882,6 +975,11 @@ def load(
         # handled specially like [subagents]/[mcp] rather than via the schema's flat one-key-one-target map.
         if section == "agents":
             overrides["agents"] = {name: _parse_agent(name, spec) for name, spec in entries.items()}
+            continue
+        # One sub-table per reviewer, each parsed whole, so it is handled here rather than through the
+        # schema's flat one-key-one-target map, exactly like [agents].
+        if section == "reviewers":
+            overrides["reviewers"] = {name: _parse_reviewer(name, spec) for name, spec in entries.items()}
             continue
         # [mcp] is the one section holding both shapes: a [[mcp.server]] array of tables, which needs
         # its own parser, and ordinary scalar keys (the OAuth callback), which the schema handles. Only

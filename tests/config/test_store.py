@@ -786,3 +786,20 @@ def test_renaming_over_a_split_task_removes_all_of_the_task_it_replaces(tmp_path
     records = config_store.load_tasks(path)
     assert [r["name"] for r in records] == ["alpha"]
     assert records[0]["schedule"] == {"type": "interval", "seconds": 30}
+
+
+# --- [reviewers.<name>]: locked by default, refused from update_config -------------------------
+
+
+def test_reviewers_are_locked_by_default():
+    from kokua.config.schema import DEFAULT_LOCKED_CONFIG_KEYS
+
+    assert "reviewers.*" in DEFAULT_LOCKED_CONFIG_KEYS
+    assert config_store.locked_by("reviewers.approval", "system_message", list(DEFAULT_LOCKED_CONFIG_KEYS)) == (
+        "reviewers.*"
+    )
+
+
+def test_update_config_refuses_a_reviewer_section():
+    with pytest.raises(settings.ConfigError, match="not editable with update_config"):
+        settings.coerce_config_string("reviewers.approval", "system_message", "x", table=core_table())
