@@ -24,6 +24,10 @@ DEFAULT_LOCKED_CONFIG_KEYS: tuple[str, ...] = (
     "email.to",
     "paths.data_dir",
     "agents.*",
+    # A reviewer's prompt and model decide how the assistant's own work is judged, including whether a
+    # gated tool call is waved through, so it is locked for the reason [agents.*] is: update_config is a
+    # tool the assistant holds.
+    "reviewers.*",
     "scheduling.task.*",
     # decides which environment variables a run_command child can see; the assistant naming its own
     # API key here would hand a shell child the credential the allowlist exists to keep out of reach.

@@ -109,6 +109,7 @@ locked_config_keys = [
     "email.to",
     "paths.data_dir",
     "agents.*",
+    "reviewers.*",
     "scheduling.task.*",
     "compute.command_env_passthrough",
 ]

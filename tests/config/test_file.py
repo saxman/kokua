@@ -964,3 +964,61 @@ def test_thinking_request_and_the_file_validator_agree_on_the_levels():
     """One vocabulary, two entry points. A level the file accepts must be a level a message can ask for."""
     for level in settings._THINKING_LEVELS:
         assert settings.thinking_request(level) == settings._thinking("assistant", "thinking", level)
+
+
+# --- [reviewers.<name>] ------------------------------------------------------------------------
+
+
+def _load_toml(tmp_path, text: str) -> AssistantConfig:
+    """Write ``text`` as config.toml under ``tmp_path`` and return the resulting ``AssistantConfig``.
+
+    A local helper rather than ``_write_config``/``_resolve``, because those two go through the whole
+    CLI arg-parsing path for a config at the fixed ``$KOKUA_HOME`` location; a reviewer test only needs
+    ``settings.load`` fed straight into the dataclass it builds.
+    """
+    path = tmp_path / "config.toml"
+    path.write_text(text, encoding="utf-8")
+    overrides = settings.load(str(path), table=core_table())
+    return AssistantConfig(**overrides)
+
+
+def test_reviewer_table_parses(tmp_path):
+    config = _load_toml(
+        tmp_path,
+        """
+        [reviewers.approval]
+        description = "Answers three questions about one gated tool call."
+        model = "ollama:b"
+        thinking = false
+        system_message = "judge it"
+        [reviewers.approval.generation]
+        temperature = 0.0
+        """,
+    )
+    assert config.reviewers["approval"].model == "ollama:b"
+    assert config.reviewers["approval"].thinking is False
+    assert config.reviewers["approval"].generation == {"temperature": 0.0}
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [("tools", '["web"]'), ("delegates_to", '["coder"]'), ("max_iterations", "6")],
+)
+def test_reviewer_rejects_agent_only_keys(tmp_path, key, value):
+    with pytest.raises(settings.ConfigError) as caught:
+        _load_toml(tmp_path, f"[reviewers.approval]\n{key} = {value}\n")
+    message = str(caught.value)
+    assert f"[reviewers.approval].{key}" in message
+    # The message has to say why, not just that: this is the one place a reader learns a reviewer has
+    # no reach, and "unknown config key" would read as a typo.
+    assert "agent" in message
+
+
+def test_reviewer_rejects_unknown_key(tmp_path):
+    with pytest.raises(settings.ConfigError, match=r"unknown config key \[reviewers.approval\].nope"):
+        _load_toml(tmp_path, "[reviewers.approval]\nnope = 1\n")
+
+
+def test_reviewer_table_must_be_a_table(tmp_path):
+    with pytest.raises(settings.ConfigError, match=r"\[reviewers.approval\] must be a table"):
+        _load_toml(tmp_path, 'reviewers = { approval = "nope" }\n')

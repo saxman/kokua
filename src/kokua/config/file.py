@@ -24,7 +24,7 @@ from typing import Any, Callable, Optional, Sequence, Union
 
 from kokua.config import paths as paths
 from kokua.config import table as runtime_settings
-from kokua.config.schema import AgentConfig, MCPServerConfig
+from kokua.config.schema import AgentConfig, MCPServerConfig, ReviewerConfig
 
 EXAMPLE_FILENAME = "config.example.toml"
 
@@ -315,6 +315,51 @@ def _parse_agent(name: str, spec: Any) -> AgentConfig:
     return AgentConfig(**fields)
 
 
+_REVIEWER_KEYS = {
+    "description": str,
+    "system_message": str,
+    "model": str,
+    "thinking": (bool, str),
+    "generation": dict,
+}
+
+# Keys an [agents.<name>] table takes and a reviewer cannot. Rejected by name, with the reason, rather
+# than caught by the unknown-key branch below: a reader who wrote one of these was reasoning by analogy
+# from the agents table, and "unknown config key" would read as a typo in a key that really exists one
+# section over.
+_AGENT_ONLY_REVIEWER_KEYS = {
+    "tools": "A reviewer holds no tools. Its independence is the whole of what it offers, and a tool "
+    "that reads a page is a tool that can be told what to decide. Declare an agent instead.",
+    "delegates_to": "A reviewer delegates to nothing: it is one model call, so there is nothing for a "
+    "worker to be part of. Declare an agent instead.",
+    "max_iterations": "A reviewer runs no tool loop, so there is no cap to set. Declare an agent instead.",
+}
+
+
+def _parse_reviewer(name: str, spec: Any) -> ReviewerConfig:
+    """Validate one [reviewers.<name>] table into a ``ReviewerConfig``."""
+    if not isinstance(spec, dict):
+        raise ConfigError(f"[reviewers.{name}] must be a table")
+    fields: dict = {}
+    for key, value in spec.items():
+        if key in _AGENT_ONLY_REVIEWER_KEYS:
+            raise ConfigError(
+                f"[reviewers.{name}].{key} is an agent key, not a reviewer key. {_AGENT_ONLY_REVIEWER_KEYS[key]}"
+            )
+        expected = _REVIEWER_KEYS.get(key)
+        if expected is None:
+            raise ConfigError(f"unknown config key [reviewers.{name}].{key}")
+        if key == "thinking":
+            fields[key] = _thinking(f"reviewers.{name}", key, value)
+        elif key == "generation":
+            fields[key] = _generation(f"reviewers.{name}", key, value)
+        elif not isinstance(value, expected):
+            raise ConfigError(f"[reviewers.{name}].{key} must be a {expected.__name__}")
+        else:
+            fields[key] = value
+    return ReviewerConfig(**fields)
+
+
 # The dotted section `_sections` yields for the [scheduling.task.<name>] tables. Not a member of
 # _STRUCTURED_SECTIONS: that set feeds `core_sections`, and reserving "scheduling" there would make
 # `settings_sources` reject the scheduling toolset's own max_task_conversations as a section collision.
@@ -553,7 +598,7 @@ AGENT_SCHEMA: dict[tuple[str, str], tuple] = {
 
 # The tables ``load`` parses itself, key by key, rather than through the flat schema above: each has its
 # own branch in ``load`` because it maps to one dict/list field or a nested table, not to one field per key.
-_STRUCTURED_SECTIONS = frozenset({"subagents", "agents", "mcp"})
+_STRUCTURED_SECTIONS = frozenset({"subagents", "agents", "mcp", "reviewers"})
 
 
 def core_sections() -> frozenset[str]:
@@ -763,6 +808,11 @@ def coerce_config_string(section: str, key: str, raw: str, *, table, extra_schem
     # and removed through the mcp tools, which connect it as well as write it.
     if section == "mcp" and key == "server":
         raise ConfigError("[[mcp.server]] is not editable with update_config; use the MCP tools")
+    if section == "reviewers" or section.startswith("reviewers."):
+        raise ConfigError(
+            "[reviewers.<name>] is not editable with update_config. A reviewer's prompt and model decide "
+            "how this assistant's own work is judged, so they are a hand-edit in config.toml."
+        )
     schema = build_schema(table, {**AGENT_SCHEMA, **(extra_schema or {})})
     spec = schema.get((_schema_section(section), key))
     if spec is None:
@@ -882,6 +932,11 @@ def load(
         # handled specially like [subagents]/[mcp] rather than via the schema's flat one-key-one-target map.
         if section == "agents":
             overrides["agents"] = {name: _parse_agent(name, spec) for name, spec in entries.items()}
+            continue
+        # One sub-table per reviewer, each parsed whole, so it is handled here rather than through the
+        # schema's flat one-key-one-target map, exactly like [agents].
+        if section == "reviewers":
+            overrides["reviewers"] = {name: _parse_reviewer(name, spec) for name, spec in entries.items()}
             continue
         # [mcp] is the one section holding both shapes: a [[mcp.server]] array of tables, which needs
         # its own parser, and ordinary scalar keys (the OAuth callback), which the schema handles. Only
