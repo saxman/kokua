@@ -130,6 +130,13 @@ Every rule here was learned from a bug. Read them before changing anything in th
    (Regressions: ``test_a_running_firing_is_tracked_under_its_task_so_it_can_be_stopped``,
    ``test_shutdown_cancellation_still_takes_the_firing_down_with_it``,
    ``test_shutdown_waits_for_a_turn_a_later_message_displaced``.)
+
+8. A reactive turn owns its auto-approval budget, opened as ``current_review_context``
+   (``core/auto_approval.py``) for the turn's duration and absent outside one. Per turn rather than
+   per gate, because concurrent turns on different conversations would otherwise share one counter and
+   one conversation's retry loop could spend another's. Absent in an unattended turn on purpose: a
+   gated call there is denied before a reviewer is asked, so the missing context is a second, structural
+   reason nothing is auto-approved while nobody is watching.
 """
 
 from __future__ import annotations
@@ -147,6 +154,7 @@ from aimu.sessions import SessionSummary
 
 from kokua.channels.web import proactive_turn, streaming_conversation
 from kokua.config.file import thinking_request
+from kokua.core.auto_approval import ReviewContext, current_review_context
 from kokua.core.build import model_label
 from kokua.core.errors import describe_error
 from kokua.core.messages import derive_title, resolve_user_index
@@ -277,6 +285,10 @@ class TurnRunner:
         collector_token = subagent_events.set([])
         metrics = TurnMetrics()
         metrics_token = current_metrics.set(metrics)
+        # The turn's auto-approval budget and request text, opened here so a gated tool call reached
+        # from anywhere inside the turn can find both. Reactive only: an unattended turn auto-denies a
+        # gated call before a reviewer is ever consulted, so a budget there would never be spent.
+        review_token = current_review_context.set(ReviewContext(request=msg.text))
         # The client carries the forwarder, not this turn's accumulator: the forwarder holds no turn
         # state, so it is safe as the durable client-wide setting AIMU calls it, and the contextvar
         # above is what keeps concurrent turns on other conversations out of this record. Assigned
@@ -376,6 +388,7 @@ class TurnRunner:
                 await self._persist(conversation_id, user_index)
         finally:
             current_metrics.reset(metrics_token)
+            current_review_context.reset(review_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
             # Normally already done by `_persist`; this covers a turn that raised before reaching it,

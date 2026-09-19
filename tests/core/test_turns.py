@@ -1343,6 +1343,53 @@ async def test_the_turns_accumulator_is_cleared_afterwards(tmp_path):
     assert current_metrics.get() is None
 
 
+async def test_reactive_turn_opens_a_review_context_carrying_the_request(tmp_path):
+    """A gated tool call reached from inside the run needs the turn's request text and its spent
+    budget, and both live on a contextvar opened by `reactive` rather than passed down the call
+    stack. Read it from inside the run the same way a real gated call would, by patching `agent.run`
+    the way `test_a_turn_runs_at_the_effort_its_message_asked_for` does."""
+    from kokua.core.auto_approval import current_review_context
+
+    seen = {}
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["hi"]))
+    agent = assistant._book.agent_for(assistant._active_id)
+    original_run = agent.run
+
+    async def recording_run(task, **kwargs):
+        context = current_review_context.get()
+        seen["request"] = None if context is None else context.request
+        return await original_run(task, **kwargs)
+
+    agent.run = recording_run
+
+    await assistant._handle(ChannelMessage(text="fix the test", channel="fake"), conversation_id=assistant._active_id)
+
+    assert seen["request"] == "fix the test"
+
+
+async def test_an_unattended_turn_opens_no_review_context(tmp_path):
+    """A gated call in an unattended turn is auto-denied before a reviewer is ever consulted (see
+    `test_proactive_new_session_auto_denies_gated_tool`), so opening a budget for one would be spent
+    on nobody. The absence proves that on purpose, not by accident: no `current_review_context.set`
+    call runs on this path at all."""
+    from kokua.core.auto_approval import current_review_context
+
+    seen = {}
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["done"]))
+    agent = assistant._agent
+    original_run = agent.run
+
+    async def recording_run(task, **kwargs):
+        seen["context"] = current_review_context.get()
+        return await original_run(task, **kwargs)
+
+    agent.run = recording_run
+
+    await assistant._proactive("remind")
+
+    assert seen["context"] is None
+
+
 async def test_two_conversations_turns_are_recorded_separately(tmp_path):
     """The isolation that matters in practice: a backgrounded turn on one conversation must not
     have its cost folded into the turn the user is watching on another."""

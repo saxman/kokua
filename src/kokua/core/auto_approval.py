@@ -27,13 +27,15 @@ reach for first.
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Mapping, Optional, Sequence
 
 from kokua.config.file import ConfigError
 from kokua.config.schema import AssistantConfig, ResolvedReviewer
-from kokua.core.agents import gateable_tools, resolve_gate_entries
-from kokua.registry.context import LiveState
+
+if TYPE_CHECKING:
+    from kokua.registry.context import LiveState
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +116,29 @@ def build_packet(
     )
 
 
+@dataclass
+class ReviewContext:
+    """One turn's auto-approval state: what the user asked for, and how much of the budget is spent.
+
+    A ContextVar rather than a field on the gate, for the reason ``core.metrics.current_metrics`` is
+    one: turns on different conversations run concurrently, and a shared counter would let one
+    conversation's retry loop exhaust another's budget. It carries the request text as well as the
+    count because the packet needs both and neither is reachable from ``HumanGate``, which sees a tool
+    name and its arguments.
+    """
+
+    request: str
+    used: int = 0
+
+
+#: The running turn's review context, opened by ``TurnRunner`` for a *reactive* turn only. Its absence
+#: is load-bearing rather than incidental: an unattended turn opens none, so a gated call in one has no
+#: budget to spend and escalates on the fail-closed path, which is the same answer the proactive branch
+#: of ``HumanGate.approve`` already gives and a second reason for it. Any future turn path that forgets
+#: to open one therefore fails safe rather than reviewing with an unbounded budget and no request text.
+current_review_context: ContextVar[Optional[ReviewContext]] = ContextVar("current_review_context", default=None)
+
+
 @dataclass(frozen=True)
 class AutoApproval:
     """The resolved gate: which tool names a reviewer may be asked about, and who is asked.
@@ -144,6 +169,16 @@ def resolve_auto_approval(
     of one decision, and an auto-approval set that is not a subset of it would describe a prompt that
     never existed.
     """
+    # Deferred rather than at module scope: `core.agents` reaches `aimu.aio.tools.builtin`, the surface
+    # `aimu_compat.require_aimu` probes for, and every toolset module sits on the import path of
+    # `resolve_config`, which runs *before* that preflight. A module-scope import here would turn a
+    # stale AIMU sibling into a bare ImportError at that point instead of the preflight's actionable
+    # message. `test_importing_a_toolset_module_does_not_pull_the_preflight_surface`, in
+    # `tests/toolsets/test_registration.py`, is what would fail if this moved back to the top of the
+    # file; see `toolsets/capabilities.py` for the same deferral against the same surface, and
+    # `config/settings_sources.py` for the analogous deferral against its own upward-import rule.
+    from kokua.core.agents import gateable_tools, resolve_gate_entries
+
     if not config.auto_approval_enabled:
         return None
     if not config.auto_approval_reviewers:

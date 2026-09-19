@@ -5,7 +5,15 @@ import pytest
 from kokua.config import ConfigError
 from kokua.config.schema import AssistantConfig, ReviewerConfig
 from kokua.core.assistant import Assistant
-from kokua.core.auto_approval import MAX_FIELD_CHARS, Review, build_packet, decide, resolve_auto_approval
+from kokua.core.auto_approval import (
+    MAX_FIELD_CHARS,
+    Review,
+    ReviewContext,
+    build_packet,
+    current_review_context,
+    decide,
+    resolve_auto_approval,
+)
 from tests.channels import FakeChannel, _config
 from tests.helpers import MockAsyncModelClient
 
@@ -233,3 +241,19 @@ async def test_a_reviewer_on_the_assistants_own_model_warns_and_still_resolves(t
         auto = await _resolve(tmp_path, reviewers={_REVIEWER: ReviewerConfig(system_message="judge it")})
     assert auto.reviewers[0].model == "ollama:a"
     assert any("same model" in record.getMessage() for record in caplog.records)
+
+
+def test_no_context_outside_a_turn():
+    assert current_review_context.get() is None
+
+
+def test_context_carries_the_request_and_counts_reviews():
+    context = ReviewContext(request="fix the test")
+    token = current_review_context.set(context)
+    try:
+        assert current_review_context.get().request == "fix the test"
+        assert context.used == 0
+        context.used += 1
+        assert current_review_context.get().used == 1
+    finally:
+        current_review_context.reset(token)
