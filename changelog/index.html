@@ -2822,7 +2822,13 @@ alone. The case that does cost something is a configured MCP server, which conne
   Three names are consumed today: <code>plan</code> and <code>result</code> are deep planning's two critics (see <a href="#deep-planning-and-adversarial-review">Deep
   planning and adversarial review</a>) and <code>approval</code> is the
   auto-approval gate's (see <a href="#security">Security</a>). The whole section is locked against
-  <code>update_config</code>, like <code>[agents.*]</code>.
+  <code>update_config</code>, like <code>[agents.*]</code>. <strong>Every declared <code>[reviewers.&lt;name&gt;].model</code> is validated at
+  startup</strong>, the same way and by the same check as <code>[agents.&lt;name&gt;].model</code>: a name AIMU's catalogue
+  does not know fails there, naming the table, rather than surfacing later as "the reviewer could not
+  be reached" on the first gated call or plan review it is asked to do. Checked for every declared
+  reviewer, not only the ones <code>[security.auto_approval].reviewers</code> names, and whether or not that gate
+  is on, since a bad <code>[reviewers.plan]</code> breaks <code>/plan</code> either way. An undeclared <code>model</code> inherits
+  <code>[assistant].model</code> and is not re-checked here.
 - <strong>One runtime-settings table.</strong> <code>config/table.py</code>'s <code>SettingsTable</code> -- built at startup from
   <code>CORE_RUNTIME_SETTINGS</code> plus every installed toolset's own hot <code>Setting</code>s -- is the single
   declaration of what can change without a restart, driving the TOML schema, the incoming-payload

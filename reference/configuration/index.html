@@ -3464,6 +3464,13 @@ would swallow), and <code>generation</code> merged key by key, so a reviewer tha
 keeps the default's context length. See <a href="#model"><code>[assistant].model</code></a> for what a model string may
 carry, including the endpoint suffix and the way a bare <code>provider:model</code> here drops an endpoint pinned
 there.</p>
+<p>A declared <code>model</code> is validated at startup, exactly as an agent's is: a name AIMU's catalogue does not
+know fails there, naming the table (<code>[reviewers.&lt;name&gt;].model</code>), rather than surfacing later as "the
+reviewer could not be reached" on the first gated call or plan review it is asked to do. This is a trap
+worth naming concretely, because it is easy to hit: a provider's model catalogue here is AIMU's own
+short id, not the dated id its API uses, so <code>anthropic:claude-haiku-4-5-20251001</code> (the API's id) fails
+where <code>anthropic:claude-haiku-4-5</code> (AIMU's) resolves. An undeclared <code>model</code> is never checked here, since
+it inherits <code>[assistant].model</code>, which is validated on its own path when it is set.</p>
 <p><code>system_message</code> is the one that does <strong>not</strong> fall back to <code>[assistant].system_message</code>, and the
 difference is deliberate. An undeclared prompt leaves it empty, and what empty means is the consumer's
 to decide rather than this file's: the <code>/plan</code> critics substitute their own shipped standard, and the

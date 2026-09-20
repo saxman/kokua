@@ -1722,9 +1722,11 @@ nine return a value rather than raise, so no caller can forget to handle one.</p
    to understand is one more thing to get wrong.</li>
 <li><strong>The reviewer timed out</strong> (<code>timeout_seconds</code>, default 10).</li>
 <li><strong>The reviewer declined to answer.</strong> A provider refusal is a refusal to review, not a verdict.</li>
-<li><strong>The reviewer could not be reached.</strong> A dead endpoint, a bad API key, or a <code>model</code> string that
-   cannot build a client at all (that string is user-written and nothing at startup builds from it, so
-   a typo surfaces here, on every gated call, as a reviewer that could not be reached like any other).</li>
+<li><strong>The reviewer could not be reached.</strong> A dead endpoint, a bad API key, or a provider outage. A
+   <code>model</code> string AIMU's catalogue does not recognize at all is caught earlier, at startup (see
+   <a href="../../reference/configuration/#reviewersname"><code>[reviewers.&lt;name&gt;]</code></a>), which is what keeps a plain
+   typo from surfacing here instead; what still reaches this path is a name that resolves but whose
+   endpoint or credentials do not answer, which nothing at startup builds a real connection to check.</li>
 <li><strong>The answer was not the shape asked for.</strong> A model that returns prose, JSON missing a field, or
    JSON whose fields came back as the wrong type (<code>"false"</code> for a boolean). The first two fail as they
    are parsed; the third parses cleanly and is rejected on arrival, since a plain dataclass enforces
