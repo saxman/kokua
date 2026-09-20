@@ -1039,7 +1039,13 @@ alone. The case that does cost something is a configured MCP server, which conne
   Three names are consumed today: `plan` and `result` are deep planning's two critics (see [Deep
   planning and adversarial review](#deep-planning-and-adversarial-review)) and `approval` is the
   auto-approval gate's (see [Security](#security)). The whole section is locked against
-  `update_config`, like `[agents.*]`.
+  `update_config`, like `[agents.*]`. **Every declared `[reviewers.<name>].model` is validated at
+  startup**, the same way and by the same check as `[agents.<name>].model`: a name AIMU's catalogue
+  does not know fails there, naming the table, rather than surfacing later as "the reviewer could not
+  be reached" on the first gated call or plan review it is asked to do. Checked for every declared
+  reviewer, not only the ones `[security.auto_approval].reviewers` names, and whether or not that gate
+  is on, since a bad `[reviewers.plan]` breaks `/plan` either way. An undeclared `model` inherits
+  `[assistant].model` and is not re-checked here.
 - **One runtime-settings table.** `config/table.py`'s `SettingsTable` -- built at startup from
   `CORE_RUNTIME_SETTINGS` plus every installed toolset's own hot `Setting`s -- is the single
   declaration of what can change without a restart, driving the TOML schema, the incoming-payload

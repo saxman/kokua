@@ -167,7 +167,7 @@ def validate_agents(config: AssistantConfig, registry: Mapping[str, Toolset]) ->
             select(agent.tools, registry, agent=name, entry_point=config.entry_agent)
         except ToolsetError as e:
             raise ConfigError(str(e)) from e
-        _check_model(name, agent.model)
+        _check_model(f"agents.{name}", agent.model)
         for target in agent.delegates_to:
             if target not in config.agents:
                 known = ", ".join(sorted(config.agents))
@@ -175,12 +175,41 @@ def validate_agents(config: AssistantConfig, registry: Mapping[str, Toolset]) ->
     _reject_cycles(config)
 
 
-def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
-    """The registry ``config`` resolves against, with its agents already checked against it.
+def validate_reviewers(config: AssistantConfig) -> None:
+    """Reject a declared ``[reviewers.<name>].model`` AIMU cannot resolve, before anything asks it a
+    question.
 
-    The two halves ship as one call because a registry nothing was validated against only defers the
-    error to a worse moment. A front end that builds its assistant lazily (the web one builds per
-    connection) calls this at startup to report a broken ``[agents.*]`` table where the user is looking.
+    A separate function from ``validate_agents`` rather than one more loop inside it: that function's
+    own docstring is about the delegation graph an agent belongs to (acyclicity, unknown delegates,
+    unknown toolsets), none of which a reviewer has. A reviewer is not an agent and takes none of an
+    agent's three reach-granting keys (see ``ReviewerConfig``), so folding this loop into
+    ``validate_agents`` would answer a question that function was never about.
+
+    Every declared reviewer is checked, not only the ones ``[security.auto_approval].reviewers`` names,
+    and whether or not that gate is even on. Two reasons: ``[reviewers.plan]`` and ``[reviewers.result]``
+    are deep planning's critics and have nothing to do with the gate, so limiting this to the gate's own
+    list would leave them unchecked; and an agent's own model is validated unconditionally, regardless of
+    whether anything currently delegates to it, so a reviewer nothing currently asks matches that same
+    rule rather than being a special case.
+
+    Only the declared value, never the resolved one: a reviewer that declares no model inherits
+    ``[assistant].model`` (see ``AssistantConfig.reviewer_for``), which is validated on its own path when
+    it is set, and re-checking the inherited value here would either duplicate that error or, if
+    ``[assistant].model`` is itself unset, force a resolution this function has no business triggering
+    just to check it. ``core/auto_approval.py``'s own ``thinking`` check reads the same declared field
+    for the same reason: a value this table did not write is not this table's mistake to report.
+    """
+    for name, reviewer in config.reviewers.items():
+        _check_model(f"reviewers.{name}", reviewer.model)
+
+
+def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
+    """The registry ``config`` resolves against, with its agents and reviewers already checked against it.
+
+    The halves ship as one call because a registry nothing was validated against only defers the error
+    to a worse moment. A front end that builds its assistant lazily (the web one builds per connection)
+    calls this at startup to report a broken ``[agents.*]`` or ``[reviewers.*]`` table where the user is
+    looking.
 
     A ``ToolsetError`` is translated on the way out, so a front end has one ``ConfigError`` family to
     catch for everything wrong with config.toml rather than the registry's internal exception type.
@@ -190,6 +219,7 @@ def validated_registry(config: AssistantConfig) -> ToolsetRegistry:
     except ToolsetError as error:
         raise ConfigError(str(error)) from error
     validate_agents(config, registry)
+    validate_reviewers(config)
     return registry
 
 
@@ -509,19 +539,27 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
     return specs
 
 
-def _check_model(agent_name: str, model: Optional[str]) -> None:
+def _check_model(table: str, model: Optional[str]) -> None:
     """Reject a declared model AIMU cannot resolve, naming the table it came from.
 
+    ``table`` is the dotted path to blame in the error, ``"agents.<name>"`` or ``"reviewers.<name>"``:
+    both callers share this function because resolving a string is the same question either way, and a
+    shared check is what keeps the two messages from drifting apart. The caller has already decided
+    what an unset ``model`` means (both fall back to ``[assistant].model``, validated on its own path)
+    and picks the string to check before reaching here; this function never sees the unset case as
+    anything but "nothing to check" (the guard below).
+
     Resolving the string is offline and cheap: no client is constructed, no key is read, and no weights
-    load. Doing it here rather than at first use is what keeps a typo from surfacing mid-turn, since a
-    worker's model is only reached once something delegates to it. A provider whose optional dependency
-    is not installed fails the same way, which is the same wall the client build would hit later.
+    load. Doing it here rather than at first use is what keeps a typo from surfacing mid-turn or mid-review,
+    since a worker's model is only reached once something delegates to it, and a reviewer's only once
+    something asks it a question. A provider whose optional dependency is not installed fails the same
+    way, which is the same wall the client build would hit later.
 
     ``resolve_model``, not ``resolve_model_string``: only the former reads the full
     ``provider:model_id[@base_url][;flags]`` grammar that ``[assistant].model`` already accepts (that
     key is validated by building a throwaway client, which parses everything). The narrower resolver
-    would refuse an endpoint the entry agent runs on happily, so pinning a worker to the host the
-    assistant itself uses would fail at startup.
+    would refuse an endpoint the entry agent runs on happily, so pinning a worker or a reviewer to the
+    host the assistant itself uses would fail at startup.
     """
     if not model:
         return
@@ -530,7 +568,7 @@ def _check_model(agent_name: str, model: Optional[str]) -> None:
     try:
         resolve_model(model)
     except (ValueError, TypeError) as e:
-        raise ConfigError(f"[agents.{agent_name}].model is {model!r}, which cannot be resolved: {e}") from e
+        raise ConfigError(f"[{table}].model is {model!r}, which cannot be resolved: {e}") from e
 
 
 def _spawn_tool(config: AssistantConfig, state: LiveState, delegator: str) -> Callable:

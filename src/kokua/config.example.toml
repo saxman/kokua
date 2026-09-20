@@ -276,7 +276,7 @@ so, and where it went wrong if it did, saying up front that those are the criter
 description = "Answers three questions about one gated tool call, and writes the sentence you read."
 # A different model from [assistant].model is the point: a reviewer running the same model as the agent
 # it reviews can be talked out of the same judgement by the same text. Startup warns if they match.
-# model = "anthropic:claude-haiku-4-5-20251001"
+# model = "anthropic:claude-haiku-4-5"
 # No `thinking`: the answer comes back through a structured call, which returns JSON and no reasoning on
 # every provider, so declaring one here is a startup error rather than a key that does nothing.
 generation = { temperature = 0.0 }
