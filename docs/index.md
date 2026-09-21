@@ -7,11 +7,11 @@
 
 # Kokua
 
-**Kokua** (Hawaiian: *help, assistance*) exists so people can learn how agentic systems work. It is a
-hackable, modular personal assistant built on the [AIMU](https://saxman.info/aimu/) library, and a real
-one rather than a demo: an always-on assistant that chats with you, authors and runs its own skills,
-connects to remote tool services, delegates independent subtasks to isolated sub-agents, schedules its
-own proactive work, and remembers facts and documents across conversations.
+**Kokua** (Hawaiian: *help, assistance*) is a real, always-on personal assistant, designed to help
+people understand how agentic assistants work. It is hackable and modular, built on the
+[AIMU](https://saxman.info/aimu/) library: it chats with you, authors and runs its own skills,
+connects to remote tool services, delegates independent subtasks to isolated sub-agents, schedules
+its own proactive work, and remembers facts and documents across conversations.
 
 A toy cannot teach what real work costs, so Kokua does real work. And the machinery is meant to be
 followed rather than taken on faith, so every mechanism above is there to be read, run, and extended.
