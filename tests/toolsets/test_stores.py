@@ -49,7 +49,7 @@ def test_skills_builds_the_authoring_and_script_tools(tmp_path):
 
     names = {fn.__name__ for fn in SKILLS.build(_ctx(tmp_path, agent=FakeAgent()))}
 
-    assert names == {"author_skill", "add_skill_script"}
+    assert names == {"author_skill", "update_skill", "add_skill_script"}
 
 
 def test_skills_builds_against_a_none_agent_without_complaining(tmp_path):
@@ -61,7 +61,7 @@ def test_skills_builds_against_a_none_agent_without_complaining(tmp_path):
     """
     names = {fn.__name__ for fn in SKILLS.build(_ctx(tmp_path, agent=None))}
 
-    assert names == {"author_skill", "add_skill_script"}
+    assert names == {"author_skill", "update_skill", "add_skill_script"}
 
 
 def test_documents_guidance_names_the_tools_that_discover_user_supplied_files():

@@ -375,15 +375,15 @@ unconfigured, which is what `email-report` did on the entry agent until the seco
 
 #### The shipped entry agent's inventory
 
-All 34 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
+All 35 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
 `config.example.toml` declares, not a fixed list: a different `tools` line produces a different set.
-Thirteen of the 34 come from AIMU, more than a third, and so are not greppable in this repository (more
+Fourteen of the 35 come from AIMU, more than a third, and so are not greppable in this repository (more
 once skills are installed, since AIMU injects a tool per skill script on top of this set), which is why
 this table exists rather than a naming convention alone:
 
 | Tools | Built by | Declared as |
 |---|---|---|
-| `author_skill`, `add_skill_script` | AIMU `make_skill_authoring_tool` / `make_skill_script_tool` | `skills` (entry agent only) |
+| `author_skill`, `update_skill`, `add_skill_script` | AIMU `make_skill_authoring_tool` / `make_skill_update_tool` / `make_skill_script_tool` | `skills` (entry agent only) |
 | `store_memory`, `search_memories`, `list_memories` | AIMU `make_memory_tools` | `memory` |
 | `save_document`, `read_document`, `edit_document`, `list_documents`, `search_documents` | AIMU `make_document_tools` | `documents` |
 | `get_current_date_and_time`, `convert_time` | AIMU `builtin.time` | `time` |
@@ -984,7 +984,27 @@ now: the method has a default implementation on the ABC (read everything, keep t
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 `TinyDBSessionStore`'s override from a plain inheritance of the default.
 
-The floor is now **`aimu>=0.31.0`**, and three capabilities in that release are Kokua's. `builtin.select`
+The floor is now **`aimu>=0.32.0`**, and two capabilities in that release are Kokua's, both about skill
+authoring. `make_skill_update_tool` is the factory
+[`toolsets/skills.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/skills.py) calls to
+hand an agent `update_skill`, so a skill whose instructions turned out wrong can be fixed in place.
+Before it a skill's prose was write-once: `author_skill` refuses to clobber and `add_skill_script`
+writes scripts alone, so the assistant could revise a skill's code forever and never a word of its text,
+and the only route to a better version was a second skill under a different name. The other capability
+is the one a user feels: `add_skill_script` no longer attaches a script by rewriting the whole
+`SKILL.md`. That rewrite passed back the description and body it had just read, so it could not change
+the prose and existed only to drop the frontmatter keys it did not re-emit, which meant a skill from
+`kokua skills install` shed its `license` and `compatibility` lines the first time an agent attached a
+script to it, and again on every later fix, with nothing raised anywhere.
+
+The probe grips `make_skill_update_tool`, a plain name lookup, and this time the newest handle is the
+right one: the script-write fix landed earlier in the same branch and has a handle of its own in
+`write_skill_script`, so gripping the later name dates a checkout to both. What it leaves to the floor
+is the *behavior* behind that fix, since no name lookup asks what a function does and Kokua calls
+neither function itself; `tests/test_aimu_compat.py` authors a skill with optional frontmatter in a temp
+directory and reads it back instead.
+
+**0.31.0** was the floor until 0.32.0, and three capabilities in it are Kokua's. `builtin.select`
 and `builtin.unscoped` are what [`toolsets/fs.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/fs.py)
 and `toolsets/fs_write.py` partition one group with, after AIMU put `write_file` and `edit_file` *into*
 `builtin.fs`: handing that group out unchanged would have granted a write to every agent already
@@ -995,7 +1015,7 @@ returns a window and replacing a whole document from a windowed read deleted eve
 per worker from a declared `context_length`, so a long delegation trims its own messages rather than
 dying in its window.
 
-The probe grips the third of those, `SUBAGENT_SPEC_KEYS`'s `"compaction"`, and the choice is the first
+The probe gripped the third of those, `SUBAGENT_SPEC_KEYS`'s `"compaction"`, and that choice was the one
 time this preflight has passed over a *newer* handle on purpose. `select` landed earlier in the release
 and is a plain name lookup for a function Kokua calls directly, but the `save_document` guard landed two
 commits after it with no handle at all, while the windowing that makes an unguarded save destructive

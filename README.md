@@ -79,7 +79,7 @@ None of these is a mode or a preset. Each is the same declared machinery pointed
 
 ## Install
 
-Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.31.0 or newer.
+Kokua needs Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.32.0 or newer.
 
 ```bash
 uv sync --all-extras --no-sources        # AIMU from PyPI; what you want to just run Kokua
@@ -94,7 +94,7 @@ The `web` extra (included in `--all-extras`, or `pip install '.[web]'`) adds the
 > uv sync --all-extras                        # installs ../aimu editable; picks up your edits live
 > ```
 >
-> The `aimu>=0.31.0` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
+> The `aimu>=0.32.0` requirement governs the PyPI path only: uv installs a path source without checking it against the specifier, so a sibling checkout is not constrained by it. If yours falls behind, startup says so and names the fix rather than failing on an import.
 
 ## Quick start
 
@@ -122,7 +122,7 @@ Five commands worth knowing. **`/new`** starts a fresh conversation, **`/convers
 ### Tools, and how an agent gets one
 
 - **One namespace, and nothing is implicit.** Every capability an agent can hold is a named toolset in a single namespace: AIMU's built-in tool groups, Kokua's own memory / documents / skills / config / MCP admin / scheduling / conversation / capability-discovery capabilities, each installed plugin toolset, and each configured MCP server by its `name`. `kokua --list-toolsets` prints the lot, grouped by what provides it. **A capability is declared, never defaulted:** no code path adds a tool an agent did not name, not even the clock, so an installed toolset or a connected server reaches nothing until some agent's `tools` list names it. An unknown name is a startup error listing the valid ones, and two providers claiming one name is one too.
-- **[Self-authored skills](https://saxman.info/aimu/how-to/use-skills/).** Built on AIMU's `SkillAgent`: the assistant writes `SKILL.md` skills (the same format Claude Code uses), and bundles runnable Python/shell scripts it can author and execute in the same turn, so it takes on capabilities it did not ship with.
+- **[Self-authored skills](https://saxman.info/aimu/how-to/use-skills/).** Built on AIMU's `SkillAgent`: the assistant writes `SKILL.md` skills (the same format Claude Code uses), and bundles runnable Python/shell scripts it can author and execute in the same turn, so it takes on capabilities it did not ship with. It can also *revise* a skill it already wrote, prose and scripts both, which is what makes the loop a loop: a procedure learned wrong the first time is fixed in place rather than duplicated under a second name.
 - **[Remote MCP services](https://saxman.info/aimu/how-to/use-mcp-tools/).** Kokua wires AIMU's `MCPClient` to config and to the agent. Connect a server with `--mcp <url>` or `[[mcp.server]]`, or let the assistant connect one itself with its `add_mcp_server` tool. OAuth is handled by posting the authorization link into the chat and persisting the tokens; bearer-token servers read their secret from an env var named by `token_env`, never from the config file.
 
 ### Agents and delegation

@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.31.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.32.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -14,21 +14,22 @@ frame, which no ``getattr`` can detect). The capability probe catches an editabl
 declared version already reads new enough while the code behind it predates the release -- the version
 string of an editable install says what the branch claims, not what it contains.
 
-The probe covers one surface at a time, and until 0.31.0 that was always the *newest* surface Kokua
-depends on. It is now the newest surface with a handle worth gripping, which is not the same thing and
-is why the rule is written this way: see AIMU 0.31.0 below, the first release where two handles existed
-and the later one had to be taken to close a window the earlier one left open.
+The probe covers one surface at a time: the newest surface Kokua depends on that has a handle worth
+gripping, which is usually the newest surface and at 0.31.0 was not. That is why the rule is written
+this way rather than as "the newest" -- see AIMU 0.31.0 below, where two handles existed and the later
+one had to be taken to close a window the earlier one left open, and 0.32.0 above it, where the newest
+was the right one and the paragraph says so to keep the pair legible.
 
-Whichever surface it is, its shape decides the check's shape. A membership check answers for an entry in
-a published set whose mere existence proves nothing, the shape in force today
-(``SUBAGENT_SPEC_KEYS``'s ``"compaction"``) and twice before: that same set shipped a release before the
-``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a checkout, and
-``StreamingContentType`` answered the same way for ``CONTINUING``. A name lookup answers for a symbol,
-the shape four times before that, for ``resolve_default_text_model``, ``ModelRefusalError``,
-``SessionStore.list_summaries``, and ``builtin.get_web_content``; a signature check answers
-for a keyword argument no ``getattr`` would notice, the shape four releases running before that:
-``SkillManager(include=...)``, then ``SkillAgent(script_env=...)``, then ``WebChannel(stream_thinking=...)``,
-then ``make_async_subagent_tool(events=...)``.
+Whichever surface it is, its shape decides the check's shape. A name lookup answers for a symbol, the
+shape in force today (``aimu.skills.make_skill_update_tool``) and four times before, for
+``resolve_default_text_model``, ``ModelRefusalError``, ``SessionStore.list_summaries``, and
+``builtin.get_web_content``. A membership check answers for an entry in a published set whose mere
+existence proves nothing, the shape three times: ``SUBAGENT_SPEC_KEYS`` shipped a release before the
+``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a checkout, then
+``StreamingContentType`` answered the same way for ``CONTINUING``, then that same first set again for
+``"compaction"``. A signature check answers for a keyword argument no ``getattr`` would notice, the
+shape four releases running: ``SkillManager(include=...)``, then ``SkillAgent(script_env=...)``, then
+``WebChannel(stream_thinking=...)``, then ``make_async_subagent_tool(events=...)``.
 Checking one surface is no claim about the others; covering those is the version floor's job.
 
 A capability can also be shaped so that *nothing* can probe it, and AIMU 0.17.0's headline surface is:
@@ -86,8 +87,37 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.31.0 is the current surface, and it is the first release where picking the newest handle would
-have been the wrong call. Three capabilities in it are Kokua's: ``builtin.select`` and
+AIMU 0.32.0 is the current surface, and it is the counterpart to the paragraph below it: two
+capabilities again, and this time the newest handle is the right one. ``make_skill_update_tool`` is the
+factory ``toolsets/skills.py`` calls to hand an agent ``update_skill``, the tool that revises a skill's
+description or body. Until it existed, a skill's prose was write-once: ``author_skill`` refuses to
+clobber and ``add_skill_script`` writes scripts alone, so the assistant could fix a skill's code
+forever and never a word of its text, and the only advice available for a skill that turned out wrong
+was to author a second one under a different name. The shape is a plain name lookup, the fifth time,
+and the easy case again: the capability is the export Kokua calls.
+
+The release's other capability landed earlier in it and matters more to a Kokua user, which is exactly
+the arrangement that made 0.20.0 and 0.31.0 awkward and does not here. ``add_skill_script`` no longer
+attaches a script by rewriting the skill's whole ``SKILL.md``: that rewrite passed back the description
+and body it had just read, so it could not change the prose and existed only to drop the frontmatter
+keys it did not re-emit -- the spec's optional ``license``, ``compatibility``, and ``allowed-tools``,
+plus anything outside the spec. A skill installed by ``kokua skills install`` shed those the first time
+an agent attached a script to it, and again on every later fix to that script, with nothing raised
+anywhere. It has a handle of its own, ``aimu.skills.write_skill_script``, and the probe passes over it
+because ``make_skill_update_tool`` landed later in the same branch, so gripping the later one dates a
+checkout to both.
+
+What this probe cannot see, and what the floor covers alone: the *behavior* behind that fix. A checkout
+could export both names and rewrite ``SKILL.md`` on a script write regardless, because a name lookup
+never asks what a function does, and Kokua has no way to notice from the outside -- it calls neither
+function itself, it hands the tool to a model, and the loss happens inside AIMU on a file Kokua does not
+read back. Establishing it directly would mean authoring a skill with optional frontmatter in a temp
+directory at startup and reading it back, a filesystem side effect a preflight has no business having.
+The same shape of gap every name lookup leaves: 0.30.0's ``get_web_content`` left it for that tool's
+three caps.
+
+AIMU 0.31.0 was the surface until 0.32.0, and it is the one release where picking the newest handle
+would have been the wrong call. Three capabilities in it are Kokua's: ``builtin.select`` and
 ``builtin.unscoped``, which ``toolsets/fs.py`` and ``toolsets/fs_write.py`` use to partition a group
 that gained ``write_file`` and ``edit_file`` (without which every agent declaring ``fs`` silently gains
 a write it never declared); ``edit_document`` plus a read-before-replace guard on ``save_document``,
@@ -95,7 +125,7 @@ without which a windowed ``read_document`` saved back truncates a user's documen
 showed; and ``compaction``, which ``core/agents.py`` writes per worker off a declared
 ``context_length`` so a long delegation trims its own messages rather than dying in its window.
 
-The probe grips the last of those, and the reason is the release's commit order rather than anything
+The probe gripped the last of those, and the reason was the release's commit order rather than anything
 about the capability. ``select`` and ``unscoped`` arrived in one commit (aimu c44dc8d) and would have
 been the obvious handle: a plain name lookup for a function Kokua calls directly. But the
 ``save_document`` guard landed two commits *later* (c66b08b) and offers no handle at all, being a set of
@@ -106,7 +136,7 @@ cutting a 3,000-line document down to 51 lines. ``compaction`` is in the release
 commit (9354536), so a checkout carrying it carries all three, and taking a later handle to subsume an
 earlier window is the reverse of the trade 0.20.0's ``endpoint_kwargs`` had to accept.
 
-The shape is a membership check, and it is the same *set* the probe already gripped once, at 0.18.0, for
+The shape was a membership check, on the same *set* the probe had already gripped once, at 0.18.0, for
 a different member. That is the 0.18.0 lesson stated twice: a published set's presence proves nothing
 about its contents, and ``SUBAGENT_SPEC_KEYS`` has now twice shipped ahead of an entry Kokua came to
 depend on. Worth not confusing with a coincidence one level down: AIMU reads ``"compaction"`` from a
@@ -114,7 +144,7 @@ spec by membership too, rather than with ``.get()``, so that a written ``None`` 
 for this specialist" distinctly from an absent key. That is AIMU's reason for its own read, not this
 probe's reason for its shape.
 
-What this probe cannot see, and what the floor covers alone: the *contents* of ``builtin.unscoped``.
+What that probe could not see, and what the floor covers alone: the *contents* of ``builtin.unscoped``.
 What Kokua's two ``fs`` toolsets depend on is that the group holds ``write_file`` and ``edit_file``, so
 that one selects the writers and the other excludes them, and asking that directly would take a
 membership check over a list of *callables* matching on ``__name__`` -- the shape declined at 0.24.0 for
@@ -266,48 +296,48 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 31, 0)
+MINIMUM_AIMU = (0, 32, 0)
 
-# The surface is `SUBAGENT_SPEC_KEYS`'s `"compaction"` entry, the spec key `core/agents.py` writes so a
-# spawned worker trims its own messages before each model turn instead of filling its window and dying
-# in it. Kokua builds that trimmer from a declared `[assistant.generation].context_length`, per worker,
-# because `generation_for` has already resolved the per-agent tier by the time the spec is assembled.
+# The surface is `aimu.skills.make_skill_update_tool`, the factory `toolsets/skills.py` calls to hand an
+# agent the `update_skill` tool, so a skill whose instructions turned out wrong can be fixed rather than
+# only its scripts. Before it, `author_skill` refused to clobber and `add_skill_script` wrote scripts
+# alone, which left a skill's prose unreachable once written: the assistant could revise a skill's code
+# forever and never a word of its text.
 #
-# Why this key and not `builtin.select`, which lands earlier in the same release and which Kokua calls
-# directly: commit order. `select` and `unscoped` arrived together (aimu c44dc8d) and are a plain name
-# lookup, but `save_document`'s read-before-replace guard landed two commits later (c66b08b) with no
-# handle at all (a digest set private to one `make_document_tools` call), while the `read_document`
-# windowing that makes an unguarded save destructive landed earlier (aae4a10). A checkout between those
-# two windows a read, does not refuse the save, and would pass a `select` probe while cutting a
-# 3,000-line document to 51 lines. `compaction` is in the release's last functional commit (9354536),
-# so a checkout carrying it carries `select`, `unscoped`, `edit_document`, and the guard as well.
+# The shape is a name lookup, the fifth time (`resolve_default_text_model` at 0.21.0,
+# `ModelRefusalError` at 0.27.0, `SessionStore.list_summaries` at 0.29.0, `builtin.get_web_content` at
+# 0.30.0), and the easy case again: the capability *is* the export Kokua calls, so a name lookup asks
+# exactly the question that matters.
 #
-# The shape is a membership check, the third time (`SUBAGENT_SPEC_KEYS`'s `generate_kwargs` at 0.18.0,
-# `StreamingContentType.CONTINUING` at 0.28.0) and the second time on this same set, which is the 0.18.0
-# lesson restated: a published set's presence proves nothing about its contents, and this one has now
-# twice shipped a release ahead of an entry Kokua came to depend on. `_PROBE_CLASS` stays None because
-# the set is at module scope; the `in` runs through `__members__` when there is one and against the
-# container otherwise, which for a frozenset is the frozenset.
+# The newest handle is the right one this time, which is worth stating next to 0.31.0's paragraph above,
+# where it was not. 0.32.0 carries a second capability Kokua depends on, and it landed *earlier* in the
+# release: `add_skill_script` no longer attaches a script by rewriting the whole `SKILL.md`, a rewrite
+# that could not change the prose (it passed back the description and body it had just read) and existed
+# only to drop the keys it did not re-emit, so an installed skill carrying `license` or `compatibility`
+# shed them the first time an agent attached a script to it and again on every later fix. That one is the
+# more consequential of the two for a Kokua user, and it has a handle of its own in
+# `aimu.skills.write_skill_script`, but `make_skill_update_tool` came later in the same branch, so
+# gripping it dates a checkout to both. The reverse of the trade 0.20.0's `endpoint_kwargs` had to accept.
 #
-# What this probe cannot see, and what the floor covers alone: the *contents* of `builtin.unscoped`.
-# Kokua's two fs toolsets depend on that group holding `write_file` and `edit_file`, so that `fs_write`
-# selects the writers and `fs` excludes them; an `unscoped` missing one would hand the read-only toolset
-# a writer, which is the whole failure the split prevents. Asking it directly needs a membership check
-# over a list of *callables* matching on `__name__`, the shape declined at 0.24.0 for `run_command` and
-# at 0.30.0 for `get_web_content`, declined again here and asserted in `tests/test_aimu_compat.py`
-# instead: a fact about the release, not the preflight's shape.
+# What this probe cannot see, and what the floor covers alone: the *behavior* behind the fix. A checkout
+# could export both names and still rewrite `SKILL.md` on a script write, because no name lookup asks
+# what a function does, and Kokua calls neither `write_skill_script` nor `add_skill_script` itself -- it
+# hands the tool to a model and the loss happens inside AIMU. That is the shape of gap every name lookup
+# leaves (0.30.0's `get_web_content` left the same one for its three caps), and the only alternative
+# would be writing a skill with optional frontmatter in a temp directory at startup and reading it back,
+# which is a filesystem side effect a preflight has no business having.
 #
-# `get_web_content` (a name lookup) was this probe's surface while 0.30.0 was the floor,
-# `SessionStore.list_summaries` (a name lookup) while 0.29.0 was, `StreamingContentType.CONTINUING`
-# (a membership check) while 0.28.0 was, `make_async_subagent_tool(events=...)` (a signature check)
-# while 0.25.0 was, `make_command_tool` (a name lookup) before that, and `ModelRefusalError` (a name
-# lookup) while 0.27.0 was; all six are the version floor's responsibility now, as everything this probe
-# has ever pointed at eventually becomes.
-_PROBE_MODULE = "aimu.tools.builtin"
+# `SUBAGENT_SPEC_KEYS`'s `"compaction"` (a membership check) was this probe's surface while 0.31.0 was
+# the floor, `get_web_content` (a name lookup) while 0.30.0 was, `SessionStore.list_summaries` (a name
+# lookup) while 0.29.0 was, `StreamingContentType.CONTINUING` (a membership check) while 0.28.0 was,
+# `make_async_subagent_tool(events=...)` (a signature check) while 0.25.0 was, `make_command_tool` (a
+# name lookup) before that, and `ModelRefusalError` (a name lookup) while 0.27.0 was; all seven are the
+# version floor's responsibility now, as everything this probe has ever pointed at eventually becomes.
+_PROBE_MODULE = "aimu.skills"
 _PROBE_CLASS: Optional[str] = None
-_PROBE_SYMBOL = "SUBAGENT_SPEC_KEYS"
+_PROBE_SYMBOL = "make_skill_update_tool"
 _PROBE_PARAMETER: Optional[str] = None
-_PROBE_MEMBER: Optional[str] = "compaction"
+_PROBE_MEMBER: Optional[str] = None
 
 
 class AimuVersionError(RuntimeError):

@@ -46,13 +46,18 @@ classifiers = [
 # now partition it with; `make_document_tools` gained `edit_document` and a read-before-replace guard on
 # `save_document`, without which a windowed `read_document` saved back truncates a user's document to the
 # window; and `compaction` on both spawn factories, which `core/agents.py` writes per worker so a long
-# delegation trims its own messages instead of dying in its window. Every earlier release in the floor's
+# delegation trims its own messages instead of dying in its window. 0.32.0 moves the floor for skill
+# authoring: `add_skill_script` no longer rewrites the skill's `SKILL.md` to attach a script, which used
+# to drop every frontmatter key the rewrite did not re-emit (`license`, `compatibility`,
+# `allowed-tools`, and anything outside the spec) from every skill an agent touched, and
+# `make_skill_update_tool` is the new tool `toolsets/skills.py` hands an agent so a skill's *prose* can
+# be fixed rather than only its scripts. Every earlier release in the floor's
 # history is listed in `kokua.aimu_compat`, which is also what enforces this floor for a sibling
 # checkout, and `tests/test_aimu_compat.py` pins this specifier against that one so the two halves
 # cannot drift. This pin is what ships in the wheel and what a PyPI install resolves;
 # [tool.uv.sources] below separately redirects development installs to the sibling checkout.
 dependencies = [
-    "aimu[anthropic,ollama,openai_compat,memory]>=0.31.0",
+    "aimu[anthropic,ollama,openai_compat,memory]>=0.32.0",
     # Comment-preserving TOML writes for config.toml. stdlib `tomllib` reads TOML but cannot write it;
     # tomlkit round-trips the parsed document so app writes keep the user's comments and formatting.
     "tomlkit>=0.13",

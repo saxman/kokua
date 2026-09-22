@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.31.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.32.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -458,6 +458,22 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.31.0 or newer
   skill whose name collides with a toolset or an MCP server is a startup error, like any other collision,
   and a skill on disk that no table names is simply available to an authoring entry agent through its
   catalogue anyway.
+- **A skill is editable, so learning a procedure wrong is recoverable.** The `skills` toolset hands an
+  agent three tools, not two: `author_skill` writes a skill, `add_skill_script` attaches a runnable
+  script (and replaces one in place when called with the same filename), and `update_skill` revises an
+  existing skill's description or body, passing only the part that changes. The third closes a loop that
+  was open: `author_skill` refuses to clobber, so before it a skill's prose was write-once, and an
+  assistant that had learned a procedure wrong could fix its *code* forever and never a word of its
+  *text*, with authoring a second skill under a different name as the only route to a better version.
+  It carries no agent (editing a skill's text changes none of its tools, so nothing reloads) and it is
+  deliberately **not** in `[security].confirm_tools`, on the same line that puts `add_skill_script`
+  there: a gate is for a call that reaches past the model, which a script does and prose does not, so
+  gating the tool that edits instructions while leaving ungated the one that writes them would buy a
+  prompt and no boundary. Needs `aimu>=0.32.0`, which also stopped `add_skill_script` from rewriting a
+  skill's whole `SKILL.md` to attach a script: that rewrite dropped every frontmatter key it did not
+  re-emit, so three of the four skills `kokua skills install` ships would have shed their `license` and
+  `compatibility` lines the first time an agent touched them.
+
 - **Every agent is declared whole in `config.toml`.** One `[agents.<name>]` table per agent, carrying a
   `description` (the label a delegator sees), a `system_message`, a `tools` list of toolset names, and a
   `delegates_to` list. `[assistant].agent` names the **entry agent**, the one you talk to and the root of
@@ -1557,7 +1573,7 @@ notice on startup.
   where the name resolves and the group still holds the old tool. `list_summaries` joined the floor's
   job then, and the behavior behind that name (a checkout could export `get_web_content` and classify
   nothing) was what it left there in turn.
-  Today the floor is **0.31.0**, and it is the first release where the probe passed over a *newer*
+  **0.31.0** was the floor until 0.32.0, and it is the one release where the probe passed over a *newer*
   handle on purpose. The probe is a membership check on `SUBAGENT_SPEC_KEYS` for `"compaction"` -- the
   second time it has gripped that same set for a different member, which restates the point that set
   keeps making: a published set's presence proves nothing and only its contents date a checkout.
@@ -1573,6 +1589,22 @@ notice on startup.
   on that group holding both writers, and asking it needs a membership check over a list of callables
   matching on `__name__`, declined for the third time and asserted in `tests/test_aimu_compat.py`
   instead. `get_web_content` joins the floor's job.
+  Today the floor is **0.32.0**, for two capabilities that are both about authoring skills, and it is
+  the counterpart to the release before it: two handles again, and this time the newest one is right.
+  The probe is a plain name lookup on `aimu.skills.make_skill_update_tool`, the factory
+  `toolsets/skills.py` calls to hand an agent `update_skill`, without which a skill's prose is
+  write-once (`author_skill` refuses to clobber, `add_skill_script` writes scripts alone, so the
+  assistant could fix a skill's code forever and never a word of its text). The other capability is
+  the one a user feels and it landed *earlier* in the same branch: `add_skill_script` no longer
+  attaches a script by rewriting the whole `SKILL.md`, a rewrite that passed back the description and
+  body it had just read, so it could not change the prose and existed only to drop the frontmatter
+  keys it did not re-emit. A skill from `kokua skills install` shed its `license` and `compatibility`
+  lines the first time an agent attached a script to it, and again on every later fix, with nothing
+  raised anywhere. It has its own handle in `write_skill_script`, and the probe passes over it because
+  the later name dates a checkout to both. What that leaves to the floor is the *behavior* behind the
+  fix: a name lookup never asks what a function does, and Kokua calls neither function itself, so
+  `tests/test_aimu_compat.py` authors a skill with optional frontmatter in a temp directory, attaches
+  a script, and reads the file back. `"compaction"` joins the floor's job.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
   halves of that one decision cannot drift. It pins the floor against the *prose* too: the README, the
