@@ -269,19 +269,26 @@ class ChannelUI:
         else:
             await self._channel.send(text)
 
-    async def ask_approval(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
+    async def ask_approval(
+        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id: Optional[str] = None
+    ) -> None:
         """Prompt for tool approval, as a frame or as a plain-text question.
 
         ``agent`` names who is asking, since a delegated worker's call reaches the same prompt as the
         entry agent's and the user is deciding whether *that* agent may act. The frame method always
-        receives ``agent`` (None when unknown), so a channel written against the older one-argument
-        method raises ``TypeError`` rather than being half-served: the frame change is a breaking one.
+        receives ``agent`` and ``conversation_id`` (None when unknown), so a channel written against an
+        older signature raises ``TypeError`` rather than being half-served: the frame change is a
+        breaking one.
+
+        ``conversation_id`` rides along for a front end that files a frame against a transcript, and
+        is dropped by the plain-text fallback, which has one place to print and no way to be looking
+        somewhere else.
 
         ``name`` is the label to show, ``toolset.tool`` where the toolset is known (``HumanGate`` composes
         it), not an identifier to match on: nothing replies with it, since the answer is a bare yes or no.
         """
         if self._approval_request is not None:
-            await self._approval_request(name, arguments, agent=agent)
+            await self._approval_request(name, arguments, agent=agent, conversation_id=conversation_id)
         elif agent is None:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
         else:

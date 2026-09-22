@@ -2008,7 +2008,13 @@ notice on startup.
   `config.update_config`; adjust with `[security] confirm_tools` or `--confirm-tools` (empty disables).
   Proactive and backgrounded turns auto-deny gated tools regardless,
   so a full-access tool is never run unattended, and a prompt only ever appears for the conversation you
-  are currently viewing. **A backgrounded turn's auto-deny raises an alert card** naming the tool and
+  are currently viewing. **That question is asked again at every point the answer can have gone stale**,
+  and the widest window is the one easiest to miss: a round's tool calls are dispatched concurrently
+  while the approval slot is single, so its second gated call waits inside the slot for as long as you
+  take to answer the first, and a switch during that wait leaves the question behind it pointed at a
+  reader who is now looking somewhere else. It is denied and raises the card below instead. The prompt
+  frame carries its conversation for the same reason an auto-approval card does, so a page can drop one
+  that raced the last check rather than draw it into the wrong transcript. **A backgrounded turn's auto-deny raises an alert card** naming the tool and
   linking the conversation: the deny itself is unchanged, but a refusal recorded only in a transcript
   the user is not reading told them nothing about their own turn losing a capability by their switching
   away. A proactive firing denies silently still, since it reports itself when it ends and a task

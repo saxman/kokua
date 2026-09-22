@@ -1001,18 +1001,29 @@ async def test_web_channel_send_working_with_no_elapsed_reports_idle():
 
 
 async def test_web_channel_send_approval_request_emits_frame():
+    """The conversation rides on the prompt too, for the reason it rides on an auto-approval card:
+    the page has to be able to drop a question that raced a switch instead of asking the wrong
+    reader about another conversation's call."""
     ws = _FakeWS()
     channel = WebChannel(ws)
-    await channel.send_approval_request("add_skill_script", {"skill_name": "x"})
+    await channel.send_approval_request("add_skill_script", {"skill_name": "x"}, conversation_id="c1")
     assert ws.frames == [
-        {"type": "approval", "name": "add_skill_script", "arguments": {"skill_name": "x"}, "agent": None}
+        {
+            "type": "approval",
+            "name": "add_skill_script",
+            "arguments": {"skill_name": "x"},
+            "agent": None,
+            "conversation_id": "c1",
+        }
     ]
 
 
 async def test_web_approval_frame_carries_the_agent():
     ws = _FakeWS()
     await WebChannel(ws).send_approval_request("run_command", {}, agent="coder")
-    assert ws.frames == [{"type": "approval", "name": "run_command", "arguments": {}, "agent": "coder"}]
+    assert ws.frames == [
+        {"type": "approval", "name": "run_command", "arguments": {}, "agent": "coder", "conversation_id": None}
+    ]
 
 
 async def test_web_channel_sends_an_auto_approval_frame():

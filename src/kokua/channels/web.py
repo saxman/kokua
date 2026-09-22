@@ -622,13 +622,29 @@ class WebChannel(BaseWebChannel):
         """
         await self.send_frame({"type": "download", "name": name, "url": url})
 
-    async def send_approval_request(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
+    async def send_approval_request(
+        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id: Optional[str] = None
+    ) -> None:
         """Ask the browser to approve a tool call; the page replies with a normal 'y'/'n' frame.
 
         The reply flows back through the ordinary inbound path (receive()), so the Assistant's serve
         loop routes it to the pending approval -- no interception is needed here.
+
+        Never muted (``approval`` is not in ``_TURN_FRAMES``), and it carries its conversation
+        instead, for the reasons ``send_auto_approval`` below carries one: the core only prompts for
+        the conversation being viewed, and muting the question a turn is blocked on would hang that
+        turn until something abandoned it. The id is what lets the page drop a prompt that raced a
+        switch, rather than asking one conversation's reader about another conversation's call.
         """
-        await self.send_frame({"type": "approval", "name": name, "arguments": arguments, "agent": agent})
+        await self.send_frame(
+            {
+                "type": "approval",
+                "name": name,
+                "arguments": arguments,
+                "agent": agent,
+                "conversation_id": conversation_id,
+            }
+        )
 
     async def send_auto_approval(
         self,

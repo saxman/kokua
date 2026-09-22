@@ -2204,7 +2204,7 @@ function handleFrame(event) {
     // minutes ago counts on from there rather than restarting at zero.
     setWorking(frame.active ? (frame.elapsed || 0) * 1000 : null);
   } else if (frame.type === "approval") {
-    renderApproval(frame.name, frame.arguments, frame.agent);
+    renderApproval(frame);
   } else if (frame.type === "auto_approval") {
     renderAutoApproval(frame);
   } else if (frame.type === "plan") {
@@ -2413,7 +2413,14 @@ function renderModels(frame) {
 
 // A gated tool needs confirmation: show the call and Allow/Deny buttons. The reply is a plain
 // "y"/"n" frame, which the server routes to the waiting tool call (same path as typing it).
-function renderApproval(name, args, agent) {
+// The question belongs to one turn, so a prompt that raced a conversation switch is dropped rather
+// than put in front of the wrong reader. The server asks the same question last thing before sending
+// (HumanGate.approve, under the lock that orders concurrent gated calls); this covers the gap between
+// that check and the frame arriving. Same shape as `renderAutoApproval` below.
+function renderApproval(frame) {
+  const { name, arguments: args, agent } = frame;
+  const active = lastConversations.find((item) => item.active);
+  if (frame.conversation_id && active && active.id !== frame.conversation_id) return;
   const el = document.createElement("div");
   el.className = "bubble approval";
   const prompt = document.createElement("div");

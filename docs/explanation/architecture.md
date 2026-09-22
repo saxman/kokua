@@ -120,6 +120,19 @@ what lets a web approval reply be routed back to the waiting tool call. Switchin
 persists to its own conversation, streams muted, and raises an alert card when it finishes. Only
 `delete_conversation` cancels, and only the deleted conversation's own turn.
 
+A gated tool call therefore has one question to keep asking: is the turn it belongs to still the
+conversation on screen? `HumanGate.approve` asks it at each of the three points the answer can have
+gone stale, and each window is wider than the last: when the call arrives, after the reviewer's model
+call, and once the single approval slot is finally held. The third is the one that is easy to miss.
+Tool calls in a round are dispatched concurrently (`[assistant].concurrent_tools`) while the approval
+slot is single and lock-guarded, so a round's second gated call waits inside `PendingRequest.ask` for
+as long as the user takes to answer the first. A switch during that wait abandons only the request
+holding the slot, and without the third check the call queued behind it would go on to ask: an
+`approval` frame is never muted, so the page would draw that question into whatever transcript is now
+on screen, and an Allow there would run the tool on a turn nobody is watching. The frame carries its
+conversation for the reason an `auto_approval` card does, so a prompt that raced even that last check
+is dropped by the page rather than shown to the wrong reader.
+
 The approval gate has one optional layer above it, off by default:
 [`core/auto_approval.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/auto_approval.py).
 A declared reviewer answers three questions and writes one sentence about a gated call, and

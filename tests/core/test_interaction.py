@@ -130,13 +130,15 @@ class _UI:
     def __init__(self):
         self.asked: list[str] = []
         self.asked_by: list[str | None] = []
+        self.asked_for: list[str] = []  # the conversation each prompt was filed against
         self.auto_approvals: list[tuple[str, dict, bool, str, str, str]] = []
         self.auto_approval_agents: list[str | None] = []
         self.alerts: list[str] = []
 
-    async def ask_approval(self, name, arguments, *, agent=None):
+    async def ask_approval(self, name, arguments, *, agent=None, conversation_id=None):
         self.asked.append(f"approve:{name}")
         self.asked_by.append(agent)
+        self.asked_for.append(conversation_id)
 
     async def show_auto_approval(self, name, arguments, *, approved, reason, model, conversation_id=None, agent=None):
         self.auto_approvals.append((name, arguments, approved, reason, model, conversation_id))
@@ -302,6 +304,19 @@ def _never_called(why: str):
 _SETTLE_TIMEOUT = 2.0
 
 
+async def _wait_for_prompt(gate) -> None:
+    """Wait, bounded, until `approve` has stopped to ask. Raises `TimeoutError` if it never does.
+
+    Polled rather than counted in loop turns, because a review can sit in front of the prompt and how
+    many turns that costs is not this helper's business. Slept rather than spun: on the failure path
+    this polls for the whole timeout, and a busy `sleep(0)` would burn a core for two seconds to reach
+    an assertion that already failed.
+    """
+    async with asyncio.timeout(_SETTLE_TIMEOUT):
+        while not gate.approval.pending:
+            await asyncio.sleep(0.001)
+
+
 async def _answer_the_prompt(gate, name, arguments, *, with_answer: bool) -> bool:
     """Run `approve`, wait for the prompt it must raise, and route `with_answer` the way the loop does.
 
@@ -313,11 +328,7 @@ async def _answer_the_prompt(gate, name, arguments, *, with_answer: bool) -> boo
     """
     task = asyncio.create_task(gate.approve("assistant", name, arguments))
     try:
-        async with asyncio.timeout(_SETTLE_TIMEOUT):
-            # Slept rather than spun: on the failure path this polls for the whole timeout, and a busy
-            # `sleep(0)` would burn a core for two seconds to reach an assertion that already failed.
-            while not gate.approval.pending:
-                await asyncio.sleep(0.001)
+        await _wait_for_prompt(gate)
     except TimeoutError:
         task.cancel()
         # Awaited, so the cancellation lands before this returns: a task left pending is collected
@@ -548,6 +559,41 @@ async def test_a_switch_during_the_review_denies_instead_of_approving(monkeypatc
 
     assert ui.asked == []
     assert ui.auto_approvals == []
+    assert len(ui.alerts) == 1
+    assert "denied automatically" in ui.alerts[0]
+
+
+async def test_a_switch_while_queued_behind_another_prompt_denies_instead_of_asking(in_turn):
+    """The check in front of the prompt is as old as the wait for the slot, which the user's answer bounds.
+
+    AIMU dispatches a round's tool calls concurrently (`[assistant].concurrent_tools`, on by default),
+    so two gated calls reach the gate at once and the second blocks inside `PendingRequest.ask` until
+    the first is answered. Its switched-away check was made before that wait, and a switch during the
+    wait abandons only the request that holds the slot. Asking anyway would put the question in front
+    of the wrong reader: an `approval` frame is never muted, so the page draws it into the conversation
+    now on screen, and a yes there runs the tool on a turn nobody is watching. The same reasoning as
+    the review above, over a window the user's own reading time sets rather than a model call.
+    """
+    viewing = {"id": "c1"}
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: viewing["id"], is_proactive=lambda: False, turn_conversation=lambda: "c1")
+    gate.policies = _policies(confirm={"run_command"})
+
+    holds_the_slot = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "one"}))
+    queued = asyncio.create_task(gate.approve("assistant", "run_command", {"command": "two"}))
+    await _wait_for_prompt(gate)
+
+    viewing["id"] = "c2"
+    gate.abandon_all()  # what a conversation switch does, and it reaches only the outstanding request
+
+    assert await holds_the_slot is False
+    try:
+        assert await asyncio.wait_for(queued, timeout=_SETTLE_TIMEOUT) is False
+    except TimeoutError:
+        raise AssertionError("the queued call asked the conversation the user had switched to") from None
+
+    assert ui.asked == ["approve:run_command"]  # the one prompt, raised before the switch
+    assert ui.asked_for == ["c1"]  # and filed against the turn's conversation, not the reader's
     assert len(ui.alerts) == 1
     assert "denied automatically" in ui.alerts[0]
 

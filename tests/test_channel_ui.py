@@ -53,8 +53,10 @@ class RichChannelDouble(BareChannel):
     async def send_notification(self, text: str, *, conversation_id=None, url=None, group=None) -> None:
         self.calls.append(("notification", (text, conversation_id, url, group)))
 
-    async def send_approval_request(self, name: str, arguments: Any, *, agent: Optional[str] = None) -> None:
-        self.calls.append(("approval", (name, arguments, agent)))
+    async def send_approval_request(
+        self, name: str, arguments: Any, *, agent: Optional[str] = None, conversation_id=None
+    ) -> None:
+        self.calls.append(("approval", (name, arguments, agent, conversation_id)))
 
     async def send_auto_approval(
         self, name: str, arguments: Any, *, approved: bool, reason: str, model: str, conversation_id=None, agent=None
@@ -165,12 +167,15 @@ async def test_plain_text_approval_names_the_agent():
     assert channel.sent[-1] == "[approve] Allow coder to run run_command({'command': 'ls'})? [y/N]"
 
 
-async def test_rich_approval_carries_the_agent_and_defaults_to_none():
+async def test_rich_approval_carries_the_agent_and_conversation_and_defaults_to_none():
     channel = RichChannelDouble()
     ui = ChannelUI(channel)
-    await ui.ask_approval("run_command", {}, agent="coder")
+    await ui.ask_approval("run_command", {}, agent="coder", conversation_id="c1")
     await ui.ask_approval("run_command", {})
-    assert channel.calls == [("approval", ("run_command", {}, "coder")), ("approval", ("run_command", {}, None))]
+    assert channel.calls == [
+        ("approval", ("run_command", {}, "coder", "c1")),
+        ("approval", ("run_command", {}, None, None)),
+    ]
 
 
 async def test_plan_review_falls_back_to_text_and_includes_the_critique():

@@ -3266,3 +3266,26 @@ def test_the_panel_scrolls_on_its_own_and_returns_focus_when_closed(page, live_s
     _open_round(page)
     page.locator("#round-panel .round-panel-close").click()
     expect(page.locator("#log button.round-button")).to_be_focused()
+
+
+def test_an_approval_prompt_for_another_conversation_is_dropped(page, live_server):
+    """The page-side half of the switched-away denial, driven by injecting the frame.
+
+    The server asks whether the turn is still on screen last thing before sending this
+    (`HumanGate.approve`, under the lock that orders a round's concurrently dispatched gated calls),
+    so in a live run the prompt below never leaves the server. This covers what the page does with one
+    that raced even that check: asking the reader in front of conversation B to allow a call belonging
+    to conversation A's turn is a question they cannot answer, and an Allow would run it unwatched.
+    """
+    _open(page, live_server(delay=0.0))
+    active = page.evaluate("() => (lastConversations.find((c) => c.active) || {}).id")
+    assert active  # the sidebar has landed, so the page has something to compare against
+
+    def render(**frame):
+        page.evaluate("(f) => renderApproval(f)", frame)
+
+    render(name="run_command", arguments={"command": "ls"}, conversation_id="another-conversation")
+    expect(page.locator(".bubble.approval")).to_have_count(0)
+
+    render(name="run_command", arguments={"command": "ls"}, conversation_id=active)
+    expect(page.locator(".bubble.approval")).to_have_count(1)

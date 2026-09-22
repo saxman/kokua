@@ -106,6 +106,16 @@ class PendingRequest(Generic[T]):
         self.resolve(self._default)
 
 
+class _SwitchedAway(Exception):
+    """The viewed conversation moved on while an approval waited its turn for the single slot.
+
+    Flow control, not a failure: ``approve`` catches it and denies the call the way it does for a
+    switch it noticed earlier. It travels as an exception because the prompt callable is the only
+    code ``PendingRequest.ask`` runs while holding the lock that orders the askers, and that is where
+    the question has to be asked one last time.
+    """
+
+
 class HumanGate:
     """The assistant's two human-decision points, and how a channel reply routes to them."""
 
@@ -172,6 +182,12 @@ class HumanGate:
         currently viewing; a turn backgrounded by a switch auto-denies. Otherwise prompt over the
         channel and await the answer, which the serve loop routes here.
 
+        **That one question is asked at all three points where the answer can have gone stale**, and
+        each window is wider than the last: on arrival, after the review's model call, and once the
+        approval slot is finally held. The third exists because the slot is single and lock-guarded,
+        so a second gated call from the same concurrently dispatched round waits out the user's answer
+        to the first, and nothing bounds how long that is.
+
         A gated tool in the agent's ``review`` list is reviewed (when ``[security.auto_approval]`` is on) just before that prompt, and
         only there: both auto-denials above run first, so a review happens exactly where a human would
         otherwise have been asked and nowhere else, and the switched-away one is asked again after the
@@ -227,7 +243,28 @@ class HumanGate:
             )
             if outcome.approved:
                 return True
-        return await self.approval.ask(lambda: self._ui.ask_approval(self._label(agent, name), arguments, agent=agent))
+
+        async def prompt() -> None:
+            # Asked a third time, here rather than above, because this runs under the lock that orders
+            # the askers and the checks above are as old as the wait for it. Concurrent tool dispatch
+            # ([assistant].concurrent_tools) puts a second gated call from the same round behind this
+            # slot, where it waits out the user's answer to the first: an unbounded window in practice,
+            # far wider than the review's. A switch during it abandons only the request holding the
+            # slot, so without this the one behind would go on to ask, and ask the wrong reader: an
+            # `approval` frame is never muted, so the page draws it into whatever transcript is on
+            # screen, and an Allow there runs the tool on a turn nobody is watching. The conversation
+            # riding on that frame is the page's own backstop for the sliver of the window even this
+            # check cannot close; the check is what keeps the question from being asked at all.
+            if self._turn_conversation() != self._active_id():
+                raise _SwitchedAway
+            await self._ui.ask_approval(
+                self._label(agent, name), arguments, agent=agent, conversation_id=turn_conversation
+            )
+
+        try:
+            return await self.approval.ask(prompt)
+        except _SwitchedAway:
+            return await self._deny_switched_away(name, turn_conversation)
 
     def _label(self, agent: str, name: str) -> str:
         """``name`` as the prompt shows it: ``toolset.tool``, or bare when no toolset is known."""
@@ -243,8 +280,9 @@ class HumanGate:
         firing, which reports itself when it ends and would otherwise raise one of these on every
         firing.
 
-        One method, two callers, because the two are the same event at different times: the switch may
-        have happened before the call reached the gate, or during the review the gate ran.
+        One method, three callers, because all three are the same event at different times: the switch
+        may have happened before the call reached the gate, during the review the gate ran, or while
+        the call waited behind another call's prompt for the approval slot.
         """
         await self._ui.alert(
             f"A turn you switched away from asked to run {name}. It was denied automatically, "
