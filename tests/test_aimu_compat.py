@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -49,18 +51,18 @@ def test_a_missing_aimu_is_reported_as_such(monkeypatch):
 
 def test_a_version_one_release_below_the_floor_is_caught(monkeypatch):
     """The floor moves with the capabilities Kokua uses, so the previous release must fail."""
-    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.30.0")
-    with pytest.raises(AimuVersionError, match="0.30.0"):
+    monkeypatch.setattr(aimu_compat, "version", lambda name: "0.31.0")
+    with pytest.raises(AimuVersionError, match="0.31.0"):
         require_aimu()
 
 
 def test_a_probe_that_checks_a_set_member_still_works(monkeypatch):
     """The probe follows whatever shape its surface has, and a set member is one of the three.
 
-    This is the live shape today (0.31.0's ``"compaction"``), and it is still exercised here against
-    0.18.0's ``generate_kwargs`` member rather than against the current one, so the branch stays covered
-    whichever member the probe grips next. Both are entries in the same set, which is the point that set
-    keeps making: its presence says nothing, and only its contents date a checkout.
+    Membership was the shape for 0.18.0's ``generate_kwargs``, 0.28.0's ``CONTINUING``, and 0.31.0's
+    ``"compaction"``, twice on that same set, which is the point the set keeps making: its presence says
+    nothing, and only its contents date a checkout. Exercised here against a stand-in rather than the
+    live surface, which is a name lookup today, so the branch stays covered whatever the probe grips next.
     """
     monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
     monkeypatch.setattr(aimu_compat, "_PROBE_CLASS", None)
@@ -121,27 +123,80 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    The surface today is ``SUBAGENT_SPEC_KEYS``'s ``"compaction"``, the spec key ``core/agents.py``
-    writes so a spawned worker trims its own messages instead of filling its window and dying in it.
-    It is deliberately not the newest *name* in 0.31.0: ``builtin.select`` landed earlier in the release
-    and would have been a plain name lookup, but ``save_document``'s read-before-replace guard landed
-    two commits after it with no handle at all, while the ``read_document`` windowing that makes an
-    unguarded save destructive landed before it. A checkout in between passes a ``select`` probe and
-    still truncates a document to the window it was read through. ``compaction`` is in the release's
-    last functional commit, so gripping it dates a checkout to all of them.
+    The surface today is ``aimu.skills.make_skill_update_tool``, the factory ``toolsets/skills.py`` calls
+    to hand an agent ``update_skill``. Before it, a skill's prose was write-once: ``author_skill``
+    refuses to clobber and ``add_skill_script`` writes scripts alone, so an agent could fix a skill's
+    code forever and never a word of its text.
+
+    It *is* the newest name in 0.32.0, which is the opposite of 0.31.0's case and the reason both are
+    spelled out in ``aimu_compat``: the release's other capability (a script write no longer rewriting
+    the skill's ``SKILL.md``, dropping every frontmatter key the rewrite did not re-emit) landed earlier
+    in the same branch and has its own handle in ``write_skill_script``, so gripping the later one dates
+    a checkout to both.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
     probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_MODULE == "aimu.tools.builtin"
-    assert aimu_compat._PROBE_SYMBOL == "SUBAGENT_SPEC_KEYS"
-    assert aimu_compat._PROBE_MEMBER == "compaction"
-    assert aimu_compat._PROBE_MEMBER in probe
-    # The set is at module scope and the shape is membership, so neither of the other two applies.
+    assert aimu_compat._PROBE_MODULE == "aimu.skills"
+    assert aimu_compat._PROBE_SYMBOL == "make_skill_update_tool"
+    # A module-scope symbol, and the capability is the name itself, so neither of the other two shapes
+    # applies: nothing to look the name up on, and nothing inside it to check.
     assert aimu_compat._PROBE_CLASS is None
     assert aimu_compat._PROBE_PARAMETER is None
+    assert aimu_compat._PROBE_MEMBER is None
+
+
+def test_the_floor_covers_the_script_write_that_leaves_skill_md_alone():
+    """0.32.0's other capability, and the one a Kokua user feels: a script write that keeps a skill's
+    frontmatter.
+
+    ``add_skill_script`` used to attach a script by rewriting the whole ``SKILL.md`` from the parsed
+    skill, which re-emitted ``name`` / ``description`` / ``metadata`` and dropped the rest, so a skill
+    installed by ``kokua skills install`` shed its ``license`` and ``compatibility`` lines the first time
+    an agent attached a script to it. A name lookup on ``write_skill_script`` says the function exists
+    and nothing about what ``add_skill_script`` does with it, so the behavior is pinned here: author a
+    skill by hand with optional frontmatter, attach a script, and read the file back.
+    """
+    import asyncio
+
+    from aimu.skills import SkillManager, make_skill_script_tool, write_skill_script
+
+    assert callable(write_skill_script)
+
+    class _StubAgent:
+        async def reload_skills(self):
+            pass
+
+    with tempfile.TemporaryDirectory() as tmp:
+        skills_dir = Path(tmp)
+        (skills_dir / "curated").mkdir()
+        original = (
+            "---\nname: curated\ndescription: A hand-written skill.\nlicense: Apache-2.0\n"
+            "compatibility: Requires uv.\n---\n\n# Curated\n"
+        )
+        (skills_dir / "curated" / "SKILL.md").write_text(original, encoding="utf-8")
+        manager = SkillManager(skill_dirs=[str(skills_dir)])
+        tool = make_skill_script_tool(_StubAgent(), manager, skills_dir)
+
+        asyncio.run(tool(skill_name="curated", filename="run.py", content="print(1)\n"))
+
+        assert (skills_dir / "curated" / "scripts" / "run.py").exists()
+        assert (skills_dir / "curated" / "SKILL.md").read_text() == original
+
+
+def test_the_floor_covers_the_spec_key_the_probe_no_longer_grips_for_compaction():
+    """0.31.0's probe surface is 0.32.0's floor now that ``make_skill_update_tool`` holds the one slot.
+
+    ``core/agents.py`` writes ``"compaction"`` per spawned worker off a declared ``context_length``, so a
+    long delegation trims its own messages instead of dying in its window. An AIMU without the entry
+    raises on the closed key set rather than degrading, which is why it never needed the slot for its own
+    sake; this pins it now that nothing else does.
+    """
+    from aimu.tools.builtin import SUBAGENT_SPEC_KEYS
+
+    assert "compaction" in SUBAGENT_SPEC_KEYS
 
 
 def test_the_floor_covers_the_fs_group_the_probe_cannot_inspect():

@@ -50,7 +50,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.31.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.32.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -59,7 +59,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.31.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.32.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -251,7 +251,7 @@ Consequences for working in this repo:
   nothing, and its three caps (20,000 characters returned, 10 MB downloaded, 200,000 extracted from a
   PDF) are invisible to a name lookup, which no preflight short of fetching a PDF could establish.
   `SessionStore.list_summaries` is the floor's job now, in its turn.
-  **AIMU 0.31.0 is the current floor, and it is the first release where the probe deliberately passed
+  **AIMU 0.31.0 was the floor until 0.32.0, and it is the one release where the probe deliberately passed
   over a newer handle.** Three of its capabilities are Kokua's, and each is a different one of this
   module's recurring shapes. First, `builtin.fs` gained `write_file` and `edit_file`, so the group Kokua
   used to hand out as `list(builtin.fs)` became a group that writes: an upgrade alone would have given
@@ -288,8 +288,37 @@ Consequences for working in this repo:
   trade 0.20.0's `endpoint_kwargs` had to accept. What it leaves to the floor is the *contents* of
   `builtin.unscoped`: the whole `fs` split rests on that group holding both writers, and asking it needs
   a membership check over a list of *callables* matching on `__name__`, declined at 0.24.0, again at
-  0.30.0, and again here, asserted in `tests/test_aimu_compat.py` instead. `get_web_content` is the
-  floor's job now, in its turn.
+  0.30.0, and again here, asserted in `tests/test_aimu_compat.py` instead. `get_web_content` became the
+  floor's job then, in its turn.
+  **AIMU 0.32.0 is the current floor, and it is the counterpart to the release before it: two
+  capabilities again, and this time the newest handle is the right one.** Both are about authoring
+  skills, and the one Kokua's own code changed for is `make_skill_update_tool`, which `toolsets/skills.py`
+  now calls beside `make_skill_authoring_tool` and `make_skill_script_tool` so the entry agent holds
+  `update_skill`. It closes a loop that was open from the start: `author_skill` refuses to clobber and
+  `add_skill_script` writes scripts alone, so a skill's prose was write-once, and an assistant that had
+  learned a procedure wrong could fix its code forever and never a word of its text. The tool needs no
+  agent (editing a skill's text changes none of its tools, so nothing reloads), which is why `skills`
+  is still `entry_point_only` for `add_skill_script`'s sake alone. It stays out of
+  `[security].confirm_tools` on the line that put `add_skill_script` in it: a gate is for a call that
+  reaches past the model, which a script does and prose does not, and gating the tool that *edits*
+  instructions while leaving ungated the one that *writes* them would buy a prompt and no boundary.
+  The second capability is the one a user feels, and it needed no Kokua change at all: `add_skill_script`
+  no longer attaches a script by rewriting the whole `SKILL.md`. That rewrite passed back the description
+  and body it had just read, so it could not change the prose and existed only to drop the frontmatter
+  keys it did not re-emit -- the spec's optional `license`, `compatibility`, and `allowed-tools`, plus
+  anything outside the spec. Three of the four skills `kokua skills install` ships carry two of those
+  keys, so each would have shed them the first time an agent attached a script to it, and again on every
+  later fix, with nothing raised anywhere. The probe is a plain name lookup on
+  `aimu.skills.make_skill_update_tool`, the fifth time that shape has answered, and for once there is no
+  trade: the script-write fix has a handle of its own in `write_skill_script`, and it landed *earlier* in
+  the same branch, so gripping the later name dates a checkout to both. Read that next to the paragraph
+  above it, which is the same arrangement with the commits in the other order. What it leaves to the
+  floor is the *behavior* behind that fix: a name lookup never asks what a function does, and Kokua
+  calls neither function itself (it hands the tool to a model, and the loss happens inside AIMU on a
+  file Kokua does not read back), so establishing it in the preflight would mean authoring a skill in a
+  temp directory at startup and reading it back, a filesystem side effect a preflight has no business
+  having. `tests/test_aimu_compat.py` does exactly that instead, where a side effect is free.
+  `"compaction"` is the floor's job now, in its turn.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is
@@ -329,7 +358,8 @@ change. Full rationale, with the code that backs each claim, is in
    describes -- built per call, discarded with the call. (Another exception worth knowing: the entry
    agent is an `aio.SkillAgent`, so AIMU gives it the skill catalogue, `activate_skill`, and each
    `{skill}__{stem}` script tool whether or not it declares the `skills` toolset, which only adds
-   `author_skill` / `add_skill_script`. A spawned worker is a plain `aio.Agent` and gets none of it.)
+   `author_skill` / `update_skill` / `add_skill_script`. A spawned worker is a plain `aio.Agent` and gets
+   none of it.)
 3. **`config.toml` is the single source of settings, and the app writes it.** No parallel store. Kokua's
    own runtime-mutable settings are one entry each in `config/table.py`'s `CORE_RUNTIME_SETTINGS`; a
    toolset's are one `Setting` on the toolset itself, in its own `[<name>]` section. `SettingsTable`,
@@ -502,7 +532,7 @@ and does so inside the function that needs it rather than at module scope, becau
 imports `settings_sources` at module level to build its cold-key schema -- hoisting the upward import
 would close that loop and break `import kokua.toolsets.core` on a partially-initialized module.
 
-Note the convention is only part of the answer: thirteen of the 34 tools the shipped entry agent holds
+Note the convention is only part of the answer: fourteen of the 35 tools the shipped entry agent holds
 come from AIMU and are not in this repo at all, which is why
 [docs/explanation/architecture.md](docs/explanation/architecture.md#how-an-agents-tools-resolve) carries
 the full inventory and `tests/core/test_build.py` pins it as an exact set. That inventory is what

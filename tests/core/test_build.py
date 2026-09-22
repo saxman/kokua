@@ -257,7 +257,11 @@ ENTRY_AGENT_TOOLS = {
         "run_scheduled_task",
         "stop_scheduled_task",
     },
-    "aimu make_skill_authoring_tool / make_skill_script_tool": {"author_skill", "add_skill_script"},
+    "aimu make_skill_authoring_tool / make_skill_update_tool / make_skill_script_tool": {
+        "author_skill",
+        "update_skill",
+        "add_skill_script",
+    },
     "aimu builtin.time": {"get_current_date_and_time", "convert_time"},
     "aimu make_async_subagent_tool": {"spawn_subagent"},
     "kokua toolsets/benchmark.py": {"benchmark_model"},
@@ -589,6 +593,31 @@ def test_memory_toolset_tools_carry_dispatch_attrs(tmp_path):
     for fn in tools:
         assert fn.__name__
         assert hasattr(fn, "__tool_spec__")
+
+
+async def test_assistant_can_fix_a_skill_it_authored(tmp_path):
+    """The loop the `skills` toolset exists for only closes if the prose is editable too.
+
+    `author_skill` refuses to clobber, so before `update_skill` was wired here the assistant's only
+    move on a skill that turned out wrong was to author a second one under a different name. Asserted
+    through the live agent rather than the toolset, because what is under test is the wiring: the tool
+    has to reach the same `SkillManager` the entry agent's catalogue is built from, or the skill it
+    just fixed reads back as not found.
+    """
+    cfg = _config(tmp_path)
+    assistant = await Assistant.create(cfg, FakeChannel(), client=MockAsyncModelClient([]))
+
+    tools = assistant._agent.tools
+    author = next(t for t in tools if t.__name__ == "author_skill")
+    update = next(t for t in tools if t.__name__ == "update_skill")
+
+    await author(name="standup", description="First try.", body="# Standup\n\nThree bullets.")
+    msg = await update(skill_name="standup", body="# Standup\n\nFour bullets, and a blocker.")
+
+    assert "standup" in msg
+    skill = assistant._state.skill_manager.skills["standup"]
+    assert skill.load_body() == "# Standup\n\nFour bullets, and a blocker."
+    assert skill.description == "First try."  # untouched: an update writes only what it is given
 
 
 async def test_assistant_authors_and_registers_runnable_script(tmp_path):
