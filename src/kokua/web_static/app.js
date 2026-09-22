@@ -2205,6 +2205,11 @@ function handleFrame(event) {
     setWorking(frame.active ? (frame.elapsed || 0) * 1000 : null);
   } else if (frame.type === "approval") {
     renderApproval(frame);
+  } else if (frame.type === "prompt_retired") {
+    // The question this page is showing is no longer waiting on an answer, however it stopped
+    // waiting: answered here, answered by a typed reply, abandoned by a switch, or cancelled with
+    // its turn. Only the controls change; the card stays as the record of what was asked.
+    retirePrompt();
   } else if (frame.type === "auto_approval") {
     renderAutoApproval(frame);
   } else if (frame.type === "plan") {
@@ -2293,6 +2298,7 @@ function handleFrame(event) {
     latestRound.delete(log);  // its button lived in the transcript being replaced
     log.innerHTML = "";  // replace any current transcript
     subagentCards = {};  // fresh view: drop any live sub-agent card references
+    outstandingPrompt = null;  // and any prompt card, which this repaint has just removed
     // Drop the references to the bubbles just removed. Without this they stay live but detached, and
     // the next token or thinking frame -- from any conversation -- re-attaches the old conversation's
     // partial bubble into this view and keeps writing into it. A `partial` item below re-opens the
@@ -2411,6 +2417,24 @@ function renderModels(frame) {
   modelLabel.title = lines.join("\n");
 }
 
+// The prompt currently waiting on an answer (a tool approval, or a plan review), or null. One at a
+// time, because the core allows one at a time: `HumanGate` holds each as a single lock-guarded slot.
+// Held so that the controls can be retired when the question closes, which is not always something
+// this page did: a typed "y" answers the prompt without touching its buttons, and a /stop cancels the
+// turn the question belonged to. A button that outlives its question sends a reply nothing is waiting
+// for, and the server can only read that as an ordinary message, so an idle click turns "y" into a
+// turn saying "y".
+let outstandingPrompt = null;
+
+// Close whatever prompt is on screen: the controls go dead, exactly as they do when this page is the
+// one that answered. Disabled rather than removed, because the question and its answer are part of
+// the transcript the user is reading.
+function retirePrompt() {
+  if (!outstandingPrompt) return;
+  outstandingPrompt.querySelectorAll("button, textarea").forEach((control) => (control.disabled = true));
+  outstandingPrompt = null;
+}
+
 // A gated tool needs confirmation: show the call and Allow/Deny buttons. The reply is a plain
 // "y"/"n" frame, which the server routes to the waiting tool call (same path as typing it).
 // The question belongs to one turn, so a prompt that raced a conversation switch is dropped rather
@@ -2450,6 +2474,7 @@ function renderApproval(frame) {
   el.appendChild(prompt);
   el.appendChild(actions);
   appendToLog(el);
+  outstandingPrompt = el;
   autoscroll();
 }
 
@@ -2535,6 +2560,7 @@ function renderPlanReview(planText, critique) {
   if (note) el.appendChild(note);
   el.appendChild(actions);
   appendToLog(el);
+  outstandingPrompt = el;
   autoscroll();
 }
 

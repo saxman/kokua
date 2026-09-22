@@ -64,6 +64,7 @@ class ChannelUI:
         self._conversations = getattr(channel, "send_conversations", None)
         self._notification = getattr(channel, "send_notification", None)
         self._approval_request = getattr(channel, "send_approval_request", None)
+        self._prompt_retired = getattr(channel, "send_prompt_retired", None)
         self._auto_approval = getattr(channel, "send_auto_approval", None)
         self._plan_review_request = getattr(channel, "send_plan_review_request", None)
         self._plan = getattr(channel, "send_plan", None)
@@ -293,6 +294,20 @@ class ChannelUI:
             await self._channel.send(f"[approve] Allow {name}({arguments})? [y/N]")
         else:
             await self._channel.send(f"[approve] Allow {agent} to run {name}({arguments})? [y/N]")
+
+    async def retire_prompt(self) -> None:
+        """Say that the outstanding question is closed, however it closed: answered here, answered by
+        a typed reply, abandoned by a switch, or cancelled with its turn.
+
+        For a channel whose prompt is a *control* (the web page's Allow/Deny, a plan review's
+        Approve/Edit/Reject), which is the only kind that can still be used after the question is
+        gone: a click on a closed prompt sends a reply that matches no pending request, which the
+        serve loop can only read as an ordinary message, so the user's "y" becomes a turn saying "y".
+        A channel that prompts by printing a line has nothing to take back and no way to be clicked,
+        so this is silence there, as it is for a channel with no prompt frame at all.
+        """
+        if self._prompt_retired is not None:
+            await self._prompt_retired()
 
     async def show_auto_approval(
         self,

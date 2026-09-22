@@ -89,6 +89,14 @@ class RichChannel(Protocol):
         transcript on screen, exactly as ``send_auto_approval`` does.
         """
 
+    async def send_prompt_retired(self) -> None:
+        """Say that the outstanding prompt is closed, so its controls must stop being usable.
+
+        Only a channel whose prompt is a control needs it, which is the same channel that offers
+        ``send_approval_request`` and ``send_plan_review_request``: a button that outlives its
+        question sends a reply nothing is waiting for.
+        """
+
     async def send_auto_approval(
         self,
         name: str,

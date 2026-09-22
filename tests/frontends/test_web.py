@@ -1026,6 +1026,30 @@ async def test_web_approval_frame_carries_the_agent():
     ]
 
 
+async def test_web_channel_sends_a_prompt_retired_frame():
+    """One frame, no payload: the page keeps one outstanding prompt because the core allows one."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_prompt_retired()
+    assert ws.frames == [{"type": "prompt_retired"}]
+
+
+async def test_a_prompt_retired_frame_is_never_muted_by_a_switch():
+    """Not a turn frame, deliberately. It is sent as a turn ends, including by the /stop that ended
+    it, and muting it would leave live controls on a question nothing is waiting to answer."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "on-screen"
+    token = streaming_conversation.set("elsewhere")
+    try:
+        await channel.send_prompt_retired()
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == [{"type": "prompt_retired"}]
+
+
 async def test_web_channel_sends_an_auto_approval_frame():
     """The conversation rides on the frame, as it does on a notification: the page files the card
     against the turn the reviewed call belongs to rather than against whatever is on screen."""

@@ -2023,7 +2023,14 @@ notice on startup.
   [#7](https://github.com/saxman/kokua/issues/7).
   The reply is routed through the single channel reader, so it is safe alongside
   `/stop`. Approval and plan review share one lock-guarded pending slot, so two concurrent requests
-  cannot overwrite each other.
+  cannot overwrite each other. **A prompt's controls are retired when its question closes**, which is
+  not always something the page can see: a typed `y` answers without touching the buttons, and a
+  `/stop` cancels the turn the question belonged to. A reply matching no outstanding request is an
+  ordinary message, so a button outliving its question turns a `y` into a turn saying "y". The
+  `prompt_retired` frame is sent from the one place that knows all four endings (`PendingRequest.ask`'s
+  `finally`: answered here, answered by a typed reply, abandoned by a switch, cancelled with the turn),
+  and the page disables the card's controls while keeping the card, which is the record of what was
+  asked. A terminal prompt is a printed line with nothing to take back, so it degrades to silence.
 - **A gate names its toolset, and one that would gate nothing fails startup.** A `[security]
   confirm_tools` entry is `<toolset>` for every tool a capability provides, `<toolset>.*` for the same
   thing said with a wildcard, or `<toolset>.<tool>` for one; `*` anywhere else is refused. A reserved

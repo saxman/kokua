@@ -1670,9 +1670,9 @@ than a shared one.
 `channels/web.py`'s `WebChannel` subclasses
 [AIMU's base `WebChannel`](https://saxman.info/aimu/how-to/build-personal-assistant/). The streaming transport
 (`token`/`thinking`/`tool`/`done` frames and `send()`) lives in AIMU's base; Kokua's subclass adds the
-frames its richer page needs, among them `conversations`, `history`, `approval`, `turn_saved`,
-`models`, and `inbox`. The UI is a single self-contained `web_static/index.html` served as package data, plus
-vendored `marked` + `DOMPurify`
+frames its richer page needs, among them `conversations`, `history`, `approval`, `prompt_retired`,
+`turn_saved`, `models`, and `inbox`. The UI is a single self-contained `web_static/index.html` served as
+package data, plus vendored `marked` + `DOMPurify`
 (GitHub-flavored markdown, sanitized, rendered client-side as the answer streams) and vendored KaTeX,
 typeset after sanitization with `trust:false` once the turn completes. The server allowlists these assets: JS/CSS by name, the
 woff2 fonts under `/fonts/`.
@@ -1713,6 +1713,15 @@ on a plain string, and the commonest message of all is the one that most needs n
 `frontends/web.py`'s `_parse_input` decodes it and `WebChannel.feed_input` queues it; both shapes
 converge on one `ChannelMessage` in `receive`, so nothing downstream knows which path a message took,
 and a frame's text is read exactly as a bare one's, commands and all.
+
+A reply that matches no outstanding request is not an error, it is an ordinary message, so a control
+that outlives its question is a real hazard rather than a dead button: clicking Allow on a closed prompt
+turns `y` into a turn saying "y". The `prompt_retired` frame is what closes one. It is sent from
+`PendingRequest.ask`'s `finally`, so it covers all four ways a question stops waiting (answered by a
+click, answered by a typed reply, abandoned by a switch, cancelled with its turn by `/stop`) rather than
+the one the page can see for itself, and the page disables the card's controls without removing the card,
+which is the record of what was asked. A channel that prompts by printing a line has nothing to take back,
+so `ChannelUI.retire_prompt` is silence there.
 
 ### Reading the socket, and applying what arrives
 

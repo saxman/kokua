@@ -61,6 +61,7 @@ class PendingRequest(Generic[T]):
         context: Any = None,
         parse: Optional[Callable[[str, str], T]] = None,
         default: Any = _UNSET,
+        retire: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> T:
         """Send ``prompt`` and wait for the answer, serialized against any other asker.
 
@@ -71,6 +72,19 @@ class PendingRequest(Generic[T]):
         default can never leak onto the first asker's abandon. The slot is cleared in that same
         ``finally``, so a ``/stop`` that cancels the waiting turn mid-await still leaves no stale
         pending request behind.
+
+        ``retire`` takes back what ``prompt`` put up, and runs once this request is no longer
+        outstanding *however* it stopped being outstanding: answered, abandoned by a switch, or
+        cancelled with the turn that raised it. It is the asker's too, and it is paired with ``prompt``
+        rather than left to the answering paths because there are four of those and every one of them
+        leaves the same live question on a page that has no other way to learn it is closed. A front
+        end whose prompt is a printed line has nothing to take back and passes none.
+
+        Two details of the pairing matter. Nothing is retired when ``prompt`` itself raised, since
+        nothing was put up (``HumanGate.approve`` raises there for a call whose turn left the screen).
+        And a ``retire`` that fails is logged rather than raised: it runs in a ``finally``, where an
+        exception would replace the answer this call is returning, and a channel that could not be
+        told is not a reason to lose a decision the user already made.
         """
         async with self._lock:
             previous_default = self._default
@@ -79,14 +93,21 @@ class PendingRequest(Generic[T]):
             self._future = asyncio.get_running_loop().create_future()
             self._context = context
             self._parse = parse
+            prompted = False
             try:
                 await prompt()
+                prompted = True
                 return await self._future
             finally:
                 self._default = previous_default
                 self._future = None
                 self._context = None
                 self._parse = None
+                if prompted and retire is not None:
+                    try:
+                        await retire()
+                    except Exception:
+                        logger.warning("Could not retire an answered prompt", exc_info=True)
 
     def resolve(self, value: T) -> bool:
         """Answer the outstanding request. Returns whether there was one to answer."""
@@ -262,7 +283,7 @@ class HumanGate:
             )
 
         try:
-            return await self.approval.ask(prompt)
+            return await self.approval.ask(prompt, retire=self._ui.retire_prompt)
         except _SwitchedAway:
             return await self._deny_switched_away(name, turn_conversation)
 
@@ -308,8 +329,14 @@ class HumanGate:
         that raised it). It is passed per call rather than fixed at construction because it is the
         workflow's safe answer, not the core's: "reject" for a plan review, but a different word for
         the next workflow along.
+
+        The retirement is the core's, though, and it is the same one an approval gets: what the page
+        has to be told is that the question is closed, which is true of every prompt this class puts
+        up and says nothing about whose vocabulary asked it.
         """
-        return await self.decision.ask(prompt, context=context, parse=parse, default=default)
+        return await self.decision.ask(
+            prompt, context=context, parse=parse, default=default, retire=self._ui.retire_prompt
+        )
 
     def resolve_reply(self, raw: str, text: str) -> bool:
         """Route an inbound message to whichever request is outstanding. Returns whether it was consumed.

@@ -58,6 +58,9 @@ class RichChannelDouble(BareChannel):
     ) -> None:
         self.calls.append(("approval", (name, arguments, agent, conversation_id)))
 
+    async def send_prompt_retired(self) -> None:
+        self.calls.append(("prompt_retired", ()))
+
     async def send_auto_approval(
         self, name: str, arguments: Any, *, approved: bool, reason: str, model: str, conversation_id=None, agent=None
     ) -> None:
@@ -178,6 +181,15 @@ async def test_rich_approval_carries_the_agent_and_conversation_and_defaults_to_
     ]
 
 
+async def test_retiring_a_prompt_is_silent_on_a_channel_that_printed_one():
+    """The one frame whose degradation has to be silence rather than a sentence. A printed question
+    has no controls to take back, and a line saying the question is closed would be noise in a
+    terminal whose next line is the answer the user just typed."""
+    channel = BareChannel()
+    await ChannelUI(channel).retire_prompt()
+    assert channel.sent == []
+
+
 async def test_plan_review_falls_back_to_text_and_includes_the_critique():
     channel = BareChannel()
     await ChannelUI(channel).ask_plan_review("step 1", ["too vague", "no verification"])
@@ -221,6 +233,7 @@ async def test_rich_channel_receives_every_frame():
     await ui.notify("done")
     await ui.alert("a scheduled task finished")
     await ui.ask_approval("execute_python", {"code": "1"})
+    await ui.retire_prompt()
     await ui.show_auto_approval("run_command", {"command": "ls"}, approved=True, reason="lists files", model="m")
     await ui.ask_plan_review("step 1", ["too vague"])
     await ui.show_plan("step 1")
@@ -236,6 +249,7 @@ async def test_rich_channel_receives_every_frame():
         "notification",  # notify
         "notification",  # alert: one frame, two methods, differing only in their fallback
         "approval",
+        "prompt_retired",
         "auto_approval",
         "plan_review",
         "plan",

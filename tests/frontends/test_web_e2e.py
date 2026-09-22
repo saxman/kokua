@@ -3289,3 +3289,25 @@ def test_an_approval_prompt_for_another_conversation_is_dropped(page, live_serve
 
     render(name="run_command", arguments={"command": "ls"}, conversation_id=active)
     expect(page.locator(".bubble.approval")).to_have_count(1)
+
+
+def test_a_retired_prompt_keeps_its_card_and_loses_its_buttons(page, live_server):
+    """A question can stop waiting without this page having answered it: a typed "y" resolves it
+    without touching the buttons, and a /stop cancels the turn it belonged to. The controls have to
+    go dead either way, because a click after that sends a reply nothing is waiting for and the
+    serve loop can only read it as an ordinary message, turning "y" into a turn saying "y". The card
+    itself stays: it is the record of what was asked."""
+    _open(page, live_server(delay=0.0))
+    active = page.evaluate("() => (lastConversations.find((c) => c.active) || {}).id")
+
+    def frame(**payload):
+        page.evaluate("(f) => handleFrame({ data: JSON.stringify(f) })", payload)
+
+    frame(type="approval", name="run_command", arguments={"command": "ls"}, conversation_id=active)
+    card = page.locator(".bubble.approval")
+    expect(card.locator("button").first).to_be_enabled()
+
+    frame(type="prompt_retired")
+    expect(card).to_have_count(1)
+    expect(card.locator("button").first).to_be_disabled()
+    expect(card.locator("button").last).to_be_disabled()

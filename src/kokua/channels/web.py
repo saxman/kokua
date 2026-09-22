@@ -646,6 +646,16 @@ class WebChannel(BaseWebChannel):
             }
         )
 
+    async def send_prompt_retired(self) -> None:
+        """Tell the page the question it is showing is closed, whichever way it closed.
+
+        Never muted (``prompt_retired`` is not in ``_TURN_FRAMES``) and carrying no conversation,
+        unlike the prompt it retires: the page keeps one outstanding prompt, because the core allows
+        one, and a switch has already replaced the whole transcript by the time anything could
+        arrive for the wrong one.
+        """
+        await self.send_frame({"type": "prompt_retired"})
+
     async def send_auto_approval(
         self,
         name: str,
