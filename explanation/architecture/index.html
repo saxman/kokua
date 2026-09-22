@@ -2532,9 +2532,9 @@ forgets raises nothing anywhere: the script simply runs with the settings missin
 unconfigured, which is what <code>email-report</code> did on the entry agent until the second route was wired.
 <code>tests/core/test_build.py</code> pins it, because nothing else would notice.</p>
 <h4 id="the-shipped-entry-agents-inventory">The shipped entry agent's inventory<a class="headerlink" href="#the-shipped-entry-agents-inventory" title="Permanent link">&para;</a></h4>
-<p>All 34 tools the shipped <code>[agents.assistant]</code> table resolves to, and where each comes from. This is what
+<p>All 35 tools the shipped <code>[agents.assistant]</code> table resolves to, and where each comes from. This is what
 <code>config.example.toml</code> declares, not a fixed list: a different <code>tools</code> line produces a different set.
-Thirteen of the 34 come from AIMU, more than a third, and so are not greppable in this repository (more
+Fourteen of the 35 come from AIMU, more than a third, and so are not greppable in this repository (more
 once skills are installed, since AIMU injects a tool per skill script on top of this set), which is why
 this table exists rather than a naming convention alone:</p>
 <table>
@@ -2547,8 +2547,8 @@ this table exists rather than a naming convention alone:</p>
 </thead>
 <tbody>
 <tr>
-<td><code>author_skill</code>, <code>add_skill_script</code></td>
-<td>AIMU <code>make_skill_authoring_tool</code> / <code>make_skill_script_tool</code></td>
+<td><code>author_skill</code>, <code>update_skill</code>, <code>add_skill_script</code></td>
+<td>AIMU <code>make_skill_authoring_tool</code> / <code>make_skill_update_tool</code> / <code>make_skill_script_tool</code></td>
 <td><code>skills</code> (entry agent only)</td>
 </tr>
 <tr>
@@ -3120,7 +3120,25 @@ name lookup, structurally a half-step deeper than its predecessors since the sym
 now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 <code>TinyDBSessionStore</code>'s override from a plain inheritance of the default.</p>
-<p>The floor is now <strong><code>aimu&gt;=0.31.0</code></strong>, and three capabilities in that release are Kokua's. <code>builtin.select</code>
+<p>The floor is now <strong><code>aimu&gt;=0.32.0</code></strong>, and two capabilities in that release are Kokua's, both about skill
+authoring. <code>make_skill_update_tool</code> is the factory
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/skills.py"><code>toolsets/skills.py</code></a> calls to
+hand an agent <code>update_skill</code>, so a skill whose instructions turned out wrong can be fixed in place.
+Before it a skill's prose was write-once: <code>author_skill</code> refuses to clobber and <code>add_skill_script</code>
+writes scripts alone, so the assistant could revise a skill's code forever and never a word of its text,
+and the only route to a better version was a second skill under a different name. The other capability
+is the one a user feels: <code>add_skill_script</code> no longer attaches a script by rewriting the whole
+<code>SKILL.md</code>. That rewrite passed back the description and body it had just read, so it could not change
+the prose and existed only to drop the frontmatter keys it did not re-emit, which meant a skill from
+<code>kokua skills install</code> shed its <code>license</code> and <code>compatibility</code> lines the first time an agent attached a
+script to it, and again on every later fix, with nothing raised anywhere.</p>
+<p>The probe grips <code>make_skill_update_tool</code>, a plain name lookup, and this time the newest handle is the
+right one: the script-write fix landed earlier in the same branch and has a handle of its own in
+<code>write_skill_script</code>, so gripping the later name dates a checkout to both. What it leaves to the floor
+is the <em>behavior</em> behind that fix, since no name lookup asks what a function does and Kokua calls
+neither function itself; <code>tests/test_aimu_compat.py</code> authors a skill with optional frontmatter in a temp
+directory and reads it back instead.</p>
+<p><strong>0.31.0</strong> was the floor until 0.32.0, and three capabilities in it are Kokua's. <code>builtin.select</code>
 and <code>builtin.unscoped</code> are what <a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/fs.py"><code>toolsets/fs.py</code></a>
 and <code>toolsets/fs_write.py</code> partition one group with, after AIMU put <code>write_file</code> and <code>edit_file</code> <em>into</em>
 <code>builtin.fs</code>: handing that group out unchanged would have granted a write to every agent already
@@ -3130,7 +3148,7 @@ returns a window and replacing a whole document from a windowed read deleted eve
 (a 3,000-line document came back 51 lines long). And <code>compaction</code> is a spec key <code>core/agents.py</code> writes
 per worker from a declared <code>context_length</code>, so a long delegation trims its own messages rather than
 dying in its window.</p>
-<p>The probe grips the third of those, <code>SUBAGENT_SPEC_KEYS</code>'s <code>"compaction"</code>, and the choice is the first
+<p>The probe gripped the third of those, <code>SUBAGENT_SPEC_KEYS</code>'s <code>"compaction"</code>, and that choice was the one
 time this preflight has passed over a <em>newer</em> handle on purpose. <code>select</code> landed earlier in the release
 and is a plain name lookup for a function Kokua calls directly, but the <code>save_document</code> guard landed two
 commits after it with no handle at all, while the windowing that makes an unguarded save destructive
