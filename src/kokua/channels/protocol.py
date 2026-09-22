@@ -123,8 +123,15 @@ class RichChannel(Protocol):
         protects it the same way that one does.
         """
 
-    async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
-        """Prompt for plan approve/edit/reject. The reply arrives through the ordinary inbound path."""
+    async def send_plan_review_request(
+        self, plan: str, critique: Optional[str] = None, *, conversation_id: Optional[str] = None
+    ) -> None:
+        """Prompt for plan approve/edit/reject. The reply arrives through the ordinary inbound path.
+
+        ``conversation_id`` is the turn's, carried for the reason ``send_approval_request`` carries
+        it: a front end drawing the prompt into a transcript can tell whether it is still the
+        transcript on screen.
+        """
 
     async def send_plan(self, plan: str) -> None:
         """Render a plan as its own bubble rather than as chat text."""

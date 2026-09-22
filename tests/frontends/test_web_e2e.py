@@ -3291,6 +3291,23 @@ def test_an_approval_prompt_for_another_conversation_is_dropped(page, live_serve
     expect(page.locator(".bubble.approval")).to_have_count(1)
 
 
+def test_a_plan_review_for_another_conversation_is_dropped(page, live_server):
+    """The plan review's half of the same rule the approval prompt follows: a question about one
+    turn must not be put to the reader of another. The server refuses to ask at all
+    (`HumanGate.decide`); this is the page's backstop for one that raced that check."""
+    _open(page, live_server(delay=0.0))
+    active = page.evaluate("() => (lastConversations.find((c) => c.active) || {}).id")
+
+    def render(**frame):
+        page.evaluate("(f) => renderPlanReview(f)", frame)
+
+    render(plan="step 1", critique=None, conversation_id="another-conversation")
+    expect(page.locator(".bubble.approval")).to_have_count(0)
+
+    render(plan="step 1", critique=None, conversation_id=active)
+    expect(page.locator(".bubble.approval")).to_have_count(1)
+
+
 def test_a_retired_prompt_keeps_its_card_and_loses_its_buttons(page, live_server):
     """A question can stop waiting without this page having answered it: a typed "y" resolves it
     without touching the buttons, and a /stop cancels the turn it belonged to. The controls have to

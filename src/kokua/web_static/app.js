@@ -2217,7 +2217,7 @@ function handleFrame(event) {
   } else if (frame.type === "subagent") {
     renderSubagent(frame, new Date());
   } else if (frame.type === "plan_review") {
-    renderPlanReview(frame.plan, frame.critique);
+    renderPlanReview(frame);
   } else if (frame.type === "conversations") {
     lastConversations = frame.items;
     awaitingTitle.clear();
@@ -2511,8 +2511,15 @@ function renderAutoApproval(frame) {
 }
 
 // Deep planning review: show Approve / Edit / Reject. Replies are plain "approve"/"reject"/"edit: <text>"
-// frames the server routes to the waiting plan (same path as tool approval).
-function renderPlanReview(planText, critique) {
+// frames the server routes to the waiting plan (same path as tool approval). Dropped when it belongs
+// to another conversation, for the reason `renderApproval` above drops one: the server already asks
+// whether the turn is still on screen before sending, and this covers the gap between that check and
+// the frame arriving.
+function renderPlanReview(frame) {
+  const planText = frame.plan;
+  const critique = frame.critique;
+  const active = lastConversations.find((item) => item.active);
+  if (frame.conversation_id && active && active.id !== frame.conversation_id) return;
   const el = document.createElement("div");
   el.className = "bubble approval";
   const prompt = document.createElement("div");

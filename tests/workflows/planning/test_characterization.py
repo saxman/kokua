@@ -75,8 +75,8 @@ class RecordingChannel(Channel):
     async def send_done(self) -> None:
         self.events.append(("done",))
 
-    async def send_plan_review_request(self, plan, critique=None) -> None:
-        self.events.append(("ask_plan_review", plan, critique))
+    async def send_plan_review_request(self, plan, critique=None, *, conversation_id=None) -> None:
+        self.events.append(("ask_plan_review", plan, critique, conversation_id))
 
 
 def _planning(**overrides) -> dict[str, dict]:

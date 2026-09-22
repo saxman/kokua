@@ -66,8 +66,10 @@ class RichChannelDouble(BareChannel):
     ) -> None:
         self.calls.append(("auto_approval", (name, arguments, approved, reason, model, conversation_id, agent)))
 
-    async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
-        self.calls.append(("plan_review", (plan, critique)))
+    async def send_plan_review_request(
+        self, plan: str, critique: Optional[str] = None, *, conversation_id=None
+    ) -> None:
+        self.calls.append(("plan_review", (plan, critique, conversation_id)))
 
     async def send_plan(self, plan: str) -> None:
         self.calls.append(("plan", (plan,)))
@@ -265,10 +267,11 @@ async def test_rich_channel_receives_every_frame():
 
 async def test_plan_review_critique_reaches_a_rich_channel_as_rendered_bullets():
     channel = RichChannelDouble()
-    await ChannelUI(channel).ask_plan_review("step 1", ["too vague", "no verification"])
-    (_, (plan, critique)) = channel.calls[0]
+    await ChannelUI(channel).ask_plan_review("step 1", ["too vague", "no verification"], conversation_id="c1")
+    (_, (plan, critique, conversation_id)) = channel.calls[0]
     assert plan == "step 1"
     assert critique == "- too vague\n- no verification"
+    assert conversation_id == "c1"  # the turn's, so the page can drop a question that raced a switch
 
 
 def test_mirrored_attributes_reach_a_rich_channel():

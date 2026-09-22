@@ -120,9 +120,15 @@ what lets a web approval reply be routed back to the waiting tool call. Switchin
 persists to its own conversation, streams muted, and raises an alert card when it finishes. Only
 `delete_conversation` cancels, and only the deleted conversation's own turn.
 
-A gated tool call therefore has one question to keep asking: is the turn it belongs to still the
-conversation on screen? `HumanGate.approve` asks it at each of the three points the answer can have
-gone stale, and each window is wider than the last: when the call arrives, after the reviewer's model
+Anything that stops to ask the user something therefore has one question to keep asking first: is the
+turn it belongs to still the conversation on screen? A gated tool call asks it most often, and a
+workflow's own question (a plan review) asks it too, since a `plan_review` frame is no more muted than
+an `approval` one and would otherwise put one turn's question to another turn's reader; a workflow
+that cannot ask takes the safe answer it named for an abandoned request, and says so on a card in the
+words the workflow supplied, since only the asker knows what it was asking.
+
+For a gated call, `HumanGate.approve` asks at each of the three points the answer can have gone
+stale, and each window is wider than the last: when the call arrives, after the reviewer's model
 call, and once the single approval slot is finally held. The third is the one that is easy to miss.
 Tool calls in a round are dispatched concurrently (`[assistant].concurrent_tools`) while the approval
 slot is single and lock-guarded, so a round's second gated call waits inside `PendingRequest.ask` for

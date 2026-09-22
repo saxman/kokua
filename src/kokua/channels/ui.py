@@ -365,11 +365,16 @@ class ChannelUI:
         else:
             await self._channel.send(f"[auto-approval] {model} is asking you to approve {call}{because}")
 
-    async def ask_plan_review(self, plan: str, critique: Optional[list[str]] = None) -> None:
-        """Prompt for plan approve/edit/reject, surfacing any reviewer critique for the user to weigh."""
+    async def ask_plan_review(
+        self, plan: str, critique: Optional[list[str]] = None, *, conversation_id: Optional[str] = None
+    ) -> None:
+        """Prompt for plan approve/edit/reject, surfacing any reviewer critique for the user to weigh.
+
+        ``conversation_id`` rides along as it does for :meth:`ask_approval`, and is dropped by the
+        same fallback for the same reason: a printed question has one place to appear."""
         concerns = _bullets(critique) if critique else None
         if self._plan_review_request is not None:
-            await self._plan_review_request(plan, concerns)
+            await self._plan_review_request(plan, concerns, conversation_id=conversation_id)
         else:
             note = ("\nReviewer's concerns:\n" + concerns) if concerns else ""
             await self._channel.send("[plan] Reply 'approve', 'reject', or 'edit: <revised plan>'." + note)

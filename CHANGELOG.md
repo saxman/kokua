@@ -1527,6 +1527,11 @@ alone. The case that does cost something is a configured MCP server, which conne
   skill or connect a server -- and then executes it. Planning is scratch work kept out of the saved
   conversation, which stores your actual request and the answer.
 - **`plan_review`** pauses a planned turn for Approve / Edit / Reject; off runs the plan autonomously.
+  A question is only put to someone who is there to answer it, the rule the tool-approval gate follows:
+  a planned turn the user has switched away from takes the workflow's own safe answer (reject, for this
+  one) and raises an alert card naming the conversation, rather than drawing its Approve / Edit / Reject
+  into whatever transcript is on screen, and an unattended turn is never asked at all. The frame carries
+  its conversation, so the page can drop a question that raced that check.
 - **Adversarial plan and result review** (both off by default): an independent, context-free reviewer
   agent -- a fresh client seeing only the request plus the plan or answer -- critiques the plan and/or
   the final result. `plan_review_agent` re-plans on rejection up to `review_rounds`, surfacing leftover

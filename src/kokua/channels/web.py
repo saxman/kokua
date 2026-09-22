@@ -746,8 +746,16 @@ class WebChannel(BaseWebChannel):
         if ending.get("parent_run_id") is None:
             await self.send_frame({"type": "ending", **ending})
 
-    async def send_plan_review_request(self, plan: str, critique: Optional[str] = None) -> None:
+    async def send_plan_review_request(
+        self, plan: str, critique: Optional[str] = None, *, conversation_id: Optional[str] = None
+    ) -> None:
         """Ask the browser to review a plan; the page replies with a normal 'approve'/'reject'/'edit:'
         frame that the serve loop routes to the pending plan (same path as approval). ``critique`` carries
-        any adversarial-reviewer concerns for the user to weigh."""
-        await self.send_frame({"type": "plan_review", "plan": plan, "critique": critique})
+        any adversarial-reviewer concerns for the user to weigh.
+
+        Never muted, and carrying its conversation, for the reasons ``send_approval_request`` above
+        does: the core only asks for the conversation being viewed, and the id is what lets the page
+        drop a question that raced a switch."""
+        await self.send_frame(
+            {"type": "plan_review", "plan": plan, "critique": critique, "conversation_id": conversation_id}
+        )

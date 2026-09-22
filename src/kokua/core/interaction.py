@@ -322,6 +322,7 @@ class HumanGate:
         *,
         default: Any = None,
         context: Any = None,
+        about: str = "something",
     ) -> Any:
         """Ask the user something on a workflow's behalf and wait for the answer.
 
@@ -330,13 +331,71 @@ class HumanGate:
         workflow's safe answer, not the core's: "reject" for a plan review, but a different word for
         the next workflow along.
 
+        **A question is only put to someone who is there to answer it**, which is the rule
+        ``approve`` follows and this one now follows too, in the same two conditions: nobody is at
+        the keyboard (an unattended turn), or the keyboard is showing something else (a turn the
+        user switched away from). The consequences differ, and the unattended one is the worse of
+        the two: a switched-away question drawn anyway would be put to the wrong reader (a
+        ``plan_review`` frame is no more muted than an ``approval`` one), while an unattended one
+        would not be answered at all and would hold the firing open until the process restarted. No
+        path reaches here from an unattended turn today, since ``_unattended_body`` calls
+        ``agent.run`` rather than dispatching a workflow; the check is here because it is the same
+        rule, and because the failure it would prevent has no other recovery.
+
+        ``about`` is how the card names the question, and it belongs to the asker for the reason
+        ``parse`` does: only the workflow knows what it was asking. The default is deliberately
+        vague, since a workflow that says nothing leaves the core nothing true to say.
+
         The retirement is the core's, though, and it is the same one an approval gets: what the page
         has to be told is that the question is closed, which is true of every prompt this class puts
         up and says nothing about whose vocabulary asked it.
         """
-        return await self.decision.ask(
-            prompt, context=context, parse=parse, default=default, retire=self._ui.retire_prompt
+        if self._is_proactive():
+            return default
+        turn_conversation = self._turn_conversation()
+        if turn_conversation != self._active_id():
+            return await self._answer_switched_away(about, turn_conversation, default)
+
+        async def prompt_unless_switched_away() -> None:
+            # Asked again under the lock that orders the askers, as `approve` does and for the same
+            # reason: the check above is as old as the wait for the slot. Nothing in Kokua's own
+            # planning workflow queues here, since it asks one question at a time and a second
+            # conversation's question is refused by the check above before it can queue, but a
+            # workflow is a plugin seam and a plugin's is arbitrary code: two questions asked
+            # concurrently is a shape this class has to answer for.
+            if self._turn_conversation() != self._active_id():
+                raise _SwitchedAway
+            await prompt()
+
+        try:
+            return await self.decision.ask(
+                prompt_unless_switched_away,
+                context=context,
+                parse=parse,
+                default=default,
+                retire=self._ui.retire_prompt,
+            )
+        except _SwitchedAway:
+            return await self._answer_switched_away(about, turn_conversation, default)
+
+    async def _answer_switched_away(self, about: str, turn_conversation: Optional[str], default: Any) -> Any:
+        """Answer a workflow's question with its own safe answer, because its turn left the screen.
+
+        The counterpart to :meth:`_deny_switched_away`, and separate from it because the two say
+        different true things: that one denies a capability the core named, this one answers a
+        question whose words belong to the workflow that asked it, so the card can only repeat what
+        the asker said it was about.
+        """
+        await self._ui.alert(
+            f"A turn you switched away from asked you {about}. It took its own safe answer, "
+            "because answering means reading the question, and that turn is not on screen.",
+            conversation_id=turn_conversation,
+            # One card per conversation, not per question: a workflow that asks repeatedly should
+            # supersede its own card rather than stack one per attempt, and unlike a tool call there
+            # is no name here to tell two questions apart.
+            group=f"{turn_conversation}:decision",
         )
+        return default
 
     def resolve_reply(self, raw: str, text: str) -> bool:
         """Route an inbound message to whichever request is outstanding. Returns whether it was consumed.

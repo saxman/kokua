@@ -291,6 +291,72 @@ async def test_abandoning_a_decision_answers_with_its_default():
     assert await task == "fallback"
 
 
+async def test_a_decision_on_a_turn_switched_away_from_takes_its_default():
+    """The same rule a gated tool call gets, for the same reason: a question is only put to someone
+    who is there to answer it. A plan review drawn into the conversation the user moved to asks them
+    about a turn they are not reading, and the `plan_review` frame is not muted, so without this the
+    page would draw it exactly there."""
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: False, turn_conversation=lambda: "elsewhere")
+
+    asked = []
+
+    async def prompt():
+        asked.append("asked")
+
+    answer = await asyncio.wait_for(
+        gate.decide(prompt, lambda raw, text: "parsed", default="rejected", about="whether to proceed with its plan"),
+        timeout=_SETTLE_TIMEOUT,
+    )
+
+    assert answer == "rejected"
+    assert asked == []
+    assert len(ui.alerts) == 1
+    assert "whether to proceed with its plan" in ui.alerts[0]
+
+
+async def test_an_unattended_turn_is_never_asked_to_decide():
+    """Nobody is at the keyboard, so a question here would not be answered wrongly, it would not be
+    answered at all: a firing would wait on it until the scheduler's next restart."""
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: "c1", is_proactive=lambda: True, turn_conversation=lambda: "c1")
+
+    async def prompt():
+        raise AssertionError("an unattended turn has nobody to ask")
+
+    assert await asyncio.wait_for(gate.decide(prompt, lambda raw, text: "parsed", default="rejected"), timeout=2.0)
+
+
+async def test_a_decision_queued_behind_another_rechecks_the_switch():
+    """Two questions at once is a shape a workflow can produce (a plugin's is arbitrary code, and
+    `WorkflowContext` hands it `decide`), so the second waits inside `PendingRequest.ask` with its
+    check already made, exactly as a round's second gated call does."""
+    viewing = {"id": "c1"}
+    ui = _UI()
+    gate = HumanGate(ui, active_id=lambda: viewing["id"], is_proactive=lambda: False, turn_conversation=lambda: "c1")
+    asked = []
+
+    async def prompt():
+        asked.append("asked")
+
+    holds_the_slot = asyncio.create_task(gate.decide(prompt, lambda raw, text: raw, default="rejected"))
+    queued = asyncio.create_task(gate.decide(prompt, lambda raw, text: raw, default="rejected"))
+    async with asyncio.timeout(_SETTLE_TIMEOUT):
+        while not gate.decision.pending:
+            await asyncio.sleep(0.001)
+
+    viewing["id"] = "c2"
+    gate.abandon_all()
+
+    assert await holds_the_slot == "rejected"
+    try:
+        assert await asyncio.wait_for(queued, timeout=_SETTLE_TIMEOUT) == "rejected"
+    except TimeoutError:
+        raise AssertionError("the queued question was put to the conversation the user switched to") from None
+    assert asked == ["asked"]  # the one prompt, raised before the switch
+    assert len(ui.alerts) == 1
+
+
 async def test_approval_takes_precedence_over_a_waiting_decision():
     gate = _gate(_UI())
 

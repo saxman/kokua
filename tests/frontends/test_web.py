@@ -1026,6 +1026,15 @@ async def test_web_approval_frame_carries_the_agent():
     ]
 
 
+async def test_web_channel_sends_a_plan_review_frame_with_its_conversation():
+    """The conversation rides on this prompt too, for the reason it rides on an approval: the page
+    has to be able to drop a question that raced a switch rather than ask the wrong reader."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_plan_review_request("step 1", "too vague", conversation_id="c1")
+    assert ws.frames == [{"type": "plan_review", "plan": "step 1", "critique": "too vague", "conversation_id": "c1"}]
+
+
 async def test_web_channel_sends_a_prompt_retired_frame():
     """One frame, no payload: the page keeps one outstanding prompt because the core allows one."""
     ws = _FakeWS()
