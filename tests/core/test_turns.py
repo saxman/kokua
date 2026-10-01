@@ -2143,3 +2143,37 @@ async def test_a_message_typed_during_a_follow_up_turn_reaches_that_turn(assista
 
     assert offered == [True]
     assert asked == ["hello", "and one more thing", "and a third"]
+
+
+async def test_the_mailbox_a_reactive_turn_builds_carries_that_turns_review_context(assistant, track_running_turn):
+    """The join between the two halves of the amendment, which each half's own test leaves open.
+
+    ``test_reactive_turn_opens_a_review_context_carrying_the_request`` proves ``reactive`` opens a
+    context and ``test_an_offer_amends_the_running_turns_review_context`` proves a mailbox amends the
+    context it was handed, and both stay green if ``reactive`` builds its mailbox with no context at
+    all. That mutation makes a security-relevant amendment a silent no-op in production, so what is
+    asserted here is the wiring: steer the turn from inside its own run and read back the request a
+    gated call in that turn would be judged against.
+    """
+    from kokua.core.auto_approval import current_review_context
+
+    track_running_turn(assistant, None)  # the entry the serve loop adds at submit time, mailbox later
+    calls = []
+    seen = {}
+
+    async def steer_from_inside(*args, **kwargs):
+        calls.append(args)
+        # Offered once only, so a drain that stopped working would cost one extra turn rather than
+        # recurse through the follow-up path without end.
+        if len(calls) == 1:
+            assert assistant._offer_steering(message("actually, read the log"), assistant._active_id) is True
+            seen["request"] = current_review_context.get().request
+            ENTRY_STEERING_SOURCE.reader()()  # delivered, so this message needs no follow-up turn
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = steer_from_inside
+    await assistant._turns.reactive(message("find the bug"), conversation_id=assistant._active_id)
+
+    assert calls and len(calls) == 1
+    assert "find the bug" in seen["request"]
+    assert "actually, read the log" in seen["request"]

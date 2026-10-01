@@ -313,11 +313,14 @@ class TurnRunner:
         review_token = current_review_context.set(review_context)
         # The turn's steering mailbox, open for its whole life so a message typed while it runs can
         # reach it rather than queuing behind it on the gate (invariant 9). Published before the first
-        # `await` for a reason the contextvars above do not share: the serve loop adds this turn's
-        # tracker entry and this block runs with no suspension point in between, so the loop can never
-        # read a tracked turn that has no mailbox. A late *reader* would be harmless, since the mailbox
-        # is append-only and a cursor opened afterwards still sees what was offered before it; a live
-        # entry with no mailbox is the thing that drops a message.
+        # `await` for a reason the contextvars above do not share: the serve loop reads this entry to
+        # route a message, so every statement between its `add` and this line is a window in which a
+        # live entry has no mailbox. Keeping the window at zero statements is not possible from here:
+        # a message already in the channel's inbound queue when this turn was submitted is drained in
+        # the same loop step and does read the entry before this line runs, which is why
+        # `Assistant._offer_steering` refuses an entry whose mailbox is absent. A late *reader* is
+        # harmless by contrast, since the mailbox is append-only and a cursor opened afterwards still
+        # sees what was offered before it.
         # Carries `review_context` rather than reading the contextvar, because an offer arrives on the
         # serve loop's own task while that contextvar is set inside this turn's: invisible from there.
         mailbox = SteeringMailbox(review_context=review_context)
