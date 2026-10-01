@@ -2171,8 +2171,8 @@ def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_co
     still streaming now joins that reply's turn instead of starting one of its own, so the composer
     can no longer produce that pair at all, and the queue has been replaced by a map keyed on the
     token each message carries. What the browser can still show is that each frame lands on the right
-    bubble: the turn's save stamps the bubble it was made of, the message that joined it is marked as
-    having joined, and nothing is left waiting afterwards.
+    bubble: the turn's save stamps the bubble it was made of, and the message that joined it is marked
+    as having joined rather than stamped.
 
     No control on the joining bubble is the point rather than an omission: it has no turn of its own,
     and the index that would truncate "here" points into the middle of one.
@@ -2201,9 +2201,9 @@ def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_co
     # branch, which drains steering and takes one more round, and that round is the second REPLY. So
     # waiting for it is waiting for the one turn to finish, which is what its save (and the control
     # below) depends on. The *other* steering outcome, a message accepted and never drained, which
-    # `TurnRunner._resubmit_steering` then re-runs as a follow-up turn, is exercised by no test here
-    # or anywhere: that path leaves this bubble marked steered and unstamped, and a reader who takes
-    # this line for coverage of it will reach the wrong conclusion about what the page does then.
+    # `TurnRunner._resubmit_steering` then re-runs as a follow-up turn, is exercised by no test here:
+    # that path ends with this same bubble stamped and its mark withdrawn, by the follow-up turn's own
+    # save carrying the token the mailbox kept, so a reader must not take this line for coverage of it.
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(2, timeout=20_000)
 
     # Exactly one bubble was stamped, and it is the one whose turn the save was about.
@@ -2211,9 +2211,12 @@ def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_co
     expect(stamped).to_have_count(1, timeout=10_000)
     expect(stamped).to_contain_text("first")
     expect(page.locator(".bubble.user.steered .bubble-truncate")).to_have_count(0)
-    # Nothing strands: an entry the server never named would sit in the map forever, which is the
-    # defect the positional queue had and the reason this one is keyed.
-    assert page.evaluate("() => pendingBubbles.size") == 0
+    # The delivered message's entry is still in the map, and deliberately: an acceptance is not a
+    # final fate (the turn could have ended without reading it, which runs it as a turn carrying this
+    # same token), so the page cannot drop the entry when it marks the bubble. Inert either way, since
+    # only a frame carrying that token can claim it. The first message's entry *was* claimed, by its
+    # own save, which is the half that would strand if this map were keyed wrongly.
+    assert page.evaluate("() => pendingBubbles.size") == 1
 
     page.locator(".bubble.user .bubble-meta .bubble-truncate").click()  # delete from the first turn
 

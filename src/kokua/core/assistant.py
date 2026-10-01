@@ -868,7 +868,9 @@ class Assistant:
         info = self._tracker.get(conversation_id)
         if info is None or info.steering is None or info.handle.done:
             return False
-        return info.steering.offer(msg.text or "")
+        # The front end's own id for the bubble it drew rides along, so a message this turn accepts and
+        # never reads can still be named by the follow-up turn it becomes (see `SteeringMessage`).
+        return info.steering.offer(msg.text or "", (msg.metadata or {}).get("token"))
 
     async def _run_conversation_command(self, word: str, argument: str) -> None:
         """Run `/new`, `/conversations`, or `/switch`, and report what happened on the channel.

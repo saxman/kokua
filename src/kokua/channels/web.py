@@ -457,8 +457,10 @@ class WebChannel(BaseWebChannel):
 
         Always sent, even when empty, so switching to a new/empty conversation clears the page.
         ``metadata`` is the active session's metadata; its ``subagent`` map interleaves reviewer cards
-        (non-verbose turns), its ``trace`` map replays the raw verbose trace (verbose turns), and its
-        ``failure`` map closes a turn that ended in an error with the reason.
+        (non-verbose turns), its ``trace`` map replays the raw verbose trace (verbose turns), its
+        ``failure`` map closes a turn that ended in an error with the reason, and its ``steering`` map
+        says which of a turn's messages the user sent into it while it ran rather than as turns of
+        their own.
 
         A turn in flight on this conversation contributes its catch-up items (see
         :class:`_CatchUpRecord`) on the end of the same frame. One frame rather than a replay of separate
@@ -475,6 +477,7 @@ class WebChannel(BaseWebChannel):
             subagent=meta.get("subagent"),
             trace=meta.get("trace"),
             failure=meta.get("failure"),
+            steering=meta.get("steering"),
         )
         record = self._catch_up.get(self.active_conversation_id)
         if record is not None:

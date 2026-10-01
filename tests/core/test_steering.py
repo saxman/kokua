@@ -9,6 +9,7 @@ from kokua.core.steering import (
     ENTRY_STEERING_SOURCE,
     STEERING_SOURCE,
     SteeringMailbox,
+    SteeringMessage,
     current_steering,
 )
 
@@ -47,7 +48,7 @@ def test_close_returns_what_the_entry_reader_never_read():
     entry()
     mailbox.offer("unread")
 
-    assert mailbox.close() == ["unread"]
+    assert [message.text for message in mailbox.close()] == ["unread"]
 
 
 def test_close_returns_nothing_a_worker_alone_consumed_is_not_counted_as_read():
@@ -58,7 +59,7 @@ def test_close_returns_nothing_a_worker_alone_consumed_is_not_counted_as_read():
     mailbox.offer("redirect")
     worker()
 
-    assert mailbox.close() == ["redirect"]
+    assert [message.text for message in mailbox.close()] == ["redirect"]
 
 
 def test_a_message_offered_after_the_last_drain_comes_back_from_close():
@@ -68,7 +69,7 @@ def test_a_message_offered_after_the_last_drain_comes_back_from_close():
     entry()
     assert mailbox.offer("just missed it") is True
 
-    assert mailbox.close() == ["just missed it"]
+    assert [message.text for message in mailbox.close()] == ["just missed it"]
 
 
 def test_peek_undelivered_neither_consumes_nor_closes():
@@ -78,9 +79,9 @@ def test_peek_undelivered_neither_consumes_nor_closes():
     mailbox = SteeringMailbox()
     mailbox.offer("never mind, do the other thing")
 
-    assert mailbox.peek_undelivered() == ["never mind, do the other thing"]
-    assert mailbox.peek_undelivered() == ["never mind, do the other thing"]
-    assert mailbox.close() == ["never mind, do the other thing"]
+    assert [message.text for message in mailbox.peek_undelivered()] == ["never mind, do the other thing"]
+    assert [message.text for message in mailbox.peek_undelivered()] == ["never mind, do the other thing"]
+    assert [message.text for message in mailbox.close()] == ["never mind, do the other thing"]
 
 
 def test_the_shared_source_reads_the_contextvar_when_a_reader_is_opened():
@@ -122,7 +123,7 @@ def test_the_worker_source_does_not_advance_the_entry_cursor():
         mailbox.offer("redirect")
         assert worker() == ["redirect"]
         # Read by a worker, never by the conversation, so it still runs as a follow-up turn.
-        assert mailbox.close() == ["redirect"]
+        assert [message.text for message in mailbox.close()] == ["redirect"]
     finally:
         current_steering.reset(token)
 
@@ -145,7 +146,7 @@ def test_an_offer_with_no_review_context_still_lands():
     mailbox = SteeringMailbox()
 
     assert mailbox.offer("redirect") is True
-    assert mailbox.close() == ["redirect"]
+    assert [message.text for message in mailbox.close()] == ["redirect"]
 
 
 def test_the_amendment_does_not_depend_on_the_offering_tasks_context():
@@ -177,3 +178,37 @@ def test_the_amendment_does_not_depend_on_the_offering_tasks_context():
     asyncio.run(serve_loop())
 
     assert "use the log instead" in context.request
+
+
+def test_close_hands_back_the_front_ends_own_id_for_an_undelivered_message():
+    """What a front end needs to find the bubble it drew, once the message becomes a turn after all.
+
+    The text cannot name it: two messages can read the same, and a bubble is not addressable by its
+    words. Without the id the follow-up turn is one no front end can match to anything it drew, so a
+    message that did become a turn is left with none of that turn's controls.
+    """
+    mailbox = SteeringMailbox()
+    entry = mailbox.entry_reader()
+    entry()
+    mailbox.offer("just missed it", token="b2")
+
+    assert mailbox.close() == [SteeringMessage("just missed it", "b2")]
+
+
+def test_a_reader_drains_the_text_alone():
+    """The drained list goes to AIMU's loop as the prompts for its next round, so a front end's own
+    id for a bubble must not reach it."""
+    mailbox = SteeringMailbox()
+    drain = mailbox.reader()
+    mailbox.offer("use the cache", token="b2")
+
+    assert drain() == ["use the cache"]
+
+
+def test_a_message_offered_without_a_token_has_none():
+    """Every channel carrying typed text can steer, and only a front end that draws its own bubbles
+    has an id to name one by."""
+    mailbox = SteeringMailbox()
+    mailbox.offer("use the cache")
+
+    assert mailbox.close() == [SteeringMessage("use the cache", None)]

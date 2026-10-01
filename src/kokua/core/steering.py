@@ -22,17 +22,33 @@ hands it back for the caller to run as a follow-up turn.
 from __future__ import annotations
 
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
     from kokua.core.auto_approval import ReviewContext
 
 
+@dataclass(frozen=True)
+class SteeringMessage:
+    """One message handed to a running turn: what the user said, and the front end's id for it.
+
+    The id is what a front end that draws its own bubbles matches a message to its fate by, and it has
+    to travel this far because a message can meet its *second* fate here: accepted into the turn,
+    never read, and then run as a turn of its own. That follow-up turn's save is the only frame left
+    to name the bubble, and the text cannot name it (two messages can read the same). ``None`` where
+    the channel draws no bubbles, which is every channel but the web page.
+    """
+
+    text: str
+    token: Optional[str] = None
+
+
 class SteeringMailbox:
     """One running turn's pending user messages, with a cursor per reader."""
 
     def __init__(self, review_context: Optional["ReviewContext"] = None) -> None:
-        self._messages: list[str] = []
+        self._messages: list[SteeringMessage] = []
         self._open = True
         # The turn's auto-approval review context, if it opened one, amended by `offer` so a
         # reviewer judges a redirected turn's calls against what the user now wants. Held as a field
@@ -45,11 +61,15 @@ class SteeringMailbox:
         # worker consumed still runs as a follow-up turn rather than vanishing into a summary.
         self._entry_seen = 0
 
-    def offer(self, text: str) -> bool:
-        """Hand a message to the running turn. ``False`` means the turn is gone: run it as a turn."""
+    def offer(self, text: str, token: Optional[str] = None) -> bool:
+        """Hand a message to the running turn. ``False`` means the turn is gone: run it as a turn.
+
+        ``token`` is the front end's own id for the message, carried for the reason
+        :class:`SteeringMessage` gives and never read here.
+        """
         if not self._open:
             return False
-        self._messages.append(text)
+        self._messages.append(SteeringMessage(text, token))
         self._amend_review_context(text)
         return True
 
@@ -71,14 +91,17 @@ class SteeringMailbox:
             self._review_context.request = f"{self._review_context.request}\n\nThe user then said: {text}"
 
     def reader(self) -> Callable[[], list[str]]:
-        """A cursor for one run: the entry agent's, or one spawned worker's."""
+        """A cursor for one run: the entry agent's, or one spawned worker's.
+
+        Drains the text alone, which is what AIMU's loop takes as the prompt for its next round.
+        """
         seen = 0
 
         def drain() -> list[str]:
             nonlocal seen
             pending = self._messages[seen:]
             seen = len(self._messages)
-            return list(pending)
+            return [message.text for message in pending]
 
         return drain
 
@@ -88,18 +111,23 @@ class SteeringMailbox:
         def drain() -> list[str]:
             pending = self._messages[self._entry_seen :]
             self._entry_seen = len(self._messages)
-            return list(pending)
+            return [message.text for message in pending]
 
         return drain
 
-    def close(self) -> list[str]:
-        """Shut the mailbox and return what the entry agent never read, oldest first."""
+    def close(self) -> list[SteeringMessage]:
+        """Shut the mailbox and return what the entry agent never read, oldest first.
+
+        The whole message rather than its text, unlike a reader's drain: the caller runs these as a
+        follow-up turn and a front end waiting on each of them needs them named (see
+        :class:`SteeringMessage`).
+        """
         self._open = False
         undelivered = self._messages[self._entry_seen :]
         self._entry_seen = len(self._messages)
         return list(undelivered)
 
-    def peek_undelivered(self) -> list[str]:
+    def peek_undelivered(self) -> list[SteeringMessage]:
         """What the entry agent has not read yet, without consuming it or closing the mailbox.
 
         For a stop, where ``close()`` still runs in the turn's ``finally`` right afterwards: the

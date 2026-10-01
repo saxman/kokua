@@ -46,7 +46,7 @@ COPY_TITLE_PREFIX = "Copy of "
 # transcript, so indices do not move and these are filtered rather than remapped. That is only true
 # while a branch keeps the parent's messages from index 0 onward; anything that changes what index 0
 # is has to revisit this.
-TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usage")
+TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usage", "steering")
 
 
 class TurnNotFound(Exception):
@@ -681,9 +681,11 @@ class ConversationBook:
         thinking: Optional[Union[bool, str]] = None,
         failure: Optional[str] = None,
         usage: Optional[dict] = None,
+        steering: Optional[list[int]] = None,
     ) -> None:
         """Persist what produced a turn's output: its sub-agent activity, the model that answered, the
-        reasoning effort it ran at, why it stopped early if it did, and what it cost.
+        reasoning effort it ran at, why it stopped early if it did, what it cost, and which of its
+        messages the user sent into it while it ran.
 
         The cards are what reload replays. The model and the effort are recorded per turn rather than
         once per conversation because a conversation outlives the config that started it:
@@ -707,8 +709,16 @@ class ConversationBook:
         figure is only meaningful beside the model that produced it, and this is the record that already
         says which model that was. A turn whose provider reported no token counts stores the record
         without them rather than storing zeros, so a reader can tell an unmeasured turn from a free one.
+
+        ``steering`` is where the messages the user sent into this turn landed in the transcript, as
+        ``core.messages.resolve_steering_indices`` resolved them. It is the only record of the
+        difference: a message handed to a running turn is committed as an ordinary ``user`` message, so
+        nothing in the transcript tells it apart from one that started a turn, and a replay that
+        guesses from position offers a turn's own controls on a message that has no turn. An empty list
+        stays out of the file, like an unconfigured effort, so an unsteered turn reads as one that
+        never had the question put to it.
         """
-        if user_index < 0 or not (events or model or thinking is not None or failure or usage):
+        if user_index < 0 or not (events or model or thinking is not None or failure or usage or steering):
             return
         session = self._store.get(conversation_id)
         if events:
@@ -721,6 +731,8 @@ class ConversationBook:
             session.metadata.setdefault("failure", {})[str(user_index)] = failure
         if usage:
             session.metadata.setdefault("usage", {})[str(user_index)] = usage
+        if steering:
+            session.metadata.setdefault("steering", {})[str(user_index)] = list(steering)
         self._store.save(session)
 
     def exists(self, conversation_id: str) -> bool:

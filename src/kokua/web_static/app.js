@@ -1640,20 +1640,35 @@ function handleFrame(event) {
       // token, or one naming a bubble this page never drew, is a turn nothing here is waiting on (a
       // proactive run, a scheduled firing) and stamps nothing.
       const pending = claimBubble(frame.token);
-      if (pending) stampTurnControls(pending, frame.message_index, frame.conversation_id);
+      if (pending) {
+        // A bubble can arrive here already marked as having joined a running turn: the server
+        // accepted it into one, that turn ended before reading it, and it was re-run as a turn of
+        // its own. The mark is withdrawn rather than left standing beside the controls, since the
+        // two would otherwise say the message both did and did not become a turn.
+        pending.classList.remove("steered");
+        stampTurnControls(pending, frame.message_index, frame.conversation_id);
+      }
     }
   } else if (frame.type === "steering") {
     // The bubble's other possible fate, and the reason this map matches rather than counts: the
-    // message joined the turn already running, so no `turn_saved` will ever name it. Marked rather
-    // than stamped, and deliberately given no turn controls: it has no turn of its own, and the
-    // index that would branch or truncate "here" points into the middle of somebody else's turn.
+    // message joined the turn already running, so no `turn_saved` for a turn of its own will name it.
+    // Marked rather than stamped, and deliberately given no turn controls: while that holds it has no
+    // turn, and the index that would branch or truncate "here" points into the middle of somebody
+    // else's turn.
+    //
+    // Looked up without claiming, which is the one place this map is read that way: an acceptance is
+    // not the message's final fate. A turn that ends before reading an accepted message hands it back
+    // and it runs as a turn after all, carrying this same token on that turn's save, so dropping the
+    // entry here would leave the bubble that did become a turn with no way to be named. The entry
+    // left behind when the message *is* delivered is inert, for the reason the map's own comment
+    // gives: only a frame carrying this token can ever claim it, and nothing else mints one.
     //
     // Two frames of this type arrive for one steered message and only one carries a token. This is
     // the server reporting the message accepted, and the token is what names the bubble; the other
     // comes from the agent loop as it reads the message, which is the one a sub-agent card renders
-    // and which names no bubble. So an untokened frame claims nothing here, as a `turn_saved` with
-    // no token does just above.
-    const steered = claimBubble(frame.token);
+    // and which names no bubble. So an untokened frame marks nothing here, as a `turn_saved` with
+    // no token stamps nothing just above.
+    const steered = pendingBubbles.get(frame.token);
     if (steered) steered.classList.add("steered");
   } else if (frame.type === "history") {
     // Replay a conversation (on connect or after switching), reusing the live renderers.

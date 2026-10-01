@@ -2823,3 +2823,52 @@ async def test_web_channel_notification_carries_its_group():
     channel = WebChannel(ws)
     await channel.send_notification("Task 'Digest' finished", group="Digest")
     assert ws.frames[0]["group"] == "Digest"
+
+
+async def test_send_history_replays_a_stored_turns_steering_messages_as_steering():
+    """The conversation's own record of which messages were sent into a running turn reaches the
+    replay, so a reload draws them the way the live frame marked them rather than as turns of their
+    own (see `replay_items`, where the index a turn's controls act on is the stake)."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    messages = [
+        {"role": "user", "content": "summarize the log"},
+        {"role": "user", "content": "use the cache"},
+        {"role": "assistant", "content": "done"},
+    ]
+
+    await channel.send_history(messages, {"steering": {"0": [1]}})
+
+    items = ws.frames[-1]["items"]
+    assert [item["type"] for item in items] == ["user", "steering", "message"]
+    assert items[1]["text"] == "use the cache"
+
+
+async def test_an_accepted_steering_message_is_caught_up_once_rather_than_twice():
+    """Two frames report one steered message, and only one of them belongs in the record.
+
+    The accept-time frame is sent from the serve loop, outside any turn, so there is no running
+    conversation for it to be recorded against; the drain-time frame is the only evidence AIMU
+    actually delivered the message, and it arrives inside the turn. A switch-in therefore sees the
+    redirection, and sees it once.
+    """
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "running"
+    channel.begin_catch_up("running", "summarize the log")
+
+    await channel.send_steering("use the cache", token="b1")  # accepted, on the serve loop's own task
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+
+    token = streaming_conversation.set("running")
+    try:
+        await channel.send(gen())
+    finally:
+        streaming_conversation.reset(token)
+    await channel.send_history([], {})
+
+    assert [item["type"] for item in ws.frames[-1]["items"] if item["type"] == "steering"] == ["steering"]

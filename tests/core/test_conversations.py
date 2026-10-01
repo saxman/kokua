@@ -1628,3 +1628,33 @@ async def test_key_lookups_do_not_read_whole_sessions(tmp_path, monkeypatch):
     assert reads == [second]
 
     assert book.resolve(first) is not None
+
+
+async def test_a_steering_record_survives_a_cut_that_keeps_its_turn(tmp_path):
+    """The steering map is turn-keyed like every other per-turn record, so a branch or a truncation
+    has to carry it: a kept turn whose record was dropped replays its mid-turn messages as turns of
+    their own again, which is the cut-in-half control the record exists to prevent."""
+    assistant, parent = await _assistant_with_branchable_parent(tmp_path, steering={"1": [3], "5": [7]})
+
+    await assistant._book.truncate(parent.key, 5)
+
+    # Filtered rather than remapped, like its siblings: a prefix cut leaves surviving indices alone.
+    assert assistant._store.get(parent.key).metadata["steering"] == {"1": [3]}
+
+
+async def test_recording_an_unsteered_turn_writes_no_steering_map(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "ollama:qwen3:8b", 0, assistant._active_id, steering=[])
+
+    assert "steering" not in assistant._store.get(assistant._active_id).metadata
+
+
+async def test_a_turn_that_only_has_steering_to_record_is_still_recorded(tmp_path):
+    """The guard that skips a turn with nothing to say has to count this as something to say, or the
+    record would be dropped for exactly the turn that needs it."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "", 0, assistant._active_id, steering=[3])
+
+    assert assistant._store.get(assistant._active_id).metadata["steering"] == {"0": [3]}

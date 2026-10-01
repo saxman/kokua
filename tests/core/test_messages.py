@@ -7,7 +7,13 @@ from __future__ import annotations
 
 from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROACTIVE
 
-from kokua.core.messages import derive_title, first_user_text, is_user_turn, message_text
+from kokua.core.messages import (
+    derive_title,
+    first_user_text,
+    is_user_turn,
+    message_text,
+    resolve_steering_indices,
+)
 
 
 def test_message_text_reads_a_plain_string():
@@ -89,3 +95,36 @@ def test_is_user_turn_rejects_other_roles():
 def test_is_user_turn_accepts_a_user_message_with_unrelated_provenance():
     # PROVENANCE_PROACTIVE tags an unattended run's own messages, not a loop injection.
     assert is_user_turn({"role": "user", "content": "brief me", PROVENANCE_KEY: PROVENANCE_PROACTIVE})
+
+
+def test_resolve_steering_indices_finds_a_message_sent_into_the_running_turn():
+    messages = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "tool_calls": [{"id": "id0"}]},
+        {"role": "tool", "content": "result", "tool_call_id": "id0"},
+        {"role": "user", "content": "use the cache"},
+        {"role": "assistant", "content": "done"},
+    ]
+    assert resolve_steering_indices(messages, 0) == [3]
+
+
+def test_resolve_steering_indices_skips_the_nudges_the_loop_injects():
+    """The one other way a ``user`` entry appears inside a turn, and the reason this shares
+    ``is_user_turn`` rather than testing for a bare absent key."""
+    messages = [
+        {"role": "user", "content": "hello"},
+        {"role": "user", "content": "continue", PROVENANCE_KEY: PROVENANCE_CONTINUATION},
+        {"role": "user", "content": "use the cache"},
+    ]
+    assert resolve_steering_indices(messages, 0) == [2]
+
+
+def test_resolve_steering_indices_of_a_turn_that_committed_no_user_message_is_empty():
+    """``-1`` is ``resolve_user_index``'s sentinel, so there is no turn here to attribute one to."""
+    messages = [{"role": "user", "content": "hello"}]
+    assert resolve_steering_indices(messages, -1) == []
+
+
+def test_resolve_steering_indices_of_an_unsteered_turn_is_empty():
+    messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "done"}]
+    assert resolve_steering_indices(messages, 0) == []

@@ -168,3 +168,52 @@ def test_replay_items_stamps_each_user_item_with_its_transcript_index():
     ]
     users = [item for item in replay_items(messages) if item["type"] == "user"]
     assert [item["message_index"] for item in users] == [1, 3]
+
+
+# The transcript a steered turn leaves behind: the turn's own message at 0, a tool exchange, the
+# message the user sent into the run at 3, and the answer it produced.
+_STEERED_TURN = [
+    {"role": "user", "content": "summarize the log"},
+    {"role": "assistant", "tool_calls": [{"id": "id0", "function": {"name": "read_file", "arguments": "{}"}}]},
+    {"role": "tool", "tool_call_id": "id0", "content": "lines"},
+    {"role": "user", "content": "use the cache"},
+    {"role": "assistant", "content": "done"},
+]
+
+
+def test_replay_items_renders_a_steering_message_as_a_steering_item():
+    items = replay_items(_STEERED_TURN, steering={"0": [3]})
+
+    assert {"type": "steering", "text": "use the cache"} in items
+    assert not any(item["type"] == "user" and item["text"] == "use the cache" for item in items)
+
+
+def test_replay_items_gives_a_steering_message_no_index_to_truncate_at():
+    """The destructive half, and the reason the provenance record exists.
+
+    A renderer opens a turn at the first item carrying a ``message_index`` and stamps that bubble with
+    the branch and delete-from-here controls. A steering message replayed as a user item therefore
+    gained a control whose index cuts its *host* turn in half, deleting the answer it was sent into.
+    Only the turn's own message may carry an index.
+    """
+    indices = [
+        item["message_index"] for item in replay_items(_STEERED_TURN, steering={"0": [3]}) if "message_index" in item
+    ]
+
+    assert indices == [0]
+
+
+def test_replay_items_keeps_a_steering_message_inside_its_hosts_failure_notice():
+    """A steering message continues the turn in progress, so it must not close that turn the way a
+    message the user sent on its own does."""
+    items = replay_items(_STEERED_TURN, steering={"0": [3]}, failure={"0": "failed: out of context"})
+
+    assert items[-1] == {"type": "notice", "text": "failed: out of context"}
+
+
+def test_replay_items_renders_an_unrecorded_message_as_the_turn_it_was():
+    """Without a record saying otherwise, a later user message is a turn of its own: that is every
+    transcript stored before a turn recorded which of its messages were steering."""
+    users = [item for item in replay_items(_STEERED_TURN) if item["type"] == "user"]
+
+    assert [item["message_index"] for item in users] == [0, 3]

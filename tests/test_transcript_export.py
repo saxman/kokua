@@ -805,3 +805,25 @@ def test_a_very_long_failure_reason_is_capped_like_any_other_payload():
 def test_a_scheduled_runs_task_is_named_in_the_header():
     session = _session([{"role": "user", "content": "run"}], {"task_id": "nightly-digest"})
     assert "nightly-digest" in render_markdown(session).split("## Turn")[0]
+
+
+def test_a_steering_message_is_exported_inside_the_turn_it_was_sent_into():
+    """One turn, not two: a message sent into a running turn has no turn of its own, and a heading
+    for it would claim the answer below it was a reply to it."""
+    session = _session(
+        [
+            {"role": "user", "content": "summarize the log"},
+            {"role": "user", "content": "use the cache"},
+            {"role": "assistant", "content": "done"},
+        ],
+        {"steering": {"0": [1]}},
+    )
+    out = render_markdown(session)
+    assert out.count("## Turn ") == 1
+    assert "**User (mid-turn):** use the cache" in out
+
+
+def test_a_steering_item_is_attributed_to_the_user_who_sent_it():
+    """Its own label rather than ``loop``'s italic machine note: these are a person's words, and the
+    export says so for the reason the page gives a steering row the foreground colour."""
+    assert _render_item({"type": "steering", "text": "use the cache"}, None) == ["**User (mid-turn):** use the cache"]

@@ -192,9 +192,9 @@ from kokua.config.file import thinking_request
 from kokua.core.auto_approval import ReviewContext, current_review_context
 from kokua.core.build import model_label
 from kokua.core.errors import describe_error
-from kokua.core.messages import derive_title, resolve_user_index
+from kokua.core.messages import derive_title, resolve_steering_indices, resolve_user_index
 from kokua.core.metrics import TurnMetrics, current_metrics, record_event
-from kokua.core.steering import ENTRY_STEERING_SOURCE, SteeringMailbox, current_steering
+from kokua.core.steering import ENTRY_STEERING_SOURCE, SteeringMailbox, SteeringMessage, current_steering
 from kokua.core.subagents import subagent_events
 from kokua.core.turn_registry import TurnInfo
 from kokua.workflows import SettingsView, WorkflowContext, is_rich
@@ -362,10 +362,12 @@ class TurnRunner:
         # later refactor removes that early `return`, rather than relying on this shape never changing.
         stopped = False
         failure_reason = ""  # set on error, so a backgrounded turn's notification can carry the reason
-        # Where this turn's sub-agent cards anchor. Both branches settle it in a `finally`, so the
-        # cancellation and error paths below record under the index a completed turn would use; -1
-        # means the turn committed no user message, and recording no-ops.
+        # Where this turn's sub-agent cards anchor, and where the messages the user sent into the turn
+        # ended up. Both branches settle both in a `finally`, so the cancellation and error paths below
+        # record under the index a completed turn would use; -1 means the turn committed no user
+        # message, and recording no-ops.
         user_index = -1
+        steering_indices: list[int] = []
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
@@ -384,6 +386,7 @@ class TurnRunner:
                             # a rich one publishes its index as it commits, so read it from the context
                             # rather than from a result that may never arrive.
                             user_index = ctx.user_index
+                            steering_indices = resolve_steering_indices(agent.model_client.messages, user_index)
                     else:
                         # Taken here rather than before the gate: it is the lower bound the turn's own
                         # user message is searched for from, so anything another turn appended first
@@ -404,6 +407,7 @@ class TurnRunner:
                             # seeds the system message ahead of it. Reached on the cancelled path too,
                             # where the agent has already snapshotted the partial turn in its finally.
                             user_index = resolve_user_index(agent.model_client.messages, base_len)
+                            steering_indices = resolve_steering_indices(agent.model_client.messages, user_index)
                 except asyncio.CancelledError:
                     # `/stop` (or shutdown) cancelled this turn. Record first: the "(stopped)" send
                     # below is one more await, and a second cancellation racing it would otherwise
@@ -412,7 +416,12 @@ class TurnRunner:
                     # keeps serving.
                     stopped = True
                     self._record_provenance(
-                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                        conversation_id,
+                        user_index,
+                        thinking=thinking,
+                        metrics=metrics,
+                        started=started,
+                        steering_indices=steering_indices,
                     )
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                     # A stop does not re-submit (invariant 9's one exception), so anything the entry
@@ -430,7 +439,12 @@ class TurnRunner:
                 except ModelConnectionError as exc:
                     # before the send: invariant 5
                     self._record_provenance(
-                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                        conversation_id,
+                        user_index,
+                        thinking=thinking,
+                        metrics=metrics,
+                        started=started,
+                        steering_indices=steering_indices,
                     )
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
@@ -440,7 +454,12 @@ class TurnRunner:
                 except ModelRefusalError as exc:
                     # before the send: invariant 5
                     self._record_provenance(
-                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                        conversation_id,
+                        user_index,
+                        thinking=thinking,
+                        metrics=metrics,
+                        started=started,
+                        steering_indices=steering_indices,
                     )
                     # info, not exception: the model was reached and answered in the time it took, so
                     # there is no fault here and a stack trace would file one against Kokua.
@@ -450,14 +469,24 @@ class TurnRunner:
                 except Exception as exc:
                     # before the send: invariant 5
                     self._record_provenance(
-                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                        conversation_id,
+                        user_index,
+                        thinking=thinking,
+                        metrics=metrics,
+                        started=started,
+                        steering_indices=steering_indices,
                     )
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"failed: {describe_error(exc)}"
                     await self._ui.send(f"Sorry, the request failed: {describe_error(exc)}", reply_to=msg)
                 else:
                     self._record_provenance(
-                        conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
+                        conversation_id,
+                        user_index,
+                        thinking=thinking,
+                        metrics=metrics,
+                        started=started,
+                        steering_indices=steering_indices,
                     )
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
@@ -480,10 +509,17 @@ class TurnRunner:
             # next turn, never neither.
             await self._resubmit_steering(conversation_id, undelivered)
 
-    async def _resubmit_steering(self, conversation_id: str, texts: list[str]) -> None:
-        """Run messages the turn never read as an ordinary follow-up turn on the same conversation."""
+    async def _resubmit_steering(self, conversation_id: str, messages: list[SteeringMessage]) -> None:
+        """Run messages the turn never read as an ordinary follow-up turn on the same conversation.
+
+        The several messages become one turn, so only one front-end bubble can carry that turn's
+        controls, and it is the first: the same rule a replay follows for a turn that drew several
+        bubbles (text and images), and the only one of them whose index would be the turn's own. The
+        rest keep the mark saying they were accepted, which is what happened to them.
+        """
+        token = messages[0].token if messages else None
         await self.reactive(
-            ChannelMessage(text="\n\n".join(texts)),
+            ChannelMessage(text="\n\n".join(message.text for message in messages), metadata={"token": token}),
             conversation_id=conversation_id,
         )
 
@@ -542,6 +578,7 @@ class TurnRunner:
         thinking: Optional[Union[bool, str]],
         metrics: Optional[TurnMetrics],
         started: Optional[float],
+        steering_indices: list[int],
     ) -> None:
         """Persist what produced this turn: whatever its spawns reported, the model that answered, the
         reasoning effort it ran at, why it stopped early if it did, and what it cost. Synchronous, so it
@@ -559,6 +596,11 @@ class TurnRunner:
         Keyword-only and required, with no default, for the same reason ``thinking`` has none: a sixth
         call site that forgot them would silently record a turn as having cost nothing, which is the
         one failure mode worth making impossible to omit by accident.
+
+        ``steering_indices`` is where the messages the user sent into this turn landed, resolved by the
+        caller after the run for the reason ``resolve_steering_indices`` gives. Keyword-only and
+        required on the same principle as the two above: a caller that forgot it would record the turn
+        as unsteered, and nothing downstream could tell that apart from a turn nobody steered.
         """
         usage = None
         if metrics is not None and started is not None:
@@ -571,6 +613,7 @@ class TurnRunner:
             thinking=thinking,
             failure=failure,
             usage=usage,
+            steering=steering_indices,
         )
 
     def _answering_model(self, conversation_id: str) -> str:
@@ -882,6 +925,7 @@ class TurnRunner:
                 thinking=self._config.thinking_for(self._config.entry_agent),
                 metrics=metrics,
                 started=started,
+                steering_indices=resolve_steering_indices(agent.model_client.messages, proactive_index),
             )
             await self._persist(conversation_id, proactive_index)
             if stopped:
