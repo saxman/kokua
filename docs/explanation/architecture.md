@@ -984,8 +984,31 @@ now: the method has a default implementation on the ABC (read everything, keep t
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 `TinyDBSessionStore`'s override from a plain inheritance of the default.
 
-The floor is now **`aimu>=0.32.0`**, and two capabilities in that release are Kokua's, both about skill
-authoring. `make_skill_update_tool` is the factory
+The floor is now **`aimu>=0.33.0`**, for `aio.SkillAgent.run`'s `steering` parameter: a run already in
+progress can be handed a user message without waiting for it to finish, which is what lets a message
+typed mid-turn reach the turn running now instead of queuing behind it. Kokua's entry agent is an
+`aio.SkillAgent`, so this is the exact method a mid-turn message reaches.
+
+The probe grips the subclass, not `aio.Agent.run`, which landed the same parameter in the *first* of
+the release's steering commits: gripping that handle would date a checkout to one drain site on one
+driver and nothing past it. `aio.SkillAgent.run` cannot delegate to `super().run()` (it prepares, sets
+skills up, then calls the post-prepare helpers that do the actual work), so it repeats `Agent.run`'s
+whole parameter list by hand, and a parameter added to the base method reaches the subclass only when
+someone remembers to copy it across. `steering` was not remembered until a whole-branch review caught
+it, after `compaction` and `script_env` had each needed the same hand-copy before it, so the base
+class's signature is not evidence about the subclass's. The shape is a signature check, the fifth time
+(`SkillManager(include=...)`, `SkillAgent(script_env=...)`, `WebChannel(stream_thinking=...)`,
+`make_async_subagent_tool(events=...)`).
+
+What it leaves to the floor is larger than usual: whether the spawn path honors a `"steering"` spec
+key, whether both drivers drain all three branches a steered turn can take, whether the three stream
+consumers render the phase, whether the budget reset on a drained mailbox is bounded, and whether a
+misbehaving host source is caught rather than trusted. None of those is a signature, so no signature
+check reaches them; the branch review that caught the missed `SkillAgent` copy raised the last three as
+findings in their own right.
+
+The floor was **`aimu>=0.32.0`** until then, and two capabilities in that release were Kokua's, both
+about skill authoring. `make_skill_update_tool` is the factory
 [`toolsets/skills.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/skills.py) calls to
 hand an agent `update_skill`, so a skill whose instructions turned out wrong can be fixed in place.
 Before it a skill's prose was write-once: `author_skill` refuses to clobber and `add_skill_script`
@@ -997,10 +1020,10 @@ the prose and existed only to drop the frontmatter keys it did not re-emit, whic
 `kokua skills install` shed its `license` and `compatibility` lines the first time an agent attached a
 script to it, and again on every later fix, with nothing raised anywhere.
 
-The probe grips `make_skill_update_tool`, a plain name lookup, and this time the newest handle is the
+The probe gripped `make_skill_update_tool`, a plain name lookup, and that time the newest handle was the
 right one: the script-write fix landed earlier in the same branch and has a handle of its own in
-`write_skill_script`, so gripping the later name dates a checkout to both. What it leaves to the floor
-is the *behavior* behind that fix, since no name lookup asks what a function does and Kokua calls
+`write_skill_script`, so gripping the later name dated a checkout to both. What it left to the floor
+was the *behavior* behind that fix, since no name lookup asks what a function does and Kokua calls
 neither function itself; `tests/test_aimu_compat.py` authors a skill with optional frontmatter in a temp
 directory and reads it back instead.
 

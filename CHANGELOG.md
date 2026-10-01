@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.32.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -1589,9 +1589,9 @@ notice on startup.
   on that group holding both writers, and asking it needs a membership check over a list of callables
   matching on `__name__`, declined for the third time and asserted in `tests/test_aimu_compat.py`
   instead. `get_web_content` joins the floor's job.
-  Today the floor is **0.32.0**, for two capabilities that are both about authoring skills, and it is
-  the counterpart to the release before it: two handles again, and this time the newest one is right.
-  The probe is a plain name lookup on `aimu.skills.make_skill_update_tool`, the factory
+  **0.32.0** was the floor until 0.33.0, for two capabilities that are both about authoring skills, and
+  it is the counterpart to the release before it: two handles again, and that time the newest one was
+  right. The probe was a plain name lookup on `aimu.skills.make_skill_update_tool`, the factory
   `toolsets/skills.py` calls to hand an agent `update_skill`, without which a skill's prose is
   write-once (`author_skill` refuses to clobber, `add_skill_script` writes scripts alone, so the
   assistant could fix a skill's code forever and never a word of its text). The other capability is
@@ -1600,11 +1600,29 @@ notice on startup.
   body it had just read, so it could not change the prose and existed only to drop the frontmatter
   keys it did not re-emit. A skill from `kokua skills install` shed its `license` and `compatibility`
   lines the first time an agent attached a script to it, and again on every later fix, with nothing
-  raised anywhere. It has its own handle in `write_skill_script`, and the probe passes over it because
-  the later name dates a checkout to both. What that leaves to the floor is the *behavior* behind the
+  raised anywhere. It has its own handle in `write_skill_script`, and the probe passed over it because
+  the later name dated a checkout to both. What that left to the floor was the *behavior* behind the
   fix: a name lookup never asks what a function does, and Kokua calls neither function itself, so
   `tests/test_aimu_compat.py` authors a skill with optional frontmatter in a temp directory, attaches
-  a script, and reads the file back. `"compaction"` joins the floor's job.
+  a script, and reads the file back. `"compaction"` joined the floor's job.
+  Today the floor is **0.33.0**, for `aio.SkillAgent.run`'s `steering` parameter: a run already in
+  progress can be handed a user message without waiting for it to finish, which is what lets a message
+  typed mid-turn reach the turn running now instead of queuing behind it. The probe is a signature
+  check, the fifth time (`SkillManager(include=...)`, `SkillAgent(script_env=...)`,
+  `WebChannel(stream_thinking=...)`, `make_async_subagent_tool(events=...)`), and it grips the subclass
+  rather than the base class on purpose: `aio.Agent.run(steering=...)` landed in the *first* of the
+  release's steering commits, so gripping it would date a checkout to one drain site on one driver and
+  nothing past it, while `aio.SkillAgent.run` cannot delegate to `super().run()` and so repeats
+  `Agent.run`'s whole parameter list by hand -- a parameter added to the base method reaches the
+  subclass only when someone remembers to copy it across, and `steering` was not remembered until a
+  whole-branch review caught it, after `compaction` and `script_env` had each needed the same
+  hand-copy before it. Kokua's entry agent is an `aio.SkillAgent`, so gripping the subclass dates a
+  checkout to every steering commit in the release and every fix after it, where an `Agent`-shaped
+  probe would have passed on an AIMU where Kokua's own first steered turn raised `TypeError`. What it
+  leaves to the floor is larger than usual: whether the spawn path honors a `"steering"` spec key,
+  whether both drivers drain all three branches a steered turn can take, whether the three stream
+  consumers render the phase, whether the budget reset on a drained mailbox is bounded, and whether a
+  misbehaving host source is caught rather than trusted. `make_skill_update_tool` joins the floor's job.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
   halves of that one decision cannot drift. It pins the floor against the *prose* too: the README, the

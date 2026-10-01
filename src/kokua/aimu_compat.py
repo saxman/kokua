@@ -1,6 +1,6 @@
 """Startup preflight: confirm the installed AIMU is new enough to run Kokua.
 
-The ``aimu>=0.32.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
+The ``aimu>=0.33.0`` requirement in ``pyproject.toml`` covers a normal install and nothing else. uv
 installs a ``[tool.uv.sources]`` path source *without* checking it against the version specifier -- a
 declared ``aimu>=0.99.0`` will happily install and lock a 0.13.1 sibling -- so in a development checkout
 the pin is not a constraint on the AIMU actually running. This module is what enforces the floor there.
@@ -20,16 +20,16 @@ this way rather than as "the newest" -- see AIMU 0.31.0 below, where two handles
 one had to be taken to close a window the earlier one left open, and 0.32.0 above it, where the newest
 was the right one and the paragraph says so to keep the pair legible.
 
-Whichever surface it is, its shape decides the check's shape. A name lookup answers for a symbol, the
-shape in force today (``aimu.skills.make_skill_update_tool``) and four times before, for
-``resolve_default_text_model``, ``ModelRefusalError``, ``SessionStore.list_summaries``, and
-``builtin.get_web_content``. A membership check answers for an entry in a published set whose mere
-existence proves nothing, the shape three times: ``SUBAGENT_SPEC_KEYS`` shipped a release before the
-``"generate_kwargs"`` entry Kokua came to depend on, so only its contents dated a checkout, then
-``StreamingContentType`` answered the same way for ``CONTINUING``, then that same first set again for
-``"compaction"``. A signature check answers for a keyword argument no ``getattr`` would notice, the
-shape four releases running: ``SkillManager(include=...)``, then ``SkillAgent(script_env=...)``, then
-``WebChannel(stream_thinking=...)``, then ``make_async_subagent_tool(events=...)``.
+Whichever surface it is, its shape decides the check's shape. A signature check answers for a keyword
+argument no ``getattr`` would notice, the shape in force today (``aio.SkillAgent.run``'s ``steering``)
+and four times before: ``SkillManager(include=...)``, then ``SkillAgent(script_env=...)``, then
+``WebChannel(stream_thinking=...)``, then ``make_async_subagent_tool(events=...)``. A name lookup
+answers for a symbol, the shape five times: ``resolve_default_text_model``, ``ModelRefusalError``,
+``SessionStore.list_summaries``, ``builtin.get_web_content``, and ``aimu.skills.make_skill_update_tool``.
+A membership check answers for an entry in a published set whose mere existence proves nothing, the
+shape three times: ``SUBAGENT_SPEC_KEYS`` shipped a release before the ``"generate_kwargs"`` entry Kokua
+came to depend on, so only its contents dated a checkout, then ``StreamingContentType`` answered the
+same way for ``CONTINUING``, then that same first set again for ``"compaction"``.
 Checking one surface is no claim about the others; covering those is the version floor's job.
 
 A capability can also be shaped so that *nothing* can probe it, and AIMU 0.17.0's headline surface is:
@@ -87,34 +87,61 @@ one change, so a checkout carrying the new name carries the new default. The def
 inspectable, unusually for this probe, and checking the parameter name is still preferred: it dates the
 checkout to the same release without teaching this module a fourth probe shape for one case.
 
-AIMU 0.32.0 is the current surface, and it is the counterpart to the paragraph below it: two
-capabilities again, and this time the newest handle is the right one. ``make_skill_update_tool`` is the
+AIMU 0.33.0 is the current surface, and ``aio.SkillAgent.run``'s ``steering`` parameter is the one this
+whole effort depends on: a run already in progress can be handed a user message without waiting for it
+to finish, which is what lets a message typed mid-turn reach the turn running now instead of queuing
+behind it. The shape is a signature check, the fifth time, and a name lookup would not do:
+``SkillAgent.run`` predates this floor by a long way, so only whether it takes this argument dates a
+checkout, not whether the method exists at all.
+
+The probe grips the subclass, not the base class, and that is the whole of its subtlety.
+``aio.Agent.run(steering=...)`` landed in the *first* of the release's steering commits, so gripping it
+would date a checkout to one drain site on one driver and nothing past it. ``aio.SkillAgent.run`` cannot
+delegate to ``super().run()`` (it has to prepare, set skills up, then call the post-prepare helpers that
+do the actual work), so it repeats ``Agent.run``'s whole parameter list by hand, and a parameter added to
+the base method reaches the subclass only when someone remembers to copy it across. ``steering`` was not
+remembered until a whole-branch review caught it, after ``compaction`` and ``script_env`` had each needed
+the same hand-copy before it. So the base class's signature is not evidence about the subclass's, and the
+subclass is what Kokua runs: Kokua's entry agent is an ``aio.SkillAgent``. Gripping it dates a checkout to
+every steering commit in the release and every fix after it, where an ``Agent``-shaped probe would have
+passed on an AIMU where Kokua's own first steered turn raised ``TypeError``.
+
+What this probe cannot see, and what the floor covers alone, is larger than usual here: whether the spawn
+path honors a ``"steering"`` spec key at all, whether both drivers drain all three branches a steered turn
+can take, whether the three stream consumers render the phase, whether the budget reset on a drained
+mailbox is bounded, and whether a misbehaving host source is caught rather than trusted. None of those is
+a signature, so no signature check reaches them. The first two are the same one-level-down gap ``events``'
+recursive passthrough left for its own capability; the last three are findings the branch review itself
+raised, each one an AIMU could regress while still answering this probe yes.
+
+AIMU 0.32.0 was the surface until 0.33.0, and it is the counterpart to the paragraph below it: two
+capabilities again, and that time the newest handle was the right one. ``make_skill_update_tool`` is the
 factory ``toolsets/skills.py`` calls to hand an agent ``update_skill``, the tool that revises a skill's
 description or body. Until it existed, a skill's prose was write-once: ``author_skill`` refuses to
 clobber and ``add_skill_script`` writes scripts alone, so the assistant could fix a skill's code
 forever and never a word of its text, and the only advice available for a skill that turned out wrong
-was to author a second one under a different name. The shape is a plain name lookup, the fifth time,
-and the easy case again: the capability is the export Kokua calls.
+was to author a second one under a different name. The shape was a plain name lookup, the fifth time,
+and the easy case again: the capability was the export Kokua called.
 
-The release's other capability landed earlier in it and matters more to a Kokua user, which is exactly
-the arrangement that made 0.20.0 and 0.31.0 awkward and does not here. ``add_skill_script`` no longer
+The release's other capability landed earlier in it and mattered more to a Kokua user, which is exactly
+the arrangement that made 0.20.0 and 0.31.0 awkward and did not here. ``add_skill_script`` no longer
 attaches a script by rewriting the skill's whole ``SKILL.md``: that rewrite passed back the description
 and body it had just read, so it could not change the prose and existed only to drop the frontmatter
 keys it did not re-emit -- the spec's optional ``license``, ``compatibility``, and ``allowed-tools``,
 plus anything outside the spec. A skill installed by ``kokua skills install`` shed those the first time
 an agent attached a script to it, and again on every later fix to that script, with nothing raised
-anywhere. It has a handle of its own, ``aimu.skills.write_skill_script``, and the probe passes over it
-because ``make_skill_update_tool`` landed later in the same branch, so gripping the later one dates a
+anywhere. It has a handle of its own, ``aimu.skills.write_skill_script``, and the probe passed over it
+because ``make_skill_update_tool`` landed later in the same branch, so gripping the later one dated a
 checkout to both.
 
-What this probe cannot see, and what the floor covers alone: the *behavior* behind that fix. A checkout
-could export both names and rewrite ``SKILL.md`` on a script write regardless, because a name lookup
-never asks what a function does, and Kokua has no way to notice from the outside -- it calls neither
-function itself, it hands the tool to a model, and the loss happens inside AIMU on a file Kokua does not
-read back. Establishing it directly would mean authoring a skill with optional frontmatter in a temp
-directory at startup and reading it back, a filesystem side effect a preflight has no business having.
-The same shape of gap every name lookup leaves: 0.30.0's ``get_web_content`` left it for that tool's
-three caps.
+What that probe could not see, and what the floor covers alone: the *behavior* behind that fix. A
+checkout could export both names and rewrite ``SKILL.md`` on a script write regardless, because a name
+lookup never asks what a function does, and Kokua has no way to notice from the outside -- it calls
+neither function itself, it hands the tool to a model, and the loss happens inside AIMU on a file Kokua
+does not read back. Establishing it directly would mean authoring a skill with optional frontmatter in a
+temp directory at startup and reading it back, a filesystem side effect a preflight has no business
+having. The same shape of gap every name lookup leaves: 0.30.0's ``get_web_content`` left it for that
+tool's three caps.
 
 AIMU 0.31.0 was the surface until 0.32.0, and it is the one release where picking the newest handle
 would have been the wrong call. Three capabilities in it are Kokua's: ``builtin.select`` and
@@ -296,47 +323,51 @@ import inspect
 from importlib.metadata import PackageNotFoundError, version
 from typing import Optional
 
-MINIMUM_AIMU = (0, 32, 0)
+MINIMUM_AIMU = (0, 33, 0)
 
-# The surface is `aimu.skills.make_skill_update_tool`, the factory `toolsets/skills.py` calls to hand an
-# agent the `update_skill` tool, so a skill whose instructions turned out wrong can be fixed rather than
-# only its scripts. Before it, `author_skill` refused to clobber and `add_skill_script` wrote scripts
-# alone, which left a skill's prose unreachable once written: the assistant could revise a skill's code
-# forever and never a word of its text.
+# The surface is `aio.SkillAgent.run`'s `steering` parameter: a run that is already in progress can be
+# handed a user message without waiting for it to finish, which is what lets a message typed mid-turn
+# reach the turn running now instead of queuing behind it. Kokua's entry agent is an `aio.SkillAgent`, so
+# this is the exact method a mid-turn message reaches.
 #
-# The shape is a name lookup, the fifth time (`resolve_default_text_model` at 0.21.0,
-# `ModelRefusalError` at 0.27.0, `SessionStore.list_summaries` at 0.29.0, `builtin.get_web_content` at
-# 0.30.0), and the easy case again: the capability *is* the export Kokua calls, so a name lookup asks
-# exactly the question that matters.
+# The shape is a signature check, the fifth time (`SkillManager(include=...)` at 0.14.0,
+# `SkillAgent(script_env=...)` at 0.20.0, `WebChannel(stream_thinking=...)` at 0.23.0,
+# `make_async_subagent_tool(events=...)` at 0.25.0), and a name lookup would not do: `SkillAgent.run`
+# predates this floor by a long way, so only whether it takes this argument dates a checkout, not whether
+# the method exists at all.
 #
-# The newest handle is the right one this time, which is worth stating next to 0.31.0's paragraph above,
-# where it was not. 0.32.0 carries a second capability Kokua depends on, and it landed *earlier* in the
-# release: `add_skill_script` no longer attaches a script by rewriting the whole `SKILL.md`, a rewrite
-# that could not change the prose (it passed back the description and body it had just read) and existed
-# only to drop the keys it did not re-emit, so an installed skill carrying `license` or `compatibility`
-# shed them the first time an agent attached a script to it and again on every later fix. That one is the
-# more consequential of the two for a Kokua user, and it has a handle of its own in
-# `aimu.skills.write_skill_script`, but `make_skill_update_tool` came later in the same branch, so
-# gripping it dates a checkout to both. The reverse of the trade 0.20.0's `endpoint_kwargs` had to accept.
+# `SkillAgent`, not `Agent`, and that is the whole of this probe's subtlety. `aio.Agent.run(steering=...)`
+# landed in the *first* of the release's steering commits, so gripping it would date a checkout to one
+# drain site on one driver and nothing past it. `aio.SkillAgent.run` cannot delegate to `super().run()`
+# (it has to prepare, set skills up, then call the post-prepare helpers that do the actual work), so it
+# repeats `Agent.run`'s whole parameter list by hand, and a parameter added to the base method reaches the
+# subclass only when someone remembers to copy it across. `steering` was not remembered until a
+# whole-branch review caught it, after `compaction` and `script_env` had each needed the same hand-copy
+# before it. So the base class's signature is not evidence about the subclass's, and the subclass is what
+# Kokua runs: gripping `SkillAgent` dates a checkout to every steering commit in the release and every fix
+# after it, where an `Agent`-shaped probe would have passed on an AIMU where Kokua's own first steered
+# turn raised `TypeError`.
 #
-# What this probe cannot see, and what the floor covers alone: the *behavior* behind the fix. A checkout
-# could export both names and still rewrite `SKILL.md` on a script write, because no name lookup asks
-# what a function does, and Kokua calls neither `write_skill_script` nor `add_skill_script` itself -- it
-# hands the tool to a model and the loss happens inside AIMU. That is the shape of gap every name lookup
-# leaves (0.30.0's `get_web_content` left the same one for its three caps), and the only alternative
-# would be writing a skill with optional frontmatter in a temp directory at startup and reading it back,
-# which is a filesystem side effect a preflight has no business having.
+# What this probe cannot see, and what the floor covers alone, is larger than usual here: whether the
+# spawn path honors a `"steering"` spec key at all, whether both drivers drain all three branches a
+# steered turn can take, whether the three stream consumers render the phase, whether the budget reset on
+# a drained mailbox is bounded, and whether a misbehaving host source is caught rather than trusted. None
+# of those is a signature, so no signature check reaches them. The first two are the same one-level-down
+# gap `events`' recursive passthrough left for its own capability; the last three are findings the
+# branch review itself raised, each one an AIMU could regress while still answering this probe yes.
 #
-# `SUBAGENT_SPEC_KEYS`'s `"compaction"` (a membership check) was this probe's surface while 0.31.0 was
-# the floor, `get_web_content` (a name lookup) while 0.30.0 was, `SessionStore.list_summaries` (a name
-# lookup) while 0.29.0 was, `StreamingContentType.CONTINUING` (a membership check) while 0.28.0 was,
-# `make_async_subagent_tool(events=...)` (a signature check) while 0.25.0 was, `make_command_tool` (a
-# name lookup) before that, and `ModelRefusalError` (a name lookup) while 0.27.0 was; all seven are the
-# version floor's responsibility now, as everything this probe has ever pointed at eventually becomes.
-_PROBE_MODULE = "aimu.skills"
-_PROBE_CLASS: Optional[str] = None
-_PROBE_SYMBOL = "make_skill_update_tool"
-_PROBE_PARAMETER: Optional[str] = None
+# `aimu.skills.make_skill_update_tool` (a name lookup) was this probe's surface while 0.32.0 was the
+# floor, `SUBAGENT_SPEC_KEYS`'s `"compaction"` (a membership check) while 0.31.0 was, `get_web_content` (a
+# name lookup) while 0.30.0 was, `SessionStore.list_summaries` (a name lookup) while 0.29.0 was,
+# `StreamingContentType.CONTINUING` (a membership check) while 0.28.0 was, `make_async_subagent_tool`'s
+# `events` (a signature check) while 0.25.0 was, `make_command_tool` (a name lookup) before that, and
+# `ModelRefusalError` (a name lookup) while 0.27.0 was; all eight are the version floor's responsibility
+# now, as everything this probe has ever pointed at eventually becomes, `make_skill_update_tool` in its
+# turn.
+_PROBE_MODULE = "aimu.aio"
+_PROBE_CLASS: Optional[str] = "SkillAgent"
+_PROBE_SYMBOL = "run"
+_PROBE_PARAMETER: Optional[str] = "steering"
 _PROBE_MEMBER: Optional[str] = None
 
 
