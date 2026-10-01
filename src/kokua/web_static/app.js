@@ -764,23 +764,35 @@ let streamingBubble = null;  // the assistant answer bubble accumulating tokens
 let streamingText = "";      // raw answer text, the source of truth every live render reparses
 let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
 let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
-// The bubbles that opened live turns whose `turn_saved` has not arrived yet, oldest first, each tagged
-// with the conversation it was drawn for. A queue rather than one reference because sending a follow-up
-// while a reply is still streaming is ordinary: the server queues that turn behind the first (turns on
-// one conversation serialize in submission order, so their saves land in that order too), and a single
-// reference would by then point at the newer bubble and stamp it with the older turn's index. That is
-// worse than losing the control, because the index is a valid turn boundary the server will honour, so
-// the user would click delete on one message and lose that one and the message before it.
+// Bubbles whose fate the server has not reported yet, keyed by the token the page minted for each.
+// Keyed rather than ordered because a message has two possible fates and only one of them is a turn: it
+// either runs as its own turn (`turn_saved`) or joins the turn already running (`steering`), and the
+// page cannot know which when it sends. A positional queue could not tell those apart, so a steering
+// message stranded an entry at the head and the *next* turn's save took the stale entry, stamping an
+// older bubble with a newer turn's index. That is worse than losing the control, because the index is a
+// valid turn boundary the server will honour, so the user would click delete on one message and lose
+// that one and the message before it.
 //
-// Two residual cases, in opposite directions. A proactive run in the conversation being viewed, landing
-// its own `turn_saved` while the user has a bubble waiting here, consumes that entry and stamps it with
-// the proactive turn's index instead; it needs a proactive turn in the very conversation the user just
-// sent to. The other is worse and is why nothing is enqueued for text the server answers as a command:
-// an entry that is never consumed (a turn that never reaches its save) sits at the head forever, so the
-// *next* turn's `turn_saved` takes the stale entry and stamps the older bubble with the newer turn's
-// index, leaving every control on the page shifted by one turn from then on. Both are repaired by any
-// repaint, since the replay path derives indices from the server rather than from this queue.
-let pendingTurnBubbles = [];
+// Matching also makes an unclaimed entry harmless, where a count had to be kept honest: text the server
+// answers as a command (or as the reply to a pending approval) runs no turn and is simply never claimed,
+// and its entry is dropped at the next repaint along with the bubble it points at.
+let pendingBubbles = new Map();
+let bubbleTokens = 0;
+// Tokens are unique per page load, not merely per message, because a turn outlives the page that
+// started it: reload while one is running and its `turn_saved` still arrives, so a counter starting
+// over at 1 would let that frame name a bubble this load drew and stamp it with the older turn's
+// index, which is the mis-stamp this whole mechanism exists to prevent. Math.random rather than
+// crypto.randomUUID, which is only defined in a secure context and Kokua is served over plain http.
+const bubbleEpoch = Math.random().toString(36).slice(2, 8);
+
+// Take the bubble this token was minted for, if it is still waiting. Deleted on the way out, so one
+// token can claim one bubble: a frame arriving twice, or two frames carrying the same token, marks
+// nothing the second time rather than stamping a bubble that has already been accounted for.
+function claimBubble(token) {
+  const bubble = pendingBubbles.get(token);
+  if (bubble) pendingBubbles.delete(token);
+  return bubble || null;
+}
 
 // Render/update a sub-agent card as a foldable block. Two producers share this frame type: a
 // planning reviewer (role + status + issues) and a spawned sub-agent (role + task + status, its
@@ -1624,15 +1636,25 @@ function handleFrame(event) {
     // from another conversation onto the one being viewed.
     const active = lastConversations.find((item) => item.active);
     if (active && active.id === frame.conversation_id) {
-      // Take the oldest bubble still waiting on a save in this conversation, which is the turn this
-      // frame is about. A frame with nothing waiting is a turn the page never drew a bubble for (a
-      // proactive run), and stamps nothing.
-      const waiting = pendingTurnBubbles.findIndex((p) => p.conversationId === frame.conversation_id);
-      if (waiting !== -1) {
-        const [pending] = pendingTurnBubbles.splice(waiting, 1);
-        stampTurnControls(pending.bubble, frame.message_index, frame.conversation_id);
-      }
+      // The bubble this turn was made of, named by the token that went out with it. A frame with no
+      // token, or one naming a bubble this page never drew, is a turn nothing here is waiting on (a
+      // proactive run, a scheduled firing) and stamps nothing.
+      const pending = claimBubble(frame.token);
+      if (pending) stampTurnControls(pending, frame.message_index, frame.conversation_id);
     }
+  } else if (frame.type === "steering") {
+    // The bubble's other possible fate, and the reason this map matches rather than counts: the
+    // message joined the turn already running, so no `turn_saved` will ever name it. Marked rather
+    // than stamped, and deliberately given no turn controls: it has no turn of its own, and the
+    // index that would branch or truncate "here" points into the middle of somebody else's turn.
+    //
+    // Two frames of this type arrive for one steered message and only one carries a token. This is
+    // the server reporting the message accepted, and the token is what names the bubble; the other
+    // comes from the agent loop as it reads the message, which is the one a sub-agent card renders
+    // and which names no bubble. So an untokened frame claims nothing here, as a `turn_saved` with
+    // no token does just above.
+    const steered = claimBubble(frame.token);
+    if (steered) steered.classList.add("steered");
   } else if (frame.type === "history") {
     // Replay a conversation (on connect or after switching), reusing the live renderers.
     log.innerHTML = "";  // replace any current transcript
@@ -1645,7 +1667,7 @@ function handleFrame(event) {
     streamingBubble = null;
     streamingText = "";
     thinkingBlock = null;
-    pendingTurnBubbles = [];  // the bubbles these referred to were just detached by the repaint
+    pendingBubbles = new Map();  // the bubbles these referred to were just detached by the repaint
     stickToBottom = true;  // a freshly loaded conversation starts pinned to the newest message
     setProcessing(false);  // idle unless the "working" frame behind this one says otherwise
     setWorking(null);  // reset; that same frame re-shows the indicator when the turn is still running
@@ -1688,6 +1710,12 @@ function handleFrame(event) {
       }
       else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response });
       else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
+      // A message that joined this turn while it was running. Rendered as a row where the live frame
+      // instead marks the bubble the page had already drawn: that bubble was local to the session that
+      // sent it and this repaint replaced it, and the turn is still in flight, so the store does not
+      // hold the message either. Without the row the user's own words would vanish from the turn they
+      // were sent into until it finishes.
+      else if (item.type === "steering") renderSteering(item.text, item.ts);
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
       else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);
@@ -2064,58 +2092,37 @@ form.addEventListener("submit", (e) => {
     if (!opening) opening = bubble;
   }
   const thinking = thinkingChoice();
-  // What the server will actually parse, settled before the queue below reads it, because it is not
-  // always what was typed. A message carrying anything besides its text goes as an input frame, which
-  // never takes the /plan wrapper: an image turn has never been plannable, and the picker is disabled
-  // whenever Plan is on, so a frame and a wrapper can never both be wanted.
+  // What the server will actually parse, which is not always what was typed. A message carrying
+  // anything besides its text never takes the /plan wrapper: an image turn has never been plannable,
+  // and the picker is disabled whenever Plan is on, so extras and a wrapper can never both be wanted.
   // `thinking` is tested for truthiness here, the same way the frame body below decides whether to
   // set `frame.thinking`: a future reasoning-effort option with a falsy non-null value must not go as
   // a frame with no `thinking` key while also silently keeping the /plan wrapper this line exists to
   // withhold from it.
-  const asFrame = attached.length > 0 || !!thinking;
-  const outgoing = !asFrame && planNext && !/^\/plan(\s|$)/i.test(text) ? "/plan " + text : text;
-  // Enqueuing an entry for text that turns out to run no turn is the case this predicate exists to
-  // close off, the same one the queue's own declaration comment calls worse (see `pendingTurnBubbles`
-  // above): nothing ever consumes that entry, so it strands at the head, and the *next* turn's
-  // `turn_saved` takes the stale entry instead of its own, stamping an older bubble with a newer turn's
-  // index and shifting every control after it by one turn until a repaint clears the queue. Withholding
-  // an entry for a message that does run a turn fails the other way, and only once a second message is
-  // already queued behind it: that turn's own `turn_saved` then consumes the *next* bubble's entry
-  // instead, so a later bubble is stamped with this earlier turn's index and its control deletes more
-  // than that bubble implies. This predicate cannot cause that, since it only suppresses text it can
-  // positively match to a word the server reserves (`Assistant._serve_channel`), read the way it reads
-  // them: /stop and /diag are matched against the whole message, the conversation commands tolerate
-  // whitespace after the slash and run with or without an argument, and a workflow command with no task
-  // is answered with a usage line. Everything else is enqueued, including an unrecognized "/"-word,
-  // which the server deliberately runs as an ordinary turn so that "/usr/local/bin is missing" reaches
-  // the model.
-  //
-  // Two cases stay wrong and cannot be decided here, both in the stranding direction above rather than
-  // the destructive one. A "/word" naming a workflow command that an installed toolset offers but the
-  // entry agent does not declare is answered with no turn, and the page has no way to know which words
-  // those are. So is a composer message sent while a tool call is waiting on approval:
-  // `HumanGate.resolve_reply` consumes it and no turn runs, in the approval-reply branch of
-  // `Assistant._serve_channel`, but the page leaves the composer live during an approval, so typing
-  // "y" strands an entry the same way. Each shifts later controls until the next repaint.
-  const answeredAsCommand =
-    /^\/(stop|diag)$/i.test(outgoing) ||
-    /^\/\s*(new|conversations|switch)(\s|$)/i.test(outgoing) ||
-    /^\/\s*plan\s*$/i.test(outgoing);
-  if (opening && !answeredAsCommand) {
-    const active = lastConversations.find((item) => item.active);
-    if (active) pendingTurnBubbles.push({ bubble: opening, conversationId: active.id });
-  }
-  if (asFrame) {
-    const frame = { type: "input", text };
-    if (attached.length) frame.images = attached.map(a => a.dataUrl);
-    if (thinking) frame.thinking = thinking;
-    ws.send(JSON.stringify(frame));
-    if (attached.length) {
-      attached = [];
-      renderPreviews();
-    }
-  } else {
-    ws.send(outgoing);
+  const carriesExtras = attached.length > 0 || !!thinking;
+  const outgoing = !carriesExtras && planNext && !/^\/plan(\s|$)/i.test(text) ? "/plan " + text : text;
+  // The name this page and the server will both use for the bubble just drawn, until the server says
+  // what became of it. Minted for every message, including text the server answers as a command and
+  // runs no turn for: that entry is simply never claimed (see `pendingBubbles`), so nothing has to be
+  // predicted here about how the server will read the words.
+  const token = `${bubbleEpoch}-${++bubbleTokens}`;
+  // The conversation is consulted and not recorded: every repaint clears this map (the bubbles in it
+  // are detached by the same repaint), so an entry can only ever belong to the conversation in view,
+  // and a bubble drawn before the page knows which conversation that is could never be stamped anyway.
+  if (opening && lastConversations.some((item) => item.active)) pendingBubbles.set(token, opening);
+  // Always a frame, never bare text: the token has nowhere to ride on a plain string, and the
+  // alternative (a frame only for a message carrying extras) would leave the commonest message of all
+  // unable to be matched to its turn. The server reads a frame's text exactly as it reads a bare one
+  // (`_parse_input` feeds it straight through, commands and all), so this changes what the message
+  // travels in and nothing about what it says. The approval and /stop replies the page sends from its
+  // own controls are still bare text: those answer a turn rather than opening one, and draw no bubble.
+  const frame = { type: "input", text: outgoing, token };
+  if (attached.length) frame.images = attached.map(a => a.dataUrl);
+  if (thinking) frame.thinking = thinking;
+  ws.send(JSON.stringify(frame));
+  if (attached.length) {
+    attached = [];
+    renderPreviews();
   }
   input.value = "";
   autoGrowInput();  // collapse the box back to one row

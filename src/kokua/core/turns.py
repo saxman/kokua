@@ -316,6 +316,10 @@ class TurnRunner:
         # channel arrives on, so it is where that belief gets guarded rather than assumed.
         requested = thinking_request((msg.metadata or {}).get("thinking")) if workflow is None else None
         thinking = declared if requested is None else requested
+        # The front end's own id for the message it drew for this turn, read from the same metadata and
+        # echoed back when the turn reaches the store, which is how a front end matches the two. Named
+        # apart from the contextvar reset token below, which is a different thing entirely.
+        bubble_token = (msg.metadata or {}).get("token")
         self._book.pin(conversation_id)  # invariant 2
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
@@ -421,7 +425,7 @@ class TurnRunner:
                         await self._ui.send(notice, reply_to=msg)
                     except Exception:
                         pass
-                    await self._persist(conversation_id, user_index)
+                    await self._persist(conversation_id, user_index, token=bubble_token)
                     return
                 except ModelConnectionError as exc:
                     # before the send: invariant 5
@@ -457,7 +461,7 @@ class TurnRunner:
                     )
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
-                await self._persist(conversation_id, user_index)
+                await self._persist(conversation_id, user_index, token=bubble_token)
         finally:
             current_metrics.reset(metrics_token)
             current_review_context.reset(review_token)
@@ -910,7 +914,7 @@ class TurnRunner:
         except Exception:
             logger.warning("A scheduled task ran; its notification could not be delivered", exc_info=True)
 
-    async def _persist(self, conversation_id: str, user_index: int) -> None:
+    async def _persist(self, conversation_id: str, user_index: int, *, token: Optional[str] = None) -> None:
         """Snapshot the turn onto its session, refreshing the sidebar if a title was just derived, and
         publish where the turn starts so a front end can offer an action on it.
 
@@ -918,6 +922,10 @@ class TurnRunner:
         ``branchable``: a front end offering to branch a turn must never be offered one the store does
         not hold, and an index that names no user turn there (an unattended run whose only user-role
         message was a loop injection, or a turn that committed none at all) is no turn to act on.
+
+        ``token`` rides along so the front end can tell which of the messages it drew this turn was
+        made of. It defaults to None for the callers where that is the honest answer: a proactive turn
+        and a scheduled firing are nobody's typed message.
         """
         title_derived = self._book.persist(conversation_id)
         # The store now holds what the catch-up record stood in for. Dropped here, between the write and
@@ -930,4 +938,4 @@ class TurnRunner:
             # replaces it (with a push of its own) whenever the model answers.
             self._spawn_title(conversation_id)
         if self._book.branchable(conversation_id, user_index):
-            await self._ui.turn_saved(conversation_id, user_index)
+            await self._ui.turn_saved(conversation_id, user_index, token=token)

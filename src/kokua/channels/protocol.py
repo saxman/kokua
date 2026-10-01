@@ -39,12 +39,24 @@ class RichChannel(Protocol):
         A duration rather than a flag plus a duration, so "idle, and it has been going 12 seconds"
         cannot be expressed."""
 
-    async def send_turn_saved(self, conversation_id: str, message_index: int) -> None:
+    async def send_turn_saved(self, conversation_id: str, message_index: int, token: Optional[str] = None) -> None:
         """Say that a turn's transcript has reached the store, and where that turn starts.
 
         The index is the position of the turn's user message, which is what identifies a turn to
         anything that acts on one (branching it, replaying its recorded cards). Sent after the write,
-        so a front end offering an action on the turn is never offering one the store cannot serve."""
+        so a front end offering an action on the turn is never offering one the store cannot serve.
+
+        ``token`` is whatever the front end sent with the message this turn was made of, echoed back
+        so it can match the two. None for a turn no front end started, which is why a front end that
+        mints tokens must treat an absent one as "not mine" rather than as the next one waiting."""
+
+    async def send_steering(self, text: str, token: Optional[str] = None) -> None:
+        """Say that a message has joined the turn already running instead of starting one of its own.
+
+        The counterpart to ``send_turn_saved`` and the reason it carries a token: these are the two
+        fates a message can meet, and a front end that drew the message cannot tell them apart when
+        it sends. A steered message never gets a ``turn_saved``, so this is the only frame that will
+        ever name it."""
 
     async def send_notification(
         self,

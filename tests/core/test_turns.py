@@ -43,6 +43,25 @@ def message(text: str, images: list | None = None) -> ChannelMessage:
     return ChannelMessage(text=text, channel="fake", images=images)
 
 
+class _SteeringEchoChannel(FakeChannel):
+    """Delivers one message carrying a front end's bubble token, and records the steering frame.
+
+    `FakeChannel` yields bare text, and the token rides the message's metadata, which is the whole
+    thing under test here.
+    """
+
+    def __init__(self, text: str, token: str):
+        super().__init__()
+        self._message = ChannelMessage(text=text, channel="fake", metadata={"token": token})
+        self.steering: list[tuple[str, str | None]] = []
+
+    async def receive(self):
+        yield self._message
+
+    async def send_steering(self, text: str, token: str | None = None) -> None:
+        self.steering.append((text, token))
+
+
 @pytest.fixture
 async def track_running_turn():
     """Track a turn on a conversation that never finishes on its own, and end it at teardown.
@@ -95,10 +114,35 @@ async def test_a_completed_turn_publishes_where_it_starts(tmp_path):
     await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
 
     assert len(channel.turns_saved) == 1
-    conversation_id, index = channel.turns_saved[0]
+    conversation_id, index, _token = channel.turns_saved[0]
     assert conversation_id == assistant._active_id
     stored = assistant._store.get(conversation_id)
     assert stored.messages[index]["role"] == "user"
+
+
+async def test_a_completed_turn_echoes_the_token_of_the_message_that_started_it(tmp_path):
+    """The front end drew a message of its own and is waiting to hear which turn it became, so the
+    token it sent with that message rides back out on the turn's own frame."""
+    channel = _TurnSavedChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["sure"]))
+
+    await assistant._handle(
+        ChannelMessage(text="hello", channel="fake", metadata={"token": "b2"}),
+        conversation_id=assistant._active_id,
+    )
+
+    assert channel.turns_saved[0][2] == "b2"
+
+
+async def test_a_turn_nobody_minted_a_token_for_publishes_without_one(tmp_path):
+    """A scheduled firing and a terminal both reach this frame with no page behind them, so an absent
+    token has to stay absent rather than become a value every reader has to recognize."""
+    channel = _TurnSavedChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["sure"]))
+
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    assert channel.turns_saved[0][2] is None
 
 
 async def test_a_turn_that_committed_no_user_message_publishes_nothing(tmp_path):
@@ -2083,6 +2127,32 @@ async def test_the_serve_loop_steers_a_running_turn_instead_of_submitting_a_new_
 
     assert mailbox.close() == ["actually, use the cache"]
     assert assistant._tracker.get(assistant._active_id).handle is handle  # no second turn submitted
+
+
+async def test_a_steered_messages_token_rides_back_so_the_page_can_mark_its_bubble(tmp_path, track_running_turn):
+    """A steered message produces no turn of its own, so nothing else will ever name it again: this is
+    the only frame that can tell a front end which of the two fates the message it drew has met."""
+    channel = _SteeringEchoChannel("actually, use the cache", token="b4")
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    track_running_turn(assistant, SteeringMailbox())
+
+    await assistant._serve_channel()
+
+    assert channel.steering == [("actually, use the cache", "b4")]
+
+
+async def test_a_message_that_starts_a_turn_reports_no_steering(tmp_path):
+    """The other half: a message with no turn to join is not reported as having joined one, which is
+    what leaves its bubble waiting for the save that will stamp it."""
+    channel = _SteeringEchoChannel("hello", token="b5")
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["sure"]))
+
+    await assistant._serve_channel()  # submits the turn as a background task
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:  # let it finish, so a report from the turn itself would be seen too
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    assert channel.steering == []
 
 
 async def test_a_pending_approval_still_takes_the_message_rather_than_steering(tmp_path, track_running_turn):

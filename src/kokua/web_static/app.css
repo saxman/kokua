@@ -290,6 +290,12 @@ header { display: flex; align-items: center; justify-content: space-between; gap
   display: flex; align-items: baseline; gap: 8px; }
 .bubble-body { flex: 1; min-width: 0; }
 .user { margin-top: 22px; }
+/* A message that joined the turn already running rather than opening one of its own. It keeps the user
+   row's marker, measure and indent, and gives up the gap that separates one turn from the next, because
+   it belongs inside the turn above it. That is also why it carries none of a turn's controls: there is
+   no turn of its own to branch, and the index that would truncate "here" points into the middle of
+   one. */
+.bubble.user.steered { margin-top: 10px; }
 .row-marker { flex: none; color: var(--fg-faint); user-select: none; }
 .assistant { margin-top: 10px; }
 /* On the body, not the block: as a flex item of the block it would sit beside the content instead of

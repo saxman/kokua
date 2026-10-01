@@ -828,6 +828,11 @@ class Assistant:
                 # switch, and a pending approval or decision still consumes the reply. A workflow
                 # command still starts a workflow turn, which queues as it always has.
                 if workflow is None and self._offer_steering(msg, self._active_id):
+                    # Reported here rather than inside `_offer_steering`, which stays a decision and
+                    # nothing else. A front end that drew this message is now waiting to hear which of
+                    # two fates it met, and a steered message produces no turn of its own, so this is
+                    # the only thing that will ever name it (see `ChannelUI.steering_taken`).
+                    await self._ui.steering_taken(msg.text or "", token=(msg.metadata or {}).get("token"))
                     continue
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. The gate still serializes same-conversation turns (a proactive turn

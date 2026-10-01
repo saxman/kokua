@@ -93,16 +93,20 @@ def _parse_control(raw: str) -> Optional[dict]:
     return None
 
 
-def _parse_input(raw: str) -> Optional[tuple[str, list[str], Optional[str]]]:
-    """Return ``(text, image_data_urls, thinking)`` for an ``{"type": "input", ...}`` frame, else None.
+def _parse_input(raw: str) -> Optional[tuple[str, list[str], Optional[str], Optional[str]]]:
+    """Return ``(text, image_data_urls, thinking, token)`` for an ``{"type": "input", ...}`` frame, else
+    None.
 
-    The page sends this shape whenever a message carries anything beyond its own text: attached images,
-    a per-turn reasoning effort, or both. A frame carrying neither still parses, into an empty list and a
-    None, because declining it here would drop its text back to the plain-string path, which would then
-    feed the raw JSON to the model as if the user had typed it.
+    Every message the page composes has this shape, carrying whatever that message needs: attached
+    images, a per-turn reasoning effort, the page's own id for the bubble it drew, or any combination.
+    A frame carrying none of them still parses, into an empty list and two Nones, because declining it
+    here would drop its text back to the plain-string path, which would then feed the raw JSON to the
+    model as if the user had typed it.
 
-    A non-string ``thinking`` is dropped rather than passed on. The core normalizes the value anyway, so
-    this is not the check that makes it safe; it is what keeps a malformed frame from travelling.
+    A non-string ``thinking`` or ``token`` is dropped rather than passed on. The core normalizes the
+    effort anyway, so this is not the check that makes it safe; it is what keeps a malformed frame from
+    travelling, and for the token it is the only such check, since nothing downstream reads it except
+    the frame that echoes it back.
     """
     try:
         obj = json.loads(raw)
@@ -113,7 +117,13 @@ def _parse_input(raw: str) -> Optional[tuple[str, list[str], Optional[str]]]:
     images_field = obj.get("images")
     urls = [u for u in images_field if isinstance(u, str)] if isinstance(images_field, list) else []
     thinking = obj.get("thinking")
-    return str(obj.get("text", "")), urls, thinking if isinstance(thinking, str) else None
+    token = obj.get("token")
+    return (
+        str(obj.get("text", "")),
+        urls,
+        thinking if isinstance(thinking, str) else None,
+        token if isinstance(token, str) else None,
+    )
 
 
 async def _sync_view(channel: WebChannel, assistant: Assistant) -> None:
@@ -335,14 +345,15 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
             inbound: asyncio.Queue = asyncio.Queue()  # unbounded: a reader that blocks is the bug above
 
             # Conversation controls (new/select/delete) are handled here and never reach the channel; an
-            # "input" frame carrying attached images or a per-turn reasoning effort is decoded and fed with
-            # its text; all other frames (chat, "/stop", approval "y"/"n") are fed to the channel as today.
+            # "input" frame (every message the composer sends, with whatever that message carries) is
+            # decoded and fed with its text; all other frames ("/stop", approval "y"/"n", and anything
+            # another client sends as bare text) are fed to the channel as today.
             async def apply_frames() -> None:
                 while True:
                     raw = await inbound.get()
                     parsed = _parse_input(raw)
                     if parsed is not None:
-                        text, data_urls, thinking = parsed
+                        text, data_urls, thinking, token = parsed
                         # Save each upload to disk, then hand the agent the filesystem paths (AIMU
                         # base64-inlines them for the model; persistence later compacts them back to the
                         # same /images/<hash> reference). Undecodable data URLs are dropped.
@@ -351,7 +362,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
                             reference = images.save_data_url(config.images_path, data_url)
                             if reference:
                                 paths.append(str(images.reference_to_path(config.images_path, reference)))
-                        await channel.feed_input(text, paths, thinking=thinking)
+                        await channel.feed_input(text, paths, thinking=thinking, token=token)
                         continue
                     control = _parse_control(raw)
                     if control is None:

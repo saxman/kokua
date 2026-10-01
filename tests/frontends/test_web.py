@@ -259,6 +259,36 @@ async def test_web_channel_send_turn_saved_emits_frame():
     assert ws.frames == [{"type": "turn_saved", "conversation_id": "abc123", "message_index": 4}]
 
 
+async def test_web_channel_send_turn_saved_echoes_the_token_the_page_sent():
+    """The page matches a bubble to its turn by the token it minted for it, so the token has to come
+    back on the frame that reports the turn rather than on nothing."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_turn_saved("abc123", 4, token="t-7")
+    assert ws.frames == [{"type": "turn_saved", "conversation_id": "abc123", "message_index": 4, "token": "t-7"}]
+
+
+async def test_web_channel_send_steering_carries_the_token_of_the_message_that_landed():
+    """The message's other possible fate. A steered message produces no `turn_saved` of its own, so
+    this is the only frame that can tell the page which bubble joined the running turn."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_steering("use the cache", token="t-8")
+    assert ws.frames == [{"type": "steering", "text": "use the cache", "token": "t-8"}]
+
+
+async def test_a_steering_frame_with_no_token_names_no_bubble():
+    """A message no page minted a token for (one typed at another front end, or sent to the socket as
+    bare text) has no bubble to name, so the key is absent rather than null: the page claims on the
+    token's presence, and a null would be a second spelling of "nothing to claim" for both ends to
+    remember. It also leaves the frame identical to the one the stream sends when the run reads the
+    message, which is the frame this one sits beside."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_steering("use the cache")
+    assert ws.frames == [{"type": "steering", "text": "use the cache"}]
+
+
 async def test_web_channel_send_settings_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -2209,6 +2239,23 @@ def test_ws_input_frame_thinking_reaches_the_stored_turn(tmp_path):
     assert "high" in session.metadata["thinking"].values()
 
 
+def test_ws_input_frame_token_rides_back_on_the_turns_own_frame(tmp_path):
+    """The whole round trip over a real socket, which no unit test above reaches: the page mints a
+    token, the turn made of that message echoes it, and the page matches the two. A mis-wire anywhere
+    between `_parse_input` and `_persist` passes every piece-wise test and still leaves the page
+    guessing which turn its bubble became."""
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient(["Hello there."]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "input", "text": "hi", "token": "b1"}))
+        saved = _drain_until(ws, "turn_saved")
+
+    assert saved["token"] == "b1"
+
+
 def test_index_route_serves_html(tmp_path):
     from starlette.testclient import TestClient
 
@@ -2416,7 +2463,7 @@ def test_parse_input_reads_an_effort_off_a_frame_with_no_images():
 
     parsed = _parse_input('{"type": "input", "text": "hello", "thinking": "high"}')
 
-    assert parsed == ("hello", [], "high")
+    assert parsed == ("hello", [], "high", None)
 
 
 def test_parse_input_reads_images_and_an_effort_together():
@@ -2424,13 +2471,13 @@ def test_parse_input_reads_images_and_an_effort_together():
 
     parsed = _parse_input('{"type": "input", "text": "what is this?", "images": ["data:x"], "thinking": "off"}')
 
-    assert parsed == ("what is this?", ["data:x"], "off")
+    assert parsed == ("what is this?", ["data:x"], "off", None)
 
 
 def test_parse_input_returns_no_effort_when_the_frame_carries_none():
     from kokua.frontends.web import _parse_input
 
-    assert _parse_input('{"type": "input", "text": "hi", "images": ["data:x"]}') == ("hi", ["data:x"], None)
+    assert _parse_input('{"type": "input", "text": "hi", "images": ["data:x"]}') == ("hi", ["data:x"], None, None)
 
 
 def test_parse_input_ignores_a_non_string_effort():
@@ -2438,7 +2485,23 @@ def test_parse_input_ignores_a_non_string_effort():
     it here keeps a malformed frame from reaching the core at all."""
     from kokua.frontends.web import _parse_input
 
-    assert _parse_input('{"type": "input", "text": "hi", "thinking": 3}') == ("hi", [], None)
+    assert _parse_input('{"type": "input", "text": "hi", "thinking": 3}') == ("hi", [], None, None)
+
+
+def test_parse_input_reads_the_pages_bubble_token_off_a_frame():
+    """The page mints one per message it draws a bubble for, and matches the bubble to whichever frame
+    comes back carrying it."""
+    from kokua.frontends.web import _parse_input
+
+    assert _parse_input('{"type": "input", "text": "hi", "token": "b7"}') == ("hi", [], None, "b7")
+
+
+def test_parse_input_ignores_a_non_string_token():
+    """Same guard as the effort beside it: the socket is not the page, and a malformed token would
+    otherwise travel as far as the frame that echoes it."""
+    from kokua.frontends.web import _parse_input
+
+    assert _parse_input('{"type": "input", "text": "hi", "token": 7}') == ("hi", [], None, None)
 
 
 def test_parse_input_declines_anything_that_is_not_an_input_frame():
@@ -2462,6 +2525,20 @@ def test_web_channel_feed_input_puts_the_effort_on_the_message_metadata():
     assert received[0].metadata["thinking"] == "high"
 
 
+def test_web_channel_feed_input_puts_the_bubble_token_on_the_message_metadata():
+    """The token rides the message so the turn it starts can echo it back, which is how the page
+    matches the bubble it drew to the turn that was made of it."""
+
+    async def run():
+        channel = WebChannel(_FakeWS())
+        await channel.feed_input("hello", [], token="b3")
+        await channel.feed(None)
+        return [m async for m in channel.receive()]
+
+    received = asyncio.run(run())
+    assert received[0].metadata["token"] == "b3"
+
+
 def test_web_channel_feed_input_leaves_metadata_empty_without_an_effort():
     """Absence has to stay absent: the core reads a missing key as "use the configured effort"."""
 
@@ -2474,6 +2551,7 @@ def test_web_channel_feed_input_leaves_metadata_empty_without_an_effort():
     received = asyncio.run(run())
     assert received[0].images == ["/tmp/a.png"]
     assert "thinking" not in received[0].metadata
+    assert "token" not in received[0].metadata
 
 
 class _AsgiSocket:

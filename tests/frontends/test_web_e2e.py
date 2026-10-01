@@ -1583,8 +1583,13 @@ def test_a_running_task_offers_stop_in_place_of_run_now(page, live_server):
 
 def test_a_chosen_effort_rides_the_message_it_was_set_for(page, live_server):
     """The picker's whole job, at the only layer that can see it: the frame the page puts on the wire.
-    The default has to keep sending the bare string, or every ordinary message would change shape for a
-    feature almost no message uses."""
+    A message with no choice made carries no ``thinking`` key at all, since the core reads a missing one
+    as "use the configured effort" and a present-but-empty one would be a second spelling of that.
+
+    It is still an ``input`` frame, where it used to be a bare string: the page now names every message
+    it draws a bubble for, so that the server can say which of two fates that bubble met, and a token
+    has nowhere to ride on a bare string. The frame is no longer the exception it was when the effort
+    picker was the only thing that needed one."""
     frames = []
     # Subscribed before the navigation, since the socket opens during it.
     page.on("websocket", lambda ws: ws.on("framesent", lambda payload: frames.append(payload)))
@@ -1600,9 +1605,14 @@ def test_a_chosen_effort_rides_the_message_it_was_set_for(page, live_server):
     expect(page.locator(".bubble.user", has_text="think hard about this")).to_be_visible()
     expect(page.locator(".bubble", has_text=REPLY).nth(1)).to_be_visible(timeout=10_000)
 
-    assert "ordinary question" in frames, "the default choice must still send the plain string"
     inputs = [json.loads(f) for f in frames if isinstance(f, str) and f.startswith('{"type":"input"')]
-    assert inputs == [{"type": "input", "text": "think hard about this", "thinking": "high"}]
+    assert [(f["text"], f.get("thinking")) for f in inputs] == [
+        ("ordinary question", None),
+        ("think hard about this", "high"),
+    ]
+    # Every message is named, and no two by the same name: the whole point of the token.
+    tokens = [f["token"] for f in inputs]
+    assert all(tokens) and len(set(tokens)) == len(tokens)
 
 
 def test_the_effort_picker_goes_inert_while_plan_is_on(page, live_server):
@@ -2151,19 +2161,21 @@ def test_declining_the_confirmation_deletes_nothing(page, live_server):
     expect(page.locator(".bubble", has_text=REPLY)).to_be_visible()
 
 
-def test_a_second_message_sent_mid_reply_does_not_share_the_first_turns_truncate_control(page, live_server):
-    """Regression guard: two turns pending a `turn_saved` at once must not collapse onto one bubble.
+def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_control(page, live_server):
+    """Two bubbles, two different fates, told apart by the token each was sent with.
 
-    The page used to keep a single reference to "the bubble that opened the live turn", overwritten on
-    every submit. Sending a second message while the first turn's reply was still streaming (ordinary
-    behavior; nothing here disables the composer mid-turn) meant that by the time the first turn's
-    `turn_saved` frame arrived, the lone reference already pointed at the *second* bubble, which got
-    stamped with the *first* turn's index. `addTruncateControl` refuses to stamp a bubble twice, so the
-    first bubble was left with no control at all and the second one carried the wrong index, meaning a
-    user who clicked delete on their second message would silently delete both. `pendingTurnBubbles`
-    (`app.js`), a FIFO of bubbles awaiting their save consumed oldest first, is what fixed it: this test
-    would fail on the old single-reference code, since only one control would ever appear (on the wrong
-    bubble) instead of two.
+    This used to assert the other half of the same rule: two turns pending a save at once, each
+    stamped with its own index, which is what the page's positional queue of pending bubbles was for
+    (before it, one overwritten reference stamped the second bubble with the first turn's index, so a
+    user who clicked delete on their second message lost both). A message typed while a reply is
+    still streaming now joins that reply's turn instead of starting one of its own, so the composer
+    can no longer produce that pair at all, and the queue has been replaced by a map keyed on the
+    token each message carries. What the browser can still show is that each frame lands on the right
+    bubble: the turn's save stamps the bubble it was made of, the message that joined it is marked as
+    having joined, and nothing is left waiting afterwards.
+
+    No control on the joining bubble is the point rather than an omission: it has no turn of its own,
+    and the index that would truncate "here" points into the middle of one.
 
     `delay` here is well above zero, deliberately: the turn is held open past the point its reply
     renders, which is the window this test sends the second message inside, before the first turn's
@@ -2181,31 +2193,27 @@ def test_a_second_message_sent_mid_reply_does_not_share_the_first_turns_truncate
     # #send is hidden (not disabled) while a turn is processing, so submit the way the composer's own
     # keydown listener does rather than clicking a control Playwright would refuse to act on.
     page.locator("#msg").press("Enter")
-    expect(page.locator(".bubble.user", has_text="second")).to_be_visible(timeout=10_000)
+    # The mark is the token round trip made visible: the server reported this message steered, naming
+    # the bubble by the token the page sent with it, and nothing else on the page carries that name.
+    expect(page.locator(".bubble.user.steered", has_text="second")).to_have_count(1, timeout=10_000)
 
-    # Both turns pending at the same time is the whole point of this test, so assert it rather than
-    # trusting the delay: on a slower machine the second submit could land after the first turn was
-    # already saved, which would quietly turn this into the sequential case another test covers.
-    assert page.evaluate("() => pendingTurnBubbles.length") == 2
-
-    # Both turns must finish (the second queues behind the first on the same conversation) before both
-    # controls can exist, so wait for the second reply too.
+    # Both turns must finish before the first one's control can exist, so wait for the reply the
+    # message that could not be delivered is answered with as well.
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(2, timeout=20_000)
 
-    controls = page.locator(".bubble.user .bubble-meta .bubble-truncate")
-    expect(controls).to_have_count(2, timeout=10_000)
+    # Exactly one bubble was stamped, and it is the one whose turn the save was about.
     stamped = page.locator(".bubble.user[data-truncate-index]")
-    expect(stamped).to_have_count(2)
-    first_index = stamped.nth(0).get_attribute("data-truncate-index")
-    second_index = stamped.nth(1).get_attribute("data-truncate-index")
-    assert first_index is not None and second_index is not None
-    assert first_index != second_index
+    expect(stamped).to_have_count(1, timeout=10_000)
+    expect(stamped).to_contain_text("first")
+    expect(page.locator(".bubble.user.steered .bubble-truncate")).to_have_count(0)
+    # Nothing strands: an entry the server never named would sit in the map forever, which is the
+    # defect the positional queue had and the reason this one is keyed.
+    assert page.evaluate("() => pendingBubbles.size") == 0
 
-    controls.nth(1).click()  # delete from the second turn only
+    page.locator(".bubble.user .bubble-meta .bubble-truncate").click()  # delete from the first turn
 
-    expect(page.locator(".bubble.user", has_text="second")).to_have_count(0, timeout=10_000)
-    expect(page.locator(".bubble.user", has_text="first")).to_be_visible()
-    expect(page.locator(".bubble", has_text=REPLY)).to_have_count(1)
+    expect(page.locator(".bubble.user", has_text="first")).to_have_count(0, timeout=10_000)
+    expect(page.locator(".bubble", has_text=REPLY)).to_have_count(0)
 
 
 def test_alert_cards_group_and_guard_their_controls(page, live_server):
