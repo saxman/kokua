@@ -71,6 +71,18 @@ def test_a_message_offered_after_the_last_drain_comes_back_from_close():
     assert mailbox.close() == ["just missed it"]
 
 
+def test_peek_undelivered_neither_consumes_nor_closes():
+    # The property this task's review called out by name: a second peek sees the same thing the
+    # first did, and close() afterward still sees it too. A peek sharing entry_reader()'s mutating
+    # drain() would pass the notice-text check in test_turns.py while failing this.
+    mailbox = SteeringMailbox()
+    mailbox.offer("never mind, do the other thing")
+
+    assert mailbox.peek_undelivered() == ["never mind, do the other thing"]
+    assert mailbox.peek_undelivered() == ["never mind, do the other thing"]
+    assert mailbox.close() == ["never mind, do the other thing"]
+
+
 def test_the_shared_source_reads_the_contextvar_when_a_reader_is_opened():
     mailbox = SteeringMailbox()
     token = current_steering.set(mailbox)
