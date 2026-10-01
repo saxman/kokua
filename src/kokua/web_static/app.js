@@ -765,13 +765,16 @@ let streamingText = "";      // raw answer text, the source of truth every live 
 let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
 let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
 // Bubbles whose fate the server has not reported yet, keyed by the token the page minted for each.
-// Keyed rather than ordered because a message has two possible fates and only one of them is a turn: it
-// either runs as its own turn (`turn_saved`) or joins the turn already running (`steering`), and the
-// page cannot know which when it sends. A positional queue could not tell those apart, so a steering
-// message stranded an entry at the head and the *next* turn's save took the stale entry, stamping an
-// older bubble with a newer turn's index. That is worse than losing the control, because the index is a
+// Keyed rather than ordered because a message has two frames it can be named by in sequence, not one:
+// `steering` first if it is accepted into the turn already running, and then either nothing more (the
+// run reads it and it stays folded into that turn) or a `turn_saved` of its own after all (the run
+// never reads it, so it becomes a follow-up turn, carrying the same token). The page cannot know which
+// of those it sends toward. A positional queue could not tell any of this apart, so a steering message
+// stranded an entry at the head and the *next* turn's save took the stale entry, stamping an older
+// bubble with a newer turn's index. That is worse than losing the control, because the index is a
 // valid turn boundary the server will honour, so the user would click delete on one message and lose
-// that one and the message before it.
+// that one and the message before it. See the `turn_saved` and `steering` frame handling below for how
+// the sequence actually plays out.
 //
 // Matching also makes an unclaimed entry harmless, where a count had to be kept honest: text the server
 // answers as a command (or as the reply to a pending approval) runs no turn and is simply never claimed,
@@ -1725,11 +1728,12 @@ function handleFrame(event) {
       }
       else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response });
       else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
-      // A message that joined this turn while it was running. Rendered as a row where the live frame
-      // instead marks the bubble the page had already drawn: that bubble was local to the session that
-      // sent it and this repaint replaced it, and the turn is still in flight, so the store does not
-      // hold the message either. Without the row the user's own words would vanish from the turn they
-      // were sent into until it finishes.
+      // A message sent into a turn already running, read from the stored record
+      // (`record_turn_provenance`'s `steering` map) rather than a frame about a turn still open: this
+      // item type reaches here for a turn long since finished and saved exactly as it does for one
+      // still in flight when the page connected, since the item carries nothing saying which. Rendered
+      // as a collapsed row rather than the live view's marked user bubble (the `.steered` class), a
+      // deliberate divergence reasoned about in `replay_items`'s own docstring rather than here.
       else if (item.type === "steering") renderSteering(item.text, item.ts);
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);

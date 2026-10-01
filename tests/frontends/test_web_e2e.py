@@ -2224,6 +2224,26 @@ def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_co
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(0)
 
 
+def test_a_steered_messages_absent_truncate_control_survives_a_reload(page, live_server):
+    """`replay_items` gives a steering message no `message_index`, so a page that reads controls from
+    that field has nothing to stamp it with; this is the one test that reloads and checks the page
+    actually behaves that way, rather than checking the index alone (see
+    `test_replay_items_gives_a_steering_message_no_index_to_truncate_at`, which does the latter)."""
+    page.on("dialog", lambda dialog: dialog.accept())
+    _open(page, live_server(delay=2.0))
+    page.fill("#msg", "first")
+    page.click("#send")
+    expect(page.locator(".bubble", has_text=REPLY)).to_be_visible(timeout=10_000)
+    page.fill("#msg", "second")
+    page.locator("#msg").press("Enter")
+    expect(page.locator(".bubble", has_text=REPLY)).to_have_count(2, timeout=20_000)
+
+    page.reload()
+    page.wait_for_selector("#conv-list li")
+    expect(page.locator(".bubble.user .bubble-meta .bubble-truncate")).to_have_count(1, timeout=10_000)
+    expect(page.locator("#log")).to_contain_text("second")
+
+
 def test_alert_cards_group_and_guard_their_controls(page, live_server):
     """Three page-side rules, driven by injecting frames rather than by arranging three server states:
     a later card supersedes its own group, a card whose conversation is gone keeps its text and loses

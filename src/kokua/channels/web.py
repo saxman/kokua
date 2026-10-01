@@ -318,9 +318,12 @@ class WebChannel(BaseWebChannel):
 
         Sent when the message is accepted, which is also why it is a frame of Kokua's own rather than
         the ``steering`` frame the stream already carries: that one is mapped from AIMU's own chunk
-        when the run *drains* the message, and the mailbox between the two carries text and no token,
-        so there is no route for the token through it. Both frames are the same type, and the page
-        tells them apart by exactly the thing it needs: the one carrying a token names a bubble.
+        when the run *drains* the message, and a reader's ``drain`` (``SteeringMailbox.reader``)
+        hands AIMU the text alone, never the token, since text is all AIMU's own loop takes as a
+        prompt. The mailbox keeps the token (see ``SteeringMessage``) only as far as that drain; AIMU
+        never sees it, so the chunk built from AIMU's side has none to carry. Both frames are the same
+        type, and the page tells them apart by exactly the thing it needs: the one carrying a token
+        names a bubble.
         """
         frame: dict[str, Any] = {"type": "steering", "text": text}
         if token is not None:

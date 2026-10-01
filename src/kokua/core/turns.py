@@ -515,7 +515,9 @@ class TurnRunner:
         The several messages become one turn, so only one front-end bubble can carry that turn's
         controls, and it is the first: the same rule a replay follows for a turn that drew several
         bubbles (text and images), and the only one of them whose index would be the turn's own. The
-        rest keep the mark saying they were accepted, which is what happened to them.
+        rest keep the mark saying they belong inside the turn above them (``app.css``'s own words for
+        it), which is still true: each was accepted into a run, and the turn that run became is this
+        one.
         """
         token = messages[0].token if messages else None
         await self.reactive(
