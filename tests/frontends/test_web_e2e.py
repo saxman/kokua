@@ -2197,8 +2197,13 @@ def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_co
     # the bubble by the token the page sent with it, and nothing else on the page carries that name.
     expect(page.locator(".bubble.user.steered", has_text="second")).to_have_count(1, timeout=10_000)
 
-    # Both turns must finish before the first one's control can exist, so wait for the reply the
-    # message that could not be delivered is answered with as well.
+    # One turn, two replies: the steered message IS delivered here, by AIMU's `TERMINAL_HEALTHY`
+    # branch, which drains steering and takes one more round, and that round is the second REPLY. So
+    # waiting for it is waiting for the one turn to finish, which is what its save (and the control
+    # below) depends on. The *other* steering outcome, a message accepted and never drained, which
+    # `TurnRunner._resubmit_steering` then re-runs as a follow-up turn, is exercised by no test here
+    # or anywhere: that path leaves this bubble marked steered and unstamped, and a reader who takes
+    # this line for coverage of it will reach the wrong conclusion about what the page does then.
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(2, timeout=20_000)
 
     # Exactly one bubble was stamped, and it is the one whose turn the save was about.
