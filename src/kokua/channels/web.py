@@ -287,7 +287,7 @@ class WebChannel(BaseWebChannel):
             frame["elapsed"] = elapsed
         await self.send_frame(frame)
 
-    async def send_turn_saved(self, conversation_id: str, message_index: int, token: Optional[str] = None) -> None:
+    async def send_turn_saved(self, conversation_id: str, message_index: int, *, token: Optional[str] = None) -> None:
         """Tell the page a turn has reached the store, and where in the transcript it starts.
 
         Never muted (``turn_saved`` is not in ``_TURN_FRAMES``): it carries the conversation it is
@@ -308,13 +308,15 @@ class WebChannel(BaseWebChannel):
             frame["token"] = token
         await self.send_frame(frame)
 
-    async def send_steering(self, text: str, token: Optional[str] = None) -> None:
+    async def send_steering(self, text: str, *, token: Optional[str] = None) -> None:
         """Tell the page a message it drew has joined the turn already running rather than starting one.
 
         The other fate a message can meet, and the reason the page matches a bubble to a frame rather
-        than counting bubbles off against turns: a steered message is folded into a turn that is
-        already under way, so it never produces a ``turn_saved`` of its own and nothing else would
-        ever name it again.
+        than counting bubbles off against turns: a steered message is normally folded into the turn
+        already under way and produces no ``turn_saved`` of its own, so nothing else would ever name it
+        again. The exception is a message the turn accepts and never reads, which runs as a follow-up
+        turn carrying this same token, so a later ``turn_saved`` naming a bubble this frame already
+        marked is a supersession the page expects rather than a mis-stamp.
 
         Sent when the message is accepted, which is also why it is a frame of Kokua's own rather than
         the ``steering`` frame the stream already carries: that one is mapped from AIMU's own chunk

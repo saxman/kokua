@@ -8,8 +8,10 @@ behind the turn on the gate.
 Two design points are worth reading before changing anything here.
 
 **Append-only with a cursor per reader, not a queue.** The user's message goes to the entry agent
-*and* to every live worker, so a shared queue would let whichever worker drained first consume a
-message the conversation never saw.
+*and* to every worker a declared agent spawned, so a shared queue would let whichever worker drained
+first consume a message the conversation never saw. ("A declared agent" is the limit, not a flourish:
+a worker ``toolsets/capabilities.py`` composes per call builds its own spawn tool and is handed no
+source, so it cannot be redirected. ``TODO.md`` carries that gap.)
 
 **Nothing here awaits.** ``offer`` and ``close`` are both synchronous, and asyncio is
 single-threaded, so there is no interleaving between the moment a turn's ``finally`` shuts the
@@ -34,10 +36,10 @@ class SteeringMessage:
     """One message handed to a running turn: what the user said, and the front end's id for it.
 
     The id is what a front end that draws its own bubbles matches a message to its fate by, and it has
-    to travel this far because a message can meet its *second* fate here: accepted into the turn,
-    never read, and then run as a turn of its own. That follow-up turn's save is the only frame left
-    to name the bubble, and the text cannot name it (two messages can read the same). ``None`` where
-    the channel draws no bubbles, which is every channel but the web page.
+    to travel this far because a message can meet a further fate here: accepted into the turn, never
+    read, and then run as a turn of its own. That follow-up turn's save is the only frame left to name
+    the bubble, and the text cannot name it (two messages can read the same). ``None`` where the
+    channel draws no bubbles, which is every channel but the web page.
     """
 
     text: str
@@ -61,11 +63,14 @@ class SteeringMailbox:
         # worker consumed still runs as a follow-up turn rather than vanishing into a summary.
         self._entry_seen = 0
 
-    def offer(self, text: str, token: Optional[str] = None) -> bool:
+    def offer(self, text: str, *, token: Optional[str] = None) -> bool:
         """Hand a message to the running turn. ``False`` means the turn is gone: run it as a turn.
 
         ``token`` is the front end's own id for the message, carried for the reason
-        :class:`SteeringMessage` gives and never read here.
+        :class:`SteeringMessage` gives and never read here. Keyword-only, which is the shape every
+        optional opaque id on this feature's surfaces takes (``ChannelUI.steering_taken`` and
+        ``turn_saved``, ``RichChannel.send_steering`` and ``send_turn_saved``), so a caller cannot pass
+        one by position and an added parameter cannot change what a positional argument means.
         """
         if not self._open:
             return False
@@ -81,6 +86,20 @@ class SteeringMailbox:
         replaced. The context comes off this instance for the reason ``__init__`` gives: a
         contextvar set inside the turn is invisible on the task an offer arrives on.
 
+        **The amendment happens on acceptance, not on delivery**, which is the earlier of the two
+        moments a reader might expect. Acceptance is where the text already is, so it costs nothing;
+        delivery would mean carrying the text as far as the drain and amending from inside AIMU's own
+        loop. The gap between the two only ever makes the reviewer read something
+        the user did say and the run has not acted on yet, because this appends and never replaces,
+        never touches ``used``, and is reachable only from ``offer``, whose input is the user's own
+        words. A message accepted and never drained is the case the gap is visible in, and all it
+        leaves behind is a sentence in a context the turn is about to discard.
+
+        What that costs instead is unbounded growth: every accepted message appends to ``request``, and
+        nothing trims it, so a turn steered many times sends a reviewer a prompt that keeps getting
+        longer. The reviewer's own cost is already uncounted, which
+        ``docs/explanation/auto-approval.md`` names as a known limit, so this rides along inside it.
+
         Only ``request`` is touched. ``used`` is deliberately left alone: the round cap bounds
         autonomous iteration, which a human message ends, while the approval budget bounds how many
         gated calls run without a prompt, which more user text does not make safer. An unattended
@@ -94,6 +113,15 @@ class SteeringMailbox:
         """A cursor for one run: the entry agent's, or one spawned worker's.
 
         Drains the text alone, which is what AIMU's loop takes as the prompt for its next round.
+
+        Opens at zero, so a worker spawned *after* a message was offered still receives it. That is
+        deliberate, and it is where this cursor and :meth:`entry_reader`'s differ: the entry cursor
+        measures one conversation's progress through the whole turn, while a worker's measures one
+        run that did not exist when the earlier messages arrived. Replaying them to it is context
+        rather than news, since the entry agent had already read the redirection and written the spawn
+        prompt with it in hand, and it is bounded (one round-budget reset per worker, under AIMU's own
+        cap on those). Opening at the current length instead would make the mailbox's simplest
+        property, append-only with every reader seeing the list, depend on when a reader was opened.
         """
         seen = 0
 
@@ -106,7 +134,12 @@ class SteeringMailbox:
         return drain
 
     def entry_reader(self) -> Callable[[], list[str]]:
-        """The entry agent's cursor, whose progress decides what ``close`` hands back."""
+        """The entry agent's cursor, whose progress decides what ``close`` hands back.
+
+        One per turn rather than one per run, which is the asymmetry :meth:`reader` explains from the
+        other side: this position is the conversation's, so every entry-agent run inside a turn shares
+        it, where each worker gets a fresh one opened at zero.
+        """
 
         def drain() -> list[str]:
             pending = self._messages[self._entry_seen :]
@@ -170,10 +203,11 @@ class _ContextSteering:
 
 
 #: Handed to the entry agent's own runs: the conversation's cursor, whose progress decides what
-#: ``close`` re-submits. One cursor per *turn*, not per run, which is why the planning workflow's
-#: three entry-agent runs in one turn correctly share it.
+#: ``close`` re-submits. One cursor per *turn*, not per run, so every entry-agent run inside one turn
+#: shares it. That is what the planning workflow needs, which makes several of them: a message one run
+#: delivered is not re-submitted by the one after it.
 ENTRY_STEERING_SOURCE = _ContextSteering(entry=True)
 
-#: Handed to every spawned worker through its spec: an independent cursor, so a worker seeing a
-#: message is not the conversation seeing it.
+#: Handed to every worker whose spec ``core/agents.py`` writes: an independent cursor, so a worker
+#: seeing a message is not the conversation seeing it.
 STEERING_SOURCE = _ContextSteering(entry=False)

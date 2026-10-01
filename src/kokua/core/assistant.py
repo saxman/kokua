@@ -829,9 +829,11 @@ class Assistant:
                 # command still starts a workflow turn, which queues as it always has.
                 if workflow is None and self._offer_steering(msg, self._active_id):
                     # Reported here rather than inside `_offer_steering`, which stays a decision and
-                    # nothing else. A front end that drew this message is now waiting to hear which of
-                    # two fates it met, and a steered message produces no turn of its own, so this is
-                    # the only thing that will ever name it (see `ChannelUI.steering_taken`).
+                    # nothing else. A front end that drew this message is now waiting to hear which
+                    # fate it met, and a steered message normally produces no turn of its own, so
+                    # without this nothing would name it. The exception is a message this turn accepts
+                    # and never reads, which `TurnRunner._resubmit_steering` runs as a follow-up turn
+                    # carrying the same token (see `ChannelUI.steering_taken`).
                     await self._ui.steering_taken(msg.text or "", token=(msg.metadata or {}).get("token"))
                     continue
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
@@ -870,7 +872,7 @@ class Assistant:
             return False
         # The front end's own id for the bubble it drew rides along, so a message this turn accepts and
         # never reads can still be named by the follow-up turn it becomes (see `SteeringMessage`).
-        return info.steering.offer(msg.text or "", (msg.metadata or {}).get("token"))
+        return info.steering.offer(msg.text or "", token=(msg.metadata or {}).get("token"))
 
     async def _run_conversation_command(self, word: str, argument: str) -> None:
         """Run `/new`, `/conversations`, or `/switch`, and report what happened on the channel.

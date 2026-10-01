@@ -194,9 +194,12 @@ async def test_web_channel_send_suppresses_spawn_subagent_tool_frame():
 
 
 async def test_web_channel_send_relays_an_injected_round_with_the_prompt_that_was_sent():
-    """The base channel maps the CONTINUING chunk; Kokua's override only has to stop swallowing it.
-    The wrap-up's wording is the case that matters: a marker showing the nudge's text here would say
-    the model was told to keep working when it was told to stop."""
+    """The base channel maps the CONTINUING chunk, and what this pins is that Kokua's ``send`` override
+    delegates to that base loop, so the base's mapping reaches the page unchanged. The override wraps
+    the chunk iterator for image progress and adds no per-chunk branches of its own; one that did would
+    have to carry this arm forward, which is the drift this test catches. The wrap-up's wording is the
+    case that matters: a marker showing the nudge's text here would say the model was told to keep
+    working when it was told to stop."""
     ws = _FakeWS()
     channel = WebChannel(ws)
 
@@ -269,8 +272,10 @@ async def test_web_channel_send_turn_saved_echoes_the_token_the_page_sent():
 
 
 async def test_web_channel_send_steering_carries_the_token_of_the_message_that_landed():
-    """The message's other possible fate. A steered message produces no `turn_saved` of its own, so
-    this is the only frame that can tell the page which bubble joined the running turn."""
+    """The message's other possible fate. A steered message normally produces no `turn_saved` of its
+    own, so this is the only frame that can tell the page which bubble joined the running turn; the
+    exception is one the turn accepts and never reads, which comes back as a follow-up turn carrying
+    this same token."""
     ws = _FakeWS()
     channel = WebChannel(ws)
     await channel.send_steering("use the cache", token="t-8")
@@ -353,8 +358,11 @@ async def test_a_steering_chunk_becomes_a_steering_frame():
 
 
 async def test_web_channel_send_relays_a_steering_message():
-    """The base channel already maps STEERING (AIMU 0.33.0); Kokua's `send` only has to stop
-    swallowing it, exactly as it does for CONTINUING."""
+    """The base channel already maps STEERING (AIMU 0.33.0), and what this pins is what the CONTINUING
+    test above pins: Kokua's ``send`` override delegates to the base loop, so the base's mapping reaches
+    the page unchanged, and an override that grew its own per-chunk branches would have to carry this
+    arm forward. Contrast ``stream_activity``, which maps chunks itself and so needs a STEERING arm of
+    its own, pinned separately."""
     ws = _FakeWS()
     channel = WebChannel(ws)
 

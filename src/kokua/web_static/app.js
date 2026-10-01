@@ -786,7 +786,9 @@ let bubbleTokens = 0;
 // over at 1 would let that frame name a bubble this load drew and stamp it with the older turn's
 // index, which is the mis-stamp this whole mechanism exists to prevent. Math.random rather than
 // crypto.randomUUID, which is only defined in a secure context and Kokua is served over plain http.
-const bubbleEpoch = Math.random().toString(36).slice(2, 8);
+// The `+ 1` is what makes the slice six characters wide: `Math.random().toString(36)` on a value like
+// 0.5 is "0.i", and slicing past the end of that yields a one-character epoch.
+const bubbleEpoch = (Math.random() + 1).toString(36).slice(2, 8);
 
 // Take the bubble this token was minted for, if it is still waiting. Deleted on the way out, so one
 // token can claim one bubble: a frame arriving twice, or two frames carrying the same token, marks

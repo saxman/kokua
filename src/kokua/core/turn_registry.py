@@ -81,10 +81,11 @@ class TurnTracker:
         task, and its write winning is also what you want, since its mailbox is the open one. That
         holds for a reactive turn, whose entry the serve loop added and whose done-callback has not
         fired yet; a scheduled firing's follow-up has no entry to win at all, because the firing
-        removes its own before the re-submit runs, so this call finds nothing there and a firing's
-        follow-up turn cannot itself be steered. What no ordering rule can fix is that one entry
-        cannot name two concurrently live turns, which is the same limitation ``running`` documents
-        from the other side.
+        removes its own before the re-submit runs, so this call finds nothing there. Three readers want
+        the entry that would have been written, so a firing's follow-up turn gets none of them: it
+        cannot itself be steered, ``/stop`` cannot reach it, and the working indicator has nothing to
+        show for it. What no ordering rule can fix is that one entry cannot name two concurrently live
+        turns, which is the same limitation ``running`` documents from the other side.
         (Regression: ``test_a_burst_of_two_turns_leaves_the_newer_turns_mailbox_on_the_entry``.)
         """
         info = self._turns.get(conversation_id)

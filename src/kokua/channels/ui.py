@@ -130,7 +130,7 @@ class ChannelUI:
         if self._working is not None:
             await self._working(elapsed)
 
-    async def turn_saved(self, conversation_id: str, message_index: int, token: Optional[str] = None) -> None:
+    async def turn_saved(self, conversation_id: str, message_index: int, *, token: Optional[str] = None) -> None:
         """Publish the position of a turn whose transcript has just been stored.
 
         A front end uses it to offer an action on the turn that only makes sense once the store has

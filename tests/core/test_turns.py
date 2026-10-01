@@ -43,6 +43,52 @@ def message(text: str, images: list | None = None) -> ChannelMessage:
     return ChannelMessage(text=text, channel="fake", images=images)
 
 
+def test_every_stated_invariant_count_matches_the_module_docstring():
+    """Five prose sites tell a reader how many concurrency invariants this module has.
+
+    Four of them said "eight" after a ninth landed, which is the same drift
+    ``tests/test_aimu_compat.py`` pins for the AIMU floor and for the same reason: the number is a
+    fact about one file, repeated in files that cannot detect it changing. Pinned here rather than in
+    a docs test because the source of truth is ``core/turns.py``, which is where a reader who adds a
+    rule is already looking.
+
+    The count is read off the docstring's own numbered rules, so adding one and forgetting the prose
+    fails this test rather than leaving a quiet contradiction. It is checked as the English word, since
+    that is how every site spells it, and the noun is matched loosely ("invariants" in four places, "a
+    block of nine rules" in the fifth) with only number words counted, so a nearby sentence about rules
+    in general cannot inflate the tally. The expected number of statements per file is part of the
+    assertion, which is what keeps a rewrite that drops one from passing silently.
+    """
+    import re
+    from pathlib import Path
+
+    from kokua.core import turns
+
+    rules = re.findall(r"^(\d+)\. ", turns.__doc__, flags=re.MULTILINE)
+    assert rules == [str(n) for n in range(1, len(rules) + 1)], f"the rules are not numbered 1..n: {rules}"
+    words = {8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve"}
+    expected = words[len(rules)]
+
+    root = Path(__file__).resolve().parents[2]
+    # (file, how many times it states the count). The README says it twice, in the module table and
+    # again in the feature list, and both are claims about today.
+    sites = (
+        ("README.md", 2),
+        ("CLAUDE.md", 1),
+        ("docs/explanation/architecture.md", 1),
+        ("docs/explanation/design-principles.md", 1),
+    )
+
+    stale = []
+    for name, times in sites:
+        text = (root / name).read_text()
+        found = re.findall(r"\b(\w+) (?:turn |concurrency )?(?:invariants?|rules)\b", text)
+        counts = [word for word in found if word in words.values()]
+        if counts.count(expected) != times:
+            stale.append(f"{name} states {counts!r}, wanted {expected!r} {times} time(s)")
+    assert not stale, f"core/turns.py has {len(rules)} invariants: " + "; ".join(stale)
+
+
 class _SteeringEchoChannel(FakeChannel):
     """Delivers one message carrying a front end's bubble token, and records the steering frame.
 
@@ -58,7 +104,7 @@ class _SteeringEchoChannel(FakeChannel):
     async def receive(self):
         yield self._message
 
-    async def send_steering(self, text: str, token: str | None = None) -> None:
+    async def send_steering(self, text: str, *, token: str | None = None) -> None:
         self.steering.append((text, token))
 
 
@@ -1979,8 +2025,8 @@ async def test_a_failed_turn_still_closes_its_mailbox(assistant):
 async def test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn(assistant):
     submitted = []
 
-    async def capture_resubmit(conversation_id, texts):
-        submitted.append((conversation_id, texts))
+    async def capture_resubmit(conversation_id, texts, *, like=None):
+        submitted.append((conversation_id, texts, like))
 
     assistant._turns._resubmit_steering = capture_resubmit
 
@@ -1991,7 +2037,36 @@ async def test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn(ass
     assistant._book.agent_for(assistant._active_id).run = ignore_steering
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
-    assert submitted == [(assistant._active_id, [SteeringMessage("just missed it")])]
+    # `like` is the finishing turn's own message, carried so the follow-up keeps its `sender` and
+    # `channel`: the mailbox holds text and a token alone, so those have no other route back.
+    assert submitted == [(assistant._active_id, [SteeringMessage("just missed it")], message("hello"))]
+
+
+async def test_a_follow_up_turn_keeps_the_sender_and_channel_of_the_turn_it_came_from(assistant):
+    """The mailbox carries text and a token alone, so a follow-up built from scratch would reach
+    ``reactive`` with no ``sender`` and no ``channel``: the two fields a channel routes a reply by
+    (``send(reply_to=...)``). Inert on every channel in this repository and not inert by definition,
+    which is why the finishing turn's own message is the template this one is derived from. ``images``
+    is cleared and ``metadata`` replaced, so nothing else riding the original (a per-turn reasoning
+    effort) is re-applied to a turn the user never asked that of.
+    """
+    submitted = []
+
+    async def capture(msg, *, conversation_id, workflow=None, tid=None):
+        submitted.append(msg)
+
+    assistant._turns.reactive = capture
+    original = ChannelMessage(
+        text="hello", sender="chat-7", channel="fake", images=["an image"], metadata={"thinking": "high"}
+    )
+
+    await assistant._turns._resubmit_steering(
+        assistant._active_id, [SteeringMessage("just missed it", token="b2")], like=original
+    )
+
+    assert submitted == [
+        ChannelMessage(text="just missed it", sender="chat-7", channel="fake", images=None, metadata={"token": "b2"})
+    ]
 
 
 async def test_the_entry_agents_run_opens_the_conversations_own_cursor(assistant):
@@ -2130,8 +2205,10 @@ async def test_the_serve_loop_steers_a_running_turn_instead_of_submitting_a_new_
 
 
 async def test_a_steered_messages_token_rides_back_so_the_page_can_mark_its_bubble(tmp_path, track_running_turn):
-    """A steered message produces no turn of its own, so nothing else will ever name it again: this is
-    the only frame that can tell a front end which of the two fates the message it drew has met."""
+    """A steered message normally produces no turn of its own, so nothing else would name it again:
+    this is the frame that tells a front end which fate the message it drew has met. The one case where
+    a later frame names it too is the message a turn accepts and never reads, which runs as a follow-up
+    turn carrying this same token."""
     channel = _SteeringEchoChannel("actually, use the cache", token="b4")
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
     track_running_turn(assistant, SteeringMailbox())
@@ -2406,9 +2483,9 @@ async def test_an_unattended_turn_records_where_its_steering_messages_landed(tmp
 
 
 async def test_a_follow_up_turn_carries_the_token_of_the_message_that_became_it(tmp_path):
-    """A front end that drew a bubble is told one of two fates for it, and this is the case where the
-    first answer is superseded: accepted into the running turn, never read, and then run as a turn
-    after all. Without the token on that turn's save, the bubble keeps a mark saying it joined a turn
+    """A front end that drew a bubble is told which fate it met, and this is the case where the first
+    answer is superseded: accepted into the running turn, never read, and then run as a turn after
+    all. Without the token on that turn's save, the bubble keeps a mark saying it joined a turn
     it never reached and gains none of the controls of the turn it actually became.
     """
     channel = _TurnSavedChannel()

@@ -179,7 +179,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Union
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
@@ -386,6 +386,14 @@ class TurnRunner:
                             # a rich one publishes its index as it commits, so read it from the context
                             # rather than from a result that may never arrive.
                             user_index = ctx.user_index
+                            # Always `[]` on this path today, and deliberately asked anyway. A
+                            # workflow rewrites the transcript as it commits (planning replaces
+                            # everything its executor appended with one user/assistant pair), so a
+                            # message delivered inside a planned turn is not in the list this reads:
+                            # it appears live and in the catch-up record, and is gone on reload. Asked
+                            # through the same helper as the plain branch so the two cannot drift, and
+                            # so a workflow that one day commits what it was told mid-run records it
+                            # without a second change here.
                             steering_indices = resolve_steering_indices(agent.model_client.messages, user_index)
                     else:
                         # Taken here rather than before the gate: it is the lower bound the turn's own
@@ -507,9 +515,11 @@ class TurnRunner:
             # Accepted by the mailbox and never read, because the turn ended first. Running them as a
             # follow-up turn is the fallback the design promises: a message is delivered or it is the
             # next turn, never neither.
-            await self._resubmit_steering(conversation_id, undelivered)
+            await self._resubmit_steering(conversation_id, undelivered, like=msg)
 
-    async def _resubmit_steering(self, conversation_id: str, messages: list[SteeringMessage]) -> None:
+    async def _resubmit_steering(
+        self, conversation_id: str, messages: list[SteeringMessage], *, like: Optional[ChannelMessage] = None
+    ) -> None:
         """Run messages the turn never read as an ordinary follow-up turn on the same conversation.
 
         The several messages become one turn, so only one front-end bubble can carry that turn's
@@ -517,11 +527,26 @@ class TurnRunner:
         bubbles (text and images), and the only one of them whose index would be the turn's own. The
         rest keep the mark saying they belong inside the turn above them (``app.css``'s own words for
         it), which is still true: each was accepted into a run, and the turn that run became is this
-        one.
+        one. Both callers reach here only with something to run, so there is always a first.
+
+        ``like`` is the message the finishing turn was made of, used as the template this one is built
+        from so the follow-up keeps that turn's ``sender`` and ``channel``. The mailbox carries only
+        text and a token (see :class:`kokua.core.steering.SteeringMessage`), so those two fields have no
+        other route back, and they are what a channel routes a reply by (``send(reply_to=...)``): inert
+        on every channel in this repository, and not inert by definition. ``images`` is cleared because
+        a steering message is text only, and ``metadata`` is replaced rather than inherited so nothing
+        else riding the original (a per-turn reasoning effort, for one) is re-applied to a turn the user
+        never asked that of. A scheduled firing passes nothing, because it was started by a prompt and
+        not by a message: its follow-up is as anonymous as the firing was.
         """
-        token = messages[0].token if messages else None
+        template = like if like is not None else ChannelMessage(text="")
         await self.reactive(
-            ChannelMessage(text="\n\n".join(message.text for message in messages), metadata={"token": token}),
+            replace(
+                template,
+                text="\n\n".join(message.text for message in messages),
+                images=None,
+                metadata={"token": messages[0].token},
+            ),
             conversation_id=conversation_id,
         )
 
@@ -561,8 +586,13 @@ class TurnRunner:
         nothing of this exchange reaches ``_persist``'s snapshot or the sub-agent record. The reply
         reaches the channel and nothing else -- reloading the conversation will not show it. A runner
         that closes over ``ctx.agent`` and runs it directly does append, and persists normally. Whether
-        a self-contained base-tier turn's own exchange should be persisted is a product question this
-        plan leaves open.
+        a self-contained base-tier turn's own exchange should be persisted is an open product question.
+
+        Nothing here passes ``steering``, so a base-tier runner is not steerable by default. A runner
+        that wants it closes over ``ctx.agent`` and passes ``ENTRY_STEERING_SOURCE`` to its own
+        ``run()`` call, which it can: the symbol is importable from ``kokua.core.steering``, and the
+        cursor it opens belongs to the turn around it rather than to the run. A self-contained runner
+        cannot, because there is no agent run for a mailbox to reach.
         """
         base_len = len(ctx.agent.model_client.messages)
         try:

@@ -259,12 +259,13 @@ loop step makes reachable); the mailbox has closed; the message carries an image
 place inside a loop; or the text is blank, since AIMU discards whitespace at the drain and accepting it
 would mean an empty follow-up turn.
 
-**A cursor per reader, not a queue.** The message goes to the entry agent *and* to every worker that
-turn has running, because a redirection the user meant for the work is useless if it only reaches the
-supervisor. A shared queue would let whichever reader drained first consume a message the others never
+**A cursor per reader, not a queue.** The message goes to the entry agent *and* to every worker a
+declared agent spawned, because a redirection the user meant for the work is useless if it only reaches
+the supervisor. A shared queue would let whichever reader drained first consume a message the others never
 saw, so the mailbox is append-only and each run opens its own cursor over it. Two sources decide which
 cursor: `ENTRY_STEERING_SOURCE` opens the mailbox's *entry* cursor and goes to every run of the entry
-agent, while `STEERING_SOURCE` opens an independent one and rides every worker's spec. The distinction
+agent, while `STEERING_SOURCE` opens an independent one and rides the spec of every worker
+`build_agent_specs` writes (see below for the one spawn path that does not go through it). The distinction
 is load-bearing rather than tidy, because `close()` measures what is left over from the entry cursor's
 position. Hand the entry agent a worker-shaped source and that position never moves, so every message
 the turn actually *delivered* would also run again as a turn of its own. A worker having read a message
@@ -301,7 +302,12 @@ those runs delivered is not re-submitted by the one after it. A spawned worker r
 its spec, which `build_agent_specs` writes unconditionally: a stated exception to "a capability is
 declared, never defaulted", because the value is not a per-worker setting but the one process-wide
 source that resolves whichever turn is running when a reader is opened, and a worker with no turn around
-it gets a drain that returns nothing. A scheduled firing opens its mailbox in `_run_unattended` rather
+it gets a drain that returns nothing. One spawn path does not go through `build_agent_specs` and so is
+not covered: `toolsets/capabilities.py`'s `compose_subagent` builds its own spawn tool for a worker
+composed per call, and passes no `steering` (nor `events`, the same gap one subsystem over), so a worker
+composed that way cannot be redirected. `capabilities` is in the shipped default
+`[agents.assistant].tools`, which makes this reachable on a default install rather than hypothetical;
+`TODO.md` carries the fix. A scheduled firing opens its mailbox in `_run_unattended` rather
 than in the body that reads it, because the body runs in a child task that copies the context at
 creation, and reaches `close()` outside the gate hold, because a follow-up turn takes a hold of its own
 (invariant 1). What is deliberately *not* steerable is an independent reviewer
@@ -319,6 +325,13 @@ controls on the first item carrying one has nothing to stamp it with, which is e
 index that would truncate "here" points into the middle of the host turn. A transcript stored before
 turns recorded this has no entry and replays the old way, which is the best a reader can do with a
 record nobody wrote.
+
+One path records nothing, and it is the `/plan` turn. A workflow rewrites the transcript as it commits
+(planning replaces everything its executor appended with one user/assistant pair), so a message
+delivered inside a planned turn is not in the message list those indices are read off: it reaches the
+model, shows live, reaches the catch-up record a switch-in replays, and is gone on reload, where the
+turn reads as the plan and its answer alone. The call is made on that path anyway, so the two branches
+cannot drift and a workflow that one day commits what it was told mid-run needs no second change.
 
 Each channel then says it in its own vocabulary. The terminal prints the words as the run reads them,
 from AIMU's base channel, which is all a channel with no bubble to go back and mark can usefully do. The
@@ -692,8 +705,15 @@ whose agent fails to build reverts the pointer rather than stranding the view. T
 touched, and the two are ordinary independent conversations afterwards.
 
 Three things decide the shape. The cut is **a turn boundary**, found by `turn_end`: the next message the
-user actually sent, skipping the `user`-role nudges the agent loop injects between tool-calling
-iterations (`messages.is_user_turn`). That is the only cut a transcript survives, because anywhere else
+user sent to *start* a turn. Two kinds of `user`-role message sit inside a turn instead, and `turn_end`
+skips both: the nudges the agent loop injects between tool-calling iterations, which carry a provenance
+tag (`messages.is_user_turn`), and a message the user typed while the turn was running, which carries no
+tag because it genuinely is user input. The second has no tell at all, so `turn_end` takes the recorded
+indices (`metadata["steering"]`, flattened by `steered_indices`) as an argument; a transcript stored
+before that record existed passes none and behaves exactly as it always did. Stopping at a steering
+message would copy a branch that loses both the redirection and the answer it produced, which is
+normally the reason for branching there, and a steering index is refused as a turn *start* for the same
+reason. That is the only cut a transcript survives, because anywhere else
 can fall between an assistant message holding `tool_calls` and the `tool` messages answering them, which
 a provider rejects on the branch's *next* request rather than at the fork, where it could still be
 reported. The per-turn metadata maps (`subagent`, `trace`, `model`, `thinking`, `failure`, `usage`, `steering`) are

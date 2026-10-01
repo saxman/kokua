@@ -180,12 +180,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer
   been paid for. `core/steering.py` gives each turn a mailbox, `Assistant._offer_steering` routes a
   plain message into the one running on the conversation being viewed, and AIMU's loop drains it at the
   turn's next model call. The mailbox is append-only with **a cursor per reader**, not a queue, because
-  the message goes to the entry agent *and* to every worker that turn has running: a redirection that
-  only reaches the supervisor redirects nothing, and a shared queue would let whichever reader drained
-  first consume a message the others never saw. Four run shapes are steerable, and they are the four a
-  turn is made of: a plain turn, a `/plan` turn (where every entry-agent run shares the one cursor,
-  since a cursor belongs to a turn and not to a run), every spawned worker, and a scheduled firing,
-  which a user who switched into its conversation can redirect like any other. The one run that is
+  the message goes to the entry agent *and* to every worker a declared agent spawned: a redirection
+  that only reaches the supervisor redirects nothing, and a shared queue would let whichever reader
+  drained first consume a message the others never saw. Four run shapes are steerable, and they are the
+  four a turn is made of: a plain turn, a `/plan` turn (where every entry-agent run shares the one
+  cursor, since a cursor belongs to a turn and not to a run), every worker spawned through
+  `build_agent_specs`, and a scheduled firing, which a user who switched into its conversation can
+  redirect like any other. The one run that is
   deliberately not steerable is an independent reviewer (`workflows/critics.py`), which is context-free
   by design.
   **Three fates, and the message is never lost between them.** It runs as its own turn, or joins the
@@ -217,6 +218,15 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer
   cut a turn in half. A conversation stored before this was recorded has no entry and replays the old
   way. `kokua export` writes the same message as a labeled line of the user's own words, uncapped,
   rather than the italic note a loop marker gets.
+  **The same record is what `turn_end` reads**, so branching and truncation agree with the replay about
+  where a turn ends. Without it a scan for the next `user` message stops at the steering message, and
+  branching a steered turn would write a fork missing both the redirection and the answer it produced,
+  which is normally the whole reason for branching there. A steering index is refused as a turn *start*
+  for the same reason, so the guard that backstops a stale index cannot approve a cut inside a turn.
+  `steered` defaults to empty, so a transcript stored before any of this behaves exactly as it did.
+  One path records nothing: a `/plan` turn rewrites its transcript as it commits, so a message delivered
+  inside one is live and in the catch-up record but not in the stored messages, and reads on reload as
+  the plan and its answer alone.
 - **Branch a conversation at a turn.** Every turn in the web UI carries a branch control, on the
   message that opened it and beside the delete-from-here control:
   it forks a new conversation holding everything through that turn and switches to it, leaving the
@@ -515,12 +525,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer
     failed to arrive. Live and on reload, whitespace alone no longer opens a bubble; inside an open one it
     is still the spacing between words.
 - **Breaking for a third-party channel: `RichChannel.send_turn_saved` takes a third argument.** The
-  signature is now `send_turn_saved(conversation_id, message_index, token=None)`, and `ChannelUI` passes
-  `token=` on every call, so a channel still implementing the two-argument form raises `TypeError` the
-  first time a turn reaches the store. The token is the front end's own id for the message a turn was
-  made of, echoed back so a front end that draws its own bubbles can match the two; a channel that does
-  not draw bubbles can accept and ignore it, which is what adding `token=None` to the signature does.
-  `channels/protocol.py` declares the new shape, and the paired `send_steering(text, token=None)` is
+  signature is now `send_turn_saved(conversation_id, message_index, *, token=None)`, and `ChannelUI`
+  passes `token=` on every call, so a channel still implementing the two-argument form raises
+  `TypeError` the first time a turn reaches the store. The token is the front end's own id for the
+  message a turn was made of, echoed back so a front end that draws its own bubbles can match the two;
+  a channel that does not draw bubbles can accept and ignore it, which is what adding `token=None` to
+  the signature does. It is **keyword-only**, which is the shape every optional opaque id on this
+  feature's surfaces takes (`send_steering`, `ChannelUI.steering_taken` and `turn_saved`,
+  `SteeringMailbox.offer`), so an implementation cannot accept one by position and a later parameter
+  cannot change what a positional argument means.
+  `channels/protocol.py` declares the new shape, and the paired `send_steering(text, *, token=None)` is
   optional like every other rich frame: a channel that does not implement it degrades in `ChannelUI` to
   no call at all, which is correct for the terminal, where AIMU's base channel already prints the steered
   words as the run reads them.

@@ -218,3 +218,18 @@ riding a front-end change. What it has to answer:
 Approving from the card itself was considered and rejected in the same discussion: a card cannot hold
 `execute_python`'s body or `add_skill_script`'s script, and a truncated argument blob beside an Allow
 button trains the user to approve unread.
+
+## 21. A composed sub-agent is unsteerable and uncounted
+`toolsets/capabilities.py`'s `compose_subagent` builds its own `make_async_subagent_tool` rather than
+going through `core/agents.py`, and passes neither `steering=STEERING_SOURCE` nor `events=record_event`.
+So a worker composed per call cannot be reached by a message the user types mid-turn (the redirection
+stops at the supervisor, which is the thing mid-turn steering exists to prevent), and its model calls
+are invisible to `TurnMetrics`, so a turn that composes heavily reads as cheap. Both are the same
+omission at the same call: every other spawn path passes both.
+
+Reachable on a default install, not hypothetical: `capabilities` is in `config.example.toml`'s
+`[agents.assistant].tools`. The fix is two keyword arguments, and what it wants first is a decision
+about where that spawn tool is built, since duplicating `core/agents.py`'s argument list is what let
+two of its arguments go missing. `docs/explanation/architecture.md` names the gap where it explains the
+unconditional spec write, and narrows the coverage claim beside it; README and CHANGELOG are narrowed
+to "every worker a declared agent spawned", so they come back when this lands.

@@ -1587,7 +1587,7 @@ def test_a_chosen_effort_rides_the_message_it_was_set_for(page, live_server):
     as "use the configured effort" and a present-but-empty one would be a second spelling of that.
 
     It is still an ``input`` frame, where it used to be a bare string: the page now names every message
-    it draws a bubble for, so that the server can say which of two fates that bubble met, and a token
+    it draws a bubble for, so that the server can say which fate that bubble met, and a token
     has nowhere to ride on a bare string. The frame is no longer the exception it was when the effort
     picker was the only thing that needed one."""
     frames = []

@@ -60,7 +60,7 @@ class _TurnSavedChannel(FakeChannel):
         super().__init__()
         self.turns_saved: list[tuple[str, int, str | None]] = []
 
-    async def send_turn_saved(self, conversation_id: str, message_index: int, token: str | None = None) -> None:
+    async def send_turn_saved(self, conversation_id: str, message_index: int, *, token: str | None = None) -> None:
         self.turns_saved.append((conversation_id, message_index, token))
 
 

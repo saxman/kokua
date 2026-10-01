@@ -32,7 +32,7 @@ class _TurnSavedDouble(BareChannel):
         super().__init__()
         self.saved: list[tuple[str, int, Optional[str]]] = []
 
-    async def send_turn_saved(self, conversation_id, message_index, token=None):
+    async def send_turn_saved(self, conversation_id, message_index, *, token=None):
         self.saved.append((conversation_id, message_index, token))
 
 
@@ -73,7 +73,7 @@ class RichChannelDouble(BareChannel):
     async def send_subagent(self, event: dict) -> None:
         self.calls.append(("subagent", (event,)))
 
-    async def send_steering(self, text: str, token: Optional[str] = None) -> None:
+    async def send_steering(self, text: str, *, token: Optional[str] = None) -> None:
         self.calls.append(("steering", (text, token)))
 
     async def stream_activity(self, chunks: AsyncIterator, *, show_answer: bool = False) -> str:
