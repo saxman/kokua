@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+
+from kokua.core.auto_approval import ReviewContext, current_review_context
 from kokua.core.steering import (
     ENTRY_STEERING_SOURCE,
     STEERING_SOURCE,
@@ -110,3 +113,55 @@ def test_the_worker_source_does_not_advance_the_entry_cursor():
         assert mailbox.close() == ["redirect"]
     finally:
         current_steering.reset(token)
+
+
+def test_an_offer_amends_the_running_turns_review_context():
+    context = ReviewContext(request="find the bug", used=2)
+    mailbox = SteeringMailbox(review_context=context)
+
+    assert mailbox.offer("actually, just read the log") is True
+    assert "find the bug" in context.request  # amended, not replaced
+    assert "actually, just read the log" in context.request
+    # The approval budget is not refreshed: the round cap bounds autonomous looping, which a human
+    # message ends, while the budget bounds unprompted gated calls, which it does not.
+    assert context.used == 2
+
+
+def test_an_offer_with_no_review_context_still_lands():
+    # An unattended turn opens no review context (invariant 8 in `core/turns.py`), so the mailbox has
+    # to work with nothing to amend.
+    mailbox = SteeringMailbox()
+
+    assert mailbox.offer("redirect") is True
+    assert mailbox.close() == ["redirect"]
+
+
+def test_the_amendment_does_not_depend_on_the_offering_tasks_context():
+    """The regression this shape exists for: the offer runs on a task that never set the contextvar.
+
+    ``TurnRunner`` sets ``current_review_context`` inside the turn, and the turn runs in a task of its
+    own, so ``asyncio.create_task``'s copy of the context keeps that set from ever reaching the serve
+    loop where an offer arrives. An amendment reading the contextvar would be a silent no-op in
+    production while a test that set the contextvar itself passed, so what is asserted here is that
+    the mailbox carries the context across the boundary instead.
+    """
+    context = ReviewContext(request="find the bug")
+    mailbox = SteeringMailbox(review_context=context)
+
+    async def serve_loop():
+        async def turn():
+            token = current_review_context.set(context)
+            try:
+                await asyncio.sleep(0)
+            finally:
+                current_review_context.reset(token)
+
+        running = asyncio.create_task(turn())
+        await asyncio.sleep(0)  # let the turn set its context
+        assert current_review_context.get() is None  # and it is still invisible from here
+        mailbox.offer("use the log instead")
+        await running
+
+    asyncio.run(serve_loop())
+
+    assert "use the log instead" in context.request

@@ -822,6 +822,13 @@ class Assistant:
                             "your config.toml."
                         )
                         continue
+                # A plain message typed while this conversation's turn is running joins that turn
+                # instead of queuing behind it on the gate. Below every branch above, so nothing they
+                # could have answered changes: /stop still cancels, the conversation commands still
+                # switch, and a pending approval or decision still consumes the reply. A workflow
+                # command still starts a workflow turn, which queues as it always has.
+                if workflow is None and self._offer_steering(msg, self._active_id):
+                    continue
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. The gate still serializes same-conversation turns (a proactive turn
                 # on this conversation can't interleave); different conversations' turns don't block
@@ -837,6 +844,26 @@ class Assistant:
                 handle.task.add_done_callback(lambda _t, cid=conversation_id, h=handle: self._tracker.remove_if(cid, h))
         finally:
             self._scheduler.stop()  # channel closed -> stop the scheduler so run() returns
+
+    def _offer_steering(self, msg: ChannelMessage, conversation_id: str) -> bool:
+        """Hand this message to a turn already running on ``conversation_id``, if one will take it.
+
+        ``False`` means it should run as an ordinary turn: no turn is in flight, its mailbox has
+        already closed, or the message carries an image, which has no defined place inside a loop and
+        so goes down the path that has always handled one. Blank text is refused for a smaller
+        reason: AIMU discards whitespace at the drain, so accepting it would be accepted, never
+        delivered, handed back by ``close``, and then run as an empty follow-up turn.
+
+        The ``steering is None`` check is load-bearing rather than defensive. A burst the channel
+        delivers in one loop step adds both turns' tracker entries before either turn's body runs,
+        so a live entry whose mailbox has not been published yet is reachable from here.
+        """
+        if msg.images or not (msg.text or "").strip():
+            return False
+        info = self._tracker.get(conversation_id)
+        if info is None or info.steering is None or info.handle.done:
+            return False
+        return info.steering.offer(msg.text or "")
 
     async def _run_conversation_command(self, word: str, argument: str) -> None:
         """Run `/new`, `/conversations`, or `/switch`, and report what happened on the channel.

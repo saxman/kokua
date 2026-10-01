@@ -7,10 +7,12 @@ import asyncio
 import pytest
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
+from aimu.aio import RunHandle
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
-from kokua.core.steering import ENTRY_STEERING_SOURCE, current_steering
+from kokua.core.steering import ENTRY_STEERING_SOURCE, SteeringMailbox, current_steering
+from kokua.core.turn_registry import TurnInfo
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
 from tests.channels import (
@@ -37,8 +39,32 @@ async def assistant(tmp_path):
     return await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["placeholder"]))
 
 
-def message(text: str) -> ChannelMessage:
-    return ChannelMessage(text=text, channel="fake")
+def message(text: str, images: list | None = None) -> ChannelMessage:
+    return ChannelMessage(text=text, channel="fake", images=images)
+
+
+@pytest.fixture
+async def track_running_turn():
+    """Track a turn on a conversation that never finishes on its own, and end it at teardown.
+
+    What routing reads is the tracker entry, not a gate hold, so a task that simply waits is enough
+    to stand in for a turn in flight. The handles are cancelled here so no task outlives its test.
+    """
+    handles: list[RunHandle] = []
+
+    def track(assistant, mailbox, conversation_id=None):
+        handle = RunHandle.start(asyncio.Event().wait())
+        handles.append(handle)
+        assistant._tracker.add(
+            conversation_id or assistant._active_id,
+            TurnInfo(handle=handle, started=0.0, preview="", steering=mailbox),
+        )
+        return handle
+
+    yield track
+    for handle in handles:
+        handle.cancel()
+    await asyncio.gather(*(handle.task for handle in handles), return_exceptions=True)
 
 
 async def test_assistant_handles_message(tmp_path):
@@ -1987,3 +2013,133 @@ async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assista
     # would swallow an `AttributeError` from a missing mailbox and leave `submitted` empty anyway.
     assert accepted == [True]
     assert submitted == []
+
+
+# --- routing a message into the turn it was typed during -----------------------------------------
+
+
+async def test_a_message_typed_during_a_turn_steers_it_rather_than_starting_one(assistant, track_running_turn):
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+
+    assert assistant._offer_steering(message("actually, use the cache"), assistant._active_id) is True
+    assert mailbox.close() == ["actually, use the cache"]
+
+
+async def test_a_message_with_no_turn_running_starts_one(assistant):
+    assert assistant._offer_steering(message("hello"), assistant._active_id) is False
+
+
+async def test_a_message_never_steers_another_conversations_turn(assistant, track_running_turn):
+    other = SteeringMailbox()
+    track_running_turn(assistant, other, conversation_id="other-conversation")
+
+    assert assistant._offer_steering(message("hello"), assistant._active_id) is False
+    assert other.close() == []
+
+
+async def test_a_message_with_an_image_starts_a_turn_rather_than_steering(assistant, track_running_turn):
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+
+    assert assistant._offer_steering(message("look", images=["/tmp/a.png"]), assistant._active_id) is False
+    assert mailbox.close() == []
+
+
+async def test_a_blank_message_starts_a_turn_rather_than_steering(assistant, track_running_turn):
+    # Accepted it would be delivered to nothing (AIMU discards whitespace at the drain), handed back
+    # by `close`, and then run as an empty follow-up turn.
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+
+    assert assistant._offer_steering(message("   "), assistant._active_id) is False
+    assert mailbox.close() == []
+
+
+async def test_a_message_arriving_after_the_mailbox_closed_starts_a_turn(assistant, track_running_turn):
+    """The follow-up-turn window: a turn whose `finally` has shut its mailbox is still tracked.
+
+    Nothing is lost there, which is the whole point of the refusal: the message runs as an ordinary
+    turn, exactly as it did before routing existed.
+    """
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+    mailbox.close()
+
+    assert assistant._offer_steering(message("too late"), assistant._active_id) is False
+
+
+async def test_the_serve_loop_steers_a_running_turn_instead_of_submitting_a_new_one(tmp_path, track_running_turn):
+    channel = FakeChannel(["actually, use the cache"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    mailbox = SteeringMailbox()
+    handle = track_running_turn(assistant, mailbox)
+
+    await assistant._serve_channel()
+
+    assert mailbox.close() == ["actually, use the cache"]
+    assert assistant._tracker.get(assistant._active_id).handle is handle  # no second turn submitted
+
+
+async def test_a_pending_approval_still_takes_the_message_rather_than_steering(tmp_path, track_running_turn):
+    """Priority: `HumanGate.resolve_reply` consumes the next message and always has."""
+
+    async def noop_prompt() -> None:
+        """A prompt that sends nothing: what this exercises is the pending-request slot."""
+
+    channel = FakeChannel(["y"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+    asking = asyncio.create_task(assistant._human.approval.ask(noop_prompt))
+    await asyncio.sleep(0)  # let it register as pending before the loop reads the "y"
+
+    await assistant._serve_channel()
+
+    # Bounded rather than a bare await: were the offer above the pending-answer check, the "y" would
+    # land in the mailbox and nothing would ever resolve this, wedging the suite instead of failing.
+    assert await asyncio.wait_for(asking, timeout=5) is True
+    assert mailbox.close() == []
+
+
+async def test_a_workflow_command_typed_mid_turn_still_starts_a_workflow_turn(tmp_path, track_running_turn):
+    """A workflow turn queues on the gate as it always has: only a plain message may steer."""
+    channel = FakeChannel(["/plan do the thing"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    mailbox = SteeringMailbox()
+    handle = track_running_turn(assistant, mailbox)
+
+    await assistant._serve_channel()
+
+    assert mailbox.close() == []
+    submitted = assistant._tracker.get(assistant._active_id)
+    assert submitted is not None and submitted.handle is not handle
+    submitted.handle.cancel()  # cancelled rather than run: what matters is that it was submitted
+    await asyncio.gather(submitted.handle.task, return_exceptions=True)
+
+
+async def test_a_message_typed_during_a_follow_up_turn_reaches_that_turn(assistant, track_running_turn):
+    """One level of nesting is reachable, and what bounds it is user action rather than a rule.
+
+    ``_resubmit_steering`` runs the follow-up turn from inside the finishing turn's own task, so no
+    second tracker entry is created for it; the follow-up's ``attach_steering`` lands on the original
+    entry instead (last write wins), which is what makes its mailbox reachable from the serve loop at
+    all. Each further level costs the user another message typed inside another missed drain window.
+    """
+    asked = []
+    offered = []
+    track_running_turn(assistant, None)  # the entry the serve loop adds at submit time, mailbox later
+
+    async def run(text, *args, **kwargs):
+        asked.append(text)
+        if len(asked) == 1:
+            current_steering.get().offer("and one more thing")  # never drained, so it runs as a turn
+        elif len(asked) == 2:
+            offered.append(assistant._offer_steering(message("and a third"), assistant._active_id))
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = run
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert offered == [True]
+    assert asked == ["hello", "and one more thing", "and a third"]

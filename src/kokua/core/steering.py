@@ -34,10 +34,11 @@ class SteeringMailbox:
     def __init__(self, review_context: Optional["ReviewContext"] = None) -> None:
         self._messages: list[str] = []
         self._open = True
-        # The turn's auto-approval review context, if it opened one. Held as a field rather than
-        # read from ``current_review_context`` at use time because an offer arrives on the serve
-        # loop's task while that contextvar is set inside the turn's own, so it is not visible
-        # there. Task 4 is what amends it; this task only carries it.
+        # The turn's auto-approval review context, if it opened one, amended by `offer` so a
+        # reviewer judges a redirected turn's calls against what the user now wants. Held as a field
+        # rather than read from ``current_review_context`` at use time because an offer arrives on
+        # the serve loop's task while that contextvar is set inside the turn's own, so it is not
+        # visible there.
         self._review_context = review_context
         # How far the entry agent's own cursor has read. The fallback is decided off this one alone:
         # a worker having seen a message is not the conversation having seen it, so a message only a
@@ -49,7 +50,25 @@ class SteeringMailbox:
         if not self._open:
             return False
         self._messages.append(text)
+        self._amend_review_context(text)
         return True
+
+    def _amend_review_context(self, text: str) -> None:
+        """Add this message to what an auto-approval reviewer reads as the turn's request.
+
+        A reviewer judges one gated call's arguments against the request text, so a turn redirected
+        mid-run would otherwise have its calls judged against instructions the user has already
+        replaced. The context comes off this instance for the reason ``__init__`` gives: a
+        contextvar set inside the turn is invisible on the task an offer arrives on.
+
+        Only ``request`` is touched. ``used`` is deliberately left alone: the round cap bounds
+        autonomous iteration, which a human message ends, while the approval budget bounds how many
+        gated calls run without a prompt, which more user text does not make safer. An unattended
+        turn opens no context at all (invariant 8 in ``core/turns.py``), so there is nothing to
+        amend there.
+        """
+        if self._review_context is not None:
+            self._review_context.request = f"{self._review_context.request}\n\nThe user then said: {text}"
 
     def reader(self) -> Callable[[], list[str]]:
         """A cursor for one run: the entry agent's, or one spawned worker's."""
