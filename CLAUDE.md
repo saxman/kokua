@@ -467,7 +467,8 @@ src/kokua/
                 auto_approval (the optional model reviewer over the approval gate, and `decide`),
                 settings_runtime, diagnostics, build, agents (build_registry, validate_agents, prompt
                 assembly, delegation), agent_registry, turn_gate, turn_registry, messages, titles,
-                errors, transcripts, metrics (what a turn cost, accumulated from AIMU's run events)
+                errors, transcripts, metrics (what a turn cost, accumulated from AIMU's run events),
+                steering (the per-turn mailbox a message typed mid-turn reaches, and its two sources)
   config/       schema, paths, file, store (writes + write policy), table, settings_sources (joins a
                 toolset's declared settings into the table; the one module under config/ that imports
                 upward, so the rest of the layer stays at the bottom)

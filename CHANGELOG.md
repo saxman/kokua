@@ -175,6 +175,46 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer
   conversation has at most two export files. A read that races the daemon's own persist reports the
   store as busy rather than parsing a torn file. See
   [Export a conversation](https://saxman.info/kokua/how-to/export-a-conversation/).
+- **A message sent while a turn is running joins that turn.** It used to queue behind the turn on the
+  per-conversation gate, so a correction arrived after the work it was meant to redirect had already
+  been paid for. `core/steering.py` gives each turn a mailbox, `Assistant._offer_steering` routes a
+  plain message into the one running on the conversation being viewed, and AIMU's loop drains it at the
+  turn's next model call. The mailbox is append-only with **a cursor per reader**, not a queue, because
+  the message goes to the entry agent *and* to every worker that turn has running: a redirection that
+  only reaches the supervisor redirects nothing, and a shared queue would let whichever reader drained
+  first consume a message the others never saw. All four turn shapes carry one: a plain turn, a `/plan`
+  turn (whose three entry-agent runs share the one cursor, since a cursor belongs to a turn and not to
+  a run), every spawned worker, and a scheduled firing, which a user who switched into its conversation
+  can redirect like any other.
+  **Three fates, and the message is never lost between them.** It runs as its own turn, or joins the
+  running one, or is accepted by a turn that ends before reading it and then runs as a follow-up turn.
+  `offer` and `close` are both synchronous and asyncio is single-threaded, so the serve loop cannot see
+  a mailbox as open in the same tick the turn's `finally` shuts it; invariant 9 at the top of
+  `core/turns.py` states the whole guarantee, the stranding and double-run bugs it rules out, and the
+  one window it does not cover. `/stop` is the deliberate exception: someone who cancelled the turn is
+  not asking for one more, so the stop notice says the last message was not delivered rather than
+  running it.
+  **Delivery buys a fresh round budget; it does not buy an approval.** AIMU resets the turn's
+  `max_iterations` stretch when it drains a message, because a human saying something is evidence the
+  run is not spinning, which is what the cap exists to catch. The `[security.auto_approval]` budget is
+  deliberately untouched, since more user text does not make a gated call safer; what the message does
+  reach there is the reviewer's copy of the request, amended so a redirected turn's calls are judged
+  against what the user now wants.
+  **What is not steered**: anything the assistant answers without running a turn (`/stop`, `/diag`, the
+  conversation commands, a reply to an approval prompt or a plan review), a workflow command, which
+  starts a turn of its own as it always has, and a message carrying an image, which has no defined place
+  inside a loop. Needs `aimu>=0.33.0`; see "Diagnostics and error reporting" below.
+- **A turn records which of its messages were steering, so a reload does not replay one turn as two.** A
+  message handed to a running turn is committed as an ordinary `user` message, indistinguishable in the
+  transcript from one that started a turn, and position cannot tell them apart either. `TurnRunner`
+  resolves the positions off the message list after the run (a compaction between rounds can move them)
+  and stores them in `metadata["steering"]`, keyed by the host turn like every other per-turn map, so a
+  branch or a truncation filters them with the rest. `replay_items` emits a steering message as its own
+  item with **no `message_index`**, which is what withholds the turn controls from it: the index that
+  would delete from "here" points into the middle of the host turn, so offering the control there would
+  cut a turn in half. A conversation stored before this was recorded has no entry and replays the old
+  way. `kokua export` writes the same message as a labeled line of the user's own words, uncapped,
+  rather than the italic note a loop marker gets.
 - **Branch a conversation at a turn.** Every turn in the web UI carries a branch control, on the
   message that opened it and beside the delete-from-here control:
   it forks a new conversation holding everything through that turn and switches to it, leaving the
@@ -251,6 +291,35 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer
     Shift+Enter inserts a newline (an IME's Enter does neither). Send is replaced by Stop for the
     duration of a turn rather than sitting beside a permanently disabled button, and switching
     conversations mid-turn updates it to match the conversation being viewed.
+  - **A bubble sent into a running turn is marked, not stamped.** The page draws a bubble when you press
+    Enter and only learns later which of its three fates the message met, so the server reports that
+    fate on a frame: `turn_saved` for a message that became a turn, and a new `steering` frame for one
+    that joined the turn already running. A steered bubble keeps the user row's marker and measure, gives
+    up the gap that separates one turn from the next, and deliberately carries **no branch and no
+    delete-from-here control**: it has no turn of its own, and the index that would delete from "here"
+    points into the middle of the turn it joined. The mark is withdrawn if the message turns out to have
+    become a turn after all (accepted, never read, re-run as a follow-up), since the mark and the controls
+    standing together would say it both did and did not become a turn. A sub-agent card gets an entry of
+    its own kind for the same message, filed apart from the `loop` marker beside it, because a card that
+    credited the agent loop with what a person said would name the wrong author. On reload the message
+    replays as a collapsed row of the user's words rather than a marked bubble, which is a deliberate
+    divergence `replay_items`'s own docstring argues; the one thing both views agree on, and the one that
+    matters, is that no turn control is offered there.
+  - **The server now says which message became which turn, instead of the page guessing.** `app.js` kept
+    a positional queue of bubbles awaiting a save, which forced it to predict server behavior before
+    sending: it had to decide for itself which composer text would be answered as a command and run no
+    turn, and keep that prediction in step with the serve loop's dispatch. A wrong guess in one direction
+    was destructive rather than untidy, since an entry nothing consumed stranded at the head and the next
+    turn's save stamped an older bubble with a newer turn's index, so clicking delete-from-here on one
+    message took that message and the one before it. Every composer message now carries a `token` the
+    page minted, echoed back on whichever frame reports its fate, and the queue is a map keyed on it.
+    Two consequences worth knowing. An unclaimed entry is now inert rather than poisonous, so the page
+    parses no commands it does not own. And **every** composer message goes as an `input` frame, where
+    only a message carrying images or a reasoning effort used to: a token has nowhere to ride on a bare
+    string, and the server reads a frame's text exactly as it read a bare one. The page's own control
+    replies (Stop, an approval's Allow/Deny, a plan review's verdict) are still bare strings, since they
+    answer a turn rather than opening one and draw no bubble. This closes the `TODO.md` item that
+    described the defect.
   - **An inline working indicator says a turn is running.** A dim row pinned to the foot of the
     transcript, a spinner over the seconds since the turn began, with the turn's output growing above
     it. It goes up the moment you send and comes down when the turn ends. Switching into a conversation
@@ -443,6 +512,16 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer
     empty stamped bubble between the reasoning block and the tool card, reading as a section whose content
     failed to arrive. Live and on reload, whitespace alone no longer opens a bubble; inside an open one it
     is still the spacing between words.
+- **Breaking for a third-party channel: `RichChannel.send_turn_saved` takes a third argument.** The
+  signature is now `send_turn_saved(conversation_id, message_index, token=None)`, and `ChannelUI` passes
+  `token=` on every call, so a channel still implementing the two-argument form raises `TypeError` the
+  first time a turn reaches the store. The token is the front end's own id for the message a turn was
+  made of, echoed back so a front end that draws its own bubbles can match the two; a channel that does
+  not draw bubbles can accept and ignore it, which is what adding `token=None` to the signature does.
+  `channels/protocol.py` declares the new shape, and the paired `send_steering(text, token=None)` is
+  optional like every other rich frame: a channel that does not implement it degrades in `ChannelUI` to
+  no call at all, which is correct for the terminal, where AIMU's base channel already prints the steered
+  words as the run reads them.
 
 ### Agents and tools
 

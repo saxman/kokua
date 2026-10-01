@@ -221,7 +221,7 @@ can attach a debugger to, rather than a request landing in whichever worker happ
 The invariants block is a teaching artifact as much as a safety one.
 
 *How this cashes out:* [`core/turns.py`](https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py) opens with a
-`## Concurrency invariants` block of eight rules, each stating what breaks without it, including a
+`## Concurrency invariants` block of nine rules, each stating what breaks without it, including a
 deadlock that a regression test still guards. [`TurnGate`](https://github.com/saxman/kokua/blob/main/src/kokua/core/turn_gate.py) is a
 documented writer-preferring readers-writer gate: turns read, a settings change writes, and which side an
 operation belongs on follows from its reach rather than from whether it mutates (a conversation delete

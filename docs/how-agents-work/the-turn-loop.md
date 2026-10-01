@@ -134,7 +134,13 @@ The turn path itself, with the workflow branch and the error handling trimmed aw
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
                 ...
-                            stream = await agent.run(msg.text, stream=True, images=msg.images, thinking=thinking)
+                            stream = await agent.run(
+                                msg.text,
+                                stream=True,
+                                images=msg.images,
+                                thinking=thinking,
+                                steering=ENTRY_STEERING_SOURCE,
+                            )
                             await self._ui.send(stream, reply_to=msg)
 ```
 
@@ -159,6 +165,18 @@ rest of the answer and not the part that had already arrived. (Invariant 5, whic
 obeys, is about a different thing: recording the turn's sub-agent events *before* the "(stopped)"
 notice, since a second cancellation racing that send would propagate straight past a record placed
 after it.)
+
+`/stop` is not the only thing a channel can read into a turn that is already running, and the
+`steering=` argument above is the other one. A turn is long enough that the thing you most often want
+mid-reply is not to cancel it but to correct it, and before this a correction typed into the composer
+queued behind the turn on the gate: it arrived after the rounds it was meant to redirect had already
+been spent. `ENTRY_STEERING_SOURCE` is a reader over the mailbox `TurnRunner` opens for the turn, which
+AIMU's loop drains once per round, so what you type lands at the turn's next model call and the loop
+takes one more round to act on it. Delivery also resets the round cap, for the reason the cap exists:
+the degenerate turn below is a model talking to itself, and a person saying something is the evidence
+that is not what is happening here. The whole design, including what happens to a message the turn ends
+before reading, is
+[Architecture](../explanation/architecture.md#a-message-sent-while-a-turn-is-running).
 
 ## What it costs
 
