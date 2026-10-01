@@ -182,10 +182,12 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer
   turn's next model call. The mailbox is append-only with **a cursor per reader**, not a queue, because
   the message goes to the entry agent *and* to every worker that turn has running: a redirection that
   only reaches the supervisor redirects nothing, and a shared queue would let whichever reader drained
-  first consume a message the others never saw. All four turn shapes carry one: a plain turn, a `/plan`
-  turn (whose three entry-agent runs share the one cursor, since a cursor belongs to a turn and not to
-  a run), every spawned worker, and a scheduled firing, which a user who switched into its conversation
-  can redirect like any other.
+  first consume a message the others never saw. Four run shapes are steerable, and they are the four a
+  turn is made of: a plain turn, a `/plan` turn (where every entry-agent run shares the one cursor,
+  since a cursor belongs to a turn and not to a run), every spawned worker, and a scheduled firing,
+  which a user who switched into its conversation can redirect like any other. The one run that is
+  deliberately not steerable is an independent reviewer (`workflows/critics.py`), which is context-free
+  by design.
   **Three fates, and the message is never lost between them.** It runs as its own turn, or joins the
   running one, or is accepted by a turn that ends before reading it and then runs as a follow-up turn.
   `offer` and `close` are both synchronous and asyncio is single-threaded, so the serve loop cannot see

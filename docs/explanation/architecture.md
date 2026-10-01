@@ -294,17 +294,19 @@ already replaced. That amendment rides the mailbox rather than the contextvar be
 offer arrives on the serve loop's task while `current_review_context` is set inside the turn's own and
 is therefore invisible from where the offer lands.
 
-All four turn shapes carry a mailbox, and the differences follow from their shapes rather than from
-different rules. A plain reactive turn is the simple case. Every entry-agent run inside a `/plan` turn shares the one
-entry cursor, since a cursor belongs to a turn and not to a run, so a message one of those runs
-delivered is not re-submitted by the one after it. A spawned worker reads through
+Four run shapes are steerable, and the differences between them follow from their shapes rather than
+from different rules. A plain reactive turn is the simple case. Every entry-agent run inside a `/plan`
+turn shares the one entry cursor, since a cursor belongs to a turn and not to a run, so a message one of
+those runs delivered is not re-submitted by the one after it. A spawned worker reads through
 its spec, which `build_agent_specs` writes unconditionally: a stated exception to "a capability is
 declared, never defaulted", because the value is not a per-worker setting but the one process-wide
 source that resolves whichever turn is running when a reader is opened, and a worker with no turn around
 it gets a drain that returns nothing. A scheduled firing opens its mailbox in `_run_unattended` rather
 than in the body that reads it, because the body runs in a child task that copies the context at
 creation, and reaches `close()` outside the gate hold, because a follow-up turn takes a hold of its own
-(invariant 1).
+(invariant 1). What is deliberately *not* steerable is an independent reviewer
+(`workflows/critics.py`), whose whole value is that it reads the request and nothing else: it passes no
+`steering` at all, so a redirection cannot reach the agent judging the work.
 
 Which of a turn's messages were steering is recorded, because nothing in the transcript shows it. A
 message
