@@ -10,6 +10,7 @@ from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
+from kokua.core.steering import ENTRY_STEERING_SOURCE, current_steering
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
 from tests.channels import (
@@ -23,6 +24,21 @@ from tests.channels import (
 )
 from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
 from tests.helpers import MockAsyncModelClient
+
+
+@pytest.fixture
+async def assistant(tmp_path):
+    """A ready assistant with one conversation, its agent built but no turn run yet.
+
+    Built with a plain ``FakeChannel``/``MockAsyncModelClient`` pair because the mailbox tests below
+    replace ``agent.run`` directly and never reach the client; what they need from this fixture is an
+    ``Assistant`` whose ``_turns.reactive`` can be called the way the serve loop calls it.
+    """
+    return await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["placeholder"]))
+
+
+def message(text: str) -> ChannelMessage:
+    return ChannelMessage(text=text, channel="fake")
 
 
 async def test_assistant_handles_message(tmp_path):
@@ -1860,3 +1876,114 @@ async def test_proactive_report_links_the_conversation_it_ran_in(tmp_path):
     # Grouped by the task, not by the conversation: every firing mints a new one, so grouping by
     # conversation would leave a card per firing, which is the pile-up the group exists to prevent.
     assert group == "report"
+
+
+async def test_a_reactive_turn_publishes_a_mailbox_and_closes_it(assistant):
+    seen = []
+
+    async def capture(*args, **kwargs):
+        seen.append(current_steering.get())
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = capture
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert seen and seen[0] is not None
+    assert current_steering.get() is None
+
+
+async def test_a_failed_turn_still_closes_its_mailbox(assistant):
+    mailboxes = []
+
+    async def explode(*args, **kwargs):
+        mailboxes.append(current_steering.get())
+        raise RuntimeError("the model server fell over")
+
+    assistant._book.agent_for(assistant._active_id).run = explode
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert current_steering.get() is None
+    assert mailboxes[0].offer("too late") is False
+
+
+async def test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn(assistant):
+    submitted = []
+
+    async def capture_resubmit(conversation_id, texts):
+        submitted.append((conversation_id, texts))
+
+    assistant._turns._resubmit_steering = capture_resubmit
+
+    async def ignore_steering(*args, **kwargs):
+        current_steering.get().offer("just missed it")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = ignore_steering
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert submitted == [(assistant._active_id, ["just missed it"])]
+
+
+async def test_the_entry_agents_run_opens_the_conversations_own_cursor(assistant):
+    """``ENTRY_STEERING_SOURCE``, not ``STEERING_SOURCE``, which belongs to a spawned worker.
+
+    ``close`` measures what to re-submit from the entry cursor's position, so a run opening an
+    independent cursor would leave that position at zero and re-run every *delivered* message as its
+    own turn: the "never both" half of invariant 9, broken in the common case.
+    """
+    sources = []
+
+    async def capture_source(*args, **kwargs):
+        sources.append(kwargs.get("steering"))
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = capture_source
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert sources == [ENTRY_STEERING_SOURCE]
+
+
+async def test_an_undelivered_message_runs_through_the_real_resubmit_path(assistant):
+    """The follow-up turn itself, with ``_resubmit_steering`` left in place rather than observed.
+
+    Worth its own case because the re-submit happens after ``reactive``'s ``finally`` has released the
+    gate: taking a second hold from inside the first would deadlock against a concurrent exclusive()
+    (invariant 1), and a stub standing in for the method cannot show that it does not.
+    """
+    asked = []
+
+    async def offer_once(text, *args, **kwargs):
+        asked.append(text)
+        if len(asked) == 1:
+            current_steering.get().offer("and one more thing")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = offer_once
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert asked == ["hello", "and one more thing"]
+
+
+async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assistant):
+    """Invariant 9's one exception: someone who cancelled the turn is not asking for one more."""
+    submitted = []
+    accepted = []
+
+    async def capture_resubmit(conversation_id, texts):
+        submitted.append((conversation_id, texts))
+
+    assistant._turns._resubmit_steering = capture_resubmit
+
+    async def offer_then_stop(*args, **kwargs):
+        # Raised from inside the run rather than delivered to the task, which is indistinguishable to
+        # `reactive`'s `except asyncio.CancelledError` and needs no second task to do the stopping.
+        accepted.append(current_steering.get().offer("never mind"))
+        raise asyncio.CancelledError()
+
+    assistant._book.agent_for(assistant._active_id).run = offer_then_stop
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    # Asserted so the test cannot pass by the offer having never landed: the generic error branch
+    # would swallow an `AttributeError` from a missing mailbox and leave `submitted` empty anyway.
+    assert accepted == [True]
+    assert submitted == []

@@ -137,6 +137,21 @@ Every rule here was learned from a bug. Read them before changing anything in th
    one conversation's retry loop could spend another's. Absent in an unattended turn on purpose: a
    gated call there is denied before a reviewer is asked, so the missing context is a second, structural
    reason nothing is auto-approved while nobody is watching.
+
+9. **A steering message reaches the running turn or becomes the next one, never both and never
+   neither.** ``SteeringMailbox.offer`` and ``close`` are both synchronous and asyncio is
+   single-threaded, so the serve loop cannot observe a mailbox as open in the same tick this
+   ``finally`` shuts it. What that alone does not cover is the window after the loop's last drain:
+   a message accepted there is never read, so ``close`` hands it back and this path runs it as a
+   follow-up turn. The "never both" half rests on which of the mailbox's two cursors the entry
+   agent's own run opens: ``close`` measures the leftovers from the entry cursor's position, so
+   handing this run a worker's independent source would leave that position at zero and re-run every
+   *delivered* message as its own turn. A stop is the one exception and is deliberate: someone who
+   cancelled the turn is not asking for one more, so those messages are reported as undelivered
+   instead.
+   (Regressions: ``test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn``,
+   ``test_the_entry_agents_run_opens_the_conversations_own_cursor``,
+   ``test_a_stopped_turn_does_not_resubmit_its_undelivered_messages``.)
 """
 
 from __future__ import annotations
@@ -159,6 +174,7 @@ from kokua.core.build import model_label
 from kokua.core.errors import describe_error
 from kokua.core.messages import derive_title, resolve_user_index
 from kokua.core.metrics import TurnMetrics, current_metrics, record_event
+from kokua.core.steering import ENTRY_STEERING_SOURCE, SteeringMailbox, current_steering
 from kokua.core.subagents import subagent_events
 from kokua.core.turn_registry import TurnInfo
 from kokua.workflows import SettingsView, WorkflowContext, is_rich
@@ -288,7 +304,19 @@ class TurnRunner:
         # The turn's auto-approval budget and request text, opened here so a gated tool call reached
         # from anywhere inside the turn can find both. Reactive only: an unattended turn auto-denies a
         # gated call before a reviewer is ever consulted, so a budget there would never be spent.
-        review_token = current_review_context.set(ReviewContext(request=msg.text))
+        review_context = ReviewContext(request=msg.text)
+        review_token = current_review_context.set(review_context)
+        # The turn's steering mailbox, open for its whole life so a message typed while it runs can
+        # reach it rather than queuing behind it on the gate (invariant 9). Set before the first
+        # `await`, like `streaming_conversation` and `subagent_events` above, and for the same reason:
+        # a message offered before this turn's own run has a cursor open would otherwise land nowhere.
+        # Carries `review_context` rather than reading the contextvar, because an offer arrives on the
+        # serve loop's own task while that contextvar is set inside this turn's: invisible from there.
+        mailbox = SteeringMailbox(review_context=review_context)
+        steering_token = current_steering.set(mailbox)
+        # Recorded on the tracker entry the serve loop already added for this conversation, so routing
+        # can find this turn's mailbox by conversation id alone.
+        self._tracker.attach_steering(conversation_id, mailbox)
         # The client carries the forwarder, not this turn's accumulator: the forwarder holds no turn
         # state, so it is safe as the durable client-wide setting AIMU calls it, and the contextvar
         # above is what keeps concurrent turns on other conversations out of this record. Assigned
@@ -298,6 +326,11 @@ class TurnRunner:
         # ended below by `_persist` (and again in the `finally`, for a turn that never got that far).
         self._ui.begin_catch_up(conversation_id, msg.text, msg.images)
         succeeded = False
+        # Deliberately belt-and-braces: the `CancelledError` branch below `return`s before reaching the
+        # re-submit block at the end of this method, so `undelivered and not stopped` is never evaluated
+        # on that path today. The flag is what keeps a stopped turn's leftovers from re-running even if a
+        # later refactor removes that early `return`, rather than relying on this shape never changing.
+        stopped = False
         failure_reason = ""  # set on error, so a backgrounded turn's notification can carry the reason
         # Where this turn's sub-agent cards anchor. Both branches settle it in a `finally`, so the
         # cancellation and error paths below record under the index a completed turn would use; -1
@@ -327,7 +360,13 @@ class TurnRunner:
                         # has to be behind it.
                         base_len = len(agent.model_client.messages)
                         try:
-                            stream = await agent.run(msg.text, stream=True, images=msg.images, thinking=thinking)
+                            stream = await agent.run(
+                                msg.text,
+                                stream=True,
+                                images=msg.images,
+                                thinking=thinking,
+                                steering=ENTRY_STEERING_SOURCE,
+                            )
                             await self._ui.send(stream, reply_to=msg)
                         finally:
                             # Resolved after the run, not taken as base_len itself: the user message
@@ -341,6 +380,7 @@ class TurnRunner:
                     # propagate straight past a record placed after -- see invariant 5. Keep the
                     # partial state (the agent snapshots it in a finally), and return so the daemon
                     # keeps serving.
+                    stopped = True
                     self._record_provenance(
                         conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
                     )
@@ -389,6 +429,8 @@ class TurnRunner:
         finally:
             current_metrics.reset(metrics_token)
             current_review_context.reset(review_token)
+            current_steering.reset(steering_token)
+            undelivered = mailbox.close()
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
             # Normally already done by `_persist`; this covers a turn that raised before reaching it,
@@ -396,6 +438,18 @@ class TurnRunner:
             self._ui.end_catch_up(conversation_id)
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
+        if undelivered and not stopped:
+            # Accepted by the mailbox and never read, because the turn ended first. Running them as a
+            # follow-up turn is the fallback the design promises: a message is delivered or it is the
+            # next turn, never neither.
+            await self._resubmit_steering(conversation_id, undelivered)
+
+    async def _resubmit_steering(self, conversation_id: str, texts: list[str]) -> None:
+        """Run messages the turn never read as an ordinary follow-up turn on the same conversation."""
+        await self.reactive(
+            ChannelMessage(text="\n\n".join(texts)),
+            conversation_id=conversation_id,
+        )
 
     def _workflow_context(self, agent, msg: ChannelMessage, workflow) -> WorkflowContext:
         """One turn's context for ``workflow``.

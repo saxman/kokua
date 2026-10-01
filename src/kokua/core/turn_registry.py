@@ -8,9 +8,12 @@ RunHandle plus the diagnostics the /diag command and the front-end "working" ind
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from aimu.aio import RunHandle
+
+if TYPE_CHECKING:
+    from kokua.core.steering import SteeringMailbox
 
 
 @dataclass
@@ -22,6 +25,9 @@ class TurnInfo:
     # than read back off the conversation's stored metadata so it is also known for a firing on a channel
     # with no conversation list, which runs in the viewed conversation and stamps no task id on it.
     task_id: Optional[str] = None
+    # The turn's steering mailbox, so a message typed while it runs can be routed to it by
+    # conversation. None for a turn that predates its creation, which nothing here produces.
+    steering: Optional["SteeringMailbox"] = None
 
 
 class TurnTracker:
@@ -52,6 +58,16 @@ class TurnTracker:
 
     def get(self, conversation_id: str) -> Optional[TurnInfo]:
         return self._turns.get(conversation_id)
+
+    def attach_steering(self, conversation_id: str, mailbox: "SteeringMailbox") -> None:
+        """Give this conversation's entry its turn's mailbox, if the entry is still that turn's.
+
+        Guarded for the reason ``remove_if`` is: a turn displaced by a later one on the same
+        conversation must not overwrite the newer turn's entry, which is the one routing reaches.
+        """
+        info = self._turns.get(conversation_id)
+        if info is not None and info.steering is None:
+            info.steering = mailbox
 
     def remove_if(self, conversation_id: str, handle: RunHandle) -> None:
         """Remove ``conversation_id``'s entry only when it is the one holding ``handle``.
