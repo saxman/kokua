@@ -120,6 +120,62 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
         require_aimu()
 
 
+def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypatch):
+    """The two-hop class lookup (``_PROBE_CLASS``) and the signature check compose for the first time
+    here, and the combination is the whole reason the probe grips the subclass rather than the base
+    class.
+
+    Fabricates the exact adversarial checkout that existed mid-release: ``aio.Agent.run`` already
+    carries ``steering``, from the *first* of the release's steering commits, while ``aio.SkillAgent.run``
+    does not yet, because it cannot delegate to ``super().run()`` and repeats the base method's whole
+    parameter list by hand instead. An ``Agent``-shaped probe would wave that sibling through; the real
+    probe, pointed at ``SkillAgent``, has to refuse it, and then pass once the stand-in ``SkillAgent``
+    catches up, matching ``test_a_probe_that_checks_a_keyword_argument_still_works``'s convention of
+    exercising the negative against a stand-in rather than the live surface.
+    """
+
+    class _StandInAgent:
+        def run(self, task, steering=None):
+            pass
+
+    class _StandInSkillAgentWithoutSteering:
+        def run(self, task):
+            pass
+
+    monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
+    monkeypatch.setattr(aimu_compat, "_PROBE_MODULE", "aimu.aio")
+    monkeypatch.setattr(aimu_compat, "_PROBE_CLASS", "SkillAgent")
+    monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "run")
+    monkeypatch.setattr(aimu_compat, "_PROBE_PARAMETER", "steering")
+    monkeypatch.setattr(aimu_compat, "_PROBE_MEMBER", None)
+    monkeypatch.setattr(
+        aimu_compat.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(
+            __file__="/somewhere/aimu/aio/__init__.py",
+            Agent=_StandInAgent,
+            SkillAgent=_StandInSkillAgentWithoutSteering,
+        ),
+    )
+    with pytest.raises(AimuVersionError, match="steering"):
+        require_aimu()
+
+    class _StandInSkillAgentWithSteering:
+        def run(self, task, steering=None):
+            pass
+
+    monkeypatch.setattr(
+        aimu_compat.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(
+            __file__="/somewhere/aimu/aio/__init__.py",
+            Agent=_StandInAgent,
+            SkillAgent=_StandInSkillAgentWithSteering,
+        ),
+    )
+    require_aimu()
+
+
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 

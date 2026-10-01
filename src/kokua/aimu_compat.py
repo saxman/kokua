@@ -112,7 +112,8 @@ can take, whether the three stream consumers render the phase, whether the budge
 mailbox is bounded, and whether a misbehaving host source is caught rather than trusted. None of those is
 a signature, so no signature check reaches them. The first two are the same one-level-down gap ``events``'
 recursive passthrough left for its own capability; the last three are findings the branch review itself
-raised, each one an AIMU could regress while still answering this probe yes.
+raised, each one an AIMU could regress while still answering this probe yes. ``make_skill_update_tool``
+is the floor's job now, in its turn.
 
 AIMU 0.32.0 was the surface until 0.33.0, and it is the counterpart to the paragraph below it: two
 capabilities again, and that time the newest handle was the right one. ``make_skill_update_tool`` is the
