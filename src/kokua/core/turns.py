@@ -154,8 +154,8 @@ Every rule here was learned from a bug. Read them before changing anything in th
    ``_notify_if_backgrounded``) computes the leftovers and drops them, which is "neither". Moving the
    re-submit into the ``finally`` trades it for two worse faults, awaiting during a cancellation and
    re-running a gate-cancelled turn's messages, so the window stands rather than being closed there.
-   A scheduled firing carries the same mailbox and the same guarantee, and the two places it differs
-   both follow from its shape rather than from a different rule. Its mailbox is opened by
+   A scheduled firing carries the same mailbox and the same guarantee, and the three places it differs
+   all follow from its shape rather than from a different rule. Its mailbox is opened by
    ``_run_unattended`` rather than by the body that reads it, unlike the ``current_metrics`` scope
    beside it (invariant 3): the body runs in a child task, which copies the context at creation, so a
    contextvar set before the task starts reaches it; and ``close`` has to be reached where the gate
@@ -163,7 +163,11 @@ Every rule here was learned from a bug. Read them before changing anything in th
    body would wait on the per-conversation lock the firing's own hold owns while the firing waits on
    the follow-up (invariant 1). The uncovered window above is also wider for a firing, because it
    reports a failure rather than catching one: an error on its way out of the hold carries that run's
-   leftovers past the re-submit.
+   leftovers past the re-submit. And a stopped firing says less than a stopped reactive turn: that
+   path peeks and tells the user their last message was not delivered, while a firing's stop returns
+   from inside the hold and drops its leftovers in silence, even where ``echo_reply`` puts its output
+   in front of someone who is reading. The mailbox does the same thing in both cases, which is to
+   drop those messages rather than run them; only the sentence about it is missing.
    (Regressions: ``test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn``,
    ``test_the_entry_agents_run_opens_the_conversations_own_cursor``,
    ``test_a_stopped_turn_does_not_resubmit_its_undelivered_messages``,
@@ -762,14 +766,18 @@ class TurnRunner:
                 finally:
                     self._tracker.remove_if(conversation_id, handle)
         finally:
+            # Ahead of the rest of the teardown, as the same pair is in `reactive`: `end_catch_up`
+            # calls back into the channel, so a front end raising there would skip the close and leak
+            # an open mailbox for the life of the process, routing every later message into a turn
+            # that has already ended.
+            current_steering.reset(steering_token)
+            undelivered = mailbox.close()
             self._book.unpin(conversation_id)
             # Normally already done by `_persist`; this covers a run that raised before reaching it.
             self._ui.end_catch_up(conversation_id)
             proactive_turn.reset(proactive_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
-            current_steering.reset(steering_token)
-            undelivered = mailbox.close()
         if undelivered:
             # Accepted by the mailbox and never read, because the firing ended first, so it runs as a
             # follow-up turn: a message is delivered or it is the next turn, never neither (invariant
@@ -778,7 +786,14 @@ class TurnRunner:
             # A failed firing raises past here instead, so its leftovers are lost, which is the same
             # uncovered window invariant 9 names on the reactive path and wider here, since a firing
             # reports its failure rather than catching it.
-            await self._resubmit_steering(conversation_id, undelivered)
+            try:
+                await self._resubmit_steering(conversation_id, undelivered)
+            except Exception:
+                # Held here rather than allowed out, where it would be reported as the *firing*
+                # having failed and would suppress the announce for a run that finished. `reactive`
+                # has already told the user about every failure it caught itself, so what reaches
+                # this handler escaped even that, and a log is the honest place for it (invariant 6).
+                logger.warning("A message a scheduled firing never read could not be run", exc_info=True)
         return False
 
     async def _unattended_body(self, prompt: str, spec: ProactiveTarget) -> None:

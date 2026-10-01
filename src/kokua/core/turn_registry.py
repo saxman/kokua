@@ -78,9 +78,13 @@ class TurnTracker:
         tasks step in creation order, so the newest turn the serve loop submitted is the last to
         publish in every interleaving the loop permits. One writer is not the serve loop:
         ``TurnRunner._resubmit_steering`` runs a follow-up turn from inside the finishing turn's own
-        task, and its write winning is also what you want, since its mailbox is the open one. What no
-        ordering rule can fix is that one entry cannot name two concurrently live turns, which is the
-        same limitation ``running`` documents from the other side.
+        task, and its write winning is also what you want, since its mailbox is the open one. That
+        holds for a reactive turn, whose entry the serve loop added and whose done-callback has not
+        fired yet; a scheduled firing's follow-up has no entry to win at all, because the firing
+        removes its own before the re-submit runs, so this call finds nothing there and a firing's
+        follow-up turn cannot itself be steered. What no ordering rule can fix is that one entry
+        cannot name two concurrently live turns, which is the same limitation ``running`` documents
+        from the other side.
         (Regression: ``test_a_burst_of_two_turns_leaves_the_newer_turns_mailbox_on_the_entry``.)
         """
         info = self._turns.get(conversation_id)

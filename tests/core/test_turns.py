@@ -2226,3 +2226,50 @@ async def test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_tur
     await asyncio.wait_for(assistant._turns.proactive("the scheduled prompt"), timeout=5)
 
     assert asked == ["the scheduled prompt", "while you are at it, check the log"]
+
+
+async def test_a_firings_mailbox_is_shut_even_when_the_channel_raises_during_teardown(assistant, monkeypatch):
+    """The reset and the close lead the teardown, ahead of anything fallible, as they do in
+    ``reactive``. ``end_catch_up`` calls back into the channel, so a front end raising there would
+    otherwise leave an open mailbox behind for the life of the process, and every later message typed
+    on that conversation would be accepted by a turn that had already ended.
+    """
+    seen = []
+
+    async def capture(*args, **kwargs):
+        seen.append(current_steering.get())
+        return "done"
+
+    def explode(conversation_id):
+        raise RuntimeError("the front end fell over")
+
+    assistant._book.agent_for(assistant._active_id).run = capture
+    monkeypatch.setattr(assistant._ui, "end_catch_up", explode)
+
+    await assistant._turns.proactive("the scheduled prompt")  # the failure is reported, not raised
+
+    assert seen and seen[0].offer("too late") is False
+
+
+async def test_a_follow_up_turn_that_fails_is_not_reported_as_the_firing_failing(assistant):
+    """A firing that finished must keep saying so. The re-submit is awaited inside the firing's own
+    call, so an error escaping the follow-up turn would otherwise reach the handlers that announce a
+    scheduled task as failed, blaming the firing for a turn that ran after it.
+    """
+    asked = []
+
+    async def run(text, *args, **kwargs):
+        asked.append(text)
+        current_steering.get().offer("while you are at it, check the log")
+        return "done"
+
+    async def explode(*args, **kwargs):
+        raise RuntimeError("the follow-up turn fell over")
+
+    assistant._book.agent_for(assistant._active_id).run = run
+    assistant._turns.reactive = explode
+
+    await assistant._turns.proactive("the scheduled prompt")
+
+    assert asked == ["the scheduled prompt"]
+    assert not [text for text in assistant._ui.channel.sent if "failed" in text]

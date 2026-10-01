@@ -302,6 +302,7 @@ def test_every_spec_key_kokua_writes_is_one_aimu_accepts():
         "generate_kwargs",
         "max_iterations",
         "compaction",
+        "steering",
     } <= SUBAGENT_SPEC_KEYS
 
 
