@@ -54,10 +54,12 @@ def test_every_stated_invariant_count_matches_the_module_docstring():
 
     The count is read off the docstring's own numbered rules, so adding one and forgetting the prose
     fails this test rather than leaving a quiet contradiction. It is checked as the English word, since
-    that is how every site spells it, and the noun is matched loosely ("invariants" in four places, "a
-    block of nine rules" in the fifth) with only number words counted, so a nearby sentence about rules
-    in general cannot inflate the tally. The expected number of statements per file is part of the
-    assertion, which is what keeps a rewrite that drops one from passing silently.
+    that is how every site spells it, and the noun is matched loosely ("invariants" in four of the five
+    places, "rules" in the fifth) with only number words counted, so a nearby sentence about rules in
+    general cannot inflate the tally. The number itself is deliberately not repeated in this docstring:
+    a sixth copy would be one this test does not read, and so one nothing could catch drifting. The
+    expected number of statements per file is part of the assertion, which is what keeps a rewrite that
+    drops one from passing silently.
     """
     import re
     from pathlib import Path

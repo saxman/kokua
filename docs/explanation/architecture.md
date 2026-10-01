@@ -326,12 +326,18 @@ index that would truncate "here" points into the middle of the host turn. A tran
 turns recorded this has no entry and replays the old way, which is the best a reader can do with a
 record nobody wrote.
 
-One path records nothing, and it is the `/plan` turn. A workflow rewrites the transcript as it commits
-(planning replaces everything its executor appended with one user/assistant pair), so a message
-delivered inside a planned turn is not in the message list those indices are read off: it reaches the
-model, shows live, reaches the catch-up record a switch-in replays, and is gone on reload, where the
-turn reads as the plan and its answer alone. The call is made on that path anyway, so the two branches
-cannot drift and a workflow that one day commits what it was told mid-run needs no second change.
+What a `/plan` turn records is decided by how it executed, and on the shipped configuration it records
+the same as a plain turn. With `[planning]`'s `result_review` and `show_reasoning` both off, which is
+how they ship, execution goes through `_execute_streaming`: that path keeps the executor's own messages
+and rewrites only the prompt it ran them under, so a message delivered while the executor was working
+sits in the stored transcript and in `metadata["steering"]` like any other, and survives a reload.
+Turn either flag on and execution goes through `_execute_with_review` instead, which replaces
+everything the executor appended with a single user/assistant pair: a message delivered there reaches
+the model, shows live, reaches the catch-up record a switch-in replays, and is gone on reload, where
+the turn reads as the request and its answer alone. The planner's own rounds behave that second way
+whichever path follows them, because `_make_plan` rolls its scratch back, so a message delivered while
+the plan was still being drafted is never in the stored transcript either. The resolve call is made on
+the workflow branch regardless of which of those happened, so the two branches cannot drift.
 
 Each channel then says it in its own vocabulary. The terminal prints the words as the run reads them,
 from AIMU's base channel, which is all a channel with no bubble to go back and mark can usefully do. The

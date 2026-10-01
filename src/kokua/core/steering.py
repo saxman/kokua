@@ -1,9 +1,9 @@
 """Messages the user sends into a turn that is already running.
 
 A turn holds one mailbox for its whole life. AIMU's loop opens a reader over it at the start of
-every run inside that turn (the entry agent's, and each spawned worker's) and drains that reader
-once per round, so what the user types reaches the model at its next model call rather than queuing
-behind the turn on the gate.
+every run inside that turn that was handed a source (the entry agent's own runs, and every worker
+whose spec ``core/agents.py`` writes) and drains that reader once per round, so what the user types
+reaches the model at its next model call rather than queuing behind the turn on the gate.
 
 Two design points are worth reading before changing anything here.
 
@@ -204,8 +204,9 @@ class _ContextSteering:
 
 #: Handed to the entry agent's own runs: the conversation's cursor, whose progress decides what
 #: ``close`` re-submits. One cursor per *turn*, not per run, so every entry-agent run inside one turn
-#: shares it. That is what the planning workflow needs, which makes several of them: a message one run
-#: delivered is not re-submitted by the one after it.
+#: shares it. That is what the planning workflow needs, which makes two on its default path (the
+#: planner's and the executor's) and one more for each review round that sends work back: a message
+#: one run delivered is not re-submitted by the one after it.
 ENTRY_STEERING_SOURCE = _ContextSteering(entry=True)
 
 #: Handed to every worker whose spec ``core/agents.py`` writes: an independent cursor, so a worker

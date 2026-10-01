@@ -386,14 +386,19 @@ class TurnRunner:
                             # a rich one publishes its index as it commits, so read it from the context
                             # rather than from a result that may never arrive.
                             user_index = ctx.user_index
-                            # Always `[]` on this path today, and deliberately asked anyway. A
-                            # workflow rewrites the transcript as it commits (planning replaces
-                            # everything its executor appended with one user/assistant pair), so a
-                            # message delivered inside a planned turn is not in the list this reads:
-                            # it appears live and in the catch-up record, and is gone on reload. Asked
-                            # through the same helper as the plain branch so the two cannot drift, and
-                            # so a workflow that one day commits what it was told mid-run records it
-                            # without a second change here.
+                            # What this finds depends on how the workflow committed, which is why it
+                            # is asked through the same helper as the plain branch rather than
+                            # short-circuited here. On the shipped `[planning]` defaults
+                            # (`result_review` and `show_reasoning` both off) a `/plan` turn executes
+                            # through `_execute_streaming`, which keeps the executor's own messages
+                            # and rewrites only the prompt, so a message delivered during execution
+                            # is in this list and records exactly as a plain turn's does. Turning
+                            # either flag on takes `_execute_with_review`, which replaces everything
+                            # the executor appended with one user/assistant pair, leaving nothing
+                            # here to find and `[]` recorded. Either way the planner's own rounds are
+                            # rolled back (`_make_plan`), so a message delivered while the plan was
+                            # being drafted shows live, reaches the catch-up record a switch-in
+                            # replays, and is gone on reload.
                             steering_indices = resolve_steering_indices(agent.model_client.messages, user_index)
                     else:
                         # Taken here rather than before the gate: it is the lower bound the turn's own

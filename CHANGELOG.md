@@ -180,9 +180,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer
   been paid for. `core/steering.py` gives each turn a mailbox, `Assistant._offer_steering` routes a
   plain message into the one running on the conversation being viewed, and AIMU's loop drains it at the
   turn's next model call. The mailbox is append-only with **a cursor per reader**, not a queue, because
-  the message goes to the entry agent *and* to every worker a declared agent spawned: a redirection
-  that only reaches the supervisor redirects nothing, and a shared queue would let whichever reader
-  drained first consume a message the others never saw. Four run shapes are steerable, and they are the
+  the message goes to the entry agent *and* to every spawned worker that is itself a declared agent (a
+  worker `toolsets/capabilities.py` composes per call is declared nowhere, and is handed no source, so
+  it cannot be redirected): a redirection that only reaches the supervisor redirects nothing, and a
+  shared queue would let whichever reader drained first consume a message the others never saw. Four
+  run shapes are steerable, and they are the
   four a turn is made of: a plain turn, a `/plan` turn (where every entry-agent run shares the one
   cursor, since a cursor belongs to a turn and not to a run), every worker spawned through
   `build_agent_specs`, and a scheduled firing, which a user who switched into its conversation can
@@ -224,9 +226,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer
   which is normally the whole reason for branching there. A steering index is refused as a turn *start*
   for the same reason, so the guard that backstops a stale index cannot approve a cut inside a turn.
   `steered` defaults to empty, so a transcript stored before any of this behaves exactly as it did.
-  One path records nothing: a `/plan` turn rewrites its transcript as it commits, so a message delivered
-  inside one is live and in the catch-up record but not in the stored messages, and reads on reload as
-  the plan and its answer alone.
+  A `/plan` turn records whatever its execution left behind. On the shipped `[planning]` defaults
+  (`result_review` and `show_reasoning` both off) execution keeps the executor's own messages and
+  rewrites only the prompt, so a message delivered while the executor was working is stored and
+  recorded exactly as a plain turn's is. Turn either flag on and execution commits one user/assistant
+  pair in place of everything the executor appended, so a message delivered there is live and in the
+  catch-up record but not in the stored messages. A message delivered while the plan was still being
+  drafted is in neither on either path, because planning scratch is rolled back.
 - **Branch a conversation at a turn.** Every turn in the web UI carries a branch control, on the
   message that opened it and beside the delete-from-here control:
   it forks a new conversation holding everything through that turn and switches to it, leaving the

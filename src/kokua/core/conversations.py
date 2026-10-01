@@ -93,7 +93,13 @@ def steered_indices(metadata: dict) -> frozenset[int]:
     the question any reader asks is "was this message steering", and a message belongs to at most one
     turn, so which turn recorded it adds nothing. Unlike :func:`_metadata_before`, which has to refuse
     a non-digit key before comparing it to a cut, nothing here reads a key at all: a value that is not
-    a message index simply matches no message, so a hand-edited or foreign file costs a reader nothing.
+    a message index simply matches no message, so a hand-edited key costs a reader nothing.
+
+    What that tolerance does not extend to is a record of the wrong *shape*. A ``steering`` that is not
+    a mapping has no ``values()``, and an index that is not hashable cannot enter a set, so either one
+    raises out of here rather than being skipped. That is the exposure ``core/transcripts.py`` already
+    has over this same map, so the two readers of it agree on what a malformed record does, and
+    hardening one of them alone would only move where the failure surfaces.
     """
     return frozenset(index for indices in metadata.get("steering", {}).values() for index in indices)
 

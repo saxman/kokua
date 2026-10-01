@@ -1693,7 +1693,9 @@ async def test_branching_a_steered_turn_keeps_the_answer_the_steering_redirected
     assert assistant._book.branchable(parent.key, 1)
     branch_id = assistant._book.branch(parent.key, 1)
 
-    # Through index 5, the redirected answer, not through index 3, where the steering message sits.
+    # Through index 5, the redirected answer. A scan that stopped at the steering message (index 4)
+    # would have cut after index 3, the `tool` result answering the turn's first call, losing both the
+    # redirection and the answer it produced.
     assert assistant._store.get(branch_id).messages == STEERED_MESSAGES[:6]
     assert assistant._store.get(branch_id).metadata["steering"] == {"1": [4]}
 
