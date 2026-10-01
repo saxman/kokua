@@ -149,6 +149,11 @@ Every rule here was learned from a bug. Read them before changing anything in th
    *delivered* message as its own turn. A stop is the one exception and is deliberate: someone who
    cancelled the turn is not asking for one more, so those messages are reported as undelivered
    instead.
+   One window is uncovered and known: the re-submit happens after the ``finally`` has released the
+   gate, so an exception escaping that block (out of ``_persist``, the gate's ``__aexit__``, or
+   ``_notify_if_backgrounded``) computes the leftovers and drops them, which is "neither". Moving the
+   re-submit into the ``finally`` trades it for two worse faults, awaiting during a cancellation and
+   re-running a gate-cancelled turn's messages, so the window stands rather than being closed there.
    (Regressions: ``test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn``,
    ``test_the_entry_agents_run_opens_the_conversations_own_cursor``,
    ``test_a_stopped_turn_does_not_resubmit_its_undelivered_messages``.)
@@ -307,9 +312,12 @@ class TurnRunner:
         review_context = ReviewContext(request=msg.text)
         review_token = current_review_context.set(review_context)
         # The turn's steering mailbox, open for its whole life so a message typed while it runs can
-        # reach it rather than queuing behind it on the gate (invariant 9). Set before the first
-        # `await`, like `streaming_conversation` and `subagent_events` above, and for the same reason:
-        # a message offered before this turn's own run has a cursor open would otherwise land nowhere.
+        # reach it rather than queuing behind it on the gate (invariant 9). Published before the first
+        # `await` for a reason the contextvars above do not share: the serve loop adds this turn's
+        # tracker entry and this block runs with no suspension point in between, so the loop can never
+        # read a tracked turn that has no mailbox. A late *reader* would be harmless, since the mailbox
+        # is append-only and a cursor opened afterwards still sees what was offered before it; a live
+        # entry with no mailbox is the thing that drops a message.
         # Carries `review_context` rather than reading the contextvar, because an offer arrives on the
         # serve loop's own task while that contextvar is set inside this turn's: invisible from there.
         mailbox = SteeringMailbox(review_context=review_context)
