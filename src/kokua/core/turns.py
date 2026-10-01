@@ -396,8 +396,14 @@ class TurnRunner:
                         conversation_id, user_index, thinking=thinking, metrics=metrics, started=started
                     )
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
+                    # A stop does not re-submit (invariant 9's one exception), so anything the entry
+                    # agent had not yet read needs to be said rather than silently run or silently
+                    # dropped. `peek_undelivered` rather than `close`: `close` still runs in the
+                    # `finally` below and must still see those messages to decide what to hand back.
+                    pending = mailbox.peek_undelivered()
+                    notice = "(stopped)" if not pending else "(stopped; your last message was not delivered)"
                     try:
-                        await self._ui.send("(stopped)", reply_to=msg)
+                        await self._ui.send(notice, reply_to=msg)
                     except Exception:
                         pass
                     await self._persist(conversation_id, user_index)

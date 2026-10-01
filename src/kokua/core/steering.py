@@ -99,6 +99,15 @@ class SteeringMailbox:
         self._entry_seen = len(self._messages)
         return list(undelivered)
 
+    def peek_undelivered(self) -> list[str]:
+        """What the entry agent has not read yet, without consuming it or closing the mailbox.
+
+        For a stop, where ``close()`` still runs in the turn's ``finally`` right afterwards: the
+        cancelled branch needs to know whether to say anything was lost before that happens, and
+        advancing the cursor here would make ``close()`` see nothing left to hand back.
+        """
+        return list(self._messages[self._entry_seen :])
+
 
 #: The running turn's mailbox, set by ``TurnRunner`` for the turn's duration and None outside one.
 #: A contextvar for the reason ``subagent_events`` is one: a spawn's context is copied from the turn

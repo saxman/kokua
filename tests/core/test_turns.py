@@ -1991,28 +1991,32 @@ async def test_an_undelivered_message_runs_through_the_real_resubmit_path(assist
 
 
 async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assistant):
-    """Invariant 9's one exception: someone who cancelled the turn is not asking for one more."""
+    """Invariant 9's one exception: someone who cancelled the turn is not asking for one more.
+
+    What became of the offered message is reported rather than silently dropped, which is the other
+    half of "never neither": delivered, re-run as a follow-up turn, or (on a stop alone) said to be
+    undelivered.
+    """
     submitted = []
-    accepted = []
-
-    async def capture_resubmit(conversation_id, texts):
-        submitted.append((conversation_id, texts))
-
-    assistant._turns._resubmit_steering = capture_resubmit
+    assistant._turns._resubmit_steering = lambda conversation_id, texts: submitted.append(texts)
+    sent = []
+    assistant._ui.send = lambda text, **kwargs: sent.append(text)
 
     async def offer_then_stop(*args, **kwargs):
         # Raised from inside the run rather than delivered to the task, which is indistinguishable to
         # `reactive`'s `except asyncio.CancelledError` and needs no second task to do the stopping.
-        accepted.append(current_steering.get().offer("never mind"))
+        current_steering.get().offer("never mind, do the other thing")
         raise asyncio.CancelledError()
 
     assistant._book.agent_for(assistant._active_id).run = offer_then_stop
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
-    # Asserted so the test cannot pass by the offer having never landed: the generic error branch
-    # would swallow an `AttributeError` from a missing mailbox and leave `submitted` empty anyway.
-    assert accepted == [True]
     assert submitted == []
+    # Asserted on the sent text rather than on the offer landing directly: a mailbox that never saw
+    # the offer (an `AttributeError` the generic error branch would swallow) sends the plain
+    # "(stopped)" notice instead, which does not contain "not delivered", so this also covers the
+    # case the old assertion on `offer`'s return value existed to rule out.
+    assert any("not delivered" in text for text in sent)
 
 
 # --- routing a message into the turn it was typed during -----------------------------------------
