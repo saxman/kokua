@@ -871,6 +871,14 @@ function appendSubagentEntry(card, entry) {
     renderLoop(entry.text, undefined, { parent: card.body, reason: entry.reason });
     return;
   }
+  if (entry.kind === "steering") {
+    // Its own branch rather than `loop`'s: `loop` is the agent loop injecting a round of its own,
+    // and this is the user's own words reaching a worker already running. Filing it under `loop`
+    // would show the card crediting the loop with what a person said.
+    card.answer = null;
+    renderSteering(entry.text, undefined, { parent: card.body });
+    return;
+  }
   if (entry.kind === "tool") {
     card.answer = null;
     renderTool(entry.name, entry.arguments, undefined, {
@@ -1470,6 +1478,16 @@ function renderLoop(text, ts, opts) {
   // find Object.prototype's method and label the row with a function.
   const kind = Object.prototype.hasOwnProperty.call(LOOP_KINDS, reason) ? LOOP_KINDS[reason] : reason;
   const f = addFoldable("loop", { kind }, { parent: opts && opts.parent }, ts);
+  f.body.textContent = text || "";
+  return f;
+}
+
+// A message the user sent into a worker already running. Its own foldable class, not `loop`'s: a
+// `loop` row is the machine's own event (grouped with thinking/tool/plan as dim, monochrome rows in
+// app.css), and this text is a person's words, so it keeps the card's ordinary foreground colour
+// rather than reading as something the assistant did.
+function renderSteering(text, ts, opts) {
+  const f = addFoldable("steering", { kind: "steering" }, { parent: opts && opts.parent }, ts);
   f.body.textContent = text || "";
   return f;
 }

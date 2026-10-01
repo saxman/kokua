@@ -308,6 +308,40 @@ async def test_web_channel_stream_activity_types_a_missing_kind_as_a_string():
     assert {"type": "loop", "reason": "", "text": "Keep going."} in ws.frames
 
 
+async def test_a_steering_chunk_becomes_a_steering_frame():
+    """`stream_activity` maps chunks itself rather than reusing the base loop (see the CONTINUING
+    test above), so this branch has to exist here too or a planned turn swallows a steering message
+    that an ordinary turn would show."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+
+    await channel.stream_activity(gen())
+    assert {"type": "steering", "text": "use the cache"} in ws.frames
+
+
+async def test_web_channel_send_relays_a_steering_message():
+    """The base channel already maps STEERING (AIMU 0.33.0); Kokua's `send` only has to stop
+    swallowing it, exactly as it does for CONTINUING."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "a")
+        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.GENERATING, "b")
+
+    await channel.send(gen())
+    assert ws.frames == [
+        {"type": "token", "text": "a"},
+        {"type": "steering", "text": "use the cache"},
+        {"type": "token", "text": "b"},
+        {"type": "done"},
+    ]
+
+
 async def test_web_channel_stream_activity_show_answer_emits_tokens():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -619,6 +653,33 @@ async def test_a_muted_turns_catch_up_keeps_the_tool_output():
 
     tool = next(item for item in ws.frames[-1]["items"] if item["type"] == "tool")
     assert tool["response"] == "4"
+
+
+async def test_a_muted_turns_steering_frame_is_caught_up_not_dropped():
+    """`steering` is a turn-scoped marker exactly like `loop`, so it has to be muted while the user is
+    looking elsewhere and still recorded, or a redirect sent into a background turn would vanish
+    instead of showing up on the switch-in that catches the rest of that turn up."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "other"  # the turn below runs out of view
+    channel.begin_catch_up("running", "look it up")
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+
+    token = streaming_conversation.set("running")
+    try:
+        await channel.send(gen())
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == []  # muted live, including the "done" terminator
+
+    channel.active_conversation_id = "running"
+    await channel.send_history([], {})
+    steering = next(item for item in ws.frames[-1]["items"] if item["type"] == "steering")
+    assert steering["text"] == "use the cache"
 
 
 async def test_the_replayed_answer_keeps_its_place_above_a_later_tool_call():

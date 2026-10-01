@@ -60,7 +60,12 @@ proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)
 # matter which turn's task emits it. That distinction has to be drawn by frame type rather than by task
 # context: `TurnRunner._persist` pushes the conversation list from inside the turn's own task, so a
 # background turn's sidebar refresh carries a muted conversation in the contextvar and would be dropped.
-_TURN_FRAMES = frozenset({"token", "thinking", "tool", "message", "done", "loop", "image", "plan", "phase", "subagent"})
+# `steering` belongs here for the same reason `loop` does: it is a turn-scoped marker, not the
+# channel's own state, so a steered background turn must stay muted and catch up on switch-in exactly
+# like every other live frame that turn produces.
+_TURN_FRAMES = frozenset(
+    {"token", "thinking", "tool", "message", "done", "loop", "steering", "image", "plan", "phase", "subagent"}
+)
 
 
 def _now() -> str:
@@ -381,6 +386,12 @@ class WebChannel(BaseWebChannel):
             elif chunk.phase == StreamingContentType.CONTINUING:
                 call = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame({"type": "loop", "reason": call.get("kind", ""), "text": call.get("prompt", "")})
+            elif chunk.phase == StreamingContentType.STEERING:
+                # A separate frame from `loop`, not a third `reason` on it: `loop` says the loop
+                # injected a prompt of its own, and these are the user's own words. One frame that
+                # meant either would have the page attribute the user's message to the assistant.
+                sent = chunk.content if isinstance(chunk.content, dict) else {}
+                await self.send_frame({"type": "steering", "text": sent.get("text", "")})
             else:
                 image = _image_frame_for(chunk)
                 if image is not None:

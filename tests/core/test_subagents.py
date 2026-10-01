@@ -53,6 +53,10 @@ def _continuing(kind, prompt):
     return StreamChunk(StreamingContentType.CONTINUING, {"kind": kind, "prompt": prompt})
 
 
+def _steering(text):
+    return StreamChunk(StreamingContentType.STEERING, {"text": text})
+
+
 async def test_a_spawn_opens_a_running_card_and_closes_it_with_the_answer():
     """A provider that yields no GENERATING chunk streams nothing, so the terminal event carries the
     text rather than leaving the card empty."""
@@ -317,6 +321,20 @@ async def test_an_injected_round_reaches_the_card_with_what_the_worker_was_told(
     entry = {"kind": "loop", "reason": "final_answer", "text": "You have reached the tool-use limit."}
     assert channel.subagent_frames[-1] == {"id": "researcher-abc", "append": entry}
     assert events[-1] == {"id": "researcher-abc", "append": entry}
+
+
+async def test_a_workers_steering_chunk_is_recorded_on_its_card():
+    """A steering message is the user's own words reaching a worker already running, not the loop
+    injecting a round of its own, so it has to land as its own kind rather than a `loop` entry (which
+    would credit the loop with what a person said)."""
+    reporter, channel = _reporter()
+    events = _collect()
+    await reporter.spawned("r-1", "researcher", "find X")
+    await reporter.chunk("r-1", _steering("stop that"))
+
+    entry = {"kind": "steering", "text": "stop that"}
+    assert channel.subagent_frames[-1] == {"id": "r-1", "append": entry}
+    assert events[-1] == {"id": "r-1", "append": entry}
 
 
 async def test_an_injected_round_starts_a_second_answer_entry():
