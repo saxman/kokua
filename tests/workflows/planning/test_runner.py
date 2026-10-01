@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant
+from kokua.core.steering import ENTRY_STEERING_SOURCE
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows.planning import PlanningWorkflow
 from kokua.workflows.planning.prompts import PLAN_PROMPT
@@ -193,3 +196,47 @@ async def test_current_settings_and_apply_carry_plan_flags(tmp_path):
     await assistant.apply_settings({"planning.plan_review": True, "generate_kwargs": {}})
     assert assistant._config.toolset_settings["planning"]["plan_review"] is True
     assert assistant.current_settings()["planning.plan_review"] is True
+
+
+class _ActivityChannel(FakeChannel):
+    """A channel that can render an agent's loop live, which is the branch ``_run_and_capture`` takes
+    when one is available. The plain ``FakeChannel`` above takes the other."""
+
+    async def stream_activity(self, chunks, *, show_answer=False) -> str:
+        parts = []
+        async for chunk in chunks:
+            if chunk.phase == StreamingContentType.GENERATING and isinstance(chunk.content, str):
+                parts.append(chunk.content)
+        return "".join(parts)
+
+
+@pytest.mark.parametrize("channel_type", [FakeChannel, _ActivityChannel])
+async def test_every_run_in_a_planned_turn_steers_on_the_conversations_own_cursor(tmp_path, channel_type):
+    """Every model call here is the *entry* agent's, so every one opens the conversation's own cursor
+    rather than a worker's independent one: ``close`` measures what to re-submit from that cursor, so a
+    run opening an independent one would leave its position at zero and re-run every message the turn
+    did deliver as a turn of its own.
+
+    Parametrized over a channel that renders an agent's loop live and one that cannot, because the
+    planner reaches the model through a different call on each.
+    """
+    channel = channel_type()
+    client = MockAsyncModelClient(["THE PLAN", "THE ANSWER"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    agent = assistant._agent
+    run = agent.run
+    sources = []
+
+    async def capture(prompt, **kwargs):
+        sources.append(kwargs.get("steering"))
+        return await run(prompt, **kwargs)
+
+    agent.run = capture
+    await assistant._handle(
+        ChannelMessage(text="do the thing", channel="fake"),
+        conversation_id=assistant._active_id,
+        workflow=PLANNING_WORKFLOW,
+    )
+
+    assert len(sources) == 2  # the planner drafting, then the executor answering
+    assert all(source is ENTRY_STEERING_SOURCE for source in sources)

@@ -154,9 +154,20 @@ Every rule here was learned from a bug. Read them before changing anything in th
    ``_notify_if_backgrounded``) computes the leftovers and drops them, which is "neither". Moving the
    re-submit into the ``finally`` trades it for two worse faults, awaiting during a cancellation and
    re-running a gate-cancelled turn's messages, so the window stands rather than being closed there.
+   A scheduled firing carries the same mailbox and the same guarantee, and the two places it differs
+   both follow from its shape rather than from a different rule. Its mailbox is opened by
+   ``_run_unattended`` rather than by the body that reads it, unlike the ``current_metrics`` scope
+   beside it (invariant 3): the body runs in a child task, which copies the context at creation, so a
+   contextvar set before the task starts reaches it; and ``close`` has to be reached where the gate
+   hold is not held, since the follow-up turn takes a hold of its own and a re-submit from inside the
+   body would wait on the per-conversation lock the firing's own hold owns while the firing waits on
+   the follow-up (invariant 1). The uncovered window above is also wider for a firing, because it
+   reports a failure rather than catching one: an error on its way out of the hold carries that run's
+   leftovers past the re-submit.
    (Regressions: ``test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn``,
    ``test_the_entry_agents_run_opens_the_conversations_own_cursor``,
-   ``test_a_stopped_turn_does_not_resubmit_its_undelivered_messages``.)
+   ``test_a_stopped_turn_does_not_resubmit_its_undelivered_messages``,
+   ``test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_turn``.)
 """
 
 from __future__ import annotations
@@ -702,6 +713,14 @@ class TurnRunner:
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
         proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run
+        # This firing's steering mailbox, opened here rather than inside the body as `current_metrics`
+        # is, for two reasons that scope does not have. The child task copies this context when it
+        # starts, so a contextvar set before `RunHandle.start` is what carries the mailbox into the
+        # run; and `close` has to be reached outside the gate hold below, since anything the run never
+        # read becomes an ordinary turn and that turn takes a hold of its own (invariant 1). No review
+        # context: an unattended turn opens none (invariant 8).
+        mailbox = SteeringMailbox()
+        steering_token = current_steering.set(mailbox)
         self._book.pin(conversation_id)  # invariant 2
         try:
             # Held here rather than in the child so there is exactly one hold for the firing either way
@@ -714,9 +733,18 @@ class TurnRunner:
                 # firing is therefore not yet stoppable, which is what the tracker's one-entry-per-
                 # conversation rule buys. Registered before the first await below, so the entry is in
                 # place by the time the child's first statement runs.
+                # The mailbox rides the entry rather than being attached to it afterwards, because
+                # this path builds the entry itself: unlike a reactive turn, whose entry the serve loop
+                # already added, there is no window here in which a live entry has no mailbox.
                 self._tracker.add(
                     conversation_id,
-                    TurnInfo(handle=handle, started=time.monotonic(), preview=prompt[:120], task_id=spec.task_id),
+                    TurnInfo(
+                        handle=handle,
+                        started=time.monotonic(),
+                        preview=prompt[:120],
+                        task_id=spec.task_id,
+                        steering=mailbox,
+                    ),
                 )
                 try:
                     await handle.result()
@@ -740,6 +768,17 @@ class TurnRunner:
             proactive_turn.reset(proactive_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
+            current_steering.reset(steering_token)
+            undelivered = mailbox.close()
+        if undelivered:
+            # Accepted by the mailbox and never read, because the firing ended first, so it runs as a
+            # follow-up turn: a message is delivered or it is the next turn, never neither (invariant
+            # 9). Reached only by a firing that finished, which is what the two paths that skip it want:
+            # a stop returns above, and someone who stopped a firing is not asking for one more turn.
+            # A failed firing raises past here instead, so its leftovers are lost, which is the same
+            # uncovered window invariant 9 names on the reactive path and wider here, since a firing
+            # reports its failure rather than catching it.
+            await self._resubmit_steering(conversation_id, undelivered)
         return False
 
     async def _unattended_body(self, prompt: str, spec: ProactiveTarget) -> None:
@@ -788,7 +827,10 @@ class TurnRunner:
             failure: Optional[str] = None
             stopped = False
             try:
-                reply = await agent.run(prompt)
+                # The conversation's own cursor, not a worker's independent one: what a user who
+                # switched into this conversation types is the conversation having seen it, and `close`
+                # measures the leftovers from this cursor's position.
+                reply = await agent.run(prompt, steering=ENTRY_STEERING_SOURCE)
                 if spec.echo_reply:
                     await self._ui.send(reply)
             except asyncio.CancelledError:

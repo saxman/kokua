@@ -5,6 +5,7 @@ from aimu.tools import builtin
 
 from kokua.config.schema import AgentConfig, AssistantConfig
 from kokua.core.agents import build_agent_specs, build_registry
+from kokua.core.steering import STEERING_SOURCE
 from kokua.registry.context import LiveState
 
 SPAWN = "spawn_subagent"
@@ -561,3 +562,23 @@ def test_the_shipped_introspector_can_both_export_a_conversation_and_read_the_ex
     names = {fn.__name__ for fn in build_agent_specs(config, state, "assistant")["introspector"]["tools"]}
 
     assert {"export_conversation", "read_file"} <= names
+
+
+def test_every_worker_spec_carries_the_steering_source(tmp_path):
+    """``STEERING_SOURCE``, never ``ENTRY_STEERING_SOURCE``: a worker reads an independent cursor, so a
+    message only a worker consumed still comes back from ``close`` and runs as a follow-up turn rather
+    than counting as the conversation having seen it.
+
+    Written for every worker rather than only a declared one, which is the exception documented beside
+    the key itself: the value is one process-wide source, not a setting resolved per worker, so there is
+    no tier a missing key could fall back to."""
+    agents = {
+        "assistant": AgentConfig(delegates_to=["researcher", "coder"]),
+        "researcher": AgentConfig(tools=["web"]),
+        "coder": AgentConfig(tools=["fs"]),
+    }
+    config, state = _state(tmp_path, agents)
+    specs = build_agent_specs(config, state, config.entry_agent)
+
+    assert sorted(specs) == ["coder", "researcher"]
+    assert all(spec["steering"] is STEERING_SOURCE for spec in specs.values())

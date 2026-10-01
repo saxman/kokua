@@ -2181,3 +2181,48 @@ async def test_the_mailbox_a_reactive_turn_builds_carries_that_turns_review_cont
     assert calls and len(calls) == 1
     assert "find the bug" in seen["request"]
     assert "actually, read the log" in seen["request"]
+
+
+async def test_an_unattended_turn_publishes_a_mailbox_too(assistant):
+    """A scheduled firing is steerable, and that takes nothing away from the auto-deny that keeps its
+    gated calls from reaching a reviewer: a message binds to the conversation the user is *viewing*, so
+    the only person who can steer a firing is one who switched into it and is watching it run, which is
+    the same condition auto-deny tests.
+    """
+    seen = []
+
+    async def capture(*args, **kwargs):
+        entry = assistant._tracker.get(assistant._active_id)
+        seen.append((current_steering.get(), entry.steering if entry else None, kwargs.get("steering")))
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = capture
+    await assistant._turns.proactive("the scheduled prompt")
+
+    assert seen
+    mailbox, routed, source = seen[0]
+    assert mailbox is not None
+    assert routed is mailbox  # the entry routing reads carries this firing's own mailbox
+    assert source is ENTRY_STEERING_SOURCE
+    assert mailbox.offer("too late") is False  # shut when the firing ended
+
+
+async def test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_turn(assistant):
+    """The follow-up turn runs for real here, rather than being observed, because that is what pins
+    *where* the re-submit happens: it takes a gate hold of its own, so a re-submit reached from inside
+    the firing's hold would wait on the per-conversation lock that hold owns while the firing waits on
+    the follow-up (invariant 1). Bounded rather than a bare await, so that deadlock fails this test
+    instead of wedging the suite.
+    """
+    asked = []
+
+    async def run(text, *args, **kwargs):
+        asked.append(text)
+        if len(asked) == 1:  # offered once, so a drain that stopped working costs one turn, not a loop
+            current_steering.get().offer("while you are at it, check the log")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = run
+    await asyncio.wait_for(assistant._turns.proactive("the scheduled prompt"), timeout=5)
+
+    assert asked == ["the scheduled prompt", "while you are at it, check the log"]

@@ -14,6 +14,7 @@ from typing import Optional
 from aimu import aio
 from aimu.aio.channels.base import ChannelMessage
 
+from kokua.core.steering import ENTRY_STEERING_SOURCE
 from kokua.workflows import WorkflowContext, WorkflowResult, critics
 from kokua.workflows.planning import critics as review
 from kokua.workflows.planning.prompts import (
@@ -177,7 +178,13 @@ class PlanningWorkflow(aio.AsyncRunner):
         base_len = len(self._agent.model_client.messages)
         try:
             stream = await self._agent.run(
-                EXECUTE_PROMPT.format(request=msg.text, plan=plan), stream=True, images=msg.images
+                EXECUTE_PROMPT.format(request=msg.text, plan=plan),
+                stream=True,
+                images=msg.images,
+                # Every run in a planned turn is the entry agent's, so every one opens the
+                # conversation's own cursor: one cursor per turn rather than per run, which is what
+                # keeps a message this run delivered from also being re-submitted as a turn of its own.
+                steering=ENTRY_STEERING_SOURCE,
             )
             await self._ui.send(stream, reply_to=msg)
         finally:
@@ -360,10 +367,10 @@ class PlanningWorkflow(aio.AsyncRunner):
         ``stream_activity`` (e.g. the CLI) fall back to a plain non-streaming run.
         """
         if self._ui.supports_streamed_activity:
-            stream = await self._agent.run(prompt, stream=True, images=images)
+            stream = await self._agent.run(prompt, stream=True, images=images, steering=ENTRY_STEERING_SOURCE)
             text = await self._ui.stream_activity(stream, show_answer=show_answer)
         else:  # the caller needs this text, so run non-streaming rather than draining to ""
-            result = await self._agent.run(prompt, images=images)
+            result = await self._agent.run(prompt, images=images, steering=ENTRY_STEERING_SOURCE)
             text = result if isinstance(result, str) else str(result)
         if self._trace:  # verbose trace: attach this call's output to the current phase segment
             self._trace[-1]["text"] = text
