@@ -7,9 +7,12 @@ import asyncio
 import pytest
 
 from aimu import PROVENANCE_KEY, PROVENANCE_PROACTIVE
+from aimu.aio import RunHandle
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
+from kokua.core.steering import ENTRY_STEERING_SOURCE, SteeringMailbox, SteeringMessage, current_steering
+from kokua.core.turn_registry import TurnInfo
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
 from tests.channels import (
@@ -23,6 +26,112 @@ from tests.channels import (
 )
 from tests.fakes import _BlockingStreamClient, _RequestsToolOnce, _SeedsSystemMessage
 from tests.helpers import MockAsyncModelClient
+
+
+@pytest.fixture
+async def assistant(tmp_path):
+    """A ready assistant with one conversation, its agent built but no turn run yet.
+
+    Built with a plain ``FakeChannel``/``MockAsyncModelClient`` pair because the mailbox tests below
+    replace ``agent.run`` directly and never reach the client; what they need from this fixture is an
+    ``Assistant`` whose ``_turns.reactive`` can be called the way the serve loop calls it.
+    """
+    return await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["placeholder"]))
+
+
+def message(text: str, images: list | None = None) -> ChannelMessage:
+    return ChannelMessage(text=text, channel="fake", images=images)
+
+
+def test_every_stated_invariant_count_matches_the_module_docstring():
+    """Five prose sites tell a reader how many concurrency invariants this module has.
+
+    Four of them said "eight" after a ninth landed, which is the same drift
+    ``tests/test_aimu_compat.py`` pins for the AIMU floor and for the same reason: the number is a
+    fact about one file, repeated in files that cannot detect it changing. Pinned here rather than in
+    a docs test because the source of truth is ``core/turns.py``, which is where a reader who adds a
+    rule is already looking.
+
+    The count is read off the docstring's own numbered rules, so adding one and forgetting the prose
+    fails this test rather than leaving a quiet contradiction. It is checked as the English word, since
+    that is how every site spells it, and the noun is matched loosely ("invariants" in four of the five
+    places, "rules" in the fifth) with only number words counted, so a nearby sentence about rules in
+    general cannot inflate the tally. The number itself is deliberately not repeated in this docstring:
+    a sixth copy would be one this test does not read, and so one nothing could catch drifting. The
+    expected number of statements per file is part of the assertion, which is what keeps a rewrite that
+    drops one from passing silently.
+    """
+    import re
+    from pathlib import Path
+
+    from kokua.core import turns
+
+    rules = re.findall(r"^(\d+)\. ", turns.__doc__, flags=re.MULTILINE)
+    assert rules == [str(n) for n in range(1, len(rules) + 1)], f"the rules are not numbered 1..n: {rules}"
+    words = {8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve"}
+    expected = words[len(rules)]
+
+    root = Path(__file__).resolve().parents[2]
+    # (file, how many times it states the count). The README says it twice, in the module table and
+    # again in the feature list, and both are claims about today.
+    sites = (
+        ("README.md", 2),
+        ("CLAUDE.md", 1),
+        ("docs/explanation/architecture.md", 1),
+        ("docs/explanation/design-principles.md", 1),
+    )
+
+    stale = []
+    for name, times in sites:
+        text = (root / name).read_text()
+        found = re.findall(r"\b(\w+) (?:turn |concurrency )?(?:invariants?|rules)\b", text)
+        counts = [word for word in found if word in words.values()]
+        if counts.count(expected) != times:
+            stale.append(f"{name} states {counts!r}, wanted {expected!r} {times} time(s)")
+    assert not stale, f"core/turns.py has {len(rules)} invariants: " + "; ".join(stale)
+
+
+class _SteeringEchoChannel(FakeChannel):
+    """Delivers one message carrying a front end's bubble token, and records the steering frame.
+
+    `FakeChannel` yields bare text, and the token rides the message's metadata, which is the whole
+    thing under test here.
+    """
+
+    def __init__(self, text: str, token: str):
+        super().__init__()
+        self._message = ChannelMessage(text=text, channel="fake", metadata={"token": token})
+        self.steering: list[tuple[str, str | None]] = []
+
+    async def receive(self):
+        yield self._message
+
+    async def send_steering(self, text: str, *, token: str | None = None) -> None:
+        self.steering.append((text, token))
+
+
+@pytest.fixture
+async def track_running_turn():
+    """Track a turn on a conversation that never finishes on its own, and end it at teardown.
+
+    What routing reads is the tracker entry, not a gate hold, so a task that simply waits is enough
+    to stand in for a turn in flight. The handles are cancelled here so no task outlives its test.
+    """
+    handles: list[RunHandle] = []
+
+    def track(assistant, mailbox, conversation_id=None):
+        handle = RunHandle.start(asyncio.Event().wait())
+        handles.append(handle)
+        assistant._tracker.add(
+            conversation_id or assistant._active_id,
+            TurnInfo(handle=handle, started=0.0, preview="", steering=mailbox),
+        )
+        return handle
+
+    yield track
+    for handle in handles:
+        handle.cancel()
+    await asyncio.gather(*(handle.task for handle in handles), return_exceptions=True)
 
 
 async def test_assistant_handles_message(tmp_path):
@@ -53,10 +162,35 @@ async def test_a_completed_turn_publishes_where_it_starts(tmp_path):
     await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
 
     assert len(channel.turns_saved) == 1
-    conversation_id, index = channel.turns_saved[0]
+    conversation_id, index, _token = channel.turns_saved[0]
     assert conversation_id == assistant._active_id
     stored = assistant._store.get(conversation_id)
     assert stored.messages[index]["role"] == "user"
+
+
+async def test_a_completed_turn_echoes_the_token_of_the_message_that_started_it(tmp_path):
+    """The front end drew a message of its own and is waiting to hear which turn it became, so the
+    token it sent with that message rides back out on the turn's own frame."""
+    channel = _TurnSavedChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["sure"]))
+
+    await assistant._handle(
+        ChannelMessage(text="hello", channel="fake", metadata={"token": "b2"}),
+        conversation_id=assistant._active_id,
+    )
+
+    assert channel.turns_saved[0][2] == "b2"
+
+
+async def test_a_turn_nobody_minted_a_token_for_publishes_without_one(tmp_path):
+    """A scheduled firing and a terminal both reach this frame with no page behind them, so an absent
+    token has to stay absent rather than become a value every reader has to recognize."""
+    channel = _TurnSavedChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["sure"]))
+
+    await assistant._handle(ChannelMessage(text="hello", channel="fake"), conversation_id=assistant._active_id)
+
+    assert channel.turns_saved[0][2] is None
 
 
 async def test_a_turn_that_committed_no_user_message_publishes_nothing(tmp_path):
@@ -1860,3 +1994,533 @@ async def test_proactive_report_links_the_conversation_it_ran_in(tmp_path):
     # Grouped by the task, not by the conversation: every firing mints a new one, so grouping by
     # conversation would leave a card per firing, which is the pile-up the group exists to prevent.
     assert group == "report"
+
+
+async def test_a_reactive_turn_publishes_a_mailbox_and_closes_it(assistant):
+    seen = []
+
+    async def capture(*args, **kwargs):
+        seen.append(current_steering.get())
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = capture
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert seen and seen[0] is not None
+    assert current_steering.get() is None
+
+
+async def test_a_failed_turn_still_closes_its_mailbox(assistant):
+    mailboxes = []
+
+    async def explode(*args, **kwargs):
+        mailboxes.append(current_steering.get())
+        raise RuntimeError("the model server fell over")
+
+    assistant._book.agent_for(assistant._active_id).run = explode
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert current_steering.get() is None
+    assert mailboxes[0].offer("too late") is False
+
+
+async def test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn(assistant):
+    submitted = []
+
+    async def capture_resubmit(conversation_id, texts, *, like=None):
+        submitted.append((conversation_id, texts, like))
+
+    assistant._turns._resubmit_steering = capture_resubmit
+
+    async def ignore_steering(*args, **kwargs):
+        current_steering.get().offer("just missed it")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = ignore_steering
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    # `like` is the finishing turn's own message, carried so the follow-up keeps its `sender` and
+    # `channel`: the mailbox holds text and a token alone, so those have no other route back.
+    assert submitted == [(assistant._active_id, [SteeringMessage("just missed it")], message("hello"))]
+
+
+async def test_a_follow_up_turn_keeps_the_sender_and_channel_of_the_turn_it_came_from(assistant):
+    """The mailbox carries text and a token alone, so a follow-up built from scratch would reach
+    ``reactive`` with no ``sender`` and no ``channel``: the two fields a channel routes a reply by
+    (``send(reply_to=...)``). Inert on every channel in this repository and not inert by definition,
+    which is why the finishing turn's own message is the template this one is derived from. ``images``
+    is cleared and ``metadata`` replaced, so nothing else riding the original (a per-turn reasoning
+    effort) is re-applied to a turn the user never asked that of.
+    """
+    submitted = []
+
+    async def capture(msg, *, conversation_id, workflow=None, tid=None):
+        submitted.append(msg)
+
+    assistant._turns.reactive = capture
+    original = ChannelMessage(
+        text="hello", sender="chat-7", channel="fake", images=["an image"], metadata={"thinking": "high"}
+    )
+
+    await assistant._turns._resubmit_steering(
+        assistant._active_id, [SteeringMessage("just missed it", token="b2")], like=original
+    )
+
+    assert submitted == [
+        ChannelMessage(text="just missed it", sender="chat-7", channel="fake", images=None, metadata={"token": "b2"})
+    ]
+
+
+async def test_the_entry_agents_run_opens_the_conversations_own_cursor(assistant):
+    """``ENTRY_STEERING_SOURCE``, not ``STEERING_SOURCE``, which belongs to a spawned worker.
+
+    ``close`` measures what to re-submit from the entry cursor's position, so a run opening an
+    independent cursor would leave that position at zero and re-run every *delivered* message as its
+    own turn: the "never both" half of invariant 9, broken in the common case.
+    """
+    sources = []
+
+    async def capture_source(*args, **kwargs):
+        sources.append(kwargs.get("steering"))
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = capture_source
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert sources == [ENTRY_STEERING_SOURCE]
+
+
+async def test_an_undelivered_message_runs_through_the_real_resubmit_path(assistant):
+    """The follow-up turn itself, with ``_resubmit_steering`` left in place rather than observed.
+
+    Worth its own case because the re-submit happens after ``reactive``'s ``finally`` has released the
+    gate: taking a second hold from inside the first would deadlock against a concurrent exclusive()
+    (invariant 1), and a stub standing in for the method cannot show that it does not.
+    """
+    asked = []
+
+    async def offer_once(text, *args, **kwargs):
+        asked.append(text)
+        if len(asked) == 1:
+            current_steering.get().offer("and one more thing")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = offer_once
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert asked == ["hello", "and one more thing"]
+
+
+async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assistant):
+    """Invariant 9's one exception: someone who cancelled the turn is not asking for one more.
+
+    What became of the offered message is reported rather than silently dropped, which is the other
+    half of "never neither": delivered, re-run as a follow-up turn, or (on a stop alone) said to be
+    undelivered.
+    """
+    submitted = []
+    assistant._turns._resubmit_steering = lambda conversation_id, texts: submitted.append(texts)
+    sent = []
+    assistant._ui.send = lambda text, **kwargs: sent.append(text)
+
+    async def offer_then_stop(*args, **kwargs):
+        # Raised from inside the run rather than delivered to the task, which is indistinguishable to
+        # `reactive`'s `except asyncio.CancelledError` and needs no second task to do the stopping.
+        current_steering.get().offer("never mind, do the other thing")
+        raise asyncio.CancelledError()
+
+    assistant._book.agent_for(assistant._active_id).run = offer_then_stop
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert submitted == []
+    # Asserted on the sent text rather than on the offer landing directly: a mailbox that never saw
+    # the offer (an `AttributeError` the generic error branch would swallow) sends the plain
+    # "(stopped)" notice instead, which does not contain "not delivered", so this also covers the
+    # case the old assertion on `offer`'s return value existed to rule out.
+    assert any("not delivered" in text for text in sent)
+
+
+# --- routing a message into the turn it was typed during -----------------------------------------
+
+
+async def test_a_message_typed_during_a_turn_steers_it_rather_than_starting_one(assistant, track_running_turn):
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+
+    assert assistant._offer_steering(message("actually, use the cache"), assistant._active_id) is True
+    assert [message.text for message in mailbox.close()] == ["actually, use the cache"]
+
+
+async def test_a_message_with_no_turn_running_starts_one(assistant):
+    assert assistant._offer_steering(message("hello"), assistant._active_id) is False
+
+
+async def test_a_message_never_steers_another_conversations_turn(assistant, track_running_turn):
+    other = SteeringMailbox()
+    track_running_turn(assistant, other, conversation_id="other-conversation")
+
+    assert assistant._offer_steering(message("hello"), assistant._active_id) is False
+    assert other.close() == []
+
+
+async def test_a_message_with_an_image_starts_a_turn_rather_than_steering(assistant, track_running_turn):
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+
+    assert assistant._offer_steering(message("look", images=["/tmp/a.png"]), assistant._active_id) is False
+    assert mailbox.close() == []
+
+
+async def test_a_blank_message_starts_a_turn_rather_than_steering(assistant, track_running_turn):
+    # Accepted it would be delivered to nothing (AIMU discards whitespace at the drain), handed back
+    # by `close`, and then run as an empty follow-up turn.
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+
+    assert assistant._offer_steering(message("   "), assistant._active_id) is False
+    assert mailbox.close() == []
+
+
+async def test_a_message_arriving_after_the_mailbox_closed_starts_a_turn(assistant, track_running_turn):
+    """The follow-up-turn window: a turn whose `finally` has shut its mailbox is still tracked.
+
+    Nothing is lost there, which is the whole point of the refusal: the message runs as an ordinary
+    turn, exactly as it did before routing existed.
+    """
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+    mailbox.close()
+
+    assert assistant._offer_steering(message("too late"), assistant._active_id) is False
+
+
+async def test_the_serve_loop_steers_a_running_turn_instead_of_submitting_a_new_one(tmp_path, track_running_turn):
+    channel = FakeChannel(["actually, use the cache"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    mailbox = SteeringMailbox()
+    handle = track_running_turn(assistant, mailbox)
+
+    await assistant._serve_channel()
+
+    assert [message.text for message in mailbox.close()] == ["actually, use the cache"]
+    assert assistant._tracker.get(assistant._active_id).handle is handle  # no second turn submitted
+
+
+async def test_a_steered_messages_token_rides_back_so_the_page_can_mark_its_bubble(tmp_path, track_running_turn):
+    """A steered message normally produces no turn of its own, so nothing else would name it again:
+    this is the frame that tells a front end which fate the message it drew has met. The one case where
+    a later frame names it too is the message a turn accepts and never reads, which runs as a follow-up
+    turn carrying this same token."""
+    channel = _SteeringEchoChannel("actually, use the cache", token="b4")
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    track_running_turn(assistant, SteeringMailbox())
+
+    await assistant._serve_channel()
+
+    assert channel.steering == [("actually, use the cache", "b4")]
+
+
+async def test_a_message_that_starts_a_turn_reports_no_steering(tmp_path):
+    """The other half: a message with no turn to join is not reported as having joined one, which is
+    what leaves its bubble waiting for the save that will stamp it."""
+    channel = _SteeringEchoChannel("hello", token="b5")
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["sure"]))
+
+    await assistant._serve_channel()  # submits the turn as a background task
+    info = assistant._tracker.get(assistant._active_id)
+    if info is not None:  # let it finish, so a report from the turn itself would be seen too
+        await asyncio.gather(info.handle.task, return_exceptions=True)
+
+    assert channel.steering == []
+
+
+async def test_a_pending_approval_still_takes_the_message_rather_than_steering(tmp_path, track_running_turn):
+    """Priority: `HumanGate.resolve_reply` consumes the next message and always has."""
+
+    async def noop_prompt() -> None:
+        """A prompt that sends nothing: what this exercises is the pending-request slot."""
+
+    channel = FakeChannel(["y"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+    asking = asyncio.create_task(assistant._human.approval.ask(noop_prompt))
+    await asyncio.sleep(0)  # let it register as pending before the loop reads the "y"
+
+    await assistant._serve_channel()
+
+    # Bounded rather than a bare await: were the offer above the pending-answer check, the "y" would
+    # land in the mailbox and nothing would ever resolve this, wedging the suite instead of failing.
+    assert await asyncio.wait_for(asking, timeout=5) is True
+    assert mailbox.close() == []
+
+
+async def test_a_workflow_command_typed_mid_turn_still_starts_a_workflow_turn(tmp_path, track_running_turn):
+    """A workflow turn queues on the gate as it always has: only a plain message may steer."""
+    channel = FakeChannel(["/plan do the thing"])
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    mailbox = SteeringMailbox()
+    handle = track_running_turn(assistant, mailbox)
+
+    await assistant._serve_channel()
+
+    assert mailbox.close() == []
+    submitted = assistant._tracker.get(assistant._active_id)
+    assert submitted is not None and submitted.handle is not handle
+    submitted.handle.cancel()  # cancelled rather than run: what matters is that it was submitted
+    await asyncio.gather(submitted.handle.task, return_exceptions=True)
+
+
+async def test_a_message_typed_during_a_follow_up_turn_reaches_that_turn(assistant, track_running_turn):
+    """One level of nesting is reachable, and what bounds it is user action rather than a rule.
+
+    ``_resubmit_steering`` runs the follow-up turn from inside the finishing turn's own task, so no
+    second tracker entry is created for it; the follow-up's ``attach_steering`` lands on the original
+    entry instead (last write wins), which is what makes its mailbox reachable from the serve loop at
+    all. Each further level costs the user another message typed inside another missed drain window.
+    """
+    asked = []
+    offered = []
+    track_running_turn(assistant, None)  # the entry the serve loop adds at submit time, mailbox later
+
+    async def run(text, *args, **kwargs):
+        asked.append(text)
+        if len(asked) == 1:
+            current_steering.get().offer("and one more thing")  # never drained, so it runs as a turn
+        elif len(asked) == 2:
+            offered.append(assistant._offer_steering(message("and a third"), assistant._active_id))
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = run
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert offered == [True]
+    assert asked == ["hello", "and one more thing", "and a third"]
+
+
+async def test_the_mailbox_a_reactive_turn_builds_carries_that_turns_review_context(assistant, track_running_turn):
+    """The join between the two halves of the amendment, which each half's own test leaves open.
+
+    ``test_reactive_turn_opens_a_review_context_carrying_the_request`` proves ``reactive`` opens a
+    context and ``test_an_offer_amends_the_running_turns_review_context`` proves a mailbox amends the
+    context it was handed, and both stay green if ``reactive`` builds its mailbox with no context at
+    all. That mutation makes a security-relevant amendment a silent no-op in production, so what is
+    asserted here is the wiring: steer the turn from inside its own run and read back the request a
+    gated call in that turn would be judged against.
+    """
+    from kokua.core.auto_approval import current_review_context
+
+    track_running_turn(assistant, None)  # the entry the serve loop adds at submit time, mailbox later
+    calls = []
+    seen = {}
+
+    async def steer_from_inside(*args, **kwargs):
+        calls.append(args)
+        # Offered once only, so a drain that stopped working would cost one extra turn rather than
+        # recurse through the follow-up path without end.
+        if len(calls) == 1:
+            assert assistant._offer_steering(message("actually, read the log"), assistant._active_id) is True
+            seen["request"] = current_review_context.get().request
+            ENTRY_STEERING_SOURCE.reader()()  # delivered, so this message needs no follow-up turn
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = steer_from_inside
+    await assistant._turns.reactive(message("find the bug"), conversation_id=assistant._active_id)
+
+    assert calls and len(calls) == 1
+    assert "find the bug" in seen["request"]
+    assert "actually, read the log" in seen["request"]
+
+
+async def test_an_unattended_turn_publishes_a_mailbox_too(assistant):
+    """A scheduled firing is steerable, and that takes nothing away from the auto-deny that keeps its
+    gated calls from reaching a reviewer: a message binds to the conversation the user is *viewing*, so
+    the only person who can steer a firing is one who switched into it and is watching it run, which is
+    the same condition auto-deny tests.
+    """
+    seen = []
+
+    async def capture(*args, **kwargs):
+        entry = assistant._tracker.get(assistant._active_id)
+        seen.append((current_steering.get(), entry.steering if entry else None, kwargs.get("steering")))
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = capture
+    await assistant._turns.proactive("the scheduled prompt")
+
+    assert seen
+    mailbox, routed, source = seen[0]
+    assert mailbox is not None
+    assert routed is mailbox  # the entry routing reads carries this firing's own mailbox
+    assert source is ENTRY_STEERING_SOURCE
+    assert mailbox.offer("too late") is False  # shut when the firing ended
+
+
+async def test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_turn(assistant):
+    """The follow-up turn runs for real here, rather than being observed, because that is what pins
+    *where* the re-submit happens: it takes a gate hold of its own, so a re-submit reached from inside
+    the firing's hold would wait on the per-conversation lock that hold owns while the firing waits on
+    the follow-up (invariant 1). Bounded rather than a bare await, so that deadlock fails this test
+    instead of wedging the suite.
+    """
+    asked = []
+
+    async def run(text, *args, **kwargs):
+        asked.append(text)
+        if len(asked) == 1:  # offered once, so a drain that stopped working costs one turn, not a loop
+            current_steering.get().offer("while you are at it, check the log")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = run
+    await asyncio.wait_for(assistant._turns.proactive("the scheduled prompt"), timeout=5)
+
+    assert asked == ["the scheduled prompt", "while you are at it, check the log"]
+
+
+async def test_a_firings_mailbox_is_shut_even_when_the_channel_raises_during_teardown(assistant, monkeypatch):
+    """The reset and the close lead the teardown, ahead of anything fallible, as they do in
+    ``reactive``. ``end_catch_up`` calls back into the channel, so a front end raising there would
+    otherwise leave an open mailbox behind for the life of the process, and every later message typed
+    on that conversation would be accepted by a turn that had already ended.
+    """
+    seen = []
+
+    async def capture(*args, **kwargs):
+        seen.append(current_steering.get())
+        return "done"
+
+    def explode(conversation_id):
+        raise RuntimeError("the front end fell over")
+
+    assistant._book.agent_for(assistant._active_id).run = capture
+    monkeypatch.setattr(assistant._ui, "end_catch_up", explode)
+
+    await assistant._turns.proactive("the scheduled prompt")  # the failure is reported, not raised
+
+    assert seen and seen[0].offer("too late") is False
+
+
+async def test_a_follow_up_turn_that_fails_is_not_reported_as_the_firing_failing(assistant):
+    """A firing that finished must keep saying so. The re-submit is awaited inside the firing's own
+    call, so an error escaping the follow-up turn would otherwise reach the handlers that announce a
+    scheduled task as failed, blaming the firing for a turn that ran after it.
+    """
+    asked = []
+
+    async def run(text, *args, **kwargs):
+        asked.append(text)
+        current_steering.get().offer("while you are at it, check the log")
+        return "done"
+
+    async def explode(*args, **kwargs):
+        raise RuntimeError("the follow-up turn fell over")
+
+    assistant._book.agent_for(assistant._active_id).run = run
+    assistant._turns.reactive = explode
+
+    await assistant._turns.proactive("the scheduled prompt")
+
+    assert asked == ["the scheduled prompt"]
+    assert not [text for text in assistant._ui.channel.sent if "failed" in text]
+
+
+# --- what a turn records about the messages sent into it ------------------------------------------
+
+
+def _steered_run(agent, steering_text="use the cache"):
+    """An ``agent.run`` that leaves behind the transcript a steered round produces.
+
+    The turn's own user message, a tool exchange, the user's mid-run message, then the answer. The
+    mock client fakes tool rounds rather than running AIMU's dispatch (see the testing notes), so the
+    shape is written out here rather than driven.
+    """
+
+    async def run(text, **kwargs):
+        agent.model_client.messages.extend(
+            [
+                {"role": "user", "content": text},
+                {"role": "assistant", "tool_calls": [{"id": "id0"}]},
+                {"role": "tool", "content": "result", "tool_call_id": "id0"},
+                {"role": "user", "content": steering_text},
+                {"role": "assistant", "content": "done"},
+            ]
+        )
+        return "done"
+
+    return run
+
+
+async def test_a_turn_records_where_its_steering_messages_landed(assistant):
+    """Replay cannot tell a steering message from one that started a turn by position alone, and
+    guessing it from position attaches a turn's controls to a message that has no turn."""
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _steered_run(agent)
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    assert assistant._store.get(conversation_id).metadata["steering"]["0"] == [3]
+
+
+async def test_an_unsteered_turn_records_no_steering_at_all(assistant):
+    """The same "stays out of the file when there is nothing to say" rule the effort record follows."""
+    conversation_id = assistant._active_id
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    assert "steering" not in assistant._store.get(conversation_id).metadata
+
+
+async def test_an_unattended_turn_records_where_its_steering_messages_landed(tmp_path):
+    """A firing carries the same mailbox a reactive turn does, so it leaves the same transcript and
+    needs the same record: its own messages are tagged proactive, which is not a loop injection."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient(["done"]))
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _steered_run(agent)
+
+    await assistant._proactive("summarize the log")
+
+    assert assistant._store.get(conversation_id).metadata["steering"]["0"] == [3]
+
+
+async def test_a_follow_up_turn_carries_the_token_of_the_message_that_became_it(tmp_path):
+    """A front end that drew a bubble is told which fate it met, and this is the case where the first
+    answer is superseded: accepted into the running turn, never read, and then run as a turn after
+    all. Without the token on that turn's save, the bubble keeps a mark saying it joined a turn
+    it never reached and gains none of the controls of the turn it actually became.
+    """
+    channel = _TurnSavedChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient([]))
+    agent = assistant._book.agent_for(assistant._active_id)
+    asked = []
+
+    async def offer_once(text, *args, **kwargs):
+        asked.append(text)
+        agent.model_client.messages.extend(
+            [{"role": "user", "content": text}, {"role": "assistant", "content": "done"}]
+        )
+        if len(asked) == 1:
+            current_steering.get().offer("and one more thing", token="b2")
+        return "done"
+
+    agent.run = offer_once
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert asked == ["hello", "and one more thing"]
+    assert [token for _conversation_id, _index, token in channel.turns_saved] == [None, "b2"]
+
+
+async def test_a_steered_message_hands_the_mailbox_the_id_its_front_end_drew_it_under(assistant, track_running_turn):
+    """The accept side of the same round trip: the token rides the message's metadata, and the
+    mailbox is what carries it as far as the follow-up turn if the run never reads the message."""
+    mailbox = SteeringMailbox()
+    track_running_turn(assistant, mailbox)
+
+    accepted = assistant._offer_steering(
+        ChannelMessage(text="use the cache", channel="fake", metadata={"token": "b2"}),
+        assistant._active_id,
+    )
+
+    assert accepted is True
+    assert mailbox.close() == [SteeringMessage("use the cache", "b2")]

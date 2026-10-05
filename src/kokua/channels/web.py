@@ -60,7 +60,12 @@ proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)
 # matter which turn's task emits it. That distinction has to be drawn by frame type rather than by task
 # context: `TurnRunner._persist` pushes the conversation list from inside the turn's own task, so a
 # background turn's sidebar refresh carries a muted conversation in the contextvar and would be dropped.
-_TURN_FRAMES = frozenset({"token", "thinking", "tool", "message", "done", "loop", "image", "plan", "phase", "subagent"})
+# `steering` belongs here for the same reason `loop` does: it is a turn-scoped marker, not the
+# channel's own state, so a steered background turn must stay muted and catch up on switch-in exactly
+# like every other live frame that turn produces.
+_TURN_FRAMES = frozenset(
+    {"token", "thinking", "tool", "message", "done", "loop", "steering", "image", "plan", "phase", "subagent"}
+)
 
 
 def _now() -> str:
@@ -282,29 +287,69 @@ class WebChannel(BaseWebChannel):
             frame["elapsed"] = elapsed
         await self.send_frame(frame)
 
-    async def send_turn_saved(self, conversation_id: str, message_index: int) -> None:
+    async def send_turn_saved(self, conversation_id: str, message_index: int, *, token: Optional[str] = None) -> None:
         """Tell the page a turn has reached the store, and where in the transcript it starts.
 
         Never muted (``turn_saved`` is not in ``_TURN_FRAMES``): it carries the conversation it is
         about, so the page can file it against the right transcript or ignore it, which is exactly
         what a background turn's completion needs. Muting it by view would instead lose it, and the
-        page would keep an unbranchable turn until the next reload."""
-        await self.send_frame(
-            {"type": "turn_saved", "conversation_id": conversation_id, "message_index": message_index}
-        )
+        page would keep an unbranchable turn until the next reload.
 
-    async def feed_input(self, text: str, image_paths: list[str], thinking: Optional[str] = None) -> None:
-        """Enqueue a user turn carrying attached image file paths, a per-turn reasoning effort, or both
-        (the web pump's ``input`` frame).
+        ``token`` is the page's own id for the message bubble this turn was made of, echoed back so
+        the page can match the two. Omitted from the frame when there is none, which is the case for
+        every turn no page started (a scheduled firing, a terminal's own message), so such a turn is
+        on the wire exactly as it was before matching existed."""
+        frame: dict[str, Any] = {
+            "type": "turn_saved",
+            "conversation_id": conversation_id,
+            "message_index": message_index,
+        }
+        if token is not None:
+            frame["token"] = token
+        await self.send_frame(frame)
 
-        Plain chat / ``/stop`` / approval replies still arrive through the base string ``feed``; only a
-        turn carrying something besides its text uses this richer path, so ``receive`` can populate
-        ``ChannelMessage.images`` and ``ChannelMessage.metadata``."""
-        await self._inbound.put({"text": text, "images": image_paths, "thinking": thinking})
+    async def send_steering(self, text: str, *, token: Optional[str] = None) -> None:
+        """Tell the page a message it drew has joined the turn already running rather than starting one.
+
+        The other fate a message can meet, and the reason the page matches a bubble to a frame rather
+        than counting bubbles off against turns: a steered message is normally folded into the turn
+        already under way and produces no ``turn_saved`` of its own, so nothing else would ever name it
+        again. The exception is a message the turn accepts and never reads, which runs as a follow-up
+        turn carrying this same token, so a later ``turn_saved`` naming a bubble this frame already
+        marked is a supersession the page expects rather than a mis-stamp.
+
+        Sent when the message is accepted, which is also why it is a frame of Kokua's own rather than
+        the ``steering`` frame the stream already carries: that one is mapped from AIMU's own chunk
+        when the run *drains* the message, and a reader's ``drain`` (``SteeringMailbox.reader``)
+        hands AIMU the text alone, never the token, since text is all AIMU's own loop takes as a
+        prompt. The mailbox keeps the token (see ``SteeringMessage``) only as far as that drain; AIMU
+        never sees it, so the chunk built from AIMU's side has none to carry. Both frames are the same
+        type, and the page tells them apart by exactly the thing it needs: the one carrying a token
+        names a bubble.
+        """
+        frame: dict[str, Any] = {"type": "steering", "text": text}
+        if token is not None:
+            frame["token"] = token
+        await self.send_frame(frame)
+
+    async def feed_input(
+        self,
+        text: str,
+        image_paths: list[str],
+        thinking: Optional[str] = None,
+        token: Optional[str] = None,
+    ) -> None:
+        """Enqueue a user turn carrying attached image file paths, a per-turn reasoning effort, the
+        page's own id for the bubble it drew, or any combination (the web pump's ``input`` frame).
+
+        ``/stop`` and approval replies still arrive through the base string ``feed``; only a message
+        the page composed uses this richer path, so ``receive`` can populate ``ChannelMessage.images``
+        and ``ChannelMessage.metadata``."""
+        await self._inbound.put({"text": text, "images": image_paths, "thinking": thinking, "token": token})
 
     async def receive(self) -> AsyncIterator[ChannelMessage]:
-        """Yield inbound turns; a dict item carries attached image paths, a per-turn reasoning effort, or
-        both, a string is a plain text turn.
+        """Yield inbound turns; a dict item carries attached image paths, a per-turn reasoning effort, a
+        bubble token, or any combination, a string is a plain text turn.
 
         Overrides the base (string-only) receive so uploaded images reach the agent. ``None`` remains the
         socket-closed sentinel."""
@@ -313,10 +358,11 @@ class WebChannel(BaseWebChannel):
             if item is None:
                 return
             if isinstance(item, dict):
-                # An absent effort leaves `metadata` empty rather than carrying a None: the core reads a
-                # missing key as "use the configured effort", and a present-but-None key would be a
-                # second spelling of the same thing for every reader to remember.
-                metadata = {} if item.get("thinking") is None else {"thinking": item["thinking"]}
+                # An absent effort or token leaves the key out of `metadata` rather than carrying a
+                # None: the core reads a missing effort as "use the configured one" and a missing token
+                # as "no bubble is waiting on this", and a present-but-None key would be a second
+                # spelling of the same thing for every reader to remember.
+                metadata = {key: item[key] for key in ("thinking", "token") if item.get(key) is not None}
                 yield ChannelMessage(
                     text=item.get("text", ""),
                     images=item.get("images") or None,
@@ -381,6 +427,12 @@ class WebChannel(BaseWebChannel):
             elif chunk.phase == StreamingContentType.CONTINUING:
                 call = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame({"type": "loop", "reason": call.get("kind", ""), "text": call.get("prompt", "")})
+            elif chunk.phase == StreamingContentType.STEERING:
+                # A separate frame from `loop`, not a third `reason` on it: `loop` says the loop
+                # injected a prompt of its own, and these are the user's own words. One frame that
+                # meant either would have the page attribute the user's message to the assistant.
+                sent = chunk.content if isinstance(chunk.content, dict) else {}
+                await self.send_frame({"type": "steering", "text": sent.get("text", "")})
             else:
                 image = _image_frame_for(chunk)
                 if image is not None:
@@ -410,8 +462,10 @@ class WebChannel(BaseWebChannel):
 
         Always sent, even when empty, so switching to a new/empty conversation clears the page.
         ``metadata`` is the active session's metadata; its ``subagent`` map interleaves reviewer cards
-        (non-verbose turns), its ``trace`` map replays the raw verbose trace (verbose turns), and its
-        ``failure`` map closes a turn that ended in an error with the reason.
+        (non-verbose turns), its ``trace`` map replays the raw verbose trace (verbose turns), its
+        ``failure`` map closes a turn that ended in an error with the reason, and its ``steering`` map
+        says which of a turn's messages the user sent into it while it ran rather than as turns of
+        their own.
 
         A turn in flight on this conversation contributes its catch-up items (see
         :class:`_CatchUpRecord`) on the end of the same frame. One frame rather than a replay of separate
@@ -428,6 +482,7 @@ class WebChannel(BaseWebChannel):
             subagent=meta.get("subagent"),
             trace=meta.get("trace"),
             failure=meta.get("failure"),
+            steering=meta.get("steering"),
         )
         record = self._catch_up.get(self.active_conversation_id)
         if record is not None:

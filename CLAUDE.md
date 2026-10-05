@@ -50,7 +50,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.32.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.33.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -59,7 +59,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.32.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.33.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -290,8 +290,8 @@ Consequences for working in this repo:
   a membership check over a list of *callables* matching on `__name__`, declined at 0.24.0, again at
   0.30.0, and again here, asserted in `tests/test_aimu_compat.py` instead. `get_web_content` became the
   floor's job then, in its turn.
-  **AIMU 0.32.0 is the current floor, and it is the counterpart to the release before it: two
-  capabilities again, and this time the newest handle is the right one.** Both are about authoring
+  **AIMU 0.32.0 was the floor until 0.33.0, and it is the counterpart to the release before it: two
+  capabilities again, and that time the newest handle was the right one.** Both are about authoring
   skills, and the one Kokua's own code changed for is `make_skill_update_tool`, which `toolsets/skills.py`
   now calls beside `make_skill_authoring_tool` and `make_skill_script_tool` so the entry agent holds
   `update_skill`. It closes a loop that was open from the start: `author_skill` refuses to clobber and
@@ -318,7 +318,33 @@ Consequences for working in this repo:
   file Kokua does not read back), so establishing it in the preflight would mean authoring a skill in a
   temp directory at startup and reading it back, a filesystem side effect a preflight has no business
   having. `tests/test_aimu_compat.py` does exactly that instead, where a side effect is free.
-  `"compaction"` is the floor's job now, in its turn.
+  `"compaction"` is the floor's job then, in its turn.
+  **AIMU 0.33.0 is the current floor, and `aio.SkillAgent.run`'s `steering` parameter is the single
+  capability behind this whole plan: a run already in progress can be handed a user message without
+  waiting for it to finish, which is what lets a message typed mid-turn reach the turn running now
+  instead of queuing behind it.** The shape is a signature check, the fifth time
+  (`SkillManager(include=...)`, `SkillAgent(script_env=...)`, `WebChannel(stream_thinking=...)`,
+  `make_async_subagent_tool(events=...)`), and a name lookup would not do: `SkillAgent.run` predates
+  this floor by a long way, so only whether it takes this argument dates a checkout, not whether the
+  method exists at all. The probe grips the subclass rather than the base class, which is the whole of
+  this release's subtlety. `aio.Agent.run(steering=...)` landed in the *first* of the release's
+  steering commits, so gripping it would date a checkout to one drain site on one driver and nothing
+  past it. `aio.SkillAgent.run` cannot delegate to `super().run()` (it has to prepare, set skills up,
+  then call the post-prepare helpers that do the actual work), so it repeats `Agent.run`'s whole
+  parameter list by hand, and a parameter added to the base method reaches the subclass only when
+  someone remembers to copy it across. `steering` was not remembered until a whole-branch review caught
+  it, after `compaction` and `script_env` had each needed the same hand-copy before it. So the base
+  class's signature is not evidence about the subclass's, and the subclass is what Kokua runs: the
+  entry agent is an `aio.SkillAgent`, and gripping it dates a checkout to every steering commit in the
+  release and every fix after it, where an `Agent`-shaped probe would have passed on an AIMU where
+  Kokua's own first steered turn raised `TypeError`. What it leaves to the floor is larger than usual:
+  whether the spawn path honors a `"steering"` spec key, whether both drivers drain all three branches
+  a steered turn can take, whether the three stream consumers render the phase, whether the budget
+  reset on a drained mailbox is bounded, and whether a misbehaving host source is caught rather than
+  trusted. None of those is a signature, so no signature check reaches them; the first two are the same
+  one-level-down gap `events`' recursive passthrough left for its own capability, and the last three
+  are findings the branch review itself raised. `make_skill_update_tool` is the floor's job now, in its
+  turn.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is
@@ -387,7 +413,7 @@ change. Full rationale, with the code that backs each claim, is in
    below `data/` is a derived `AssistantConfig` property, never a new function in `config/paths.py`.
    Declared scheduled tasks are the one stated exception, living in `config.toml` rather than under
    `data/`, because a task is a declaration a user should be able to write and comment.
-5. **A single user, one process, with concurrency rules written down.** The eight turn invariants live
+5. **A single user, one process, with concurrency rules written down.** The nine turn invariants live
    at the top of `core/turns.py`, each naming the bug it prevents. Update them in the same commit as
    any change to turn concurrency.
 6. **Security is explicit and user controlled.** Capability stays real; a control is added beside it
@@ -441,7 +467,8 @@ src/kokua/
                 auto_approval (the optional model reviewer over the approval gate, and `decide`),
                 settings_runtime, diagnostics, build, agents (build_registry, validate_agents, prompt
                 assembly, delegation), agent_registry, turn_gate, turn_registry, messages, titles,
-                errors, transcripts, metrics (what a turn cost, accumulated from AIMU's run events)
+                errors, transcripts, metrics (what a turn cost, accumulated from AIMU's run events),
+                steering (the per-turn mailbox a message typed mid-turn reaches, and its two sources)
   config/       schema, paths, file, store (writes + write policy), table, settings_sources (joins a
                 toolset's declared settings into the table; the one module under config/ that imports
                 upward, so the rest of the layer stays at the bottom)

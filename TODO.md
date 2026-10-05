@@ -4,7 +4,10 @@ Captured 2026-07-14; pruned and renumbered 2026-08-13 (three resolved items remo
 release-hygiene items added). Item 12, a security policy, was resolved 2026-08-23 by `SECURITY.md`.
 Item 19, `read_file`'s unreachable tail, was resolved upstream 2026-09-11 by AIMU 0.31.0, which gave
 every capped read an `offset` and a truncation notice naming the call that continues it; numbers are
-not reused, so the gap it left stays.
+not reused, so the gap it left stays. Item 18, the page guessing which of the messages it drew became
+turns, was resolved 2026-10-01: a composer message now carries a token the server echoes on whichever
+frame reports that message's fate, so `app.js` matches a bubble to its turn instead of counting saves
+off against bubbles and predicting which text runs no turn at all.
 Backlog only, not yet scheduled. File references point at current code.
 
 ## 1. Make session-level config overrides visible
@@ -187,23 +190,6 @@ those call sites: re-fetch the agent inside the hold (or pin and revalidate it a
 always runs on the agent the conversation has when it actually starts. That is a change to
 invariant-governed code, so it wants its own pass over the invariants at the top of `core/turns.py`.
 
-## 18. Let the server say which messages became turns, instead of the page guessing
-`app.js`'s `pendingTurnBubbles` is a positional queue: each `turn_saved` consumes the oldest entry for
-that conversation, because nothing correlates a sent message with the save it produces. That forces the
-page to predict server behavior before it sends, deciding for itself which composer text will be
-answered as a command and run no turn, and it has to keep that prediction in step with
-`Assistant._serve_channel`'s dispatch and with `_slash_command`'s parsing. Every wrong prediction costs
-a control: withholding an entry for a message that does run a turn mis-targets a later delete control,
-and enqueuing one for a message that runs no turn shifts the rest until a repaint. Two cases stay wrong
-today for reasons the page cannot fix, since it cannot know them: a workflow command an installed
-toolset offers but the entry agent does not declare, and a message consumed as the answer to a pending
-approval.
-
-Make the server authoritative instead. Either a frame saying a message was answered without becoming a
-turn, or a client-supplied token echoed back on `turn_saved` so the queue matches rather than counts;
-the token is the stronger of the two, since it also survives a proactive turn's save landing in the
-conversation being viewed. Either one lets the page stop parsing commands it does not own.
-
 ## 20. Park a backgrounded turn at the tool gate instead of auto-denying it
 `HumanGate.approve` denies a gated tool outright when the calling turn's conversation is not the one
 being viewed (`interaction.py`, the `turn_conversation() != active_id()` branch), and switching away
@@ -232,3 +218,18 @@ riding a front-end change. What it has to answer:
 Approving from the card itself was considered and rejected in the same discussion: a card cannot hold
 `execute_python`'s body or `add_skill_script`'s script, and a truncated argument blob beside an Allow
 button trains the user to approve unread.
+
+## 21. A composed sub-agent is unsteerable and uncounted
+`toolsets/capabilities.py`'s `compose_subagent` builds its own `make_async_subagent_tool` rather than
+going through `core/agents.py`, and passes neither `steering=STEERING_SOURCE` nor `events=record_event`.
+So a worker composed per call cannot be reached by a message the user types mid-turn (the redirection
+stops at the supervisor, which is the thing mid-turn steering exists to prevent), and its model calls
+are invisible to `TurnMetrics`, so a turn that composes heavily reads as cheap. Both are the same
+omission at the same call: every other spawn path passes both.
+
+Reachable on a default install, not hypothetical: `capabilities` is in `config.example.toml`'s
+`[agents.assistant].tools`. The fix is two keyword arguments, and what it wants first is a decision
+about where that spawn tool is built, since duplicating `core/agents.py`'s argument list is what let
+two of its arguments go missing. `docs/explanation/architecture.md` names the gap where it explains the
+unconditional spec write, and narrows the coverage claim beside it; README and CHANGELOG are narrowed
+to "every worker a declared agent spawned", so they come back when this lands.

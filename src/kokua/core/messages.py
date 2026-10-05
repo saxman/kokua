@@ -88,6 +88,26 @@ def resolve_user_index(messages: list[dict], base_len: int) -> int:
     return -1
 
 
+def resolve_steering_indices(messages: list[dict], user_index: int) -> list[int]:
+    """Where a turn's steering messages sit, given where its own user message sits.
+
+    Every later entry the user actually sent is a message that reached the turn while it was running:
+    the loop appends nothing else with that role, and the nudges it injects itself are exactly what
+    :func:`is_user_turn` excludes. That test is shared rather than rewritten as an absent-key check,
+    because the question is the same one a branch asks and the answer has the same stake: a message
+    sent into a turn is not a turn boundary, and a reader that treats one as a boundary cuts a turn
+    off in the middle of its own tool loop.
+
+    Resolved after the run rather than recorded as the mailbox delivers, because only the message list
+    says where a message ended up, and a compaction between rounds can move it. ``user_index`` is
+    ``resolve_user_index``'s answer, so ``-1`` means the turn committed no user message and there is no
+    turn here to attribute anything to.
+    """
+    if user_index < 0:
+        return []
+    return [index for index in range(user_index + 1, len(messages)) if is_user_turn(messages[index])]
+
+
 def _map_image_block_urls(messages: list[dict], transform) -> list[dict]:
     """Return a copy of *messages* with each ``image_url`` block's url passed through *transform*.
 

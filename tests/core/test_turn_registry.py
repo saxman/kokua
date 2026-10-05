@@ -126,3 +126,54 @@ def test_live_omits_a_turn_that_has_already_finished():
     tracker.add("c1", TurnInfo(handle=_handle(done=True), started=1.0, preview="done"))
 
     assert tracker.live() == []
+
+
+def test_attach_steering_puts_the_mailbox_on_the_conversations_entry():
+    tracker = TurnTracker()
+    info = TurnInfo(handle=_handle(), started=1.0, preview="hi")
+    tracker.add("c1", info)
+
+    mailbox = object()
+    tracker.attach_steering("c1", mailbox)
+
+    assert info.steering is mailbox
+    tracker.attach_steering("missing", mailbox)  # no entry -> no error
+
+
+def test_a_burst_of_two_turns_leaves_the_newer_turns_mailbox_on_the_entry():
+    """Two messages already queued are submitted in one loop step, then step in creation order.
+
+    ``Queue.get`` on a non-empty queue does not suspend and the submit block takes no ``await``
+    between starting a turn and adding its entry, so both ``add`` calls land before either body's
+    first statement; ``RunHandle.start`` defers those bodies, which then run oldest first. So the
+    older turn publishes into the *newer* turn's entry. A "only if the entry has no mailbox yet"
+    guard would accept that write and refuse the newer turn's, leaving a closed mailbox on the entry
+    routing reads and killing steering for the turn actually running. Last write wins instead.
+    """
+    tracker = TurnTracker()
+    older = TurnInfo(handle=_handle(), started=1.0, preview="first")
+    newer = TurnInfo(handle=_handle(), started=2.0, preview="second")
+    tracker.add("c1", older)
+    tracker.add("c1", newer)
+
+    older_mailbox, newer_mailbox = object(), object()
+    tracker.attach_steering("c1", older_mailbox)
+    tracker.attach_steering("c1", newer_mailbox)
+
+    assert tracker.get("c1").steering is newer_mailbox
+
+
+def test_a_displaced_turns_entry_keeps_its_own_mailbox():
+    """The flip side of last-write-wins: ``add`` carries no mailbox over, so the older turn's own
+    entry (still in ``live()`` until its callback fires) is unaffected by the newer turn's write."""
+    tracker = TurnTracker()
+    older = TurnInfo(handle=_handle(), started=1.0, preview="first")
+    tracker.add("c1", older)
+    older_mailbox = object()
+    tracker.attach_steering("c1", older_mailbox)
+
+    newer = TurnInfo(handle=_handle(), started=2.0, preview="second")
+    tracker.add("c1", newer)
+
+    assert newer.steering is None
+    assert older.steering is older_mailbox

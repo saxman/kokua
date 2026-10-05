@@ -1628,3 +1628,122 @@ async def test_key_lookups_do_not_read_whole_sessions(tmp_path, monkeypatch):
     assert reads == [second]
 
     assert book.resolve(first) is not None
+
+
+# Two turns, each steered: an untagged `user` message between the turn's tool round and the answer it
+# redirected. That is the only `user`-role message with no tell at all (an injected nudge carries a
+# provenance tag), so it is the fixture every claim about `metadata["steering"]` has to be made on:
+# without a real one, a test can pin the metadata filter and nothing about the cut.
+STEERED_MESSAGES = [
+    {"role": "system", "content": "you are kokua"},
+    {"role": "user", "content": "plan the trip"},
+    {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "c1", "function": {"name": "clock", "arguments": "{}"}}],
+    },
+    {"role": "tool", "tool_call_id": "c1", "content": "12:00"},
+    {"role": "user", "content": "actually, use the cache"},
+    {"role": "assistant", "content": "here is the cached plan"},
+    {"role": "user", "content": "second question"},
+    {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{"id": "c2", "function": {"name": "clock", "arguments": "{}"}}],
+    },
+    {"role": "tool", "tool_call_id": "c2", "content": "13:00"},
+    {"role": "user", "content": "and skip the ferry"},
+    {"role": "assistant", "content": "second answer"},
+]
+
+STEERED_METADATA = {"1": [4], "6": [9]}
+
+
+async def _assistant_with_steered_parent(tmp_path):
+    """An assistant whose active conversation holds STEERED_MESSAGES and the record of its steering."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+    parent = assistant._session
+    parent.messages = [dict(message) for message in STEERED_MESSAGES]
+    parent.metadata["title"] = "Kauai trip"
+    parent.metadata["steering"] = {key: list(value) for key, value in STEERED_METADATA.items()}
+    assistant._store.save(parent)
+    return assistant, parent
+
+
+async def test_a_steering_record_survives_a_cut_that_keeps_its_turn(tmp_path):
+    """The steering map is turn-keyed like every other per-turn record, so a branch or a truncation
+    has to carry it: a kept turn whose record was dropped replays its mid-turn messages as turns of
+    their own again, which is the cut-in-half control the record exists to prevent."""
+    assistant, parent = await _assistant_with_steered_parent(tmp_path)
+
+    await assistant._book.truncate(parent.key, 6)
+
+    # Filtered rather than remapped, like its siblings: a prefix cut leaves surviving indices alone.
+    assert assistant._store.get(parent.key).metadata["steering"] == {"1": [4]}
+
+
+async def test_branching_a_steered_turn_keeps_the_answer_the_steering_redirected(tmp_path):
+    """A steering message is an untagged `user` entry, so a scan for the next one stops at it and cuts
+    the turn in half. The branch would then lose both the redirection and the answer it produced, which
+    is normally the whole reason for branching at that turn, and it would do so silently: `branchable`
+    reads the same `turn_end`, so the control is offered and honoured and nothing reports the loss.
+    """
+    assistant, parent = await _assistant_with_steered_parent(tmp_path)
+
+    assert assistant._book.branchable(parent.key, 1)
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    # Through index 5, the redirected answer. A scan that stopped at the steering message (index 4)
+    # would have cut after index 3, the `tool` result answering the turn's first call, losing both the
+    # redirection and the answer it produced.
+    assert assistant._store.get(branch_id).messages == STEERED_MESSAGES[:6]
+    assert assistant._store.get(branch_id).metadata["steering"] == {"1": [4]}
+
+
+async def test_a_steering_message_is_not_a_turn_any_cut_can_land_on(tmp_path):
+    """The other half of the same answer: a message sent into a turn does not start one, so no cut may
+    land on it. The page never offers the index (a steering item carries no `message_index`), which
+    leaves this guard as what backstops a stale one, and a cut accepted here would fall between an
+    assistant message holding `tool_calls` and the `tool` messages answering them.
+    """
+    assistant, parent = await _assistant_with_steered_parent(tmp_path)
+
+    assert not assistant._book.branchable(parent.key, 4)
+    with pytest.raises(TurnNotFound):
+        assistant._book.branch(parent.key, 4)
+    with pytest.raises(TurnNotFound):
+        await assistant._book.truncate(parent.key, 4)
+
+
+async def test_a_transcript_with_no_steering_record_cuts_exactly_as_it_always_did(tmp_path):
+    """Backward compatibility is the empty default, and it is worth a test of its own because it is
+    what lets every conversation stored before mid-turn steering existed keep its old boundaries: with
+    no record, nothing is excluded, and every untagged `user` message is the turn start it has always
+    been. Same fixture, record withheld, and the answer moves to the one the old code gave.
+    """
+    assistant, parent = await _assistant_with_steered_parent(tmp_path)
+    parent.metadata.pop("steering")
+    assistant._store.save(parent)
+
+    branch_id = assistant._book.branch(parent.key, 1)
+
+    assert assistant._store.get(branch_id).messages == STEERED_MESSAGES[:4]
+    assert assistant._book.branchable(parent.key, 4)
+
+
+async def test_recording_an_unsteered_turn_writes_no_steering_map(tmp_path):
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "ollama:qwen3:8b", 0, assistant._active_id, steering=[])
+
+    assert "steering" not in assistant._store.get(assistant._active_id).metadata
+
+
+async def test_a_turn_that_only_has_steering_to_record_is_still_recorded(tmp_path):
+    """The guard that skips a turn with nothing to say has to count this as something to say, or the
+    record would be dropped for exactly the turn that needs it."""
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=MockAsyncModelClient([]))
+
+    assistant._book.record_turn_provenance([], "", 0, assistant._active_id, steering=[3])
+
+    assert assistant._store.get(assistant._active_id).metadata["steering"] == {"0": [3]}

@@ -16,6 +16,7 @@ from kokua.config.file import ConfigError
 from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
 from kokua.core import conversation_commands
 from kokua.core.metrics import record_event
+from kokua.core.steering import STEERING_SOURCE
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.registry.context import LiveState, ToolsetContext
 from kokua.registry.registry import (
@@ -536,6 +537,15 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         compaction = compaction_for_window(config.generation_for(name))
         if compaction is not None:
             specs[name]["compaction"] = compaction
+        # Written unconditionally, unlike every other key above, and so a deliberate exception to "a
+        # capability is declared, never defaulted": the value is not a setting resolved per worker but
+        # the one process-wide source that reads whichever turn is running when AIMU opens a reader
+        # over it. A worker with no turn around it gets a drain that returns nothing, so there is no
+        # tier for a missing key to fall back to and nothing a declaration could say differently.
+        # `STEERING_SOURCE`, never `ENTRY_STEERING_SOURCE`: a worker opens an independent cursor, so a
+        # message only a worker consumed still comes back from `close` and runs as a follow-up turn
+        # rather than counting as the conversation having seen it.
+        specs[name]["steering"] = STEERING_SOURCE
     return specs
 
 

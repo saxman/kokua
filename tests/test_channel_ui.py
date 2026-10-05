@@ -25,6 +25,17 @@ class BareChannel:
         raise NotImplementedError
 
 
+class _TurnSavedDouble(BareChannel):
+    """Records what reached ``send_turn_saved``, token included."""
+
+    def __init__(self):
+        super().__init__()
+        self.saved: list[tuple[str, int, Optional[str]]] = []
+
+    async def send_turn_saved(self, conversation_id, message_index, *, token=None):
+        self.saved.append((conversation_id, message_index, token))
+
+
 class RichChannelDouble(BareChannel):
     """Every optional frame, recorded rather than rendered."""
 
@@ -61,6 +72,9 @@ class RichChannelDouble(BareChannel):
 
     async def send_subagent(self, event: dict) -> None:
         self.calls.append(("subagent", (event,)))
+
+    async def send_steering(self, text: str, *, token: Optional[str] = None) -> None:
+        self.calls.append(("steering", (text, token)))
 
     async def stream_activity(self, chunks: AsyncIterator, *, show_answer: bool = False) -> str:
         parts = [chunk async for chunk in chunks]
@@ -235,17 +249,31 @@ async def test_turn_saved_is_a_no_op_on_a_channel_that_cannot_take_it():
 
 
 async def test_turn_saved_reaches_a_channel_that_offers_it():
-    class _Channel(BareChannel):
-        def __init__(self):
-            super().__init__()
-            self.saved = []
-
-        async def send_turn_saved(self, conversation_id, message_index):
-            self.saved.append((conversation_id, message_index))
-
-    channel = _Channel()
+    channel = _TurnSavedDouble()
     await ChannelUI(channel).turn_saved("abc123", 4)
-    assert channel.saved == [("abc123", 4)]
+    assert channel.saved == [("abc123", 4, None)]
+
+
+async def test_turn_saved_carries_the_bubble_token_the_front_end_minted():
+    """The front end matches the message it drew to the turn it became, so the token it sent with the
+    message has to reach the frame that reports the turn."""
+    channel = _TurnSavedDouble()
+    await ChannelUI(channel).turn_saved("abc123", 4, token="b9")
+    assert channel.saved == [("abc123", 4, "b9")]
+
+
+# --- steering: the other fate a message can meet --------------------------------------------------
+
+
+async def test_steering_taken_is_a_no_op_on_a_channel_that_cannot_take_it():
+    """A transport that draws no message of its own has nothing to go back and mark."""
+    await ChannelUI(BareChannel()).steering_taken("use the cache", token="b9")
+
+
+async def test_steering_taken_reaches_a_channel_that_offers_it():
+    channel = RichChannelDouble()
+    await ChannelUI(channel).steering_taken("use the cache", token="b9")
+    assert channel.calls == [("steering", ("use the cache", "b9"))]
 
 
 # --- alerts: a card the user has to dismiss -------------------------------------------------------

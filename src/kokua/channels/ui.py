@@ -55,6 +55,7 @@ class ChannelUI:
         self._history = getattr(channel, "send_history", None)
         self._working = getattr(channel, "send_working", None)
         self._turn_saved = getattr(channel, "send_turn_saved", None)
+        self._steering = getattr(channel, "send_steering", None)
 
     @property
     def channel(self) -> Channel:
@@ -129,15 +130,36 @@ class ChannelUI:
         if self._working is not None:
             await self._working(elapsed)
 
-    async def turn_saved(self, conversation_id: str, message_index: int) -> None:
+    async def turn_saved(self, conversation_id: str, message_index: int, *, token: Optional[str] = None) -> None:
         """Publish the position of a turn whose transcript has just been stored.
 
         A front end uses it to offer an action on the turn that only makes sense once the store has
         it, which today is branching. A channel that offers no such action never asked for the index,
         so this is a no-op there.
+
+        ``token`` is whatever the front end sent with the message this turn was made of, so it can
+        match the message it drew to the turn that was made of it. None whenever no front end sent
+        one, which is every turn nobody typed.
         """
         if self._turn_saved is not None:
-            await self._turn_saved(conversation_id, message_index)
+            await self._turn_saved(conversation_id, message_index, token=token)
+
+    async def steering_taken(self, text: str, *, token: Optional[str] = None) -> None:
+        """Report that this message joined the turn already running instead of starting one.
+
+        Paired with :meth:`turn_saved`: a front end that drew the message before sending it cannot
+        know, at send time, which of the two it is about to get. Most steered messages never reach
+        ``turn_saved`` at all, so without this call the front end would wait on one forever; the
+        exception is a message accepted here and then never drained before its turn ends, which
+        ``TurnRunner._resubmit_steering`` re-runs as a follow-up turn of its own, carrying this same
+        token on *that* turn's ``turn_saved``. A front end has to be able to tell the two apart by
+        the frames alone, since the entry agent's run is the only place that would otherwise know.
+
+        A channel that draws nothing it would go back and mark has nothing to do with this, so it is
+        a no-op there, and the terminal already prints the steered words as the run reads them.
+        """
+        if self._steering is not None:
+            await self._steering(text, token=token)
 
     async def notify(self, text: str, *, conversation_id: Optional[str] = None) -> None:
         """Report a background turn's completion. Skipped by a channel that cannot background a turn.

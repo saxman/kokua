@@ -167,6 +167,7 @@ def render_markdown(
         subagent=metadata.get("subagent"),
         trace=metadata.get("trace"),
         failure=metadata.get("failure"),
+        steering=metadata.get("steering"),
     )
     lines.extend(_render_body(items, metadata, max_payload_chars, payloads_path))
     return "\n".join(lines) + "\n"
@@ -518,6 +519,12 @@ def _render_item(item: dict, max_payload_chars: Optional[int], payloads_path: Op
         return [f"_[image: {url}]_" if url else "_[image]_"]
     if item_type == "loop":
         return [_loop_line(item, max_payload_chars)]
+    if item_type == "steering":
+        # A label rather than ``loop``'s italic machine note, and uncapped like the turn's own user
+        # text: this is a person's words, sent into a turn that was already running. It opens no turn
+        # heading of its own because ``replay_items`` gives it no ``message_index``, which is what
+        # keeps one steered turn from reading as two.
+        return [f"**User (mid-turn):** {item.get('text', '')}"]
     if item_type == "tool":
         return _render_tool(item, max_payload_chars, payloads_path)
     if item_type == "notice":

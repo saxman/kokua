@@ -194,9 +194,12 @@ async def test_web_channel_send_suppresses_spawn_subagent_tool_frame():
 
 
 async def test_web_channel_send_relays_an_injected_round_with_the_prompt_that_was_sent():
-    """The base channel maps the CONTINUING chunk; Kokua's override only has to stop swallowing it.
-    The wrap-up's wording is the case that matters: a marker showing the nudge's text here would say
-    the model was told to keep working when it was told to stop."""
+    """The base channel maps the CONTINUING chunk, and what this pins is that Kokua's ``send`` override
+    delegates to that base loop, so the base's mapping reaches the page unchanged. The override wraps
+    the chunk iterator for image progress and adds no per-chunk branches of its own; one that did would
+    have to carry this arm forward, which is the drift this test catches. The wrap-up's wording is the
+    case that matters: a marker showing the nudge's text here would say the model was told to keep
+    working when it was told to stop."""
     ws = _FakeWS()
     channel = WebChannel(ws)
 
@@ -259,6 +262,38 @@ async def test_web_channel_send_turn_saved_emits_frame():
     assert ws.frames == [{"type": "turn_saved", "conversation_id": "abc123", "message_index": 4}]
 
 
+async def test_web_channel_send_turn_saved_echoes_the_token_the_page_sent():
+    """The page matches a bubble to its turn by the token it minted for it, so the token has to come
+    back on the frame that reports the turn rather than on nothing."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_turn_saved("abc123", 4, token="t-7")
+    assert ws.frames == [{"type": "turn_saved", "conversation_id": "abc123", "message_index": 4, "token": "t-7"}]
+
+
+async def test_web_channel_send_steering_carries_the_token_of_the_message_that_landed():
+    """The message's other possible fate. A steered message normally produces no `turn_saved` of its
+    own, so this is the only frame that can tell the page which bubble joined the running turn; the
+    exception is one the turn accepts and never reads, which comes back as a follow-up turn carrying
+    this same token."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_steering("use the cache", token="t-8")
+    assert ws.frames == [{"type": "steering", "text": "use the cache", "token": "t-8"}]
+
+
+async def test_a_steering_frame_with_no_token_names_no_bubble():
+    """A message no page minted a token for (one typed at another front end, or sent to the socket as
+    bare text) has no bubble to name, so the key is absent rather than null: the page claims on the
+    token's presence, and a null would be a second spelling of "nothing to claim" for both ends to
+    remember. It also leaves the frame identical to the one the stream sends when the run reads the
+    message, which is the frame this one sits beside."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    await channel.send_steering("use the cache")
+    assert ws.frames == [{"type": "steering", "text": "use the cache"}]
+
+
 async def test_web_channel_send_settings_emits_frame():
     ws = _FakeWS()
     channel = WebChannel(ws)
@@ -306,6 +341,43 @@ async def test_web_channel_stream_activity_types_a_missing_kind_as_a_string():
 
     await channel.stream_activity(gen())
     assert {"type": "loop", "reason": "", "text": "Keep going."} in ws.frames
+
+
+async def test_a_steering_chunk_becomes_a_steering_frame():
+    """`stream_activity` maps chunks itself rather than reusing the base loop (see the CONTINUING
+    test above), so this branch has to exist here too or a planned turn swallows a steering message
+    that an ordinary turn would show."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+
+    await channel.stream_activity(gen())
+    assert {"type": "steering", "text": "use the cache"} in ws.frames
+
+
+async def test_web_channel_send_relays_a_steering_message():
+    """The base channel already maps STEERING (AIMU 0.33.0), and what this pins is what the CONTINUING
+    test above pins: Kokua's ``send`` override delegates to the base loop, so the base's mapping reaches
+    the page unchanged, and an override that grew its own per-chunk branches would have to carry this
+    arm forward. Contrast ``stream_activity``, which maps chunks itself and so needs a STEERING arm of
+    its own, pinned separately."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.GENERATING, "a")
+        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.GENERATING, "b")
+
+    await channel.send(gen())
+    assert ws.frames == [
+        {"type": "token", "text": "a"},
+        {"type": "steering", "text": "use the cache"},
+        {"type": "token", "text": "b"},
+        {"type": "done"},
+    ]
 
 
 async def test_web_channel_stream_activity_show_answer_emits_tokens():
@@ -619,6 +691,33 @@ async def test_a_muted_turns_catch_up_keeps_the_tool_output():
 
     tool = next(item for item in ws.frames[-1]["items"] if item["type"] == "tool")
     assert tool["response"] == "4"
+
+
+async def test_a_muted_turns_steering_frame_is_caught_up_not_dropped():
+    """`steering` is a turn-scoped marker exactly like `loop`, so it has to be muted while the user is
+    looking elsewhere and still recorded, or a redirect sent into a background turn would vanish
+    instead of showing up on the switch-in that catches the rest of that turn up."""
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "other"  # the turn below runs out of view
+    channel.begin_catch_up("running", "look it up")
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+
+    token = streaming_conversation.set("running")
+    try:
+        await channel.send(gen())
+    finally:
+        streaming_conversation.reset(token)
+    assert ws.frames == []  # muted live, including the "done" terminator
+
+    channel.active_conversation_id = "running"
+    await channel.send_history([], {})
+    steering = next(item for item in ws.frames[-1]["items"] if item["type"] == "steering")
+    assert steering["text"] == "use the cache"
 
 
 async def test_the_replayed_answer_keeps_its_place_above_a_later_tool_call():
@@ -2148,6 +2247,23 @@ def test_ws_input_frame_thinking_reaches_the_stored_turn(tmp_path):
     assert "high" in session.metadata["thinking"].values()
 
 
+def test_ws_input_frame_token_rides_back_on_the_turns_own_frame(tmp_path):
+    """The whole round trip over a real socket, which no unit test above reaches: the page mints a
+    token, the turn made of that message echoes it, and the page matches the two. A mis-wire anywhere
+    between `_parse_input` and `_persist` passes every piece-wise test and still leaves the page
+    guessing which turn its bubble became."""
+    import json
+
+    from starlette.testclient import TestClient
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient(["Hello there."]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "input", "text": "hi", "token": "b1"}))
+        saved = _drain_until(ws, "turn_saved")
+
+    assert saved["token"] == "b1"
+
+
 def test_index_route_serves_html(tmp_path):
     from starlette.testclient import TestClient
 
@@ -2355,7 +2471,7 @@ def test_parse_input_reads_an_effort_off_a_frame_with_no_images():
 
     parsed = _parse_input('{"type": "input", "text": "hello", "thinking": "high"}')
 
-    assert parsed == ("hello", [], "high")
+    assert parsed == ("hello", [], "high", None)
 
 
 def test_parse_input_reads_images_and_an_effort_together():
@@ -2363,13 +2479,13 @@ def test_parse_input_reads_images_and_an_effort_together():
 
     parsed = _parse_input('{"type": "input", "text": "what is this?", "images": ["data:x"], "thinking": "off"}')
 
-    assert parsed == ("what is this?", ["data:x"], "off")
+    assert parsed == ("what is this?", ["data:x"], "off", None)
 
 
 def test_parse_input_returns_no_effort_when_the_frame_carries_none():
     from kokua.frontends.web import _parse_input
 
-    assert _parse_input('{"type": "input", "text": "hi", "images": ["data:x"]}') == ("hi", ["data:x"], None)
+    assert _parse_input('{"type": "input", "text": "hi", "images": ["data:x"]}') == ("hi", ["data:x"], None, None)
 
 
 def test_parse_input_ignores_a_non_string_effort():
@@ -2377,7 +2493,23 @@ def test_parse_input_ignores_a_non_string_effort():
     it here keeps a malformed frame from reaching the core at all."""
     from kokua.frontends.web import _parse_input
 
-    assert _parse_input('{"type": "input", "text": "hi", "thinking": 3}') == ("hi", [], None)
+    assert _parse_input('{"type": "input", "text": "hi", "thinking": 3}') == ("hi", [], None, None)
+
+
+def test_parse_input_reads_the_pages_bubble_token_off_a_frame():
+    """The page mints one per message it draws a bubble for, and matches the bubble to whichever frame
+    comes back carrying it."""
+    from kokua.frontends.web import _parse_input
+
+    assert _parse_input('{"type": "input", "text": "hi", "token": "b7"}') == ("hi", [], None, "b7")
+
+
+def test_parse_input_ignores_a_non_string_token():
+    """Same guard as the effort beside it: the socket is not the page, and a malformed token would
+    otherwise travel as far as the frame that echoes it."""
+    from kokua.frontends.web import _parse_input
+
+    assert _parse_input('{"type": "input", "text": "hi", "token": 7}') == ("hi", [], None, None)
 
 
 def test_parse_input_declines_anything_that_is_not_an_input_frame():
@@ -2401,6 +2533,20 @@ def test_web_channel_feed_input_puts_the_effort_on_the_message_metadata():
     assert received[0].metadata["thinking"] == "high"
 
 
+def test_web_channel_feed_input_puts_the_bubble_token_on_the_message_metadata():
+    """The token rides the message so the turn it starts can echo it back, which is how the page
+    matches the bubble it drew to the turn that was made of it."""
+
+    async def run():
+        channel = WebChannel(_FakeWS())
+        await channel.feed_input("hello", [], token="b3")
+        await channel.feed(None)
+        return [m async for m in channel.receive()]
+
+    received = asyncio.run(run())
+    assert received[0].metadata["token"] == "b3"
+
+
 def test_web_channel_feed_input_leaves_metadata_empty_without_an_effort():
     """Absence has to stay absent: the core reads a missing key as "use the configured effort"."""
 
@@ -2413,6 +2559,7 @@ def test_web_channel_feed_input_leaves_metadata_empty_without_an_effort():
     received = asyncio.run(run())
     assert received[0].images == ["/tmp/a.png"]
     assert "thinking" not in received[0].metadata
+    assert "token" not in received[0].metadata
 
 
 class _AsgiSocket:
@@ -2684,3 +2831,52 @@ async def test_web_channel_notification_carries_its_group():
     channel = WebChannel(ws)
     await channel.send_notification("Task 'Digest' finished", group="Digest")
     assert ws.frames[0]["group"] == "Digest"
+
+
+async def test_send_history_replays_a_stored_turns_steering_messages_as_steering():
+    """The conversation's own record of which messages were sent into a running turn reaches the
+    replay, so a reload draws them the way the live frame marked them rather than as turns of their
+    own (see `replay_items`, where the index a turn's controls act on is the stake)."""
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    messages = [
+        {"role": "user", "content": "summarize the log"},
+        {"role": "user", "content": "use the cache"},
+        {"role": "assistant", "content": "done"},
+    ]
+
+    await channel.send_history(messages, {"steering": {"0": [1]}})
+
+    items = ws.frames[-1]["items"]
+    assert [item["type"] for item in items] == ["user", "steering", "message"]
+    assert items[1]["text"] == "use the cache"
+
+
+async def test_an_accepted_steering_message_is_caught_up_once_rather_than_twice():
+    """Two frames report one steered message, and only one of them belongs in the record.
+
+    The accept-time frame is sent from the serve loop, outside any turn, so there is no running
+    conversation for it to be recorded against; the drain-time frame is the only evidence AIMU
+    actually delivered the message, and it arrives inside the turn. A switch-in therefore sees the
+    redirection, and sees it once.
+    """
+    from kokua.channels.web import streaming_conversation
+
+    ws = _FakeWS()
+    channel = WebChannel(ws)
+    channel.active_conversation_id = "running"
+    channel.begin_catch_up("running", "summarize the log")
+
+    await channel.send_steering("use the cache", token="b1")  # accepted, on the serve loop's own task
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+
+    token = streaming_conversation.set("running")
+    try:
+        await channel.send(gen())
+    finally:
+        streaming_conversation.reset(token)
+    await channel.send_history([], {})
+
+    assert [item["type"] for item in ws.frames[-1]["items"] if item["type"] == "steering"] == ["steering"]

@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import io
 
+from aimu.models import StreamChunk, StreamingContentType
+
 from kokua.channels.cli import _THINK_CHOICES, CLIChannel
 from kokua.config.file import thinking_request
 
@@ -88,3 +90,16 @@ def test_a_bare_channel_streams_reasoning_and_tool_calls():
     channel = CLIChannel()
     assert channel.stream_thinking is True
     assert channel.stream_tools is True
+
+
+async def test_a_steering_chunk_prints_its_own_marker(capsys):
+    """Kokua's `CLIChannel` defines no `send` of its own, so a steering message reaches the terminal
+    only because AIMU's base channel already prints one. This pins that inherited behaviour: Kokua
+    overriding `send` later (for `/attach`-style markers, say) without carrying this arm forward would
+    make a redirect typed mid-turn vanish on the one channel with no bubble to confirm it landed."""
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+
+    await CLIChannel().send(gen())
+    assert "[steering] use the cache" in capsys.readouterr().out

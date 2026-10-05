@@ -46,7 +46,11 @@ COPY_TITLE_PREFIX = "Copy of "
 # transcript, so indices do not move and these are filtered rather than remapped. That is only true
 # while a branch keeps the parent's messages from index 0 onward; anything that changes what index 0
 # is has to revisit this.
-TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usage")
+# `steering` is the first entry whose *values* are message indices too, and the argument for those
+# runs one step further than the argument for keys: every index a turn recorded sits below the *next*
+# turn's user message, so a key a prefix cut keeps brings values that are still inside the kept
+# transcript, and a key it drops takes its values with it. Nothing points across the cut either way.
+TURN_KEYED_METADATA = ("subagent", "trace", "model", "thinking", "failure", "usage", "steering")
 
 
 class TurnNotFound(Exception):
@@ -82,22 +86,54 @@ class TurnInFlight(Exception):
     """
 
 
-def turn_end(messages: list[dict], user_index: int) -> Optional[int]:
-    """The exclusive end of the turn opened at ``user_index``, or None if no user turn is there.
+def steered_indices(metadata: dict) -> frozenset[int]:
+    """Every message index a session recorded as a message sent into a turn while it ran.
 
-    The end is the next message the user actually sent, or the end of the transcript. Injected loop
-    turns are skipped (see :func:`kokua.core.messages.is_user_turn`): they carry the ``user`` role but
-    sit *inside* a turn, between tool-calling iterations, so ending there would cut a turn off before
-    the answer it produced.
+    Flattened across turns, for the reason ``core.transcripts.replay_items`` flattens the same map:
+    the question any reader asks is "was this message steering", and a message belongs to at most one
+    turn, so which turn recorded it adds nothing. Unlike :func:`_metadata_before`, which has to refuse
+    a non-digit key before comparing it to a cut, nothing here reads a key at all: a value that is not
+    a message index simply matches no message, so a hand-edited key costs a reader nothing.
+
+    What that tolerance does not extend to is a record of the wrong *shape*. A ``steering`` that is not
+    a mapping has no ``values()``, and an index that is not hashable cannot enter a set, so either one
+    raises out of here rather than being skipped. That is the exposure ``core/transcripts.py`` already
+    has over this same map, so the two readers of it agree on what a malformed record does, and
+    hardening one of them alone would only move where the failure surfaces.
+    """
+    return frozenset(index for indices in metadata.get("steering", {}).values() for index in indices)
+
+
+def turn_end(messages: list[dict], user_index: int, *, steered: frozenset[int] = frozenset()) -> Optional[int]:
+    """The exclusive end of the turn opened at ``user_index``, or None if no turn starts there.
+
+    The end is the next message the user sent to *start* a turn, or the end of the transcript. Two
+    kinds of ``user``-role message sit inside a turn rather than opening one, and neither ends it:
+
+    - the nudges the agent loop injects between tool-calling iterations, which carry the role and a
+      provenance tag :func:`kokua.core.messages.is_user_turn` recognises; and
+    - a message the user typed while the turn was running, which carries no tag at all, because it
+      genuinely is user input rather than something the loop injected (see ``core/steering.py``).
+
+    ``steered`` is what names the second kind, and it has to be a parameter because nothing in such a
+    message distinguishes it: ``session.metadata["steering"]`` is the only record, flattened by
+    :func:`steered_indices`. Ending at one would cut the turn off before the answer it produced, which
+    for a steering message is the redirected answer a user branching there almost certainly wants.
+    A steered index is refused as a turn *start* for the same reason, so no cut this function approves
+    can land inside a turn.
+
+    ``steered`` defaults to empty, which is what makes a transcript stored before mid-turn steering
+    existed behave exactly as it did before: no record, no indices, and every untagged ``user`` message
+    the boundary it has always been.
 
     A turn boundary is also the only cut a transcript survives. Anywhere else can fall between an
     assistant message holding ``tool_calls`` and the ``tool`` messages answering them, which a provider
     rejects on the next request rather than here, where it could still be reported.
     """
-    if not 0 <= user_index < len(messages) or not is_user_turn(messages[user_index]):
+    if not 0 <= user_index < len(messages) or not is_user_turn(messages[user_index]) or user_index in steered:
         return None
     for index in range(user_index + 1, len(messages)):
-        if is_user_turn(messages[index]):
+        if is_user_turn(messages[index]) and index not in steered:
             return index
     return len(messages)
 
@@ -362,7 +398,8 @@ class ConversationBook:
         actually be branched. Reads the same ``turn_end`` the branch does, so the offer and the
         operation cannot disagree.
         """
-        return turn_end(self._store.get(conversation_id).messages, user_index) is not None
+        session = self._store.get(conversation_id)
+        return turn_end(session.messages, user_index, steered=steered_indices(session.metadata)) is not None
 
     def branch(self, conversation_id: str, user_index: int) -> str:
         """Fork a conversation at one of its turns into a new one, switch to it, and return its id.
@@ -387,7 +424,7 @@ class ConversationBook:
         collide with.
         """
         parent = self._store.get(conversation_id)
-        cut = turn_end(parent.messages, user_index)
+        cut = turn_end(parent.messages, user_index, steered=steered_indices(parent.metadata))
         if cut is None:
             raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")
         previous_id = self._active_id
@@ -528,7 +565,7 @@ class ConversationBook:
             if turn_running is not None and turn_running(conversation_id):
                 raise TurnInFlight(f"Conversation {conversation_id} has a turn in flight.")
             session = self._store.get(conversation_id)
-            if turn_end(session.messages, user_index) is None:
+            if turn_end(session.messages, user_index, steered=steered_indices(session.metadata)) is None:
                 raise TurnNotFound(f"Conversation {conversation_id} has no user turn at message {user_index}.")
             removed = len(session.messages) - user_index
             session.messages = session.messages[:user_index]
@@ -681,9 +718,11 @@ class ConversationBook:
         thinking: Optional[Union[bool, str]] = None,
         failure: Optional[str] = None,
         usage: Optional[dict] = None,
+        steering: Optional[list[int]] = None,
     ) -> None:
         """Persist what produced a turn's output: its sub-agent activity, the model that answered, the
-        reasoning effort it ran at, why it stopped early if it did, and what it cost.
+        reasoning effort it ran at, why it stopped early if it did, what it cost, and which of its
+        messages the user sent into it while it ran.
 
         The cards are what reload replays. The model and the effort are recorded per turn rather than
         once per conversation because a conversation outlives the config that started it:
@@ -707,8 +746,16 @@ class ConversationBook:
         figure is only meaningful beside the model that produced it, and this is the record that already
         says which model that was. A turn whose provider reported no token counts stores the record
         without them rather than storing zeros, so a reader can tell an unmeasured turn from a free one.
+
+        ``steering`` is where the messages the user sent into this turn landed in the transcript, as
+        ``core.messages.resolve_steering_indices`` resolved them. It is the only record of the
+        difference: a message handed to a running turn is committed as an ordinary ``user`` message, so
+        nothing in the transcript tells it apart from one that started a turn, and a replay that
+        guesses from position offers a turn's own controls on a message that has no turn. An empty list
+        stays out of the file, like an unconfigured effort, so an unsteered turn reads as one that
+        never had the question put to it.
         """
-        if user_index < 0 or not (events or model or thinking is not None or failure or usage):
+        if user_index < 0 or not (events or model or thinking is not None or failure or usage or steering):
             return
         session = self._store.get(conversation_id)
         if events:
@@ -721,6 +768,8 @@ class ConversationBook:
             session.metadata.setdefault("failure", {})[str(user_index)] = failure
         if usage:
             session.metadata.setdefault("usage", {})[str(user_index)] = usage
+        if steering:
+            session.metadata.setdefault("steering", {})[str(user_index)] = list(steering)
         self._store.save(session)
 
     def exists(self, conversation_id: str) -> bool:

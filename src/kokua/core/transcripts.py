@@ -265,6 +265,7 @@ def replay_items(
     subagent: Optional[dict] = None,
     trace: Optional[dict] = None,
     failure: Optional[dict] = None,
+    steering: Optional[dict] = None,
 ) -> list[dict]:
     """Flatten stored conversation messages into ordered display items the page replays on reload.
 
@@ -293,6 +294,32 @@ def replay_items(
     produce. It matters most for a scheduled run, whose error never reached this conversation live -- the
     status line for a firing goes to whichever conversation the user was viewing at the time.
 
+    ``steering`` is keyed the same way and holds the *message* indices of what the user sent into that
+    turn while it ran (``record_turn_provenance``'s ``steering`` map). Those messages are ordinary
+    untagged ``user`` entries in the transcript, so nothing in the messages themselves distinguishes
+    one from a message that started a turn, and position cannot: this record is the only thing that
+    can say. Without it a steering message replays as a turn of its own, which is destructive rather
+    than untidy, because a renderer stamps a turn's branch and delete-from-here controls on the first
+    item carrying a ``message_index`` and the index of a message sent mid-turn cuts its *host* turn in
+    half. A transcript stored before turns recorded this has no entry and still replays the old way,
+    which is the best a reader can do with a record that was never written.
+
+    What this emits for a steering message, a ``"steering"`` item with no ``message_index``, is not
+    what the live page shows for the same message: there it is a ``user`` bubble marked ``steered``,
+    carrying the user's own styling, where here it is a collapsed row rendered the way a tool call or
+    a loop marker is. That divergence was a deliberate choice rather than an oversight. The live mark
+    is a CSS class on a bubble the page already drew for the message as it was typed; replay draws no
+    such bubble; there is no earlier draw for this function to find and re-mark. Reusing the row
+    renderer costs nothing new on the page (it already exists, for the live case where a turn is still
+    open when a reload or switch-in lands on it), where matching the live bubble would mean teaching
+    ``app.js`` a second way to draw a steered item: a ``user`` item carrying a ``steered`` flag beside
+    its absent ``message_index``, read by a branch neither ``stampTurnStart`` nor any existing replay
+    code has. That branch has no default-suite coverage were it added (the page's own tests are the
+    opt-in end-to-end suite), which is the cost weighed against it here. The row is not wrong where it
+    differs: a steering message's words are no less readable collapsed than expanded, only slower to
+    read, and nothing about the fix this record exists for (the truncate control) depends on which
+    presentation the page chooses.
+
     ``message_index`` (the user message's own position in ``messages``, what ``record_turn_provenance``
     keys a turn's model/effort/usage under) is stamped on every item this function emits for a user
     message, not only its text: a message sent with an image and no text yields no ``"user"`` item at
@@ -302,6 +329,9 @@ def replay_items(
     subagent = subagent or {}
     trace = trace or {}
     failure = failure or {}
+    # Flattened across turns: the question asked per message is "was this one steering", and a
+    # message belongs to at most one turn, so which turn recorded it adds nothing here.
+    steered = {index for indices in (steering or {}).values() for index in indices}
     items: list[dict] = []
     results = _tool_results_by_call_id(messages)
     pending_failure: Optional[tuple[str, object]] = None  # (reason, the turn's timestamp)
@@ -342,6 +372,13 @@ def replay_items(
                 # identically. It continues the turn already in progress rather than starting a new one,
                 # so it must not close that turn's failure notice either.
                 add({"type": "loop", "reason": provenance, "text": message_text(message.get("content"))}, ts)
+                continue
+            if index in steered:
+                # A message the user sent into the turn already running. Deliberately carries no
+                # `message_index`: it has no turn of its own, so a renderer must neither open one here
+                # nor offer the controls that act on one. It continues the turn in progress, so like a
+                # loop marker it must not close that turn's failure notice either.
+                add({"type": "steering", "text": message_text(message.get("content"))}, ts)
                 continue
             flush_failure()  # whatever turn was in progress ends where this one begins
             if str(index) in failure:

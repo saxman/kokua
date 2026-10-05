@@ -54,14 +54,14 @@ class _ConvCapturingChannel(FakeChannel):
 
 
 class _TurnSavedChannel(FakeChannel):
-    """Captures the turn_saved frames a turn publishes."""
+    """Captures the turn_saved frames a turn publishes, including the bubble token it echoes."""
 
     def __init__(self):
         super().__init__()
-        self.turns_saved: list[tuple[str, int]] = []
+        self.turns_saved: list[tuple[str, int, str | None]] = []
 
-    async def send_turn_saved(self, conversation_id: str, message_index: int) -> None:
-        self.turns_saved.append((conversation_id, message_index))
+    async def send_turn_saved(self, conversation_id: str, message_index: int, *, token: str | None = None) -> None:
+        self.turns_saved.append((conversation_id, message_index, token))
 
 
 class SubagentCapturingChannel(FakeChannel):

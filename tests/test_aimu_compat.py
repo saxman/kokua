@@ -120,32 +120,102 @@ def test_a_new_enough_version_string_over_older_code_is_still_caught(monkeypatch
         require_aimu()
 
 
+def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypatch):
+    """The two-hop class lookup (``_PROBE_CLASS``) and the signature check compose for the first time
+    here, and the combination is the whole reason the probe grips the subclass rather than the base
+    class.
+
+    Fabricates the exact adversarial checkout that existed mid-release: ``aio.Agent.run`` already
+    carries ``steering``, from the *first* of the release's steering commits, while ``aio.SkillAgent.run``
+    does not yet, because it cannot delegate to ``super().run()`` and repeats the base method's whole
+    parameter list by hand instead. An ``Agent``-shaped probe would wave that sibling through; the real
+    probe, pointed at ``SkillAgent``, has to refuse it, and then pass once the stand-in ``SkillAgent``
+    catches up, matching ``test_a_probe_that_checks_a_keyword_argument_still_works``'s convention of
+    exercising the negative against a stand-in rather than the live surface.
+    """
+
+    class _StandInAgent:
+        def run(self, task, steering=None):
+            pass
+
+    class _StandInSkillAgentWithoutSteering:
+        def run(self, task):
+            pass
+
+    monkeypatch.setattr(aimu_compat, "version", lambda name: AT_FLOOR)
+    monkeypatch.setattr(aimu_compat, "_PROBE_MODULE", "aimu.aio")
+    monkeypatch.setattr(aimu_compat, "_PROBE_CLASS", "SkillAgent")
+    monkeypatch.setattr(aimu_compat, "_PROBE_SYMBOL", "run")
+    monkeypatch.setattr(aimu_compat, "_PROBE_PARAMETER", "steering")
+    monkeypatch.setattr(aimu_compat, "_PROBE_MEMBER", None)
+    monkeypatch.setattr(
+        aimu_compat.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(
+            __file__="/somewhere/aimu/aio/__init__.py",
+            Agent=_StandInAgent,
+            SkillAgent=_StandInSkillAgentWithoutSteering,
+        ),
+    )
+    with pytest.raises(AimuVersionError, match="steering"):
+        require_aimu()
+
+    class _StandInSkillAgentWithSteering:
+        def run(self, task, steering=None):
+            pass
+
+    monkeypatch.setattr(
+        aimu_compat.importlib,
+        "import_module",
+        lambda name: SimpleNamespace(
+            __file__="/somewhere/aimu/aio/__init__.py",
+            Agent=_StandInAgent,
+            SkillAgent=_StandInSkillAgentWithSteering,
+        ),
+    )
+    require_aimu()
+
+
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    The surface today is ``aimu.skills.make_skill_update_tool``, the factory ``toolsets/skills.py`` calls
-    to hand an agent ``update_skill``. Before it, a skill's prose was write-once: ``author_skill``
-    refuses to clobber and ``add_skill_script`` writes scripts alone, so an agent could fix a skill's
-    code forever and never a word of its text.
+    The surface today is ``aio.SkillAgent.run``'s ``steering`` parameter: a run already in progress can
+    be handed a user message without waiting for it to finish, which is what lets a message typed
+    mid-turn reach the turn running now instead of queuing behind it.
 
-    It *is* the newest name in 0.32.0, which is the opposite of 0.31.0's case and the reason both are
-    spelled out in ``aimu_compat``: the release's other capability (a script write no longer rewriting
-    the skill's ``SKILL.md``, dropping every frontmatter key the rewrite did not re-emit) landed earlier
-    in the same branch and has its own handle in ``write_skill_script``, so gripping the later one dates
-    a checkout to both.
+    It grips the *subclass*, not ``aio.Agent.run``, which took the same parameter in the first of the
+    release's steering commits. ``SkillAgent.run`` cannot delegate to ``super().run()`` (it prepares,
+    sets skills up, then calls the post-prepare helpers that do the real work), so it repeats
+    ``Agent.run``'s whole parameter list by hand, and ``steering`` was not copied across until a
+    whole-branch review caught the gap, in the release's last functional commit. Gripping ``Agent``
+    would date a checkout to one drain site on one driver; gripping ``SkillAgent`` dates it to every
+    steering commit in the release and every fix after it, which is what Kokua's entry agent runs.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
-    probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
+    holder = getattr(module, aimu_compat._PROBE_CLASS)
+    probe = getattr(holder, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_MODULE == "aimu.skills"
-    assert aimu_compat._PROBE_SYMBOL == "make_skill_update_tool"
-    # A module-scope symbol, and the capability is the name itself, so neither of the other two shapes
-    # applies: nothing to look the name up on, and nothing inside it to check.
-    assert aimu_compat._PROBE_CLASS is None
-    assert aimu_compat._PROBE_PARAMETER is None
+    assert aimu_compat._PROBE_MODULE == "aimu.aio"
+    assert aimu_compat._PROBE_CLASS == "SkillAgent"
+    assert aimu_compat._PROBE_SYMBOL == "run"
+    # A keyword argument no `getattr` would notice, since `SkillAgent.run` predates this floor by a long
+    # way: only whether it takes `steering` dates a checkout, not whether the method exists at all.
+    assert aimu_compat._PROBE_PARAMETER == "steering"
     assert aimu_compat._PROBE_MEMBER is None
+
+
+def test_the_floor_covers_the_skill_update_tool_the_probe_no_longer_grips():
+    """0.32.0's probe surface is 0.33.0's floor now that ``steering`` holds the one probe slot.
+
+    ``toolsets/skills.py`` imports ``aimu.skills.make_skill_update_tool`` at module scope to hand the
+    entry agent ``update_skill``, so an AIMU without the export fails loudly at import time, which is why
+    it never needed the one probe slot for its own sake; this pins it now that nothing else does.
+    """
+    from aimu.skills import make_skill_update_tool
+
+    assert callable(make_skill_update_tool)
 
 
 def test_the_floor_covers_the_script_write_that_leaves_skill_md_alone():
@@ -380,8 +450,9 @@ def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
     Exercised here against a stand-in rather than the live surface, because the point is the *negative*:
     where a capability is a constructor parameter, a name lookup passes over an older signature that has
     the class and not the argument. ``SkillManager(include=...)`` was this shape for 0.14.0,
-    ``SkillAgent(script_env=...)`` for 0.20.0, and ``WebChannel(stream_thinking=...)`` for 0.23.0, so the
-    quadruple keeps its historical name.
+    ``SkillAgent(script_env=...)`` for 0.20.0, and ``WebChannel(stream_thinking=...)`` for 0.23.0, and
+    ``aio.SkillAgent.run(steering=...)`` is this shape for 0.33.0, so the quintuple keeps its historical
+    name.
     """
 
     class SkillManagerWithoutInclude:
@@ -402,6 +473,20 @@ def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
     )
     with pytest.raises(AimuVersionError, match="include"):
         require_aimu()
+
+
+def test_the_probe_grips_the_steering_parameter():
+    import inspect
+
+    from aimu.aio import SkillAgent
+
+    assert "steering" in inspect.signature(SkillAgent.run).parameters
+
+
+def test_the_floor_is_0_33_0():
+    from kokua.aimu_compat import MINIMUM_AIMU
+
+    assert MINIMUM_AIMU == (0, 33, 0)
 
 
 def test_an_unimportable_aimu_carries_the_import_error(monkeypatch):
