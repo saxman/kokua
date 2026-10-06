@@ -2113,6 +2113,41 @@ async def test_an_undelivered_message_runs_through_the_real_resubmit_path(assist
     assert asked == ["hello", "and one more thing"]
 
 
+async def test_an_undelivered_agent_message_is_reported_and_not_rerun(assistant):
+    """Invariant 10: an agent's note to a run that never read it is said rather than run.
+
+    Re-running it as a user turn would put words in the user's mouth, so the two lists ``close``
+    hands back go to different places, and this is the one that goes to the channel. The stub for
+    ``_resubmit_messages`` takes the keyword the real one is called with, so a run that wrongly
+    re-submitted this message fails the assertion below rather than raising from the stub.
+    """
+    submitted = []
+
+    async def resubmit(conversation_id, messages, **kwargs):
+        submitted.append(messages)
+
+    assistant._turns._resubmit_messages = resubmit
+    sent = []
+
+    async def send(text, **kwargs):
+        sent.append(text)
+
+    assistant._ui.send = send
+
+    async def leave_one_undelivered(*args, **kwargs):
+        # Addressed to a researcher nothing is running, so no reader can match it and every cursor
+        # passes over it: the case a cursor position alone reports as read.
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = leave_one_undelivered
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert submitted == []
+    assert any("not delivered" in text for text in sent)
+    assert any("researcher#1" in text and "look at the index" in text for text in sent)
+
+
 async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assistant):
     """Invariant 9's one exception: someone who cancelled the turn is not asking for one more.
 
@@ -2150,7 +2185,7 @@ async def test_a_message_typed_during_a_turn_steers_it_rather_than_starting_one(
     track_running_turn(assistant, bus)
 
     assert assistant._offer_message(message("actually, use the cache"), assistant._active_id) is True
-    assert [message.text for message in bus.close()] == ["actually, use the cache"]
+    assert [message.text for message in bus.close()[0]] == ["actually, use the cache"]
 
 
 async def test_a_message_with_no_turn_running_starts_one(assistant):
@@ -2162,7 +2197,7 @@ async def test_a_message_never_steers_another_conversations_turn(assistant, trac
     track_running_turn(assistant, other, conversation_id="other-conversation")
 
     assert assistant._offer_message(message("hello"), assistant._active_id) is False
-    assert other.close() == []
+    assert other.close() == ([], [])
 
 
 async def test_a_message_with_an_image_starts_a_turn_rather_than_joining_one(assistant, track_running_turn):
@@ -2170,7 +2205,7 @@ async def test_a_message_with_an_image_starts_a_turn_rather_than_joining_one(ass
     track_running_turn(assistant, bus)
 
     assert assistant._offer_message(message("look", images=["/tmp/a.png"]), assistant._active_id) is False
-    assert bus.close() == []
+    assert bus.close() == ([], [])
 
 
 async def test_a_blank_message_starts_a_turn_rather_than_joining_one(assistant, track_running_turn):
@@ -2180,7 +2215,7 @@ async def test_a_blank_message_starts_a_turn_rather_than_joining_one(assistant, 
     track_running_turn(assistant, bus)
 
     assert assistant._offer_message(message("   "), assistant._active_id) is False
-    assert bus.close() == []
+    assert bus.close() == ([], [])
 
 
 async def test_a_message_arriving_after_the_bus_closed_starts_a_turn(assistant, track_running_turn):
@@ -2204,7 +2239,7 @@ async def test_the_serve_loop_steers_a_running_turn_instead_of_submitting_a_new_
 
     await assistant._serve_channel()
 
-    assert [message.text for message in bus.close()] == ["actually, use the cache"]
+    assert [message.text for message in bus.close()[0]] == ["actually, use the cache"]
     assert assistant._tracker.get(assistant._active_id).handle is handle  # no second turn submitted
 
 
@@ -2254,7 +2289,7 @@ async def test_a_pending_approval_still_takes_the_message_rather_than_the_runnin
     # Bounded rather than a bare await: were the offer above the pending-answer check, the "y" would
     # land in the bus and nothing would ever resolve this, wedging the suite instead of failing.
     assert await asyncio.wait_for(asking, timeout=5) is True
-    assert bus.close() == []
+    assert bus.close() == ([], [])
 
 
 async def test_a_workflow_command_typed_mid_turn_still_starts_a_workflow_turn(tmp_path, track_running_turn):
@@ -2266,7 +2301,7 @@ async def test_a_workflow_command_typed_mid_turn_still_starts_a_workflow_turn(tm
 
     await assistant._serve_channel()
 
-    assert bus.close() == []
+    assert bus.close() == ([], [])
     submitted = assistant._tracker.get(assistant._active_id)
     assert submitted is not None and submitted.handle is not handle
     submitted.handle.cancel()  # cancelled rather than run: what matters is that it was submitted
@@ -2527,4 +2562,4 @@ async def test_a_mid_turn_message_hands_the_bus_the_id_its_front_end_drew_it_und
     )
 
     assert accepted is True
-    assert bus.close() == [Message("use the cache", sender=USER, to=EVERYONE, token="b2")]
+    assert bus.close() == ([Message("use the cache", sender=USER, to=EVERYONE, token="b2")], [])

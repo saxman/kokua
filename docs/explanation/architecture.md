@@ -104,7 +104,7 @@ serve loop, and little else. It owns:
 - **`ConversationBook`** -- the session store, the per-conversation agent cache, and which
   conversation is being viewed. These move together on a switch, which is why they are one object.
 - **`TurnRunner`** -- reactive turns (the user sent something) and proactive turns (a scheduled task
-  fired). The nine concurrency invariants are documented at the top of that module.
+  fired). The ten concurrency invariants are documented at the top of that module.
 - **`HumanGate`** -- tool approval and a workflow's own decision, each a lock-guarded single-slot request
   the serve loop resolves with the user's next message. With
   [`[security.auto_approval]`](../reference/configuration.md#securityauto_approval) on, a gated call
@@ -284,6 +284,14 @@ shuts it. That is [invariant 9](https://github.com/saxman/kokua/blob/main/src/ko
 full, including the one window it does not cover and the reason closing that window would cost more than
 it buys. A stop is the deliberate exception: someone who cancelled the turn is not asking for one more,
 so the cancelled branch peeks at what was undelivered and says so in its notice instead of running it.
+`close()` hands back two lists rather than one, because who sent a message decides what its failure to
+arrive deserves: the user's own words can become the next turn, while an agent's note to another run is
+*reported* instead, since re-running it as a user turn would put words in the user's mouth. Telling the
+two apart needs more than a cursor position, which is why the bus records which messages a reader
+actually took: every cursor advances past every message whether its filter matched or not, so a message
+addressed to a run that never drained it looks read from every position on the bus. That is
+[invariant 10](https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py), with the three gaps
+it leaves named there.
 
 **Liveness resets, safety does not.** AIMU's loop drains the bus once per round, at all three ways a
 round can end, and a delivered message moves the round budget's base so the run gets a fresh

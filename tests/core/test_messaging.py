@@ -102,7 +102,7 @@ def test_a_message_carries_its_sender_and_its_selector():
     bus = MessageBus()
     bus.send("use the cache", sender="user", to="everyone")
 
-    assert bus.close() == [Message("use the cache", sender="user", to="everyone", token=None)]
+    assert bus.close() == ([Message("use the cache", sender="user", to="everyone", token=None)], [])
 
 
 def test_a_reader_sees_messages_offered_before_and_after_it_opened():
@@ -139,7 +139,7 @@ def test_close_returns_what_the_entry_reader_never_read():
     entry()
     bus.send("unread", sender=USER, to=EVERYONE)
 
-    assert [message.text for message in bus.close()] == ["unread"]
+    assert [message.text for message in bus.close()[0]] == ["unread"]
 
 
 def test_close_returns_nothing_a_worker_alone_consumed_is_not_counted_as_read():
@@ -150,7 +150,7 @@ def test_close_returns_nothing_a_worker_alone_consumed_is_not_counted_as_read():
     bus.send("redirect", sender=USER, to=EVERYONE)
     worker()
 
-    assert [message.text for message in bus.close()] == ["redirect"]
+    assert [message.text for message in bus.close()[0]] == ["redirect"]
 
 
 def test_a_message_offered_after_the_last_drain_comes_back_from_close():
@@ -160,7 +160,86 @@ def test_a_message_offered_after_the_last_drain_comes_back_from_close():
     entry()
     assert bus.send("just missed it", sender=USER, to=EVERYONE) is True
 
-    assert [message.text for message in bus.close()] == ["just missed it"]
+    assert [message.text for message in bus.close()[0]] == ["just missed it"]
+
+
+def test_close_returns_an_undelivered_user_message_for_resubmission():
+    bus = MessageBus()
+    bus.entry_reader("assistant")
+    bus.send("just missed it", sender=USER, to=EVERYONE)
+
+    resubmit, report = bus.close()
+
+    assert [m.text for m in resubmit] == ["just missed it"]
+    assert report == []
+
+
+def test_close_reports_an_undelivered_agent_message_rather_than_resubmitting_it():
+    # Re-running one worker's note to another as a user turn would put words in the user's mouth, so
+    # an undrained agent message is reported and dropped.
+    bus = MessageBus()
+    bus.entry_reader("assistant")
+    bus.reader("researcher")
+    bus.send("look at the index", sender="assistant", to="researcher#1")
+
+    resubmit, report = bus.close()
+
+    assert resubmit == []
+    assert [m.text for m in report] == ["look at the index"]
+
+
+def test_a_message_a_worker_drained_is_not_reported():
+    bus = MessageBus()
+    bus.entry_reader("assistant")
+    drain = bus.reader("researcher")
+    bus.send("look at the index", sender="assistant", to="researcher#1")
+    drain()
+
+    resubmit, report = bus.close()
+
+    assert resubmit == [] and report == []
+
+
+def test_a_message_every_cursor_passed_over_is_reported_rather_than_lost():
+    """The case a cursor position cannot answer, and the reason the bus records its drains.
+
+    Every cursor advances past every message whether its filter matched or not, so once both of
+    these have drained, the message addressed to an analyst nobody is running looks read from both
+    positions while having reached nobody. That is the shape that went missing in silence. The two
+    tests above do not catch it: neither drains at all, so their undelivered message is still past
+    the entry cursor and a report computed from that position alone would hand it back too.
+    """
+    bus = MessageBus()
+    entry = bus.entry_reader("assistant")
+    researcher = bus.reader("researcher")
+    bus.send("ask the analyst", sender="assistant", to="analyst#1")
+    entry()
+    researcher()
+
+    resubmit, report = bus.close()
+
+    assert resubmit == []
+    assert [m.text for m in report] == ["ask the analyst"]
+
+
+def test_a_user_message_no_reader_matched_still_runs_as_a_follow_up_turn():
+    """The same gap on the user's side of the envelope, where the answer is the opposite one.
+
+    A front end cannot write a narrow selector today (``Assistant._offer_message`` sends to
+    ``EVERYONE``), so this is reachable only by a sender that can. Asserted anyway because the two
+    halves of ``close`` are one decision: an agent's unread note is reported, and the user's own
+    words become the next turn, which is what keeps "never neither" true of a message whose selector
+    named a run that nothing answered for.
+    """
+    bus = MessageBus()
+    entry = bus.entry_reader("assistant")
+    bus.send("tell me when the index is done", sender=USER, to="researcher#1")
+    entry()
+
+    resubmit, report = bus.close()
+
+    assert [m.text for m in resubmit] == ["tell me when the index is done"]
+    assert report == []
 
 
 def test_peek_undelivered_neither_consumes_nor_closes():
@@ -172,7 +251,7 @@ def test_peek_undelivered_neither_consumes_nor_closes():
 
     assert [message.text for message in bus.peek_undelivered()] == ["never mind, do the other thing"]
     assert [message.text for message in bus.peek_undelivered()] == ["never mind, do the other thing"]
-    assert [message.text for message in bus.close()] == ["never mind, do the other thing"]
+    assert [message.text for message in bus.close()[0]] == ["never mind, do the other thing"]
 
 
 def test_the_shared_source_reads_the_contextvar_when_a_reader_is_opened():
@@ -201,7 +280,7 @@ def test_the_entry_source_opens_the_cursor_close_measures_from():
         drain = ENTRY_SOURCE.reader()
         bus.send("redirect", sender=USER, to=EVERYONE)
         assert drain() == ["redirect"]
-        assert bus.close() == []
+        assert bus.close() == ([], [])
     finally:
         current_bus.reset(token)
 
@@ -214,7 +293,7 @@ def test_the_worker_source_does_not_advance_the_entry_cursor():
         bus.send("redirect", sender=USER, to=EVERYONE)
         assert worker() == ["redirect"]
         # Read by a worker, never by the conversation, so it still runs as a follow-up turn.
-        assert [message.text for message in bus.close()] == ["redirect"]
+        assert [message.text for message in bus.close()[0]] == ["redirect"]
     finally:
         current_bus.reset(token)
 
@@ -237,7 +316,7 @@ def test_a_send_with_no_review_context_still_lands():
     bus = MessageBus()
 
     assert bus.send("redirect", sender=USER, to=EVERYONE) is True
-    assert [message.text for message in bus.close()] == ["redirect"]
+    assert [message.text for message in bus.close()[0]] == ["redirect"]
 
 
 def test_the_amendment_does_not_depend_on_the_sending_tasks_context():
@@ -283,7 +362,7 @@ def test_close_hands_back_the_front_ends_own_id_for_an_undelivered_message():
     entry()
     bus.send("just missed it", sender=USER, to=EVERYONE, token="b2")
 
-    assert bus.close() == [Message("just missed it", sender=USER, to=EVERYONE, token="b2")]
+    assert bus.close() == ([Message("just missed it", sender=USER, to=EVERYONE, token="b2")], [])
 
 
 def test_a_reader_drains_the_text_alone():
@@ -302,7 +381,7 @@ def test_a_message_sent_without_a_token_has_none():
     bus = MessageBus()
     bus.send("use the cache", sender=USER, to=EVERYONE)
 
-    assert bus.close() == [Message("use the cache", sender=USER, to=EVERYONE, token=None)]
+    assert bus.close() == ([Message("use the cache", sender=USER, to=EVERYONE, token=None)], [])
 
 
 def test_matches_everyone_reaches_every_address():

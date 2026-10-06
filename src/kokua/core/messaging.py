@@ -1,11 +1,11 @@
-"""Messages the user sends into a turn that is already running.
+"""Messages sent into a turn that is already running, by the user or by one of its own agents.
 
 A turn holds one bus for its whole life. AIMU's loop opens a reader over it at the start of every
 run inside that turn that was handed a source (the entry agent's own runs, and every worker whose
 spec ``core/agents.py`` writes) and drains that reader once per round, so what the user types
 reaches the model at its next model call rather than queuing behind the turn on the gate.
 
-Two design points are worth reading before changing anything here.
+Three design points are worth reading before changing anything here.
 
 **Append-only with a cursor per reader, not a queue.** The user's message goes to the entry agent
 *and* to every worker a declared agent spawned, so a shared queue would let whichever worker drained
@@ -19,6 +19,14 @@ bus and the moment the serve loop asks whether it is open. That is the whole of 
 message is accepted and delivered, or refused and run as its own turn, and never both or neither.
 A message accepted in the window after the loop's last drain is not lost either, because ``close``
 hands it back for the caller to run as a follow-up turn.
+
+**Who sent a message decides what its failure to arrive deserves.** The user's own words can become
+the next turn, which is invariant 9. An agent's note to another run cannot: re-running it as a user
+turn would put words in the user's mouth, so it is reported instead, which is invariant 10. ``close``
+therefore returns the two groups separately, and it can only tell them apart because the bus records
+which messages a reader actually took: every cursor advances past every message whether the filter
+matched it or not (see :meth:`MessageBus.reader`), so a position alone cannot say whether a message
+addressed to one run reached it or reached nobody.
 """
 
 from __future__ import annotations
@@ -84,7 +92,7 @@ def matches(selector: str, address: Optional[str]) -> bool:
 
 
 class MessageBus:
-    """One running turn's pending user messages, with a cursor per reader."""
+    """One running turn's pending messages, with a cursor per reader."""
 
     def __init__(self, review_context: Optional["ReviewContext"] = None) -> None:
         self._messages: list[Message] = []
@@ -95,9 +103,11 @@ class MessageBus:
         # the serve loop's task while that contextvar is set inside the turn's own, so it is not
         # visible there.
         self._review_context = review_context
-        # How far the entry agent's own cursor has read. The fallback is decided off this one alone:
-        # a worker having seen a message is not the conversation having seen it, so a message only a
-        # worker consumed still runs as a follow-up turn rather than vanishing into a summary.
+        # How far the entry agent's own cursor has read, which is what decides whether a user's
+        # message re-runs as a follow-up turn: a worker having seen a message is not the conversation
+        # having seen it, so a message only a worker consumed still runs rather than vanishing into a
+        # summary. Not the whole of what `close` reads, because a cursor position cannot say whether
+        # anyone at all took a message; `_drained` below is the other half.
         self._entry_seen = 0
         # Every address that has opened a reader this turn, in the order they opened, and the next
         # ordinal per label. Append-only and never retired: nothing in AIMU's protocol signals that a
@@ -106,6 +116,12 @@ class MessageBus:
         # and `close` is what reports a message nobody drained.
         self._roster: list[str] = []
         self._ordinals: dict[str, int] = {}
+        # Indices into `_messages` that some reader's filter matched and returned, which is the one
+        # fact a cursor position cannot supply: every cursor advances past every message, matched or
+        # not, so a message addressed to a run that never drained it is passed over by each reader
+        # and looks read from all of their positions. `close` reads this to tell an undeliverable
+        # message from a delivered one.
+        self._drained: set[int] = set()
 
     def roster(self) -> list[str]:
         """Every address that has opened a reader this turn, oldest first."""
@@ -222,16 +238,17 @@ class MessageBus:
 
         The cursor still advances past every message on each call, matched or not: a cursor that
         stalled on someone else's mail would re-examine it forever, and what comes back is the
-        filter's decision alone.
+        filter's decision alone. That is why the match is recorded rather than inferred afterwards
+        (see :meth:`_take`): once a cursor has passed over someone else's mail, its position no
+        longer distinguishes mail that reached its recipient from mail that reached nobody.
         """
         address = self._register(agent, ordinal=True)
         seen = 0
 
         def drain() -> list[str]:
             nonlocal seen
-            pending = self._messages[seen:]
-            seen = len(self._messages)
-            return [message.text for message in pending if matches(message.to, address)]
+            start, seen = seen, len(self._messages)
+            return self._take(start, seen, address)
 
         return drain
 
@@ -250,28 +267,71 @@ class MessageBus:
         :meth:`reader` filters its own.
 
         The cursor still advances past every message on each call, matched or not, which is what
-        decides what :meth:`close` hands back: a message addressed only to a worker is, from this
-        cursor's own position, passed over rather than unread.
+        decides whether a user's message re-runs: a message addressed only to a worker is, from this
+        cursor's own position, passed over rather than unread. Whether anyone at all took it is the
+        other half of what :meth:`close` hands back, and that is the record :meth:`_take` keeps
+        rather than anything this position can say.
         """
         address = self._register(agent, ordinal=False)
 
         def drain() -> list[str]:
-            pending = self._messages[self._entry_seen :]
-            self._entry_seen = len(self._messages)
-            return [message.text for message in pending if matches(message.to, address)]
+            start, self._entry_seen = self._entry_seen, len(self._messages)
+            return self._take(start, self._entry_seen, address)
 
         return drain
 
-    def close(self) -> list[Message]:
-        """Shut the bus and return what the entry agent never read, oldest first.
+    def _take(self, start: int, stop: int, address: Optional[str]) -> list[str]:
+        """The texts addressed to *address* between two cursor positions, recorded as delivered.
 
-        The whole message rather than its text, unlike a reader's drain: the caller runs these as a
-        follow-up turn and a front end waiting on each of them needs them named (see :class:`Message`).
+        Shared by both cursors because the recording is the half ``close`` depends on, and a cursor
+        that advanced without recording would leave ``close`` inferring delivery from a position that
+        cannot carry it. Text alone comes back, which is what AIMU's loop takes as the prompt for its
+        next round; the envelope stays here, where ``close`` still needs it.
+        """
+        taken: list[str] = []
+        for index in range(start, stop):
+            message = self._messages[index]
+            if matches(message.to, address):
+                self._drained.add(index)
+                taken.append(message.text)
+        return taken
+
+    def close(self) -> tuple[list[Message], list[Message]]:
+        """Shut the bus and say what nobody read, split by what each kind deserves.
+
+        The first list is what the user sent and the conversation never saw, which the caller re-runs
+        as a follow-up turn: delivered or the next turn, never neither (invariant 9 in
+        ``core/turns.py``). The second is what an agent sent and no reader drained, which is
+        *reported* rather than re-run, because re-running one worker's note to another as a user turn
+        would put words in the user's mouth (invariant 10).
+
+        Each list holds whole messages rather than their texts, unlike a reader's drain: a follow-up
+        turn carries the front end's own id for the message it was made of, and a report names the
+        address nothing answered to (see :class:`Message`).
+
+        Two tests of membership rather than one, and neither is redundant. The entry cursor's
+        position is what decides re-submission, because a worker having seen a message is not the
+        conversation having seen it, so a message only a worker drained still re-runs. The drain
+        record is what decides a report, because every cursor advances past every message whether its
+        filter matched or not, so nothing in a position says whether a message addressed to one run
+        reached that run or reached nobody. A user's message is undelivered if *either* says so: past
+        the entry cursor, or matched by no reader at all, which is the narrow selector a front end
+        cannot write today and a sender could. The two cannot hand the same message back twice,
+        because they decide one list between them: a message is appended once, whichever of them said
+        so.
         """
         self._open = False
-        undelivered = self._messages[self._entry_seen :]
-        self._entry_seen = len(self._messages)
-        return list(undelivered)
+        start, self._entry_seen = self._entry_seen, len(self._messages)
+        resubmit: list[Message] = []
+        report: list[Message] = []
+        for index, message in enumerate(self._messages):
+            delivered = index in self._drained
+            if message.sender == USER:
+                if index >= start or not delivered:
+                    resubmit.append(message)
+            elif not delivered:
+                report.append(message)
+        return resubmit, report
 
     def peek_undelivered(self) -> list[Message]:
         """What the entry agent has not read yet, without consuming it or closing the bus.
