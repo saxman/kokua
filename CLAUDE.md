@@ -173,7 +173,7 @@ Consequences for working in this repo:
   to something it can only pretend to check -- but look for a handle first, because 0.17.0 appeared to be
   that case and was not, and 0.20.0 shows the other outcome: no handle for the capability itself, so the
   probe takes the nearest one on its path and names what that leaves uncovered.
-  **AIMU 0.28.0 is the current floor, and it lands a new outcome in that same taxonomy: its reason and its
+  **AIMU 0.28.0 was the floor until 0.29.0, and it landed a new outcome in that same taxonomy: its reason and its
   probe are the same capability again, unlike 0.27.0's split, and it is the very next floor move after
   0.27.0's, whose own forcing capability (0.26.0's tool-loop fix) the probe deliberately never covered,
   because a checkout missing it fails loudly on its own, with an outright provider rejection, rather than

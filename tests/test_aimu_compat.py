@@ -414,6 +414,12 @@ def test_every_stated_floor_matches_the_packaged_requirement():
 
     root = Path(__file__).resolve().parents[1]
     claims = (
+        # CLAUDE.md states the floor twice, as an install requirement and as the dependency
+        # narrative's current-floor sentence, and it is also the file that documents this very pin.
+        # It was the one file the pin named and did not cover, so the guidance claiming the
+        # protection was the only guidance without it.
+        ("CLAUDE.md", r"requires `aimu>=(\d+\.\d+\.\d+)`"),
+        ("CLAUDE.md", r"AIMU (\d+\.\d+\.\d+) is the current floor"),
         ("README.md", r"AIMU\]\([^)]*\)\s+(\d+\.\d+\.\d+) or newer"),
         ("CHANGELOG.md", r"AIMU\]\([^)]*\)\s+(\d+\.\d+\.\d+) or newer"),
         ("docs/index.md", r"AIMU\]\([^)]*\)\s+(\d+\.\d+\.\d+) or newer"),
