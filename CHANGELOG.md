@@ -620,7 +620,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   nests: at 3 a chain reaches three sub-agents, and the last of them holds neither tool, since a
   `compose_subagent` with no way to look up capability names is useless to whatever holds it. A
   declared role is ranked above composing one in the prompt guidance, since its instructions were
-  written for its job where a composed one's are written in the moment.
+  written for its job where a composed one's are written in the moment. A composed sub-agent now also
+  gets a bus address of its own (`inbox=WORKER_SOURCE`, the same key a declared worker's spec carries)
+  and reports its cost into the turn's own metrics (`events=record_event`); both were missing, the
+  second silently and the first exploitably once `messaging` (below) gave an address something to
+  grant.
 - **Guidance travels with the capability.** Each toolset carries the prompt text that makes the model use
   it, appended to any agent holding it, so installing a toolset brings its instructions and removing one
   takes them away. An agent's system message is its own opener (falling back to
@@ -890,27 +894,54 @@ opens a reader this turn (an exact one per worker, like `researcher#1`, and the 
 the entry agent), and until this release the only sender who could use an address was the user's own
 typed message, sent to `EVERYONE`. This toolset lets an agent address one of those runs directly: the
 entry agent can redirect a worker already running, and a worker can report back to the parent that
-spawned it, by its declared name. `list_agents` shows the current roster plus the two standing
-selectors, `user` and `everyone`; `send_message` refuses a `to` that matches nothing on the roster
-right now, rather than accepting it and later reporting nothing delivered, since the roster can answer
-that without knowing whether any run is still alive (review focus item from the design: a send-time
-check needs no liveness tracking because the roster is append-only). It cannot refuse the opposite
-case, a worker that has already finished: the roster does not retire an address, by the same argument
-`core/messaging.py` makes for never inferring a run has ended, so a message to a finished worker is
-accepted and comes back as an undelivered report at the end of the turn instead (invariant 10 in
-`core/turns.py`). A receipt therefore says a message was *accepted for* the addresses it matched, never
-that any of them will read it -- a bare label matching several runs is satisfied by any one of them, so
-naming both in a receipt cannot promise both will see it. The sender's own address cannot be an
-argument (a tool has nothing in its arguments or its call stack naming the run calling it), so it comes
-off a `current_address` contextvar `core/messaging.py` sets when a reader opens, and re-asserts on
-every drain so that a nested spawn dispatched sequentially in the same `asyncio` Task (the common
-case: a round with exactly one tool call never gets a `TaskGroup.create_task` of its own) cannot leave
-it pointing at the wrong run once that nested call returns. Declared on the shipped entry agent and all
-three shipped workers, since both directions need it: `[agents.assistant].tools` and each of
-`[agents.researcher]`, `[agents.coder]`, `[agents.introspector]` name `messaging`. Deliberately absent
-from `[security].confirm_tools`: a gate is for a call that reaches past the model, and this one writes
-to an in-process bus every reader is another agent in this same turn, nothing outside it.
-`tests/core/test_messaging.py` and `tests/toolsets/test_messaging.py` cover it.
+spawned it, by its declared name. `list_agents` shows the current roster plus `everyone`; the person
+the turn is for is not on it, since `user` is a sender (the address the bus re-runs a redirected message
+under), not a selector a tool argument can name. `send_message` refuses a `to` that matches nothing on
+the roster right now, rather than accepting it and later reporting nothing delivered, since the roster
+can answer that without knowing whether any run is still alive (a send-time check needs no liveness
+tracking because the roster is append-only). It cannot refuse the opposite case, a worker that has
+already finished: the roster does not retire an address, by the same argument `core/messaging.py` makes
+for never inferring a run has ended, so a message to a finished worker is accepted and comes back as an
+undelivered report at the end of the turn instead (invariant 10 in `core/turns.py`) -- read by the user,
+never by the sender, whose own run has already ended by the time that report is possible. A receipt
+therefore says a message was *accepted for* the addresses it matched, never that any of them will read
+it -- a bare label matching several runs is satisfied by any one of them, so naming both in a receipt
+cannot promise both will see it.
+
+The sender's own address cannot be an argument (a tool has nothing in its arguments or its call stack
+naming the run calling it), so it comes off a `current_address` contextvar `core/messaging.py` sets when
+a reader opens. **`send_message` refuses outright when that var is unset**, rather than sending under
+whatever the surrounding `Context` happens to hold: a run that never opened a reader (a worker whose
+spec omitted an inbox) has no address of its own to claim, and the refusal is what turns that into a
+loud failure instead of a silent one sent under whoever spawned it. Keeping the var correct the rest of
+the time needed more than the reader's own reassertion on every drain: AIMU dispatches a round's tool
+calls sequentially whenever that round calls exactly one (the common case, with no
+`TaskGroup.create_task` and so no fresh `Context`), so a round that both spawns a worker and sends a
+message -- two sequential tool calls, one round -- has no round boundary between them for a drain to
+land on, and the spawning run's own later call in that round would still see the worker's leftover
+address. `core/subagents.py`'s `SubagentReporter` (already the display hook every spawn Kokua builds
+passes as `observer`, declared or composed) closes that gap instead: its `spawned`/`finished` callbacks
+now also clear `current_address` before a spawned run's own `run()` starts and restore whatever was
+current once it returns, in a `finally`, bracketing the spawn itself rather than waiting for a round
+boundary. `compose_subagent` (the `capabilities` toolset) gets the same inbox-of-its-own fix that makes
+any of this apply to it at all; see that toolset's own entry below.
+
+Declared on the shipped entry agent and all three shipped workers, since both directions need it:
+`[agents.assistant].tools` and each of `[agents.researcher]`, `[agents.coder]`, `[agents.introspector]`
+name `messaging`. Deliberately absent from `[security].confirm_tools`: a gate is for a call that reaches
+past the model, and this one writes to an in-process bus every reader is another agent in this same
+turn, nothing outside it. One limit is by design rather than an oversight: an independent reviewer
+(`workflows/critics.py`'s `reviewer_agent`) is built with no `inbox=`, so it inherits whatever address
+was ambient rather than `None`, and the fail-closed check cannot tell it apart from a run that is
+entitled to send. Closed today because nothing ever hands it Kokua's `messaging` toolset: every caller
+leaves its `tools` parameter at the fixed, AIMU-only `REVIEWER_TOOLS` default, and `ReviewerConfig`
+rejects a config-declared `tools` or `delegates_to` by name at parse time, so there is no route from
+`config.toml` to this parameter either. Neither guard lives in `core/messaging.py` or
+`core/subagents.py`, so a change that gave a reviewer real tools would reopen this without touching
+either.
+`tests/core/test_messaging.py`, `tests/core/test_subagents.py`, `tests/toolsets/test_messaging.py`,
+`tests/toolsets/test_capabilities.py`, and `tests/test_aimu_compat.py` (a release-fact pin that AIMU's
+loop drains an inbox after a round's own dispatch, not only on a tool-free turn) cover it.
 
 The four below are Kokua's own standalone capabilities, needing nothing but `AssistantConfig`. They are
 the shortest worked examples of the shape: one file, one `TOOLSET`, one entry-point line.

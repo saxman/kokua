@@ -388,18 +388,24 @@ current_bus: ContextVar[Optional[MessageBus]] = ContextVar("current_bus", defaul
 #: the only route back to that fact; see :meth:`MessageBus.reader` and :meth:`MessageBus.entry_reader`,
 #: which set it from the same address they mint and hand the model-facing tool nothing further to do.
 #:
-#: Set in two places on purpose, not one. A reader opens once, at the start of its run, so setting it
-#: there alone would cover a run's first round and nothing past it: AIMU's loop dispatches a round's
-#: tool calls directly on the task that is already running whenever that round calls exactly one tool
-#: (the common case), with no ``TaskGroup.create_task`` and therefore no fresh ``Context`` to isolate
-#: a nested run's own ``set`` from this one. A worker sequentially spawned and awaited from inside a
-#: tool call therefore shares this run's own ``Context`` for the rest of this run's life, and its own
-#: open would leave this contextvar holding its address, not this run's, once it returns. What undoes
-#: that is where AIMU's loop drains an inbox: once per round, always after that round's own tool
-#: dispatch and before the next one, on the same run that opened this reader. So the drain closure
-#: re-asserts this run's address every time, which lands strictly before this run's *next* round of
-#: tool calls -- the one place that matters -- even though a round in between may have left it
-#: pointing at whatever a nested spawn set it to.
+#: Two mechanisms touch this var, and the one that actually protects it lives elsewhere.
+#: ``core/subagents.py``'s ``SubagentReporter.spawned``/``finished`` clears it before a spawned run's
+#: own ``run()`` starts and restores whatever was current once that run returns, in a ``finally``, for
+#: every spawn Kokua builds (every factory hands it ``state.observer``; see that module for why this
+#: is the one hook shared by a declared worker and a composed one alike). That bracket is what a
+#: round-boundary reassertion here cannot be: AIMU dispatches a round's tool calls sequentially
+#: whenever that round calls exactly one (the common case -- no ``TaskGroup.create_task``, so no
+#: fresh ``Context``), and a round that both spawns a worker and sends a message, as two sequential
+#: tool calls, has no round boundary between them for a drain to land on. The bracket wraps the spawn
+#: itself instead of waiting for one.
+#:
+#: What :meth:`MessageBus.reader` and :meth:`MessageBus.entry_reader` still do here -- set this var at
+#: open and again on every drain -- covers what the bracket structurally cannot: a run's own first
+#: round, before its own first drain and before any bracket around it has had anything to restore, and
+#: the whole of a spawn built with no ``observer`` attached, since nothing calls
+#: ``spawned``/``finished`` without one (a bare ``make_async_subagent_tool`` call, which only a test
+#: constructs this way; every real spawn Kokua makes passes ``state.observer``). Elsewhere this is
+#: redundant with the bracket rather than wrong, which is why it is left in place rather than removed.
 current_address: ContextVar[Optional[str]] = ContextVar("current_address", default=None)
 
 

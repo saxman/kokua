@@ -76,6 +76,12 @@ def _compose_spec(
     recursion; keeping it out of here means these two functions are not mutually recursive and this
     one stays a pure translation from names to a spec.
     """
+    # Function-scope like its neighbours below, and load-bearing for the same reason: importing this
+    # module alone (which is all `discover_toolsets` does to find `TOOLSET`) leaves `kokua.core` out
+    # of `sys.modules` entirely, since nothing at this module's own top level reaches for it. A
+    # module-scope import here would pull in `kokua.core.__init__`, which imports `assistant.py`, which
+    # (through `core/build.py`) reaches back into `toolsets/` -- the same cycle `compaction_for_window`'s
+    # import below is deferred to dodge.
     from kokua.core.messaging import WORKER_SOURCE
     from kokua.registry.context import ToolsetContext
 

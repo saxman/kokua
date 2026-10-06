@@ -10,8 +10,9 @@ from aimu.models import StreamChunk, StreamingContentType
 
 from kokua import payloads
 from kokua.channels.ui import ChannelUI
-from kokua.core.messaging import current_address
+from kokua.core.messaging import MessageBus, current_address, current_bus
 from kokua.core.subagents import RESPONSE_PREVIEW_CHARS, SubagentReporter, subagent_events
+from kokua.toolsets.messaging import send_message
 from tests.channels import SubagentCapturingChannel
 
 # No existing reporter test produces a response over RESPONSE_PREVIEW_CHARS, so nothing is ever
@@ -614,3 +615,40 @@ async def test_nested_spawns_restore_in_the_right_order():
 
     await reporter.finished("outer", "outer answer", None)
     assert current_address.get() == "assistant"  # back to the original caller
+
+
+async def test_a_real_spawn_through_the_reporter_leaves_the_parents_own_send_correctly_attributed():
+    """Fix round 2 (N4). Each half of the property the bracket exists for is pinned on its own
+    elsewhere: `spawned`/`finished` restoring `current_address` is the tests above, and `bus.send`
+    attributing a message to whatever `current_address` holds is `tests/core/test_messaging.py`.
+    Neither is the join the bracket was built for -- `send_message`, called by the parent right after
+    a real spawn runs through this reporter, attributed to the parent and not to the worker it just
+    spawned -- which is exactly the shape two earlier reviews each had to construct by hand because no
+    test did it.
+    """
+    reporter, _ = _reporter()
+    bus = MessageBus()
+    bus.entry_reader("assistant")
+
+    bus_token = current_bus.set(bus)
+    try:
+        await reporter.spawned("s-1", "researcher", "find sources")
+        # Stands in for the spawned worker's own `agent.run()` calling `_open_inbox`, which is what a
+        # real spawn does between `spawned` and `finished` -- see `spawned`'s own docstring.
+        bus.reader("subagent-researcher")
+        await reporter.finished("s-1", "the answer", None)
+
+        # The spawn has returned; this is the parent's own next tool call in the same round. Nothing
+        # between `finished` and this line reopens the parent's reader, so if the bracket's restore
+        # had not run, this would still be attributed to "researcher#1".
+        receipt = send_message("researcher#1", "any luck?")
+    finally:
+        current_bus.reset(bus_token)
+
+    assert "no agent" not in receipt.lower()
+    assert "no address" not in receipt.lower()
+    resubmit, report = bus.close()
+    assert resubmit == []
+    assert len(report) == 1
+    assert report[0].sender == "assistant"
+    assert report[0].to == "researcher#1"

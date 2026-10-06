@@ -115,6 +115,19 @@ def reviewer_agent(
     # Covers any call a caller makes directly on the client (finalize_verdict's schema= call included),
     # not just the agent's own run() loop, which has its own events= below.
     client.events = record_event
+    # No `inbox=` here, deliberately: this agent is not one of `build_agent_specs`'s workers, so
+    # nothing mints it a `core/messaging.py` address, and `toolsets/messaging.py`'s `send_message`
+    # cannot refuse it the way it refuses a worker that forgot one. The two cases look identical from
+    # the var's own side (neither ever calls `current_address.set`) but are not identical in what they
+    # leave behind: a forgetful worker is wrapped by `core/subagents.py`'s `SubagentReporter`, which
+    # clears the var to `None` before it runs, so it is refused; this agent is built and `run()` directly
+    # by whichever turn asked for a review, with no spawn and so no bracket around it, so it inherits
+    # the ambient address rather than `None` and would be refused by nothing. Safe today only because
+    # `tools` is never Kokua's `messaging` (``REVIEWER_TOOLS`` is a fixed AIMU-only list the caller can
+    # narrow but never widen with a Kokua toolset) and `ReviewerConfig` rejects a config-declared
+    # `tools`/`delegates_to` by name at parse time, so nothing reaches this parameter with `messaging`
+    # in it. Giving a reviewer real tools here would need an `inbox=` alongside, or this limit reopens
+    # without a single line in `core/messaging.py` or `core/subagents.py` changing.
     return aio.Agent(
         client,
         tools=REVIEWER_TOOLS if tools is None else tools,

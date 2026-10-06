@@ -560,7 +560,11 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         # tier for a missing key to fall back to and nothing a declaration could say differently.
         # `WORKER_SOURCE`, never `ENTRY_SOURCE`: a worker opens an independent cursor, so a
         # message only a worker consumed still comes back from `close` and runs as a follow-up turn
-        # rather than counting as the conversation having seen it.
+        # rather than counting as the conversation having seen it. Receiving and sending are coupled
+        # through this one key: AIMU accepts a spec's own `"inbox": None` to turn a specialist's
+        # reading off, and nothing here does that today, but it would also silently take away that
+        # worker's ability to call `send_message` (`toolsets/messaging.py` refuses a run with no
+        # `current_address`, which only an opened reader ever sets).
         specs[name]["inbox"] = WORKER_SOURCE
     return specs
 

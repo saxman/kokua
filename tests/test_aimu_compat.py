@@ -541,51 +541,106 @@ def test_aimu_still_names_a_spawned_worker_with_the_prefix_addresses_strip(monke
     assert seen_agent_names == ["subagent-researcher"]
 
 
-def test_aimu_still_drains_the_inbox_during_a_run_not_only_at_its_start(monkeypatch):
-    """Fix round 1. ``core/messaging.py``'s ``current_address`` is kept correct across a nested spawn
-    by reasserting it on every drain (see that contextvar's own comment), which depends on AIMU
-    calling a reader's drain *during* a run, not only opening the reader once at the start. Nothing in
-    Kokua's own suite can tell the two apart: ``tests/core/test_messaging.py`` calls ``MessageBus.
-    reader()`` and its returned ``drain()`` directly, so it would pass unchanged even if AIMU stopped
-    calling the drain on its own. This is the fact that closes that gap, pinned against a real
-    ``Agent`` rather than inferred from reading ``_tool_loop.py``: with ``_take_message`` patched to a
-    no-op, this fails (the recorded count drops to 0) while the rest of the suite keeps passing.
+def test_aimu_still_drains_the_inbox_after_a_rounds_dispatch_not_only_on_a_healthy_turn(monkeypatch):
+    """Fix round 2 (N3). The previous version of this test scripted a one-shot answer with no tool
+    call at all, so it only proved AIMU drains *somewhere* during a run -- the ``TERMINAL_HEALTHY``
+    branch drains once before returning, with no dispatch anywhere in the run. Skipping only the
+    *after-dispatch* drain while leaving that one in place still left the whole suite green, which
+    is exactly the upstream change this test exists to catch and the one it was missing.
 
-    One drain call is reachable with no tool round at all: even a plain one-shot answer, the shape
-    this test scripts, takes AIMU's ``TERMINAL_HEALTHY`` branch, which drains once before returning
-    (to catch a message that arrived while the model was producing its answer). A test proving drain
-    happens *after dispatch* specifically would need a genuine tool-call round, which the project's
-    own mock client cannot produce (its ``"tool"`` response simulates one by appending messages
-    directly, without ever handing AIMU's loop a real tool call to classify); this is the weaker but
-    honest claim that does not depend on building one.
+    The after-dispatch drain is not a detail of ``current_address``: it is **the primary delivery
+    window for the entire messaging feature**. A message a worker sends mid-round has to reach its
+    parent on the round immediately after that round's own dispatch, or it waits for a round that may
+    never come; `current_address`'s reassertion there is one more thing riding the same window, not
+    the reason it exists.
+
+    This needs a genuine ``TERMINAL_PENDING_TOOLS`` round, which the project's ``MockAsyncModelClient``
+    cannot produce on its own (its ``"tool"`` response simulates one by appending messages directly,
+    without ever handing AIMU's loop a real tool call to classify and dispatch). ``_PendingToolClient``
+    below is the ~20-line fix: it appends a genuine ``tool_calls``-bearing assistant message once, so
+    AIMU's own ``classify_terminal_turn`` calls it pending, its own ``_dispatch`` calls the real tool
+    below, and only then does the loop call ``_take_message`` -- all AIMU's code, not a stand-in for
+    it. The tool and the inbox share one list, so the recorded order (``"dispatch(drains_so_far=N)"``
+    once, ``"drain"`` one or more times) says directly whether a drain landed after the dispatch
+    rather than only before it -- and specifically whether *two* drains happened (the one right after
+    this round's own dispatch, and the final round's), since one survivor sorts after the dispatch
+    entry exactly the same as two would and a weaker "any drain after dispatch" check cannot tell
+    them apart. Proven to fail, not merely to read as though it should: skipping the after-dispatch
+    drain alone (patching ``_AsyncToolLoop._take_message`` to a no-op only on the ``TERMINAL_PENDING_
+    TOOLS`` branch, while leaving the ``TERMINAL_HEALTHY`` one untouched) fails this test while the
+    other 113 tests across this file, ``tests/core/test_messaging.py`` and
+    ``tests/core/test_subagents.py`` stay green -- checked by hand, not committed as a mutation.
     """
     import asyncio
 
     from aimu.aio.tools import builtin as aio_builtin
     from aimu.aio.tools.builtin import make_async_subagent_tool
+    from aimu.tools import tool as aimu_tool
 
     from tests.helpers import MockAsyncModelClient
 
-    drain_calls = 0
+    order: list[str] = []
 
-    class _CountingInbox:
+    @aimu_tool
+    def mock_tool() -> str:
+        """A real tool AIMU's own dispatch calls, so an entry here means AIMU ran it, not a stand-in
+        for running it. Carries how many drains had already happened, so the recorded order also
+        proves dispatch precedes draining within its own round, not only that both occur somewhere."""
+        order.append(f"dispatch(drains_so_far={order.count('drain')})")
+        return "tool result"
+
+    class _PendingToolClient(MockAsyncModelClient):
+        """Returns a genuine ``tool_calls`` turn once, then a plain answer, so AIMU's own loop (not
+        this test) decides there is a pending-tools round and dispatches it for real."""
+
+        def __init__(self):
+            super().__init__([])
+            self._answered = False
+
+        async def _chat(
+            self, user_message, generate_kwargs=None, use_tools=True, stream=False, images=None, audio=None
+        ):
+            self._append_message({"role": "user", "content": user_message})
+            if not self._answered:
+                self._answered = True
+                self._append_message(
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {"type": "function", "function": {"name": "mock_tool", "arguments": {}}, "id": "c1"}
+                        ],
+                    }
+                )
+                return ""
+            self._append_message({"role": "assistant", "content": "done"})
+            return "done"
+
+    class _RecordingInbox:
         def reader(self, agent: Optional[str] = None):
             def drain():
-                nonlocal drain_calls
-                drain_calls += 1
+                order.append("drain")
                 return []
 
             return drain
 
-    monkeypatch.setattr(aio_builtin, "_fresh_async_subagent_client", lambda model: MockAsyncModelClient(["done"]))
+    monkeypatch.setattr(aio_builtin, "_fresh_async_subagent_client", lambda model: _PendingToolClient())
 
     spawn = make_async_subagent_tool(
         "mock:mock",
-        agent_types={"researcher": {"system_message": "Look things up."}},
-        inbox=_CountingInbox(),
+        agent_types={"researcher": {"system_message": "Look things up.", "tools": [mock_tool]}},
+        inbox=_RecordingInbox(),
     )
     asyncio.run(spawn("researcher", "find something"))
-    assert drain_calls >= 1
+
+    # One round dispatches the tool call, with no drain yet; the round after it drains once (the
+    # window a worker's own send would have to land in); the final, tool-free round drains again on
+    # its way to returning. Two drains total is the fact that matters: the break the brief called
+    # realistic (skip only the drain that follows a PENDING_TOOLS dispatch, keep the one on a
+    # TERMINAL_HEALTHY turn) leaves exactly one, which the weaker "a drain happened somewhere after
+    # dispatch" check could not tell apart from this, since the later round's own drain still sorts
+    # after the dispatch entry either way.
+    assert order[0] == "dispatch(drains_so_far=0)", f"dispatch did not come first, or came after a drain: {order}"
+    assert order.count("drain") >= 2, f"expected the after-dispatch drain and the final round's; got {order}"
 
 
 def test_the_floor_covers_the_agent_parameter_the_probe_cannot_see():
