@@ -2,8 +2,10 @@
 
 import re
 
+from aimu.models import PROVENANCE_KEY
 from aimu.sessions import Session
 
+from kokua.core.messages import PROVENANCE_AGENT
 from kokua.transcript_export import _render_item, _render_subagent, render_markdown
 
 
@@ -827,3 +829,28 @@ def test_an_inbox_item_is_attributed_to_the_user_who_sent_it():
     """Its own label rather than ``loop``'s italic machine note: these are a person's words, and the
     export says so for the reason the page gives this row the foreground colour."""
     assert _render_item({"type": "inbox", "text": "use the cache"}, None) == ["**User (mid-turn):** use the cache"]
+
+
+def test_an_agent_sent_inbox_item_is_not_signed_by_the_user():
+    """The label is the one place this export states who spoke, so it has to read the item rather
+    than assume: one of the turn's own agents can send a mid-turn message too, and signing a
+    worker's note "User" is the impersonation the provenance tag exists to stop."""
+    item = {"type": "inbox", "text": "look at the index", "from": "agent"}
+    assert _render_item(item, None) == ["**Agent (mid-turn):** look at the index"]
+
+
+def test_an_agent_message_is_exported_as_agent_sent_end_to_end():
+    """Through ``replay_items`` rather than from a hand-written item, because the flag the renderer
+    reads has to be the one the tagged message produces."""
+    session = _session(
+        [
+            {"role": "user", "content": "summarize the log"},
+            {"role": "user", "content": "look at the index", PROVENANCE_KEY: PROVENANCE_AGENT},
+            {"role": "assistant", "content": "done"},
+        ],
+        {"messages": {"0": [1]}},
+    )
+    out = render_markdown(session)
+    assert out.count("## Turn ") == 1
+    assert "**Agent (mid-turn):** look at the index" in out
+    assert "User (mid-turn)" not in out

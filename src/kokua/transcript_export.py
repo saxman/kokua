@@ -521,10 +521,16 @@ def _render_item(item: dict, max_payload_chars: Optional[int], payloads_path: Op
         return [_loop_line(item, max_payload_chars)]
     if item_type == "inbox":
         # A label rather than ``loop``'s italic machine note, and uncapped like the turn's own user
-        # text: this is a person's words, sent into a turn that was already running. It opens no turn
-        # heading of its own because ``replay_items`` gives it no ``message_index``, which is what
-        # keeps the turn it joined from reading as two.
-        return [f"**User (mid-turn):** {item.get('text', '')}"]
+        # text: a message sent into a turn that was already running is somebody's words either way. It
+        # opens no turn heading of its own because ``replay_items`` gives it no ``message_index``,
+        # which is what keeps the turn it joined from reading as two.
+        #
+        # Who said it has to be read off the item rather than assumed, because one of the turn's own
+        # agents can send one too (``core/messaging.py``) and a line signed "User" over a worker's
+        # note is the impersonation the provenance tag exists to stop. "Agent" rather than a name:
+        # the sender's address is not on the stored message, only the fact that it was not the user.
+        speaker = "Agent" if item.get("from") == "agent" else "User"
+        return [f"**{speaker} (mid-turn):** {item.get('text', '')}"]
     if item_type == "tool":
         return _render_tool(item, max_payload_chars, payloads_path)
     if item_type == "notice":

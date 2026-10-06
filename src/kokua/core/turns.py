@@ -461,6 +461,10 @@ class TurnRunner:
                             # being drafted shows live, reaches the catch-up record a switch-in
                             # replays, and is gone on reload.
                             message_indices = resolve_message_indices(agent.model_client.messages, user_index)
+                            # The rollback just described is exactly the case this cannot pair a
+                            # delivery with its message in; see `_tag_agent_messages` for what it
+                            # does instead.
+                            self._tag_agent_messages(agent, bus, message_indices)
                     else:
                         # Taken here rather than before the gate: it is the lower bound the turn's own
                         # user message is searched for from, so anything another turn appended first
@@ -482,6 +486,9 @@ class TurnRunner:
                             # where the agent has already snapshotted the partial turn in its finally.
                             user_index = resolve_user_index(agent.model_client.messages, base_len)
                             message_indices = resolve_message_indices(agent.model_client.messages, user_index)
+                            # Before `_persist` writes these messages to the store, which is what the
+                            # tag has to reach; see `_tag_agent_messages`.
+                            self._tag_agent_messages(agent, bus, message_indices)
                 except asyncio.CancelledError:
                     # `/stop` (or shutdown) cancelled this turn. Record first: the "(stopped)" send
                     # below is one more await, and a second cancellation racing it would otherwise
@@ -732,6 +739,41 @@ class TurnRunner:
         finally:
             ctx.publish_user_index(resolve_user_index(ctx.agent.model_client.messages, base_len))
 
+    @staticmethod
+    def _tag_agent_messages(agent, bus: MessageBus, message_indices: list[int]) -> None:
+        """Mark the mid-turn messages that came from an agent, so none of them wears the user's role.
+
+        AIMU appends a delivery as a plain ``user`` message with no provenance of its own (its loop
+        tags only the nudges it composes itself, because an inbox message is normally the user's), so
+        this is the only place a worker's note can be told from something the user typed once the turn
+        is over. Written onto the message dict, which is what ``_persist`` snapshots into the session
+        store, so it must run before that: called wherever a turn resolves its indices, which on the
+        reactive path is the ``finally`` that reaches the cancelled turn too, rather than from the
+        outer ``finally`` that closes the bus, which runs after the store has already been written.
+
+        **A delivery is paired with the message it became by position**, because each non-empty entry
+        drain becomes exactly one appended message and ``message_indices`` lists those in order. When
+        the two counts disagree the pairing is not safe to make, and the ``/plan`` path is where that
+        happens: the planner's rounds are rolled back (``workflows/planning``), so a message delivered
+        while the plan was being drafted was drained and then had its appended message discarded,
+        leaving more deliveries than indices and every surviving pair off by one. The fallback is to
+        ask one question of every delivery at once, which can only under-tag: it tags nothing unless
+        *no* delivery in the whole turn carried the user's words, so a mis-pairing can never put the
+        agent tag on something the user said.
+
+        ``tag_for_delivery`` is what decides each answer, including the mixed delivery that must stay
+        untagged; see it for why under-tagging is the safe direction and what covers the gap.
+        """
+        deliveries = bus.entry_deliveries()
+        if len(deliveries) != len(message_indices):
+            whole_turn = [message for delivery in deliveries for message in delivery]
+            deliveries = [whole_turn] * len(message_indices)
+        messages = agent.model_client.messages
+        for index, delivery in zip(message_indices, deliveries):
+            tag = bus.tag_for_delivery(delivery)
+            if tag is not None:
+                messages[index][PROVENANCE_KEY] = tag
+
     def _record_provenance(
         self,
         conversation_id: str,
@@ -941,7 +983,7 @@ class TurnRunner:
             # Held here rather than in the child so there is exactly one hold for the firing either way
             # (invariant 1). An asyncio lock has no owning task, so releasing it here is sound.
             async with self._gate.turn(conversation_id):  # invariant 1
-                handle = RunHandle.start(self._unattended_body(prompt, spec))
+                handle = RunHandle.start(self._unattended_body(prompt, spec, bus=bus))
                 # Tracked inside the gate, for the same reason the catch-up record is opened there: a
                 # firing queued behind a turn already running on this conversation would otherwise
                 # overwrite that turn's entry, which is the one `/stop` and shutdown reach. A queued
@@ -1014,12 +1056,17 @@ class TurnRunner:
                 logger.warning("A message a scheduled firing never read could not be run", exc_info=True)
         return False
 
-    async def _unattended_body(self, prompt: str, spec: ProactiveTarget) -> None:
+    async def _unattended_body(self, prompt: str, spec: ProactiveTarget, *, bus: MessageBus) -> None:
         """One unattended turn, inside its caller's gate hold. See the module's concurrency invariants.
 
         Ends cancelled when it was stopped, as a cancelled task should, having first recorded and
         persisted as much of the turn as it got: ``_run_unattended`` is what turns that back into an
         ordinary return.
+
+        ``bus`` is the firing's own, passed rather than read from ``current_bus`` even though the child
+        task this runs in does inherit it. The contextvar exists so a tool call anywhere inside the run
+        can reach the bus without it being threaded through; this body is not that, it is the caller's
+        own code, and a parameter leaves no absent case to guard against.
         """
         conversation_id = spec.conversation_id
         started = time.monotonic()
@@ -1076,6 +1123,16 @@ class TurnRunner:
                 error, failure = exc, _describe_refusal(exc, "this request")
             except Exception as exc:
                 error, failure = exc, f"failed: {describe_error(exc)}"
+            # A firing carries a bus too, so one of its own agents can message it, and that message
+            # must not be read as the firing's own output: `is_user_turn` treats a proactive tag as a
+            # turn somebody took, where the agent tag is exactly what says nobody did. The agent tag
+            # survives either order, since this pass assigns where the loop below defaults, and it
+            # goes first because it is the more specific of the two claims. Resolving the indices here
+            # rather than below the loop changes nothing about what they find: neither helper reads
+            # the tag that loop writes.
+            proactive_index = resolve_user_index(agent.model_client.messages, start)
+            message_indices = resolve_message_indices(agent.model_client.messages, proactive_index)
+            self._tag_agent_messages(agent, bus, message_indices)
             for message in agent.model_client.messages[start:]:
                 # Tag every message this unprompted run appended, so replayed history can distinguish
                 # it from a user-driven turn. setdefault, not assignment: the agent loop tags the
@@ -1086,7 +1143,6 @@ class TurnRunner:
             # The reason is recorded here rather than left to `_report`, whose status line goes to
             # whichever conversation the user is viewing rather than to this one. Before the persist,
             # and synchronously, for invariant 5's reason.
-            proactive_index = resolve_user_index(agent.model_client.messages, start)
             self._record_provenance(
                 conversation_id,
                 proactive_index,
@@ -1096,7 +1152,7 @@ class TurnRunner:
                 thinking=self._config.thinking_for(self._config.entry_agent),
                 metrics=metrics,
                 started=started,
-                message_indices=resolve_message_indices(agent.model_client.messages, proactive_index),
+                message_indices=message_indices,
             )
             await self._persist(conversation_id, proactive_index)
             if stopped:

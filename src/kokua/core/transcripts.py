@@ -23,7 +23,12 @@ from typing import Any, Optional
 from aimu.models import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 from aimu.sessions import Session
 
-from kokua.core.messages import INJECTED_USER_PROVENANCE, message_text
+from kokua.core.messages import (
+    INJECTED_USER_PROVENANCE,
+    LOOP_INJECTED_PROVENANCE,
+    PROVENANCE_AGENT,
+    message_text,
+)
 
 # Cut one message on its own, before any whole-transcript budget, so a single pasted document cannot
 # consume a read and hide every message around it.
@@ -60,7 +65,9 @@ def readable_messages(messages: list[dict]) -> list[tuple[str, object, str]]:
     """The ``(label, timestamp, text)`` of each message that carries something the user or the assistant
     actually said, in order.
 
-    Skips the system message, tool results, the loop's injected user turns, and any message left with no
+    Skips the system message, tool results, every user-role message the user did not type (the loop's
+    injected turns, and a message one of a turn's agents sent to another, which is neither the user
+    nor the assistant speaking), and any message left with no
     text -- which drops an assistant message whose only content was ``tool_calls``. The cost is that a
     turn whose visible work was all delegation shows only its final answer; that is acceptable because
     the loop ends every turn with a text answer, and the web UI is where the full trace is inspectable.
@@ -209,11 +216,15 @@ def search(
 # --- replay --------------------------------------------------------------------------------------
 
 # User-role turns the agent loop injects between tool-calling iterations. They are byte-for-byte
-# ordinary user messages except for this provenance tag, so display keys off the tag alone. Same set
-# as messages.INJECTED_USER_PROVENANCE (both name "a loop injection, not real user input"), kept under
-# its own name here because the two call sites ask different questions of it: that one filters a
-# message out of what counts as user input, this one decides how to render one that was not filtered.
-_LOOP_PROVENANCE = INJECTED_USER_PROVENANCE
+# ordinary user messages except for this provenance tag, so display keys off the tag alone.
+#
+# A *subset* of messages.INJECTED_USER_PROVENANCE, and the difference matters: that set is every
+# user-role message the user did not type, which now includes a message one of the turn's agents sent
+# to another (messages.PROVENANCE_AGENT). Both are "not real user input", so both are filtered out of
+# what counts as user input there, but only a loop injection renders as a loop marker here. Keying
+# this on the wider set would draw an agent's message as a `loop` item carrying a `reason` the page
+# has no marker for, instead of the `inbox` row it belongs in.
+_LOOP_PROVENANCE = LOOP_INJECTED_PROVENANCE
 
 # AIMU's make_async_subagent_tool (aimu/aio/tools/builtin.py) defaults its built tool's name to this
 # literal; kokua never overrides it. A spawn's own `subagent` card already shows its role, task, and
@@ -294,11 +305,13 @@ def replay_items(
     produce. It matters most for a scheduled run, whose error never reached this conversation live -- the
     status line for a firing goes to whichever conversation the user was viewing at the time.
 
-    ``mid_turn`` is keyed the same way and holds the *message* indices of what the user sent into that
-    turn while it ran (``record_turn_provenance``'s ``messages`` map). Those messages are ordinary
-    untagged ``user`` entries in the transcript, so nothing in the messages themselves distinguishes
-    one from a message that started a turn, and position cannot: this record is the only thing that
-    can say. Without it a mid-turn message replays as a turn of its own, which is destructive rather
+    ``mid_turn`` is keyed the same way and holds the *message* indices of what was sent into that turn
+    while it ran (``record_turn_provenance``'s ``messages`` map). What the *user* sent is an ordinary
+    untagged ``user`` entry in the transcript, so nothing in the message itself distinguishes one from
+    a message that started a turn, and position cannot: for those, this record is the only thing that
+    can say. (What one of the turn's *agents* sent carries ``messages.PROVENANCE_AGENT``, so it has a
+    second answer that survives without the record; see the branch below.)
+    Without it a mid-turn message replays as a turn of its own, which is destructive rather
     than untidy, because a renderer stamps a turn's branch and delete-from-here controls on the first
     item carrying a ``message_index`` and the index of a message sent mid-turn cuts its *host* turn in
     half. A transcript stored before turns recorded this has no entry and still replays the old way,
@@ -373,12 +386,30 @@ def replay_items(
                 # so it must not close that turn's failure notice either.
                 add({"type": "loop", "reason": provenance, "text": message_text(message.get("content"))}, ts)
                 continue
-            if index in mid_turn_set:
-                # A message the user sent into the turn already running. Deliberately carries no
-                # `message_index`: it has no turn of its own, so a renderer must neither open one here
-                # nor offer the controls that act on one. It continues the turn in progress, so like a
-                # loop marker it must not close that turn's failure notice either.
-                add({"type": "inbox", "text": message_text(message.get("content"))}, ts)
+            if index in mid_turn_set or provenance == PROVENANCE_AGENT:
+                # A message sent into the turn already running, by the user or by one of the turn's
+                # own agents. Deliberately carries no `message_index`: it has no turn of its own, so a
+                # renderer must neither open one here nor offer the controls that act on one. It
+                # continues the turn in progress, so like a loop marker it must not close that turn's
+                # failure notice either.
+                #
+                # Either test is enough on its own, and the tag is the one that does not depend on a
+                # record surviving: the index comes from this turn's metadata, while the tag rides the
+                # message itself, so an agent's message is kept out of a user bubble even by a reader
+                # holding the messages and not the record. The user's own mid-turn message has no such
+                # second route, deliberately (it is untagged because it really is the user speaking),
+                # which is why the index is still what answers for it.
+                #
+                # `from` says which of the two it was, and only a reader that attributes the words in
+                # so many letters needs it: the Markdown export writes "User (mid-turn)" over an inbox
+                # item, which would be a worker's note signed by the user. A flag on the item rather
+                # than an item type of its own, because a renderer that has not learned the flag
+                # still draws the message (the web page's replay keys on `inbox` and ignores keys it
+                # does not know, where an unknown *type* would be dropped in silence).
+                item = {"type": "inbox", "text": message_text(message.get("content"))}
+                if provenance == PROVENANCE_AGENT:
+                    item["from"] = "agent"
+                add(item, ts)
                 continue
             flush_failure()  # whatever turn was in progress ends where this one begins
             if str(index) in failure:

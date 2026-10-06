@@ -6,6 +6,7 @@ from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROA
 
 from aimu.sessions import Session
 
+from kokua.core.messages import PROVENANCE_AGENT
 from kokua.core.transcripts import MAX_MESSAGE_CHARS, flatten_transcript, replay_items, search, truncate_lines
 
 
@@ -217,3 +218,52 @@ def test_replay_items_renders_an_unrecorded_message_as_the_turn_it_was():
     users = [item for item in replay_items(_MID_TURN_TURN) if item["type"] == "user"]
 
     assert [item["message_index"] for item in users] == [0, 3]
+
+
+# The same turn, with the mid-turn message sent by one of the turn's own agents rather than typed.
+_AGENT_MESSAGE_TURN = [
+    *_MID_TURN_TURN[:3],
+    {"role": "user", "content": "look at the index", PROVENANCE_KEY: PROVENANCE_AGENT},
+    _MID_TURN_TURN[4],
+]
+
+
+def test_replay_items_renders_an_agent_message_from_its_tag_with_no_record_at_all():
+    """The tag's own job here, which is the one thing the mid-turn record cannot do: it rides the
+    message, so a reader holding the messages without the turn's metadata still cannot draw a
+    worker's note as a user bubble, and cannot stamp it with the controls that would cut the host
+    turn in half. The test above is the same transcript without the tag, where the record is the
+    only answer and its absence costs exactly that.
+    """
+    items = replay_items(_AGENT_MESSAGE_TURN)
+
+    # `from` is how a reader that signs the words (the Markdown export) says who said them, rather
+    # than assuming the user did.
+    assert {"type": "inbox", "text": "look at the index", "from": "agent"} in items
+    assert [item["message_index"] for item in items if "message_index" in item] == [0]
+
+
+def test_replay_items_leaves_the_users_own_mid_turn_message_unattributed():
+    """The user's is the default case and carries no ``from``, which is what keeps the key meaning
+    "not the user" wherever it appears rather than being a field every reader has to interpret."""
+    items = replay_items(_MID_TURN_TURN, mid_turn={"0": [3]})
+
+    assert {"type": "inbox", "text": "use the cache"} in items
+
+
+def test_replay_items_does_not_render_an_agent_message_as_a_loop_marker():
+    """The tag is in ``messages.INJECTED_USER_PROVENANCE`` because an agent's message is not a turn
+    the user took, and this is why the replay cannot key on that same set: a loop marker names which
+    injection the loop made, and an agent's message is not one of them."""
+    items = replay_items(_AGENT_MESSAGE_TURN, mid_turn={"0": [3]})
+
+    assert not any(item["type"] == "loop" for item in items)
+
+
+def test_an_agent_message_is_not_part_of_what_was_said():
+    """Neither the user nor the assistant said it, so the Markdown export and search leave it out
+    rather than attributing it to whichever of them its role suggests."""
+    assert flatten_transcript(_AGENT_MESSAGE_TURN) == flatten_transcript(
+        [message for message in _AGENT_MESSAGE_TURN if message.get(PROVENANCE_KEY) != PROVENANCE_AGENT]
+    )
+    assert not any("look at the index" in line for line in flatten_transcript(_AGENT_MESSAGE_TURN))

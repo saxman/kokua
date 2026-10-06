@@ -327,11 +327,18 @@ creation, and reaches `close()` outside the gate hold, because a follow-up turn 
 `inbox` at all, so a redirection cannot reach the agent judging the work.
 
 Which of a turn's messages were sent mid-turn is recorded, because nothing in the transcript shows it. A
-message
+message the user
 handed to a running turn is appended as an ordinary `user` message, indistinguishable from one that
 started a turn, so `resolve_message_indices` reads the positions back off the message list after the
 run (a compaction between rounds can move them) and `record_turn_provenance` stores them under
-`metadata["messages"]`. That record is what keeps a reload from replaying one such turn as two: the
+`metadata["messages"]`. A message one of the turn's *agents* sent is not indistinguishable: the turn
+writes `messages.PROVENANCE_AGENT` onto it before `_persist` snapshots the turn
+(`TurnRunner._tag_agent_messages`), so a worker cannot reach the stored transcript wearing the user's
+role, and `is_user_turn` excludes it with no record needed. One qualifier, and it is the reason the
+record still carries both kinds: a drain's list becomes *one* appended message, so a round that
+delivered the user's words and an agent's is one message that is both, and tagging it would hide what
+the user said. That case stays untagged and rests on the index alone
+(`MessageBus.tag_for_delivery`). That record is what keeps a reload from replaying one such turn as two: the
 `"inbox"` item `replay_items` emits carries no `message_index`, so a renderer that stamps a turn's
 controls on the first item carrying one has nothing to stamp it with, which is exactly right, since the
 index that would truncate "here" points into the middle of the host turn. A transcript stored before
@@ -724,10 +731,12 @@ whose agent fails to build reverts the pointer rather than stranding the view. T
 touched, and the two are ordinary independent conversations afterwards.
 
 Three things decide the shape. The cut is **a turn boundary**, found by `turn_end`: the next message the
-user sent to *start* a turn. Two kinds of `user`-role message sit inside a turn instead, and `turn_end`
-skips both: the nudges the agent loop injects between tool-calling iterations, which carry a provenance
-tag (`messages.is_user_turn`), and a message the user typed while the turn was running, which carries no
-tag because it genuinely is user input. The second has no tell at all, so `turn_end` takes the recorded
+user sent to *start* a turn. Three kinds of `user`-role message sit inside a turn instead, and `turn_end`
+skips all of them: the nudges the agent loop injects between tool-calling iterations, a message one of
+the turn's own agents sent to another run on it, which carries `messages.PROVENANCE_AGENT`, and a
+message the user typed while the turn was running, which carries no
+tag because it genuinely is user input. The first two carry a provenance tag `messages.is_user_turn`
+recognises; the third has no tell at all, so `turn_end` takes the recorded
 indices (`metadata["messages"]`, flattened by `mid_turn_indices`) as an argument; a transcript stored
 before that record existed passes none and behaves exactly as it always did. Stopping at a mid-turn
 message would copy a branch that loses both the redirection and the answer it produced, which is

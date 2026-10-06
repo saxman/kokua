@@ -204,16 +204,19 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   run is not spinning, which is what the cap exists to catch. The `[security.auto_approval]` budget is
   deliberately untouched, since more user text does not make a gated call safer; what the message does
   reach there is the reviewer's copy of the request, amended so a redirected turn's calls are judged
-  against what the user now wants.
+  against what the user now wants. **Only yours is.** A message one of the turn's own agents sends
+  amends nothing, for the reason given under `messaging` below.
   **What does not reach a running turn this way**: anything the assistant answers without running a
   turn (`/stop`, `/diag`, the conversation commands, a reply to an approval prompt or a plan review), a
   workflow command, which starts a turn of its own as it always has, and a message carrying an image,
   which has no defined place inside a loop. Needs `aimu>=0.33.0`; see "Diagnostics and error reporting"
   below.
 - **A turn records which of its messages were sent mid-turn, so a reload does not replay one turn as
-  two.** A message handed to a running turn is committed as an ordinary `user` message,
+  two.** A message *you* hand to a running turn is committed as an ordinary `user` message,
   indistinguishable in the transcript from one that started a turn, and position cannot tell them apart
-  either. `TurnRunner` resolves the positions off the message list after the run (a compaction between
+  either. (One an agent sends carries a provenance tag instead; see `messaging` below. The record
+  covers both, because a round that delivered yours and an agent's together is one message that is
+  both and so stays untagged.) `TurnRunner` resolves the positions off the message list after the run (a compaction between
   rounds can move them) and stores them in `metadata["messages"]`, keyed by the host turn like every
   other per-turn map, so a branch or a truncation filters them with the rest. `replay_items` emits a
   mid-turn message as its own `"inbox"` item with **no `message_index`**, which is what withholds the
@@ -939,8 +942,34 @@ rejects a config-declared `tools` or `delegates_to` by name at parse time, so th
 `config.toml` to this parameter either. Neither guard lives in `core/messaging.py` or
 `core/subagents.py`, so a change that gave a reviewer real tools would reopen this without touching
 either.
+**An agent's message is distinguishable from yours wherever it is read, and two of the three places
+needed a rule rather than a rendering.** It arrives in the identical `user` shape yours does, so the
+turn writes `messages.PROVENANCE_AGENT` onto it before the store is written
+(`TurnRunner._tag_agent_messages`). `is_user_turn` then excludes it, which is what keeps a branch or a
+truncation from ending a turn at a worker's note, with no stored record needed; `replay_items` draws it
+as its own collapsed row rather than a user bubble, and marks it `from: "agent"` so `kokua export`
+signs the line **Agent (mid-turn)** instead of **User (mid-turn)**, which is the one place the export
+states who spoke. One qualifier, and it is deliberate: a drain's list becomes *one* appended message,
+so a round that carried your words and an agent's is one message that is both, and tagging it would
+hide what you said from every one of those readers. That case stays untagged and rests on the per-turn
+message index, which lists a mid-turn message either way. A turn with several deliveries is answered
+one delivery at a time (`MessageBus.entry_deliveries`), so a turn where you spoke in one round and a
+worker in another tags only the worker's; where the pairing cannot be made safely, which is a `/plan`
+turn whose planner rounds were rolled back under a delivery, it can only under-tag, never mis-tag.
+
+**An agent's message never amends what an auto-approval reviewer reads as the turn's request**, where
+yours does. A reviewer judges one gated call's arguments against that text, so a model that could
+append to it would be editing the terms its own calls are judged against, which is an escalation; you
+appending to it is the principal exercising your own budget. The whole rule is one sender test in
+`MessageBus.send`, which is why it is pinned directly. What is *not* ruled out, and is recorded rather
+than designed away: a delivery extends the recipient's round budget whoever sent it, because AIMU's
+`_extend_budget` fires on any delivery and the drain's `list[str]` contract is what keeps AIMU
+ignorant of senders. AIMU's own cap (one extension per permitted round) is what bounds it, and
+`messaging` is a declared capability, so no agent holds it by default.
 `tests/core/test_messaging.py`, `tests/core/test_subagents.py`, `tests/toolsets/test_messaging.py`,
-`tests/toolsets/test_capabilities.py`, and `tests/test_aimu_compat.py` (a release-fact pin that AIMU's
+`tests/toolsets/test_capabilities.py`, `tests/core/test_messages.py`, `tests/core/test_turns.py`,
+`tests/core/test_transcripts.py`, `tests/core/test_conversations.py`, `tests/test_transcript_export.py`,
+and `tests/test_aimu_compat.py` (a release-fact pin that AIMU's
 loop drains an inbox after a round's own dispatch, not only on a tool-free turn) cover it.
 
 The four below are Kokua's own standalone capabilities, needing nothing but `AssistantConfig`. They are

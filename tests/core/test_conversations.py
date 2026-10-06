@@ -12,7 +12,7 @@ from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY
 
 from kokua.core.assistant import Assistant
 from kokua.core.conversations import ConversationNotFound, TurnInFlight, TurnNotFound
-from kokua.core.messages import TITLE_MAX
+from kokua.core.messages import PROVENANCE_AGENT, TITLE_MAX
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
 from tests.helpers import BlockingModelClient, MockAsyncModelClient, settle_titles
 
@@ -1731,6 +1731,27 @@ async def test_a_transcript_with_no_mid_turn_record_cuts_exactly_as_it_always_di
 
     assert assistant._store.get(branch_id).messages == MID_TURN_MESSAGES[:4]
     assert assistant._book.branchable(parent.key, 4)
+
+
+async def test_an_agent_message_is_no_turn_to_cut_at_even_with_the_record_withheld(tmp_path):
+    """What the tag buys over the record, on the pair of claims the record alone answers above.
+
+    An agent's message carries ``messages.PROVENANCE_AGENT``, so ``is_user_turn`` already refuses it
+    and ``turn_end`` scans past it with nothing recorded anywhere. Read against the test above, which
+    is this same fixture with the record withheld and the message untyped: there the cut lands at 4
+    and the branch loses the answer, here it cannot. The record is still what answers for the user's
+    own mid-turn message, which is untagged on purpose.
+    """
+    assistant, parent = await _assistant_with_mid_turn_parent(tmp_path)
+    parent.messages[4] = {**parent.messages[4], PROVENANCE_KEY: PROVENANCE_AGENT}
+    parent.metadata.pop("messages")
+    assistant._store.save(parent)
+
+    assert not assistant._book.branchable(parent.key, 4)
+    with pytest.raises(TurnNotFound):
+        await assistant._book.truncate(parent.key, 4)
+    # Through index 5, the answer the message redirected, exactly as the recorded case keeps it.
+    assert assistant._store.get(assistant._book.branch(parent.key, 1)).messages == parent.messages[:6]
 
 
 async def test_recording_a_turn_with_no_mid_turn_messages_writes_no_messages_map(tmp_path):

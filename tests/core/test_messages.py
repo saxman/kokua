@@ -8,6 +8,7 @@ from __future__ import annotations
 from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROACTIVE
 
 from kokua.core.messages import (
+    PROVENANCE_AGENT,
     derive_title,
     first_user_text,
     is_user_turn,
@@ -109,14 +110,47 @@ def test_resolve_message_indices_finds_a_message_sent_into_the_running_turn():
 
 
 def test_resolve_message_indices_skips_the_nudges_the_loop_injects():
-    """The one other way a ``user`` entry appears inside a turn, and the reason this shares
-    ``is_user_turn`` rather than testing for a bare absent key."""
+    """The one way a ``user`` entry appears inside a turn without anyone having sent it, and the
+    reason this tests the loop's own tags rather than a bare absent key."""
     messages = [
         {"role": "user", "content": "hello"},
         {"role": "user", "content": "continue", PROVENANCE_KEY: PROVENANCE_CONTINUATION},
         {"role": "user", "content": "use the cache"},
     ]
     assert resolve_message_indices(messages, 0) == [2]
+
+
+def test_an_agent_message_is_tagged_in_the_stored_transcript():
+    """The security property: a worker must not be able to impersonate the user.
+
+    Both halves are asserted because each covers what the other cannot. ``is_user_turn`` is False, so
+    every reader of that predicate (a transcript's own idea of what was said, and the turn boundary a
+    branch or a truncation cuts at) treats the message as machine-authored without being told. And the
+    message is still in the per-turn index, which is what keeps it from replaying as a turn of its own:
+    the two questions differ by exactly this kind of message, which is why
+    ``resolve_message_indices`` cannot be written in terms of ``is_user_turn``.
+    """
+    messages = [
+        {"role": "user", "content": "do X"},
+        {"role": "assistant", "tool_calls": [{"id": "id0"}]},
+        {"role": "tool", "content": "r", "tool_call_id": "id0"},
+        {"role": "user", "content": "look at the index", PROVENANCE_KEY: PROVENANCE_AGENT},
+        {"role": "assistant", "content": "done"},
+    ]
+
+    assert is_user_turn(messages[3]) is False
+    assert resolve_message_indices(messages, 0) == [3]
+
+
+def test_the_users_own_mid_turn_message_is_untagged_and_still_a_turn_the_user_took():
+    """The other side of the tag, and the reason it is not written on every mid-turn message: the
+    user's own words are the principal speaking, so they stay untagged and keep reading as a turn the
+    user took. Without this, the test above would also pass on an implementation that tagged (or
+    excluded) everything delivered mid-turn."""
+    typed = {"role": "user", "content": "use the cache"}
+
+    assert is_user_turn(typed) is True
+    assert resolve_message_indices([{"role": "user", "content": "do X"}, typed], 0) == [1]
 
 
 def test_resolve_message_indices_of_a_turn_that_committed_no_user_message_is_empty():

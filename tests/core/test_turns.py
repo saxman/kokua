@@ -11,6 +11,7 @@ from aimu.aio import RunHandle
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
+from kokua.core.messages import PROVENANCE_AGENT
 from kokua.core.messaging import ENTRY_SOURCE, EVERYONE, USER, Message, MessageBus, current_bus
 from kokua.core.turn_registry import TurnInfo
 from kokua.toolsets.planning import PLANNING_WORKFLOW
@@ -2609,6 +2610,141 @@ def _mid_turn_run(agent, mid_turn_text="use the cache"):
         return "done"
 
     return run
+
+
+def _delivering_run(agent, *rounds):
+    """An ``agent.run`` that drains this turn's inbox the way AIMU's loop does, once per round.
+
+    Each callable in ``rounds`` sends onto the bus just before that round's drain, which is how a
+    message arrives while the model is working, and what comes back is appended as the *one* ``user``
+    message AIMU joins a drain's list into. The drain is opened through the ``inbox`` source the turn
+    passed, so the cursor this advances is the turn's own entry cursor and the deliveries it records
+    are the ones the turn tags from. The mock client fakes tool rounds rather than running AIMU's
+    dispatch (see the testing notes), so the shape is written out here rather than driven.
+    """
+
+    async def run(text, **kwargs):
+        messages = agent.model_client.messages
+        drain = kwargs["inbox"].reader("assistant")
+        messages.append({"role": "user", "content": text})
+        for round_number, send in enumerate(rounds):
+            send()
+            messages.append({"role": "assistant", "tool_calls": [{"id": f"id{round_number}"}]})
+            messages.append({"role": "tool", "content": "result", "tool_call_id": f"id{round_number}"})
+            taken = drain()
+            if taken:
+                messages.append({"role": "user", "content": "\n\n".join(taken)})
+        messages.append({"role": "assistant", "content": "done"})
+        return "done"
+
+    return run
+
+
+async def test_an_agent_message_reaches_the_stored_transcript_tagged(assistant):
+    """The security property, end to end through the store: a worker cannot reach the transcript
+    wearing the user's role.
+
+    Asserted on the stored session rather than on the agent's live messages, because the tag is
+    written for a reader who comes back later: it has to be in place before ``_persist`` snapshots
+    the turn, which is why it is applied where the indices are resolved and not in the outer
+    ``finally`` that closes the bus.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _delivering_run(
+        agent, lambda: current_bus.get().send("look at the index", sender="researcher#1", to="assistant")
+    )
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id)
+    assert stored.messages[3]["content"] == "look at the index"
+    assert stored.messages[3][PROVENANCE_KEY] == PROVENANCE_AGENT
+    # And it is still recorded as a mid-turn message, which is what keeps it from replaying as a turn
+    # of its own whichever of the two a reader asks.
+    assert stored.metadata["messages"]["0"] == [3]
+
+
+async def test_the_users_own_mid_turn_message_reaches_the_store_untagged(assistant):
+    """The control for the test above, and a rule of its own: untagged means the principal spoke.
+    An implementation that tagged every delivery would pass that test and fail this one."""
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _delivering_run(agent, lambda: current_bus.get().send("use the cache", sender=USER, to=EVERYONE))
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id)
+    assert stored.messages[3]["content"] == "use the cache"
+    assert PROVENANCE_KEY not in stored.messages[3]
+
+
+async def test_a_round_that_carried_both_the_user_and_an_agent_stays_untagged(assistant):
+    """Review focus 1. One drain becomes one appended message, so this message is both, and tagging
+    is all-or-nothing per message. Tagging it would hide the user's own words from ``is_user_turn``,
+    which is the worse of the two errors; the recorded index covers it either way."""
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+
+    def both():
+        bus = current_bus.get()
+        bus.send("use the cache", sender=USER, to=EVERYONE)
+        bus.send("and the index", sender="researcher#1", to="assistant")
+
+    agent.run = _delivering_run(agent, both)
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id)
+    assert stored.messages[3]["content"] == "use the cache\n\nand the index"
+    assert PROVENANCE_KEY not in stored.messages[3]
+    assert stored.metadata["messages"]["0"] == [3]
+
+
+async def test_two_deliveries_in_one_turn_are_tagged_one_at_a_time(assistant):
+    """Why the bus keeps every delivery rather than the latest one.
+
+    The user speaks in the first round and a worker in the second, so the turn holds one message of
+    each kind. A single answer taken over the whole turn tags both or neither: tagging both would put
+    the agent tag on what the user said, which is the failure the mixed case is untagged to avoid,
+    arriving by a different route.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _delivering_run(
+        agent,
+        lambda: current_bus.get().send("use the cache", sender=USER, to=EVERYONE),
+        lambda: current_bus.get().send("and the index", sender="researcher#1", to="assistant"),
+    )
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id)
+    assert [stored.messages[index]["content"] for index in (3, 6)] == ["use the cache", "and the index"]
+    assert PROVENANCE_KEY not in stored.messages[3]
+    assert stored.messages[6][PROVENANCE_KEY] == PROVENANCE_AGENT
+    assert stored.metadata["messages"]["0"] == [3, 6]
+
+
+async def test_an_agent_message_in_an_unattended_turn_is_tagged_rather_than_read_as_proactive(assistant):
+    """A firing carries a bus too, so an agent can message one, and the firing's own provenance pass
+    would otherwise claim that message: it tags everything the run appended as proactive, which
+    ``is_user_turn`` reads as a turn somebody took, where the agent tag is what says nobody did. What
+    is asserted is which tag survives both passes, not the order they run in, because either order
+    leaves this one on top (the agent tag is assigned, the proactive tag defaults).
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _delivering_run(
+        agent, lambda: current_bus.get().send("look at the index", sender="researcher#1", to="assistant")
+    )
+
+    await assistant._turns.proactive("summarize the log")
+
+    stored = assistant._store.get(conversation_id)
+    assert stored.messages[3]["content"] == "look at the index"
+    assert stored.messages[3][PROVENANCE_KEY] == PROVENANCE_AGENT
+    assert stored.messages[0][PROVENANCE_KEY] == PROVENANCE_PROACTIVE  # the firing's own prompt still is
 
 
 async def test_a_turn_records_where_its_mid_turn_messages_landed(assistant):

@@ -35,6 +35,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
+from kokua.core.messages import PROVENANCE_AGENT
+
 if TYPE_CHECKING:
     from kokua.core.auto_approval import ReviewContext
 
@@ -126,6 +128,12 @@ class MessageBus:
         # and looks read from all of their positions. `close` reads this to tell an undeliverable
         # message from a delivered one.
         self._drained: set[int] = set()
+        # What each non-empty entry drain handed over, in order, which is what lets the turn say
+        # whose words an appended message was made of (see `entry_deliveries`). Only the entry
+        # cursor's drains are recorded: a worker's messages are built per spawn and discarded with
+        # it, so nothing that reaches the stored transcript is made of them and there is nothing
+        # there to tag.
+        self._entry_deliveries: list[list[Message]] = []
 
     def roster(self) -> list[str]:
         """Every address that has opened a reader this turn, oldest first."""
@@ -185,7 +193,12 @@ class MessageBus:
         if not self._open:
             return False
         self._messages.append(Message(text, sender, to, token))
-        self._amend_review_context(text)
+        if sender == USER:
+            # The user's own words, and only ever those, reach the auto-approval reviewer's view of
+            # what this turn was asked for. An agent's do not, for the reason
+            # :meth:`_amend_review_context` gives: a model editing what its own reviewer judges its
+            # calls against is an escalation, and this one branch is the whole of the rule.
+            self._amend_review_context(text)
         return True
 
     def _amend_review_context(self, text: str) -> None:
@@ -196,18 +209,33 @@ class MessageBus:
         replaced. The context comes off this instance for the reason ``__init__`` gives: a
         contextvar set inside the turn is invisible on the task a send arrives on.
 
+        **Only the user's messages reach here, which is a security rule and not an optimisation.**
+        ``send`` tests the sender before calling this, because what a reviewer reads as the request
+        is what decides whether a gated tool call runs without asking anyone. The user amending it is
+        the principal exercising their own budget; an agent amending it is a model editing the terms
+        its own calls are judged against, which is an escalation, and ``send_message``
+        (``toolsets/messaging.py``) makes that a tool an agent holds.
+
+        The containment downstream is real and is still not what this rests on.
+        ``core/auto_approval.py`` fences the request as untrusted data and refuses to build a packet
+        around text that tries to break out, so persuasion has a wall in front of it; but refusing to
+        build a packet sends every later gated call in the turn to a prompt the user may not be at,
+        which an agent could trigger with one long enough sentence, and that wall is a property of a
+        module this one cannot see. So the sender test is the rule, and
+        ``tests/core/test_messaging.py`` pins it directly rather than pinning a reviewer's behaviour.
+
         **The amendment happens on acceptance, not on delivery**, which is the earlier of the two
         moments a reader might expect. Acceptance is where the text already is, so it costs nothing;
         delivery would mean carrying the text as far as the drain and amending from inside AIMU's own
         loop. The gap between the two only ever makes the reviewer read something
         the user did say and the run has not acted on yet, because this appends and never replaces,
-        never touches ``used``, and is reachable only from ``send``, whose input is the user's own
-        words. A message accepted and never drained is the case the gap is visible in, and all it
-        leaves behind is a sentence in a context the turn is about to discard.
+        never touches ``used``, and is reached only for a message the user sent. A message accepted
+        and never drained is the case the gap is visible in, and all it leaves behind is a sentence in
+        a context the turn is about to discard.
 
-        What that costs instead is unbounded growth: every accepted message appends to ``request``, and
-        nothing trims it, so a turn carrying many mid-turn messages sends a reviewer a prompt that keeps
-        getting longer. The reviewer's own cost is already uncounted, which
+        What that costs instead is unbounded growth: every accepted *user* message appends to
+        ``request``, and nothing trims it, so a turn carrying many mid-turn messages sends a reviewer a
+        prompt that keeps getting longer. The reviewer's own cost is already uncounted, which
         ``docs/explanation/auto-approval.md`` names as a known limit, so this rides along inside it.
 
         Only ``request`` is touched. ``used`` is deliberately left alone: the round cap bounds
@@ -257,7 +285,7 @@ class MessageBus:
             nonlocal seen
             current_address.set(address)
             start, seen = seen, len(self._messages)
-            return self._take(start, seen, address)
+            return [message.text for message in self._take(start, seen, address)]
 
         return drain
 
@@ -290,24 +318,74 @@ class MessageBus:
         def drain() -> list[str]:
             current_address.set(address)
             start, self._entry_seen = self._entry_seen, len(self._messages)
-            return self._take(start, self._entry_seen, address)
+            taken = self._take(start, self._entry_seen, address)
+            if taken:
+                # Recorded per delivery rather than accumulated, because AIMU joins one drain's list
+                # into one appended message and the turn tags that message from this: which delivery
+                # a message was made of is exactly the question an accumulated list could not answer.
+                # Empty drains are left out so a position in this list counts appended messages
+                # rather than rounds (see `entry_deliveries`).
+                self._entry_deliveries.append(taken)
+            return [message.text for message in taken]
 
         return drain
 
-    def _take(self, start: int, stop: int, address: Optional[str]) -> list[str]:
-        """The texts addressed to *address* between two cursor positions, recorded as delivered.
+    def entry_deliveries(self) -> list[list[Message]]:
+        """What each non-empty entry drain handed over, oldest first, one list per delivery.
+
+        The turn reads this to tag what reached the stored transcript (see :meth:`tag_for_delivery`
+        for the rule and ``TurnRunner._tag_agent_messages`` for how a
+        delivery is paired with the message it became). One list per delivery rather than one flat
+        list, which is the shape the tagging rule needs rather than a convenience: a turn can take
+        several deliveries, and a single answer over all of them would either tag the user's own words
+        as agent-sent or leave an agent's untagged, depending on which way it rounded.
+
+        Whole messages rather than their texts, unlike a drain: the tag is decided from ``sender``,
+        which the texts have dropped by the time AIMU's loop sees them.
+        """
+        return [list(delivery) for delivery in self._entry_deliveries]
+
+    @staticmethod
+    def tag_for_delivery(messages: list[Message]) -> Optional[str]:
+        """The provenance to write on the message one delivery became, or None to leave it untagged.
+
+        ``PROVENANCE_AGENT`` when every message in the delivery came from an agent, so a worker
+        cannot reach the stored transcript wearing the user's role: untagged means the principal,
+        tagged means a machine, and :func:`kokua.core.messages.is_user_turn` keeps a tagged message
+        from being read as a turn the user took.
+
+        **A mixed delivery is None, and that is the safe answer rather than a gap.** A drain returns a
+        list and AIMU joins it into *one* appended message, so a round that carried both the user's
+        words and an agent's is one message that is both. Tagging is all-or-nothing per message, and
+        tagging that one would hide the user's own words from every reader of ``is_user_turn``, which
+        is a worse outcome than leaving an agent's words untagged: it would lose a turn the user
+        really took. What covers both cases is the per-turn message index
+        (``core.messages.resolve_message_indices``), which lists a mid-turn message whether it is
+        tagged or not, so a mixed message is still never read as a turn of its own.
+
+        An empty delivery is None too, for the reason there is nothing to say about it: no drain, no
+        appended message, nothing to tag.
+        """
+        if not messages:
+            return None
+        return PROVENANCE_AGENT if all(message.sender != USER for message in messages) else None
+
+    def _take(self, start: int, stop: int, address: Optional[str]) -> list[Message]:
+        """The messages addressed to *address* between two cursor positions, recorded as delivered.
 
         Shared by both cursors because the recording is the half ``close`` depends on, and a cursor
         that advanced without recording would leave ``close`` inferring delivery from a position that
-        cannot carry it. Text alone comes back, which is what AIMU's loop takes as the prompt for its
-        next round; the envelope stays here, where ``close`` still needs it.
+        cannot carry it. Whole messages come back and each caller takes what it needs: a drain hands
+        AIMU's loop the text alone, which is what it takes as the prompt for its next round, and the
+        envelope stays this side of that boundary, where ``close`` and
+        :meth:`entry_deliveries` still need the sender.
         """
-        taken: list[str] = []
+        taken: list[Message] = []
         for index in range(start, stop):
             message = self._messages[index]
             if matches(message.to, address):
                 self._drained.add(index)
-                taken.append(message.text)
+                taken.append(message)
         return taken
 
     def close(self) -> tuple[list[Message], list[Message]]:
@@ -448,4 +526,20 @@ ENTRY_SOURCE = _ContextSource(entry=True)
 
 #: Handed to every worker whose spec ``core/agents.py`` writes: an independent cursor, so a worker
 #: seeing a message is not the conversation seeing it.
+#:
+#: **A delivery resets the recipient's round budget whoever sent it, which is a cost rather than a
+#: choice.** AIMU's ``_extend_budget`` fires on any delivery, and it cannot be made to fire only for
+#: the user's: the drain's whole contract is ``list[str]``, so the sender does not cross that boundary,
+#: and widening it to carry one would put addressing inside AIMU's loop and break what keeps this
+#: module's design (and principle 1's) separable. So an agent messaging a worker does extend that
+#: worker's autonomous stretch, and this is written down rather than asserted and quietly unmet.
+#:
+#: What bounds the residual is a cap AIMU already has rather than anything here: ``_extend_budget``
+#: allows one extension per permitted round and logs once when it refuses more, so a run's rounds stay
+#: bounded by its own ``max_iterations`` (that many extensions at the very most) rather than growing
+#: with the number of messages sent to it. ``send_message`` is also a declared capability
+#: (``[agents.<name>].tools``), so no agent
+#: holds it by default. Two mitigations are deliberately not taken: no config key for this, and no
+#: refusal of ``to=EVERYONE`` from an agent, which would remove a capability that was asked for. The
+#: design records the second as the one to revisit if the residual ever bites.
 WORKER_SOURCE = _ContextSource(entry=False)
