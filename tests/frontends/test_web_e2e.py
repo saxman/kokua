@@ -2193,24 +2193,25 @@ def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_co
     # #send is hidden (not disabled) while a turn is processing, so submit the way the composer's own
     # keydown listener does rather than clicking a control Playwright would refuse to act on.
     page.locator("#msg").press("Enter")
-    # The mark is the token round trip made visible: the server reported this message steered, naming
-    # the bubble by the token the page sent with it, and nothing else on the page carries that name.
-    expect(page.locator(".bubble.user.steered", has_text="second")).to_have_count(1, timeout=10_000)
+    # The mark is the token round trip made visible: the server reported this message as having
+    # joined the running turn, naming the bubble by the token the page sent with it, and nothing else
+    # on the page carries that name.
+    expect(page.locator(".bubble.user.mid-turn", has_text="second")).to_have_count(1, timeout=10_000)
 
-    # One turn, two replies: the steered message IS delivered here, by AIMU's `TERMINAL_HEALTHY`
-    # branch, which drains steering and takes one more round, and that round is the second REPLY. So
+    # One turn, two replies: the mid-turn message IS delivered here, by AIMU's `TERMINAL_HEALTHY`
+    # branch, which drains the inbox and takes one more round, and that round is the second REPLY. So
     # waiting for it is waiting for the one turn to finish, which is what its save (and the control
-    # below) depends on. The *other* steering outcome, a message accepted and never drained, which
-    # `TurnRunner._resubmit_steering` then re-runs as a follow-up turn, is exercised by no test here:
+    # below) depends on. The *other* outcome for a mid-turn message, accepted and never drained, which
+    # `TurnRunner._resubmit_messages` then re-runs as a follow-up turn, is exercised by no test here:
     # that path ends with this same bubble stamped and its mark withdrawn, by the follow-up turn's own
-    # save carrying the token the mailbox kept, so a reader must not take this line for coverage of it.
+    # save carrying the token the bus kept, so a reader must not take this line for coverage of it.
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(2, timeout=20_000)
 
     # Exactly one bubble was stamped, and it is the one whose turn the save was about.
     stamped = page.locator(".bubble.user[data-truncate-index]")
     expect(stamped).to_have_count(1, timeout=10_000)
     expect(stamped).to_contain_text("first")
-    expect(page.locator(".bubble.user.steered .bubble-truncate")).to_have_count(0)
+    expect(page.locator(".bubble.user.mid-turn .bubble-truncate")).to_have_count(0)
     # The delivered message's entry is still in the map, and deliberately: an acceptance is not a
     # final fate (the turn could have ended without reading it, which runs it as a turn carrying this
     # same token), so the page cannot drop the entry when it marks the bubble. Inert either way, since
@@ -2224,11 +2225,11 @@ def test_a_message_sent_mid_reply_is_marked_as_joining_that_turn_and_takes_no_co
     expect(page.locator(".bubble", has_text=REPLY)).to_have_count(0)
 
 
-def test_a_steered_messages_absent_truncate_control_survives_a_reload(page, live_server):
-    """`replay_items` gives a steering message no `message_index`, so a page that reads controls from
+def test_a_mid_turn_messages_absent_truncate_control_survives_a_reload(page, live_server):
+    """`replay_items` gives a mid-turn message no `message_index`, so a page that reads controls from
     that field has nothing to stamp it with; this is the one test that reloads and checks the page
     actually behaves that way, rather than checking the index alone (see
-    `test_replay_items_gives_a_steering_message_no_index_to_truncate_at`, which does the latter)."""
+    `test_replay_items_gives_a_mid_turn_message_no_index_to_truncate_at`, which does the latter)."""
     page.on("dialog", lambda dialog: dialog.accept())
     _open(page, live_server(delay=2.0))
     page.fill("#msg", "first")

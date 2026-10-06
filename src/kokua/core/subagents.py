@@ -28,10 +28,10 @@ no marker at either level, because the tool call between two generations is alre
 card still keeps no iteration counter of its own: the counter could not have named the injection or
 quoted it anyway.
 
-AIMU also yields a ``STEERING`` chunk when the user redirects a worker already running, and the card
-carries it for the same reason it carries a ``loop`` entry: a round with nothing else between two
+AIMU also yields an ``INBOX`` chunk when the user sends a message to a worker already running, and the
+card carries it for the same reason it carries a ``loop`` entry: a round with nothing else between two
 generations needs its own marker, or the break reads as unexplained. The two are recorded as distinct
-kinds rather than one, because ``loop`` is the agent loop speaking and ``STEERING`` is the user's own
+kinds rather than one, because ``loop`` is the agent loop speaking and ``INBOX`` is the user's own
 words reaching the worker; a card that filed both under ``loop`` would credit the loop with what a
 person said.
 """
@@ -119,11 +119,11 @@ class SubagentReporter:
                 }
             )
         elif chunk.phase == StreamingContentType.INBOX:
-            # The user redirected the turn while this worker was running, and the worker read it at
+            # The user sent a message while this worker was running, and the worker read it at
             # its next round. Recorded as its own kind rather than as a `loop` entry, because the
             # card's reader needs to see that a person said this, not the loop.
             sent = chunk.content if isinstance(chunk.content, dict) else {}
-            await self._report({"id": spawn_id, "append": {"kind": "steering", "text": sent.get("text", "")}})
+            await self._report({"id": spawn_id, "append": {"kind": "message", "text": sent.get("text", "")}})
         elif chunk.phase == StreamingContentType.THINKING:
             if chunk.content:
                 await self._report({"id": spawn_id, "append": {"kind": "reasoning", "text": chunk.content}})

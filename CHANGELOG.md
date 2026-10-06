@@ -177,24 +177,24 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   [Export a conversation](https://saxman.info/kokua/how-to/export-a-conversation/).
 - **A message sent while a turn is running joins that turn.** It used to queue behind the turn on the
   per-conversation gate, so a correction arrived after the work it was meant to redirect had already
-  been paid for. `core/steering.py` gives each turn a mailbox, `Assistant._offer_steering` routes a
+  been paid for. `core/messaging.py` gives each turn a message bus, `Assistant._offer_message` routes a
   plain message into the one running on the conversation being viewed, and AIMU's loop drains it at the
-  turn's next model call. The mailbox is append-only with **a cursor per reader**, not a queue, because
+  turn's next model call. The bus is append-only with **a cursor per reader**, not a queue, because
   the message goes to the entry agent *and* to every spawned worker that is itself a declared agent (a
   worker `toolsets/capabilities.py` composes per call is declared nowhere, and is handed no source, so
   it cannot be redirected): a redirection that only reaches the supervisor redirects nothing, and a
   shared queue would let whichever reader drained first consume a message the others never saw. Four
-  run shapes are steerable, and they are the
+  run shapes can receive a message mid-turn, and they are the
   four a turn is made of: a plain turn, a `/plan` turn (where every entry-agent run shares the one
   cursor, since a cursor belongs to a turn and not to a run), every worker spawned through
   `build_agent_specs`, and a scheduled firing, which a user who switched into its conversation can
-  redirect like any other. The one run that is
-  deliberately not steerable is an independent reviewer (`workflows/critics.py`), which is context-free
-  by design.
+  redirect like any other. The one run that
+  deliberately cannot receive a message mid-turn is an independent reviewer (`workflows/critics.py`),
+  which is context-free by design.
   **Three fates, and the message is never lost between them.** It runs as its own turn, or joins the
   running one, or is accepted by a turn that ends before reading it and then runs as a follow-up turn.
   `offer` and `close` are both synchronous and asyncio is single-threaded, so the serve loop cannot see
-  a mailbox as open in the same tick the turn's `finally` shuts it; invariant 9 at the top of
+  a bus as open in the same tick the turn's `finally` shuts it; invariant 9 at the top of
   `core/turns.py` states the whole guarantee, the stranding and double-run bugs it rules out, and the
   one window it does not cover. `/stop` is the deliberate exception: someone who cancelled the turn is
   not asking for one more, so the stop notice says the last message was not delivered rather than
@@ -205,27 +205,29 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   deliberately untouched, since more user text does not make a gated call safer; what the message does
   reach there is the reviewer's copy of the request, amended so a redirected turn's calls are judged
   against what the user now wants.
-  **What is not steered**: anything the assistant answers without running a turn (`/stop`, `/diag`, the
-  conversation commands, a reply to an approval prompt or a plan review), a workflow command, which
-  starts a turn of its own as it always has, and a message carrying an image, which has no defined place
-  inside a loop. Needs `aimu>=0.33.0`; see "Diagnostics and error reporting" below.
-- **A turn records which of its messages were steering, so a reload does not replay one turn as two.** A
-  message handed to a running turn is committed as an ordinary `user` message, indistinguishable in the
-  transcript from one that started a turn, and position cannot tell them apart either. `TurnRunner`
-  resolves the positions off the message list after the run (a compaction between rounds can move them)
-  and stores them in `metadata["steering"]`, keyed by the host turn like every other per-turn map, so a
-  branch or a truncation filters them with the rest. `replay_items` emits a steering message as its own
-  item with **no `message_index`**, which is what withholds the turn controls from it: the index that
-  would delete from "here" points into the middle of the host turn, so offering the control there would
-  cut a turn in half. A conversation stored before this was recorded has no entry and replays the old
-  way. `kokua export` writes the same message as a labeled line of the user's own words, uncapped,
-  rather than the italic note a loop marker gets.
+  **What does not reach a running turn this way**: anything the assistant answers without running a
+  turn (`/stop`, `/diag`, the conversation commands, a reply to an approval prompt or a plan review), a
+  workflow command, which starts a turn of its own as it always has, and a message carrying an image,
+  which has no defined place inside a loop. Needs `aimu>=0.33.0`; see "Diagnostics and error reporting"
+  below.
+- **A turn records which of its messages were sent mid-turn, so a reload does not replay one turn as
+  two.** A message handed to a running turn is committed as an ordinary `user` message,
+  indistinguishable in the transcript from one that started a turn, and position cannot tell them apart
+  either. `TurnRunner` resolves the positions off the message list after the run (a compaction between
+  rounds can move them) and stores them in `metadata["messages"]`, keyed by the host turn like every
+  other per-turn map, so a branch or a truncation filters them with the rest. `replay_items` emits a
+  mid-turn message as its own `"inbox"` item with **no `message_index`**, which is what withholds the
+  turn controls from it: the index that would delete from "here" points into the middle of the host
+  turn, so offering the control there would cut a turn in half. A conversation stored before this was
+  recorded has no entry and replays the old way. `kokua export` writes the same message as a labeled
+  line of the user's own words, uncapped, rather than the italic note a loop marker gets.
   **The same record is what `turn_end` reads**, so branching and truncation agree with the replay about
-  where a turn ends. Without it a scan for the next `user` message stops at the steering message, and
-  branching a steered turn would write a fork missing both the redirection and the answer it produced,
-  which is normally the whole reason for branching there. A steering index is refused as a turn *start*
-  for the same reason, so the guard that backstops a stale index cannot approve a cut inside a turn.
-  `steered` defaults to empty, so a transcript stored before any of this behaves exactly as it did.
+  where a turn ends. Without it a scan for the next `user` message stops at the mid-turn message, and
+  branching a turn carrying one would write a fork missing both the redirection and the answer it
+  produced, which is normally the whole reason for branching there. A mid-turn index is refused as a
+  turn *start* for the same reason, so the guard that backstops a stale index cannot approve a cut
+  inside a turn. `mid_turn` defaults to empty, so a transcript stored before any of this behaves
+  exactly as it did.
   A `/plan` turn records whatever its execution left behind. On the shipped `[planning]` defaults
   (`result_review` and `show_reasoning` both off) execution keeps the executor's own messages and
   rewrites only the prompt, so a message delivered while the executor was working is stored and
@@ -311,8 +313,8 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
     conversations mid-turn updates it to match the conversation being viewed.
   - **A bubble sent into a running turn is marked, not stamped.** The page draws a bubble when you press
     Enter and only learns later which of its three fates the message met, so the server reports that
-    fate on a frame: `turn_saved` for a message that became a turn, and a new `steering` frame for one
-    that joined the turn already running. A steered bubble keeps the user row's marker and measure, gives
+    fate on a frame: `turn_saved` for a message that became a turn, and a new `inbox` frame for one
+    that joined the turn already running. A mid-turn bubble keeps the user row's marker and measure, gives
     up the gap that separates one turn from the next, and deliberately carries **no branch and no
     delete-from-here control**: it has no turn of its own, and the index that would delete from "here"
     points into the middle of the turn it joined. The mark is withdrawn if the message turns out to have
@@ -537,13 +539,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   message a turn was made of, echoed back so a front end that draws its own bubbles can match the two;
   a channel that does not draw bubbles can accept and ignore it, which is what adding `token=None` to
   the signature does. It is **keyword-only**, which is the shape every optional opaque id on this
-  feature's surfaces takes (`send_steering`, `ChannelUI.steering_taken` and `turn_saved`,
-  `SteeringMailbox.offer`), so an implementation cannot accept one by position and a later parameter
+  feature's surfaces takes (`send_message_frame`, `ChannelUI.message_taken` and `turn_saved`,
+  `MessageBus.offer`), so an implementation cannot accept one by position and a later parameter
   cannot change what a positional argument means.
-  `channels/protocol.py` declares the new shape, and the paired `send_steering(text, *, token=None)` is
-  optional like every other rich frame: a channel that does not implement it degrades in `ChannelUI` to
-  no call at all, which is correct for the terminal, where AIMU's base channel already prints the steered
-  words as the run reads them.
+  `channels/protocol.py` declares the new shape, and the paired `send_message_frame(text, *, token=None)`
+  is optional like every other rich frame: a channel that does not implement it degrades in `ChannelUI`
+  to no call at all, which is correct for the terminal, where AIMU's base channel already prints the
+  mid-turn words as the run reads them.
 
 ### Agents and tools
 

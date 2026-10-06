@@ -73,8 +73,8 @@ class RichChannelDouble(BareChannel):
     async def send_subagent(self, event: dict) -> None:
         self.calls.append(("subagent", (event,)))
 
-    async def send_steering(self, text: str, *, token: Optional[str] = None) -> None:
-        self.calls.append(("steering", (text, token)))
+    async def send_message_frame(self, text: str, *, token: Optional[str] = None) -> None:
+        self.calls.append(("message_frame", (text, token)))
 
     async def stream_activity(self, chunks: AsyncIterator, *, show_answer: bool = False) -> str:
         parts = [chunk async for chunk in chunks]
@@ -262,18 +262,18 @@ async def test_turn_saved_carries_the_bubble_token_the_front_end_minted():
     assert channel.saved == [("abc123", 4, "b9")]
 
 
-# --- steering: the other fate a message can meet --------------------------------------------------
+# --- message_taken: the other fate a message can meet -----------------------------------------------
 
 
-async def test_steering_taken_is_a_no_op_on_a_channel_that_cannot_take_it():
+async def test_message_taken_is_a_no_op_on_a_channel_that_cannot_take_it():
     """A transport that draws no message of its own has nothing to go back and mark."""
-    await ChannelUI(BareChannel()).steering_taken("use the cache", token="b9")
+    await ChannelUI(BareChannel()).message_taken("use the cache", token="b9")
 
 
-async def test_steering_taken_reaches_a_channel_that_offers_it():
+async def test_message_taken_reaches_a_channel_that_offers_it():
     channel = RichChannelDouble()
-    await ChannelUI(channel).steering_taken("use the cache", token="b9")
-    assert channel.calls == [("steering", ("use the cache", "b9"))]
+    await ChannelUI(channel).message_taken("use the cache", token="b9")
+    assert channel.calls == [("message_frame", ("use the cache", "b9"))]
 
 
 # --- alerts: a card the user has to dismiss -------------------------------------------------------

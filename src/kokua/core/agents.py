@@ -15,8 +15,8 @@ from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
 from kokua.config.file import ConfigError
 from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
 from kokua.core import conversation_commands
+from kokua.core.messaging import WORKER_SOURCE
 from kokua.core.metrics import record_event
-from kokua.core.steering import STEERING_SOURCE
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.registry.context import LiveState, ToolsetContext
 from kokua.registry.registry import (
@@ -542,10 +542,10 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         # the one process-wide source that reads whichever turn is running when AIMU opens a reader
         # over it. A worker with no turn around it gets a drain that returns nothing, so there is no
         # tier for a missing key to fall back to and nothing a declaration could say differently.
-        # `STEERING_SOURCE`, never `ENTRY_STEERING_SOURCE`: a worker opens an independent cursor, so a
+        # `WORKER_SOURCE`, never `ENTRY_SOURCE`: a worker opens an independent cursor, so a
         # message only a worker consumed still comes back from `close` and runs as a follow-up turn
         # rather than counting as the conversation having seen it.
-        specs[name]["inbox"] = STEERING_SOURCE
+        specs[name]["inbox"] = WORKER_SOURCE
     return specs
 
 

@@ -827,14 +827,14 @@ class Assistant:
                 # could have answered changes: /stop still cancels, the conversation commands still
                 # switch, and a pending approval or decision still consumes the reply. A workflow
                 # command still starts a workflow turn, which queues as it always has.
-                if workflow is None and self._offer_steering(msg, self._active_id):
-                    # Reported here rather than inside `_offer_steering`, which stays a decision and
+                if workflow is None and self._offer_message(msg, self._active_id):
+                    # Reported here rather than inside `_offer_message`, which stays a decision and
                     # nothing else. A front end that drew this message is now waiting to hear which
-                    # fate it met, and a steered message normally produces no turn of its own, so
-                    # without this nothing would name it. The exception is a message this turn accepts
-                    # and never reads, which `TurnRunner._resubmit_steering` runs as a follow-up turn
-                    # carrying the same token (see `ChannelUI.steering_taken`).
-                    await self._ui.steering_taken(msg.text or "", token=(msg.metadata or {}).get("token"))
+                    # fate it met, and a message joining a running turn normally produces no turn of
+                    # its own, so without this nothing would name it. The exception is a message this
+                    # turn accepts and never reads, which `TurnRunner._resubmit_messages` runs as a
+                    # follow-up turn carrying the same token (see `ChannelUI.message_taken`).
+                    await self._ui.message_taken(msg.text or "", token=(msg.metadata or {}).get("token"))
                     continue
                 # Start the turn as a background task so the loop keeps reading and a `/stop` can
                 # arrive mid-turn. The gate still serializes same-conversation turns (a proactive turn
@@ -852,27 +852,27 @@ class Assistant:
         finally:
             self._scheduler.stop()  # channel closed -> stop the scheduler so run() returns
 
-    def _offer_steering(self, msg: ChannelMessage, conversation_id: str) -> bool:
+    def _offer_message(self, msg: ChannelMessage, conversation_id: str) -> bool:
         """Hand this message to a turn already running on ``conversation_id``, if one will take it.
 
-        ``False`` means it should run as an ordinary turn: no turn is in flight, its mailbox has
+        ``False`` means it should run as an ordinary turn: no turn is in flight, its bus has
         already closed, or the message carries an image, which has no defined place inside a loop and
         so goes down the path that has always handled one. Blank text is refused for a smaller
         reason: AIMU discards whitespace at the drain, so accepting it would be accepted, never
         delivered, handed back by ``close``, and then run as an empty follow-up turn.
 
-        The ``steering is None`` check is load-bearing rather than defensive. A burst the channel
+        The ``bus is None`` check is load-bearing rather than defensive. A burst the channel
         delivers in one loop step adds both turns' tracker entries before either turn's body runs,
-        so a live entry whose mailbox has not been published yet is reachable from here.
+        so a live entry whose bus has not been published yet is reachable from here.
         """
         if msg.images or not (msg.text or "").strip():
             return False
         info = self._tracker.get(conversation_id)
-        if info is None or info.steering is None or info.handle.done:
+        if info is None or info.bus is None or info.handle.done:
             return False
         # The front end's own id for the bubble it drew rides along, so a message this turn accepts and
-        # never reads can still be named by the follow-up turn it becomes (see `SteeringMessage`).
-        return info.steering.offer(msg.text or "", token=(msg.metadata or {}).get("token"))
+        # never reads can still be named by the follow-up turn it becomes (see `Message`).
+        return info.bus.offer(msg.text or "", token=(msg.metadata or {}).get("token"))
 
     async def _run_conversation_command(self, word: str, argument: str) -> None:
         """Run `/new`, `/conversations`, or `/switch`, and report what happened on the channel.

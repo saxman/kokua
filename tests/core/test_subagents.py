@@ -53,7 +53,7 @@ def _continuing(kind, prompt):
     return StreamChunk(StreamingContentType.CONTINUING, {"kind": kind, "prompt": prompt})
 
 
-def _steering(text):
+def _inbox(text):
     return StreamChunk(StreamingContentType.INBOX, {"text": text})
 
 
@@ -323,16 +323,16 @@ async def test_an_injected_round_reaches_the_card_with_what_the_worker_was_told(
     assert events[-1] == {"id": "researcher-abc", "append": entry}
 
 
-async def test_a_workers_steering_chunk_is_recorded_on_its_card():
-    """A steering message is the user's own words reaching a worker already running, not the loop
-    injecting a round of its own, so it has to land as its own kind rather than a `loop` entry (which
-    would credit the loop with what a person said)."""
+async def test_a_workers_inbox_chunk_is_recorded_on_its_card():
+    """A message sent into a worker already running is the user's own words, not the loop injecting a
+    round of its own, so it has to land as its own kind rather than a `loop` entry (which would credit
+    the loop with what a person said)."""
     reporter, channel = _reporter()
     events = _collect()
     await reporter.spawned("r-1", "researcher", "find X")
-    await reporter.chunk("r-1", _steering("stop that"))
+    await reporter.chunk("r-1", _inbox("stop that"))
 
-    entry = {"kind": "steering", "text": "stop that"}
+    entry = {"kind": "message", "text": "stop that"}
     assert channel.subagent_frames[-1] == {"id": "r-1", "append": entry}
     assert events[-1] == {"id": "r-1", "append": entry}
 

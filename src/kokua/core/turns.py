@@ -138,24 +138,23 @@ Every rule here was learned from a bug. Read them before changing anything in th
    gated call there is denied before a reviewer is asked, so the missing context is a second, structural
    reason nothing is auto-approved while nobody is watching.
 
-9. **A steering message reaches the running turn or becomes the next one, never both and never
-   neither.** ``SteeringMailbox.offer`` and ``close`` are both synchronous and asyncio is
-   single-threaded, so the serve loop cannot observe a mailbox as open in the same tick this
-   ``finally`` shuts it. What that alone does not cover is the window after the loop's last drain:
-   a message accepted there is never read, so ``close`` hands it back and this path runs it as a
-   follow-up turn. The "never both" half rests on which of the mailbox's two cursors the entry
-   agent's own run opens: ``close`` measures the leftovers from the entry cursor's position, so
-   handing this run a worker's independent source would leave that position at zero and re-run every
-   *delivered* message as its own turn. A stop is the one exception and is deliberate: someone who
-   cancelled the turn is not asking for one more, so those messages are reported as undelivered
-   instead.
+9. **A message typed mid-turn reaches the running turn or becomes the next one, never both and never
+   neither.** ``MessageBus.offer`` and ``close`` are both synchronous and asyncio is single-threaded,
+   so the serve loop cannot observe a bus as open in the same tick this ``finally`` shuts it. What that
+   alone does not cover is the window after the loop's last drain: a message accepted there is never
+   read, so ``close`` hands it back and this path runs it as a follow-up turn. The "never both" half
+   rests on which of the bus's two cursors the entry agent's own run opens: ``close`` measures the
+   leftovers from the entry cursor's position, so handing this run a worker's independent source would
+   leave that position at zero and re-run every *delivered* message as its own turn. A stop is the
+   one exception and is deliberate: someone who cancelled the turn is not asking for one more, so
+   those messages are reported as undelivered instead.
    One window is uncovered and known: the re-submit happens after the ``finally`` has released the
    gate, so an exception escaping that block (out of ``_persist``, the gate's ``__aexit__``, or
    ``_notify_if_backgrounded``) computes the leftovers and drops them, which is "neither". Moving the
    re-submit into the ``finally`` trades it for two worse faults, awaiting during a cancellation and
    re-running a gate-cancelled turn's messages, so the window stands rather than being closed there.
-   A scheduled firing carries the same mailbox and the same guarantee, and the three places it differs
-   all follow from its shape rather than from a different rule. Its mailbox is opened by
+   A scheduled firing carries the same bus and the same guarantee, and the three places it differs
+   all follow from its shape rather than from a different rule. Its bus is opened by
    ``_run_unattended`` rather than by the body that reads it, unlike the ``current_metrics`` scope
    beside it (invariant 3): the body runs in a child task, which copies the context at creation, so a
    contextvar set before the task starts reaches it; and ``close`` has to be reached where the gate
@@ -166,8 +165,8 @@ Every rule here was learned from a bug. Read them before changing anything in th
    leftovers past the re-submit. And a stopped firing says less than a stopped reactive turn: that
    path peeks and tells the user their last message was not delivered, while a firing's stop returns
    from inside the hold and drops its leftovers in silence, even where ``echo_reply`` puts its output
-   in front of someone who is reading. The mailbox does the same thing in both cases, which is to
-   drop those messages rather than run them; only the sentence about it is missing.
+   in front of someone who is reading. The bus does the same thing in both cases, which is to drop
+   those messages rather than run them; only the sentence about it is missing.
    (Regressions: ``test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn``,
    ``test_the_entry_agents_run_opens_the_conversations_own_cursor``,
    ``test_a_stopped_turn_does_not_resubmit_its_undelivered_messages``,
@@ -192,9 +191,9 @@ from kokua.config.file import thinking_request
 from kokua.core.auto_approval import ReviewContext, current_review_context
 from kokua.core.build import model_label
 from kokua.core.errors import describe_error
-from kokua.core.messages import derive_title, resolve_steering_indices, resolve_user_index
+from kokua.core.messages import derive_title, resolve_message_indices, resolve_user_index
+from kokua.core.messaging import ENTRY_SOURCE, Message, MessageBus, current_bus
 from kokua.core.metrics import TurnMetrics, current_metrics, record_event
-from kokua.core.steering import ENTRY_STEERING_SOURCE, SteeringMailbox, SteeringMessage, current_steering
 from kokua.core.subagents import subagent_events
 from kokua.core.turn_registry import TurnInfo
 from kokua.workflows import SettingsView, WorkflowContext, is_rich
@@ -330,23 +329,23 @@ class TurnRunner:
         # gated call before a reviewer is ever consulted, so a budget there would never be spent.
         review_context = ReviewContext(request=msg.text)
         review_token = current_review_context.set(review_context)
-        # The turn's steering mailbox, open for its whole life so a message typed while it runs can
+        # The turn's message bus, open for its whole life so a message typed while it runs can
         # reach it rather than queuing behind it on the gate (invariant 9). Published before the first
         # `await` for a reason the contextvars above do not share: the serve loop reads this entry to
         # route a message, so every statement between its `add` and this line is a window in which a
-        # live entry has no mailbox. Keeping the window at zero statements is not possible from here:
+        # live entry has no bus. Keeping the window at zero statements is not possible from here:
         # a message already in the channel's inbound queue when this turn was submitted is drained in
         # the same loop step and does read the entry before this line runs, which is why
-        # `Assistant._offer_steering` refuses an entry whose mailbox is absent. A late *reader* is
-        # harmless by contrast, since the mailbox is append-only and a cursor opened afterwards still
+        # `Assistant._offer_message` refuses an entry whose bus is absent. A late *reader* is
+        # harmless by contrast, since the bus is append-only and a cursor opened afterwards still
         # sees what was offered before it.
         # Carries `review_context` rather than reading the contextvar, because an offer arrives on the
         # serve loop's own task while that contextvar is set inside this turn's: invisible from there.
-        mailbox = SteeringMailbox(review_context=review_context)
-        steering_token = current_steering.set(mailbox)
+        bus = MessageBus(review_context=review_context)
+        bus_token = current_bus.set(bus)
         # Recorded on the tracker entry the serve loop already added for this conversation, so routing
-        # can find this turn's mailbox by conversation id alone.
-        self._tracker.attach_steering(conversation_id, mailbox)
+        # can find this turn's bus by conversation id alone.
+        self._tracker.attach_bus(conversation_id, bus)
         # The client carries the forwarder, not this turn's accumulator: the forwarder holds no turn
         # state, so it is safe as the durable client-wide setting AIMU calls it, and the contextvar
         # above is what keeps concurrent turns on other conversations out of this record. Assigned
@@ -367,7 +366,7 @@ class TurnRunner:
         # record under the index a completed turn would use; -1 means the turn committed no user
         # message, and recording no-ops.
         user_index = -1
-        steering_indices: list[int] = []
+        message_indices: list[int] = []
         try:
             async with self._gate.turn(conversation_id):  # invariant 1
                 logger.info("turn %s gate entered (%s)", tid, conversation_id)
@@ -399,7 +398,7 @@ class TurnRunner:
                             # rolled back (`_make_plan`), so a message delivered while the plan was
                             # being drafted shows live, reaches the catch-up record a switch-in
                             # replays, and is gone on reload.
-                            steering_indices = resolve_steering_indices(agent.model_client.messages, user_index)
+                            message_indices = resolve_message_indices(agent.model_client.messages, user_index)
                     else:
                         # Taken here rather than before the gate: it is the lower bound the turn's own
                         # user message is searched for from, so anything another turn appended first
@@ -411,7 +410,7 @@ class TurnRunner:
                                 stream=True,
                                 images=msg.images,
                                 thinking=thinking,
-                                inbox=ENTRY_STEERING_SOURCE,
+                                inbox=ENTRY_SOURCE,
                             )
                             await self._ui.send(stream, reply_to=msg)
                         finally:
@@ -420,7 +419,7 @@ class TurnRunner:
                             # seeds the system message ahead of it. Reached on the cancelled path too,
                             # where the agent has already snapshotted the partial turn in its finally.
                             user_index = resolve_user_index(agent.model_client.messages, base_len)
-                            steering_indices = resolve_steering_indices(agent.model_client.messages, user_index)
+                            message_indices = resolve_message_indices(agent.model_client.messages, user_index)
                 except asyncio.CancelledError:
                     # `/stop` (or shutdown) cancelled this turn. Record first: the "(stopped)" send
                     # below is one more await, and a second cancellation racing it would otherwise
@@ -434,14 +433,14 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     logger.info("turn %s cancelled after %.1fs", tid, time.monotonic() - started)
                     # A stop does not re-submit (invariant 9's one exception), so anything the entry
                     # agent had not yet read needs to be said rather than silently run or silently
                     # dropped. `peek_undelivered` rather than `close`: `close` still runs in the
                     # `finally` below and must still see those messages to decide what to hand back.
-                    pending = mailbox.peek_undelivered()
+                    pending = bus.peek_undelivered()
                     notice = "(stopped)" if not pending else "(stopped; your last message was not delivered)"
                     try:
                         await self._ui.send(notice, reply_to=msg)
@@ -457,7 +456,7 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     logger.exception("turn %s connection error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"couldn't reach the model server: {describe_error(exc)}"
@@ -472,7 +471,7 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     # info, not exception: the model was reached and answered in the time it took, so
                     # there is no fault here and a stack trace would file one against Kokua.
@@ -487,7 +486,7 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     logger.exception("turn %s error after %.1fs", tid, time.monotonic() - started)
                     failure_reason = f"failed: {describe_error(exc)}"
@@ -499,7 +498,7 @@ class TurnRunner:
                         thinking=thinking,
                         metrics=metrics,
                         started=started,
-                        steering_indices=steering_indices,
+                        message_indices=message_indices,
                     )
                     logger.info("turn %s done after %.1fs", tid, time.monotonic() - started)
                     succeeded = True
@@ -507,8 +506,8 @@ class TurnRunner:
         finally:
             current_metrics.reset(metrics_token)
             current_review_context.reset(review_token)
-            current_steering.reset(steering_token)
-            undelivered = mailbox.close()
+            current_bus.reset(bus_token)
+            undelivered = bus.close()
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
             # Normally already done by `_persist`; this covers a turn that raised before reaching it,
@@ -517,13 +516,13 @@ class TurnRunner:
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
         if undelivered and not stopped:
-            # Accepted by the mailbox and never read, because the turn ended first. Running them as a
+            # Accepted by the bus and never read, because the turn ended first. Running them as a
             # follow-up turn is the fallback the design promises: a message is delivered or it is the
             # next turn, never neither.
-            await self._resubmit_steering(conversation_id, undelivered, like=msg)
+            await self._resubmit_messages(conversation_id, undelivered, like=msg)
 
-    async def _resubmit_steering(
-        self, conversation_id: str, messages: list[SteeringMessage], *, like: Optional[ChannelMessage] = None
+    async def _resubmit_messages(
+        self, conversation_id: str, messages: list[Message], *, like: Optional[ChannelMessage] = None
     ) -> None:
         """Run messages the turn never read as an ordinary follow-up turn on the same conversation.
 
@@ -535,14 +534,14 @@ class TurnRunner:
         one. Both callers reach here only with something to run, so there is always a first.
 
         ``like`` is the message the finishing turn was made of, used as the template this one is built
-        from so the follow-up keeps that turn's ``sender`` and ``channel``. The mailbox carries only
-        text and a token (see :class:`kokua.core.steering.SteeringMessage`), so those two fields have no
-        other route back, and they are what a channel routes a reply by (``send(reply_to=...)``): inert
-        on every channel in this repository, and not inert by definition. ``images`` is cleared because
-        a steering message is text only, and ``metadata`` is replaced rather than inherited so nothing
-        else riding the original (a per-turn reasoning effort, for one) is re-applied to a turn the user
-        never asked that of. A scheduled firing passes nothing, because it was started by a prompt and
-        not by a message: its follow-up is as anonymous as the firing was.
+        from so the follow-up keeps that turn's ``sender`` and ``channel``. The bus carries only text
+        and a token (see :class:`kokua.core.messaging.Message`), so those two fields have no other
+        route back, and they are what a channel routes a reply by (``send(reply_to=...)``): inert on
+        every channel in this repository, and not inert by definition. ``images`` is cleared because a
+        message handed to a running turn is text only, and ``metadata`` is replaced rather than
+        inherited so nothing else riding the original (a per-turn reasoning effort, for one) is
+        re-applied to a turn the user never asked that of. A scheduled firing passes nothing, because it
+        was started by a prompt and not by a message: its follow-up is as anonymous as the firing was.
         """
         template = like if like is not None else ChannelMessage(text="")
         await self.reactive(
@@ -593,11 +592,11 @@ class TurnRunner:
         that closes over ``ctx.agent`` and runs it directly does append, and persists normally. Whether
         a self-contained base-tier turn's own exchange should be persisted is an open product question.
 
-        Nothing here passes ``steering``, so a base-tier runner is not steerable by default. A runner
-        that wants it closes over ``ctx.agent`` and passes ``ENTRY_STEERING_SOURCE`` to its own
-        ``run()`` call, which it can: the symbol is importable from ``kokua.core.steering``, and the
-        cursor it opens belongs to the turn around it rather than to the run. A self-contained runner
-        cannot, because there is no agent run for a mailbox to reach.
+        Nothing here passes ``inbox``, so a base-tier runner does not receive a mid-turn message by
+        default. A runner that wants it closes over ``ctx.agent`` and passes ``ENTRY_SOURCE`` to its
+        own ``run()`` call, which it can: the symbol is importable from ``kokua.core.messaging``, and
+        the cursor it opens belongs to the turn around it rather than to the run. A self-contained
+        runner cannot, because there is no agent run for a bus to reach.
         """
         base_len = len(ctx.agent.model_client.messages)
         try:
@@ -615,7 +614,7 @@ class TurnRunner:
         thinking: Optional[Union[bool, str]],
         metrics: Optional[TurnMetrics],
         started: Optional[float],
-        steering_indices: list[int],
+        message_indices: list[int],
     ) -> None:
         """Persist what produced this turn: whatever its spawns reported, the model that answered, the
         reasoning effort it ran at, why it stopped early if it did, and what it cost. Synchronous, so it
@@ -634,10 +633,11 @@ class TurnRunner:
         call site that forgot them would silently record a turn as having cost nothing, which is the
         one failure mode worth making impossible to omit by accident.
 
-        ``steering_indices`` is where the messages the user sent into this turn landed, resolved by the
-        caller after the run for the reason ``resolve_steering_indices`` gives. Keyword-only and
+        ``message_indices`` is where the messages the user sent into this turn landed, resolved by the
+        caller after the run for the reason ``resolve_message_indices`` gives. Keyword-only and
         required on the same principle as the two above: a caller that forgot it would record the turn
-        as unsteered, and nothing downstream could tell that apart from a turn nobody steered.
+        as having received no messages, and nothing downstream could tell that apart from a turn that
+        genuinely received none.
         """
         usage = None
         if metrics is not None and started is not None:
@@ -650,7 +650,7 @@ class TurnRunner:
             thinking=thinking,
             failure=failure,
             usage=usage,
-            steering=steering_indices,
+            messages=message_indices,
         )
 
     def _answering_model(self, conversation_id: str) -> str:
@@ -801,14 +801,14 @@ class TurnRunner:
         token = streaming_conversation.set(conversation_id)  # invariant 3
         collector_token = subagent_events.set([])
         proactive_token = proactive_turn.set(True)  # gated tools auto-deny for the whole run
-        # This firing's steering mailbox, opened here rather than inside the body as `current_metrics`
+        # This firing's message bus, opened here rather than inside the body as `current_metrics`
         # is, for two reasons that scope does not have. The child task copies this context when it
-        # starts, so a contextvar set before `RunHandle.start` is what carries the mailbox into the
+        # starts, so a contextvar set before `RunHandle.start` is what carries the bus into the
         # run; and `close` has to be reached outside the gate hold below, since anything the run never
         # read becomes an ordinary turn and that turn takes a hold of its own (invariant 1). No review
         # context: an unattended turn opens none (invariant 8).
-        mailbox = SteeringMailbox()
-        steering_token = current_steering.set(mailbox)
+        bus = MessageBus()
+        bus_token = current_bus.set(bus)
         self._book.pin(conversation_id)  # invariant 2
         try:
             # Held here rather than in the child so there is exactly one hold for the firing either way
@@ -821,9 +821,9 @@ class TurnRunner:
                 # firing is therefore not yet stoppable, which is what the tracker's one-entry-per-
                 # conversation rule buys. Registered before the first await below, so the entry is in
                 # place by the time the child's first statement runs.
-                # The mailbox rides the entry rather than being attached to it afterwards, because
+                # The bus rides the entry rather than being attached to it afterwards, because
                 # this path builds the entry itself: unlike a reactive turn, whose entry the serve loop
-                # already added, there is no window here in which a live entry has no mailbox.
+                # already added, there is no window here in which a live entry has no bus.
                 self._tracker.add(
                     conversation_id,
                     TurnInfo(
@@ -831,7 +831,7 @@ class TurnRunner:
                         started=time.monotonic(),
                         preview=prompt[:120],
                         task_id=spec.task_id,
-                        steering=mailbox,
+                        bus=bus,
                     ),
                 )
                 try:
@@ -852,10 +852,10 @@ class TurnRunner:
         finally:
             # Ahead of the rest of the teardown, as the same pair is in `reactive`: `end_catch_up`
             # calls back into the channel, so a front end raising there would skip the close and leak
-            # an open mailbox for the life of the process, routing every later message into a turn
+            # an open bus for the life of the process, routing every later message into a turn
             # that has already ended.
-            current_steering.reset(steering_token)
-            undelivered = mailbox.close()
+            current_bus.reset(bus_token)
+            undelivered = bus.close()
             self._book.unpin(conversation_id)
             # Normally already done by `_persist`; this covers a run that raised before reaching it.
             self._ui.end_catch_up(conversation_id)
@@ -863,7 +863,7 @@ class TurnRunner:
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
         if undelivered:
-            # Accepted by the mailbox and never read, because the firing ended first, so it runs as a
+            # Accepted by the bus and never read, because the firing ended first, so it runs as a
             # follow-up turn: a message is delivered or it is the next turn, never neither (invariant
             # 9). Reached only by a firing that finished, which is what the two paths that skip it want:
             # a stop returns above, and someone who stopped a firing is not asking for one more turn.
@@ -871,7 +871,7 @@ class TurnRunner:
             # uncovered window invariant 9 names on the reactive path and wider here, since a firing
             # reports its failure rather than catching it.
             try:
-                await self._resubmit_steering(conversation_id, undelivered)
+                await self._resubmit_messages(conversation_id, undelivered)
             except Exception:
                 # Held here rather than allowed out, where it would be reported as the *firing*
                 # having failed and would suppress the announce for a run that finished. `reactive`
@@ -929,7 +929,7 @@ class TurnRunner:
                 # The conversation's own cursor, not a worker's independent one: what a user who
                 # switched into this conversation types is the conversation having seen it, and `close`
                 # measures the leftovers from this cursor's position.
-                reply = await agent.run(prompt, inbox=ENTRY_STEERING_SOURCE)
+                reply = await agent.run(prompt, inbox=ENTRY_SOURCE)
                 if spec.echo_reply:
                     await self._ui.send(reply)
             except asyncio.CancelledError:
@@ -962,7 +962,7 @@ class TurnRunner:
                 thinking=self._config.thinking_for(self._config.entry_agent),
                 metrics=metrics,
                 started=started,
-                steering_indices=resolve_steering_indices(agent.model_client.messages, proactive_index),
+                message_indices=resolve_message_indices(agent.model_client.messages, proactive_index),
             )
             await self._persist(conversation_id, proactive_index)
             if stopped:

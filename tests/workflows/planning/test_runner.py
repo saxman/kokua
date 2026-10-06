@@ -9,7 +9,7 @@ import pytest
 
 from tests.helpers import MockAsyncModelClient
 from kokua.core.assistant import Assistant
-from kokua.core.steering import ENTRY_STEERING_SOURCE
+from kokua.core.messaging import ENTRY_SOURCE
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows.planning import PlanningWorkflow
 from kokua.workflows.planning.prompts import PLAN_PROMPT
@@ -239,4 +239,4 @@ async def test_every_run_in_a_planned_turn_steers_on_the_conversations_own_curso
     )
 
     assert len(sources) == 2  # the planner drafting, then the executor answering
-    assert all(source is ENTRY_STEERING_SOURCE for source in sources)
+    assert all(source is ENTRY_SOURCE for source in sources)

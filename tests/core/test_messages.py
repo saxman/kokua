@@ -12,7 +12,7 @@ from kokua.core.messages import (
     first_user_text,
     is_user_turn,
     message_text,
-    resolve_steering_indices,
+    resolve_message_indices,
 )
 
 
@@ -97,7 +97,7 @@ def test_is_user_turn_accepts_a_user_message_with_unrelated_provenance():
     assert is_user_turn({"role": "user", "content": "brief me", PROVENANCE_KEY: PROVENANCE_PROACTIVE})
 
 
-def test_resolve_steering_indices_finds_a_message_sent_into_the_running_turn():
+def test_resolve_message_indices_finds_a_message_sent_into_the_running_turn():
     messages = [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "tool_calls": [{"id": "id0"}]},
@@ -105,10 +105,10 @@ def test_resolve_steering_indices_finds_a_message_sent_into_the_running_turn():
         {"role": "user", "content": "use the cache"},
         {"role": "assistant", "content": "done"},
     ]
-    assert resolve_steering_indices(messages, 0) == [3]
+    assert resolve_message_indices(messages, 0) == [3]
 
 
-def test_resolve_steering_indices_skips_the_nudges_the_loop_injects():
+def test_resolve_message_indices_skips_the_nudges_the_loop_injects():
     """The one other way a ``user`` entry appears inside a turn, and the reason this shares
     ``is_user_turn`` rather than testing for a bare absent key."""
     messages = [
@@ -116,15 +116,15 @@ def test_resolve_steering_indices_skips_the_nudges_the_loop_injects():
         {"role": "user", "content": "continue", PROVENANCE_KEY: PROVENANCE_CONTINUATION},
         {"role": "user", "content": "use the cache"},
     ]
-    assert resolve_steering_indices(messages, 0) == [2]
+    assert resolve_message_indices(messages, 0) == [2]
 
 
-def test_resolve_steering_indices_of_a_turn_that_committed_no_user_message_is_empty():
+def test_resolve_message_indices_of_a_turn_that_committed_no_user_message_is_empty():
     """``-1`` is ``resolve_user_index``'s sentinel, so there is no turn here to attribute one to."""
     messages = [{"role": "user", "content": "hello"}]
-    assert resolve_steering_indices(messages, -1) == []
+    assert resolve_message_indices(messages, -1) == []
 
 
-def test_resolve_steering_indices_of_an_unsteered_turn_is_empty():
+def test_resolve_message_indices_of_a_turn_with_no_mid_turn_messages_is_empty():
     messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "done"}]
-    assert resolve_steering_indices(messages, 0) == []
+    assert resolve_message_indices(messages, 0) == []

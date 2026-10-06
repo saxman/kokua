@@ -766,15 +766,15 @@ let thinkingBlock = null;    // the reasoning block accumulating THINKING tokens
 let subagentCards = {};      // sub-agent card id -> element, so a "running" card updates on its verdict
 // Bubbles whose fate the server has not reported yet, keyed by the token the page minted for each.
 // Keyed rather than ordered because a message has two frames it can be named by in sequence, not one:
-// `steering` first if it is accepted into the turn already running, and then either nothing more (the
+// `inbox` first if it is accepted into the turn already running, and then either nothing more (the
 // run reads it and it stays folded into that turn) or a `turn_saved` of its own after all (the run
 // never reads it, so it becomes a follow-up turn, carrying the same token). The page cannot know which
-// of those it sends toward. A positional queue could not tell any of this apart, so a steering message
-// stranded an entry at the head and the *next* turn's save took the stale entry, stamping an older
-// bubble with a newer turn's index. That is worse than losing the control, because the index is a
-// valid turn boundary the server will honour, so the user would click delete on one message and lose
-// that one and the message before it. See the `turn_saved` and `steering` frame handling below for how
-// the sequence actually plays out.
+// of those it sends toward. A positional queue could not tell any of this apart, so a message joining
+// a running turn stranded an entry at the head and the *next* turn's save took the stale entry,
+// stamping an older bubble with a newer turn's index. That is worse than losing the control, because
+// the index is a valid turn boundary the server will honour, so the user would click delete on one
+// message and lose that one and the message before it. See the `turn_saved` and `inbox` frame
+// handling below for how the sequence actually plays out.
 //
 // Matching also makes an unclaimed entry harmless, where a count had to be kept honest: text the server
 // answers as a command (or as the reply to a pending approval) runs no turn and is simply never claimed,
@@ -890,12 +890,12 @@ function appendSubagentEntry(card, entry) {
     renderLoop(entry.text, undefined, { parent: card.body, reason: entry.reason });
     return;
   }
-  if (entry.kind === "steering") {
+  if (entry.kind === "message") {
     // Its own branch rather than `loop`'s: `loop` is the agent loop injecting a round of its own,
     // and this is the user's own words reaching a worker already running. Filing it under `loop`
     // would show the card crediting the loop with what a person said.
     card.answer = null;
-    renderSteering(entry.text, undefined, { parent: card.body });
+    renderMidTurn(entry.text, undefined, { parent: card.body });
     return;
   }
   if (entry.kind === "tool") {
@@ -1501,12 +1501,12 @@ function renderLoop(text, ts, opts) {
   return f;
 }
 
-// A message the user sent into a worker already running. Its own foldable class, not `loop`'s: a
+// A message the user sent into a turn already running. Its own foldable class, not `loop`'s: a
 // `loop` row is the machine's own event (grouped with thinking/tool/plan as dim, monochrome rows in
 // app.css), and this text is a person's words, so it keeps the card's ordinary foreground colour
 // rather than reading as something the assistant did.
-function renderSteering(text, ts, opts) {
-  const f = addFoldable("steering", { kind: "steering" }, { parent: opts && opts.parent }, ts);
+function renderMidTurn(text, ts, opts) {
+  const f = addFoldable("inbox", { kind: "inbox" }, { parent: opts && opts.parent }, ts);
   f.body.textContent = text || "";
   return f;
 }
@@ -1652,12 +1652,12 @@ function handleFrame(event) {
         // accepted it into one, that turn ended before reading it, and it was re-run as a turn of
         // its own. The mark is withdrawn rather than left standing beside the controls, since the
         // two would otherwise say the message both did and did not become a turn.
-        pending.classList.remove("steered");
+        pending.classList.remove("mid-turn");
         stampTurnControls(pending, frame.message_index, frame.conversation_id);
       }
     }
   } else if (frame.type === "inbox") {
-    // AIMU's own name for this chunk (renamed from `steering`), matched here because both of the
+    // AIMU's own name for this chunk (renamed from `STEERING`), matched here because both of the
     // server's emitters now send it: a plain reactive turn's delivery frame and a planned turn's
     // both carry this type, and a mid-turn message's live marker would render nothing without this
     // branch, on either kind of turn.
@@ -1675,13 +1675,13 @@ function handleFrame(event) {
     // left behind when the message *is* delivered is inert, for the reason the map's own comment
     // gives: only a frame carrying this token can ever claim it, and nothing else mints one.
     //
-    // Two frames of this type arrive for one steered message and only one carries a token. This is
+    // Two frames of this type arrive for one mid-turn message and only one carries a token. This is
     // the server reporting the message accepted, and the token is what names the bubble; the other
     // comes from the agent loop as it reads the message, which is the one a sub-agent card renders
     // and which names no bubble. So an untokened frame marks nothing here, as a `turn_saved` with
     // no token stamps nothing just above.
-    const steered = pendingBubbles.get(frame.token);
-    if (steered) steered.classList.add("steered");
+    const midTurn = pendingBubbles.get(frame.token);
+    if (midTurn) midTurn.classList.add("mid-turn");
   } else if (frame.type === "history") {
     // Replay a conversation (on connect or after switching), reusing the live renderers.
     log.innerHTML = "";  // replace any current transcript
@@ -1738,12 +1738,12 @@ function handleFrame(event) {
       else if (item.type === "tool") renderTool(item.name, item.arguments, item.ts, { response: item.response });
       else if (item.type === "loop") renderLoop(item.text, item.ts, { reason: item.reason });
       // A message sent into a turn already running, read from the stored record
-      // (`record_turn_provenance`'s `steering` map) rather than a frame about a turn still open: this
+      // (`record_turn_provenance`'s `messages` map) rather than a frame about a turn still open: this
       // item type reaches here for a turn long since finished and saved exactly as it does for one
       // still in flight when the page connected, since the item carries nothing saying which. Rendered
-      // as a collapsed row rather than the live view's marked user bubble (the `.steered` class), a
+      // as a collapsed row rather than the live view's marked user bubble (the `.mid-turn` class), a
       // deliberate divergence reasoned about in `replay_items`'s own docstring rather than here.
-      else if (item.type === "steering") renderSteering(item.text, item.ts);
+      else if (item.type === "inbox") renderMidTurn(item.text, item.ts);
       else if (item.type === "subagent") renderSubagent(item, item.ts);
       else if (item.type === "phase") renderPhase(item.label, item.detail, item.ts);
       else if (item.type === "reasoning") addMarkdownBubble("assistant", item.text, item.ts);

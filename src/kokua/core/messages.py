@@ -88,8 +88,8 @@ def resolve_user_index(messages: list[dict], base_len: int) -> int:
     return -1
 
 
-def resolve_steering_indices(messages: list[dict], user_index: int) -> list[int]:
-    """Where a turn's steering messages sit, given where its own user message sits.
+def resolve_message_indices(messages: list[dict], user_index: int) -> list[int]:
+    """Where a turn's mid-turn messages sit, given where its own user message sits.
 
     Every later entry the user actually sent is a message that reached the turn while it was running:
     the loop appends nothing else with that role, and the nudges it injects itself are exactly what
@@ -98,7 +98,7 @@ def resolve_steering_indices(messages: list[dict], user_index: int) -> list[int]
     sent into a turn is not a turn boundary, and a reader that treats one as a boundary cuts a turn
     off in the middle of its own tool loop.
 
-    Resolved after the run rather than recorded as the mailbox delivers, because only the message list
+    Resolved after the run rather than recorded as the bus delivers, because only the message list
     says where a message ended up, and a compaction between rounds can move it. ``user_index`` is
     ``resolve_user_index``'s answer, so ``-1`` means the turn committed no user message and there is no
     turn here to attribute anything to.

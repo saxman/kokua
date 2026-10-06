@@ -50,14 +50,15 @@ class RichChannel(Protocol):
         so it can match the two. None for a turn no front end started, which is why a front end that
         mints tokens must treat an absent one as "not mine" rather than as the next one waiting."""
 
-    async def send_steering(self, text: str, *, token: Optional[str] = None) -> None:
+    async def send_message_frame(self, text: str, *, token: Optional[str] = None) -> None:
         """Say that a message has joined the turn already running instead of starting one of its own.
 
         The counterpart to ``send_turn_saved`` and the reason it carries a token: a front end that
-        drew the message cannot tell, at send time, which fate it is about to meet. A steered message
-        normally gets no ``turn_saved`` at all, so without this frame nothing would ever name it. The
-        exception is a message a turn accepts and then ends before reading, which the core re-runs as a
-        follow-up turn of its own, carrying this same token on *that* turn's ``turn_saved``."""
+        drew the message cannot tell, at send time, which fate it is about to meet. A message joining a
+        running turn normally gets no ``turn_saved`` at all, so without this frame nothing would ever
+        name it. The exception is a message a turn accepts and then ends before reading, which the core
+        re-runs as a follow-up turn of its own, carrying this same token on *that* turn's
+        ``turn_saved``."""
 
     async def send_notification(
         self,
