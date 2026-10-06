@@ -1588,8 +1588,14 @@ is the commitment to keep them there.</p>
 </span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>        <span class="k">try</span><span class="p">:</span>
 </span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>            <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_gate</span><span class="o">.</span><span class="n">turn</span><span class="p">(</span><span class="n">conversation_id</span><span class="p">):</span>  <span class="c1"># invariant 1</span>
 </span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>                <span class="o">...</span>
-</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>                            <span class="n">stream</span> <span class="o">=</span> <span class="k">await</span> <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">text</span><span class="p">,</span> <span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">images</span><span class="o">=</span><span class="n">msg</span><span class="o">.</span><span class="n">images</span><span class="p">,</span> <span class="n">thinking</span><span class="o">=</span><span class="n">thinking</span><span class="p">)</span>
-</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>                            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ui</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">stream</span><span class="p">,</span> <span class="n">reply_to</span><span class="o">=</span><span class="n">msg</span><span class="p">)</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>                            <span class="n">stream</span> <span class="o">=</span> <span class="k">await</span> <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>                                <span class="n">msg</span><span class="o">.</span><span class="n">text</span><span class="p">,</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>                                <span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>                                <span class="n">images</span><span class="o">=</span><span class="n">msg</span><span class="o">.</span><span class="n">images</span><span class="p">,</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>                                <span class="n">thinking</span><span class="o">=</span><span class="n">thinking</span><span class="p">,</span>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>                                <span class="n">steering</span><span class="o">=</span><span class="n">ENTRY_STEERING_SOURCE</span><span class="p">,</span>
+</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>                            <span class="p">)</span>
+</span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>                            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ui</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">stream</span><span class="p">,</span> <span class="n">reply_to</span><span class="o">=</span><span class="n">msg</span><span class="p">)</span>
 </span></code></pre></div>
 <p>Every round in the transcript above happened inside that one <code>agent.run(...)</code> line, and the chunks the
 three <code>[thinking]</code> blocks were printed from arrived through the stream it returns, as the loop produced
@@ -1608,6 +1614,17 @@ rest of the answer and not the part that had already arrived. (Invariant 5, whic
 obeys, is about a different thing: recording the turn's sub-agent events <em>before</em> the "(stopped)"
 notice, since a second cancellation racing that send would propagate straight past a record placed
 after it.)</p>
+<p><code>/stop</code> is not the only thing a channel can read into a turn that is already running, and the
+<code>steering=</code> argument above is the other one. A turn is long enough that the thing you most often want
+mid-reply is not to cancel it but to correct it, and before this a correction typed into the composer
+queued behind the turn on the gate: it arrived after the rounds it was meant to redirect had already
+been spent. <code>ENTRY_STEERING_SOURCE</code> is a reader over the mailbox <code>TurnRunner</code> opens for the turn, which
+AIMU's loop drains once per round, so what you type lands at the turn's next model call and the loop
+takes one more round to act on it. Delivery also resets the round cap, for the reason the cap exists:
+the degenerate turn below is a model talking to itself, and a person saying something is the evidence
+that is not what is happening here. The whole design, including what happens to a message the turn ends
+before reading, is
+<a href="../../explanation/architecture/#a-message-sent-while-a-turn-is-running">Architecture</a>.</p>
 <h2 id="what-it-costs">What it costs<a class="headerlink" href="#what-it-costs" title="Permanent link">&para;</a></h2>
 <p><strong>Rounds, not words.</strong> Every round is a full request carrying the entire conversation so far: the system
 message, every previous message, every tool result, and the schema of every tool the agent holds. The

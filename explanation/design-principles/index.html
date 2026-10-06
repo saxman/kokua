@@ -1851,7 +1851,7 @@ it prevents. One process is also what makes a single turn followable end to end:
 can attach a debugger to, rather than a request landing in whichever worker happened to pick it up.
 The invariants block is a teaching artifact as much as a safety one.</p>
 <p><em>How this cashes out:</em> <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py"><code>core/turns.py</code></a> opens with a
-<code>## Concurrency invariants</code> block of eight rules, each stating what breaks without it, including a
+<code>## Concurrency invariants</code> block of nine rules, each stating what breaks without it, including a
 deadlock that a regression test still guards. <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turn_gate.py"><code>TurnGate</code></a> is a
 documented writer-preferring readers-writer gate: turns read, a settings change writes, and which side an
 operation belongs on follows from its reach rather than from whether it mutates (a conversation delete
