@@ -60,14 +60,16 @@ proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)
 # matter which turn's task emits it. That distinction has to be drawn by frame type rather than by task
 # context: `TurnRunner._persist` pushes the conversation list from inside the turn's own task, so a
 # background turn's sidebar refresh carries a muted conversation in the contextvar and would be dropped.
-# `steering` belongs here for the same reason `loop` does: it is a turn-scoped marker, not the
-# channel's own state, so a steered background turn must stay muted and catch up on switch-in exactly
-# like every other live frame that turn produces. `inbox` belongs here for the same event under a
-# different name: AIMU's own un-overridden `send()` loop (reused via `super().send()` below for every
-# chunk this subclass does not map itself) emits `{"type": "inbox", ...}` for the same mid-turn message,
-# since AIMU renamed its `STEERING` chunk to `INBOX`. That frame reaches a plain reactive turn's base
-# path, where `stream_activity`'s own override still emits Kokua's `"steering"` for a planned one; both
-# name the same turn-scoped event and both have to be muted the same way.
+# `inbox` belongs here for the same reason `loop` does: it is a turn-scoped marker, not the channel's
+# own state, so a steered background turn must stay muted and catch up on switch-in exactly like every
+# other live frame that turn produces. It is AIMU's own name for the chunk (renamed from `STEERING`),
+# and both of Kokua's emitters converge on it now: AIMU's un-overridden `send()` loop (reused via
+# `super().send()` below for every chunk this subclass does not map itself) carries it unchanged for a
+# plain reactive turn, and `stream_activity`'s own override maps the same chunk to the same string for
+# a planned one, so one wire type reaches the page either way. `steering` is kept alongside it only as
+# a historical member with no live producer left (nothing calls `send_frame` with it any more); the
+# name survives on the *replay* side, in `core/transcripts.py`'s stored items, which this set does not
+# govern.
 _TURN_FRAMES = frozenset(
     {
         "token",
@@ -337,15 +339,17 @@ class WebChannel(BaseWebChannel):
         marked is a supersession the page expects rather than a mis-stamp.
 
         Sent when the message is accepted, which is also why it is a frame of Kokua's own rather than
-        the ``steering`` frame the stream already carries: that one is mapped from AIMU's own chunk
+        the ``inbox`` frame the stream already carries: that one is mapped from AIMU's own chunk
         when the run *drains* the message, and a reader's ``drain`` (``SteeringMailbox.reader``)
         hands AIMU the text alone, never the token, since text is all AIMU's own loop takes as a
         prompt. The mailbox keeps the token (see ``SteeringMessage``) only as far as that drain; AIMU
-        never sees it, so the chunk built from AIMU's side has none to carry. Both frames are the same
-        type, and the page tells them apart by exactly the thing it needs: the one carrying a token
-        names a bubble.
+        never sees it, so the chunk built from AIMU's side has none to carry. Both frames carry the
+        same ``"type"`` (``"inbox"``, AIMU's own name for the chunk, matched here rather than kept as
+        Kokua's former ``"steering"`` so a plain reactive turn's base-path delivery and this
+        acceptance frame stay one wire type for one page handler), and the page tells them apart by
+        exactly the thing it needs: the one carrying a token names a bubble.
         """
-        frame: dict[str, Any] = {"type": "steering", "text": text}
+        frame: dict[str, Any] = {"type": "inbox", "text": text}
         if token is not None:
             frame["token"] = token
         await self.send_frame(frame)
@@ -449,8 +453,10 @@ class WebChannel(BaseWebChannel):
                 # A separate frame from `loop`, not a third `reason` on it: `loop` says the loop
                 # injected a prompt of its own, and these are the user's own words. One frame that
                 # meant either would have the page attribute the user's message to the assistant.
+                # `"inbox"`, matching the base path's own name for this chunk (see `send_steering`),
+                # so a planned turn's delivery frame and a plain turn's are one type for one handler.
                 sent = chunk.content if isinstance(chunk.content, dict) else {}
-                await self.send_frame({"type": "steering", "text": sent.get("text", "")})
+                await self.send_frame({"type": "inbox", "text": sent.get("text", "")})
             else:
                 image = _image_frame_for(chunk)
                 if image is not None:

@@ -275,11 +275,16 @@ async def test_web_channel_send_steering_carries_the_token_of_the_message_that_l
     """The message's other possible fate. A steered message normally produces no `turn_saved` of its
     own, so this is the only frame that can tell the page which bubble joined the running turn; the
     exception is one the turn accepts and never reads, which comes back as a follow-up turn carrying
-    this same token."""
+    this same token.
+
+    The frame type is `"inbox"`, AIMU's own name for the chunk the stream sends when the run actually
+    reads the message (see the next test): matching it here, rather than keeping Kokua's former
+    `"steering"`, is what lets the page hold one handler for both frames instead of two that must be
+    kept in step by hand."""
     ws = _FakeWS()
     channel = WebChannel(ws)
     await channel.send_steering("use the cache", token="t-8")
-    assert ws.frames == [{"type": "steering", "text": "use the cache", "token": "t-8"}]
+    assert ws.frames == [{"type": "inbox", "text": "use the cache", "token": "t-8"}]
 
 
 async def test_a_steering_frame_with_no_token_names_no_bubble():
@@ -287,11 +292,48 @@ async def test_a_steering_frame_with_no_token_names_no_bubble():
     bare text) has no bubble to name, so the key is absent rather than null: the page claims on the
     token's presence, and a null would be a second spelling of "nothing to claim" for both ends to
     remember. It also leaves the frame identical to the one the stream sends when the run reads the
-    message, which is the frame this one sits beside."""
+    message, which is the frame this one sits beside: both are `{"type": "inbox", "text": ...}`,
+    whether the stream's side reaches the page through `stream_activity`'s own mapping (a planned
+    turn) or through AIMU's un-overridden base `send()` loop (a plain reactive turn) -- see
+    `test_the_two_inbox_emitters_agree_on_the_frame_type` below, which pins that identity directly
+    rather than leaving it to this docstring."""
     ws = _FakeWS()
     channel = WebChannel(ws)
     await channel.send_steering("use the cache")
-    assert ws.frames == [{"type": "steering", "text": "use the cache"}]
+    assert ws.frames == [{"type": "inbox", "text": "use the cache"}]
+
+
+async def test_the_two_inbox_emitters_agree_on_the_frame_type():
+    """One event, two code paths, and the page holds exactly one handler for it
+    (``frame.type === "inbox"`` in ``app.js``): ``send_steering``'s accept-time frame, and the frame a
+    plain reactive turn's delivery produces through the base ``send()`` loop this subclass delegates
+    to for every chunk it does not map itself. Nothing but agreement between the two keeps that one
+    handler correct, and that agreement used to live only in a docstring's prose
+    (``test_a_steering_frame_with_no_token_names_no_bubble``'s "leaves the frame identical...") with no
+    test driving the base path at all -- which is exactly how AIMU's floor move broke it silently: the
+    base path's own name for the chunk changed out from under Kokua's emitter, the two frame tests of
+    the time both called ``send_steering`` directly, and nothing noticed.
+
+    Drives both paths for real rather than asserting either string on its own, so a change to either
+    emitter alone, not just a simultaneous rename of both, is what this is built to catch. The
+    delivery side goes through ``send()``, not ``stream_activity()``: that override maps the chunk
+    itself and would prove nothing about the base loop, which is the path that actually broke.
+    """
+    accept_ws = _FakeWS()
+    accept_channel = WebChannel(accept_ws)
+    await accept_channel.send_steering("use the cache")
+    accept_type = accept_ws.frames[0]["type"]
+
+    deliver_ws = _FakeWS()
+    deliver_channel = WebChannel(deliver_ws)
+
+    async def gen():
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
+
+    await deliver_channel.send(gen())
+    deliver_type = next(f["type"] for f in deliver_ws.frames if f.get("text") == "use the cache")
+
+    assert accept_type == deliver_type == "inbox"
 
 
 async def test_web_channel_send_settings_emits_frame():
@@ -346,7 +388,8 @@ async def test_web_channel_stream_activity_types_a_missing_kind_as_a_string():
 async def test_a_steering_chunk_becomes_a_steering_frame():
     """`stream_activity` maps chunks itself rather than reusing the base loop (see the CONTINUING
     test above), so this branch has to exist here too or a planned turn swallows a steering message
-    that an ordinary turn would show."""
+    that an ordinary turn would show. It maps to `"inbox"`, the same type the base loop now carries
+    for a plain reactive turn's own delivery, not a type of its own."""
     ws = _FakeWS()
     channel = WebChannel(ws)
 
@@ -354,7 +397,7 @@ async def test_a_steering_chunk_becomes_a_steering_frame():
         yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
 
     await channel.stream_activity(gen())
-    assert {"type": "steering", "text": "use the cache"} in ws.frames
+    assert {"type": "inbox", "text": "use the cache"} in ws.frames
 
 
 async def test_web_channel_send_relays_a_steering_message():
@@ -2864,9 +2907,12 @@ async def test_an_accepted_steering_message_is_caught_up_once_rather_than_twice(
     actually delivered the message, and it arrives inside the turn. A switch-in therefore sees the
     redirection, and sees it once.
 
-    The two frames carry different types for the same event: the accept-time one is Kokua's own
-    ``send_steering``, carrying ``"steering"``; the drain-time one reaches the page through the base
-    ``send()`` loop this subclass delegates to, so it carries AIMU's own name for the chunk, ``"inbox"``.
+    Both frames carry the *same* type now (``"inbox"``: the accept-time one is Kokua's own
+    ``send_steering``, the drain-time one reaches the page through the base ``send()`` loop this
+    subclass delegates to, carrying AIMU's own name for the chunk), which is exactly why "only one
+    belongs in the record" is the thing worth pinning here: a filter on type alone could no longer
+    tell the two apart, so the dedup has to come from the turn-context gate (no catch-up record keyed
+    under "no conversation") rather than from the frames looking different.
     """
     from kokua.channels.web import streaming_conversation
 

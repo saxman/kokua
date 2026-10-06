@@ -1656,7 +1656,12 @@ function handleFrame(event) {
         stampTurnControls(pending, frame.message_index, frame.conversation_id);
       }
     }
-  } else if (frame.type === "steering") {
+  } else if (frame.type === "inbox") {
+    // AIMU's own name for this chunk (renamed from `steering`), matched here because both of the
+    // server's emitters now send it: a plain reactive turn's delivery frame and a planned turn's
+    // both carry this type, and a mid-turn message's live marker would render nothing without this
+    // branch, on either kind of turn.
+    //
     // The bubble's other possible fate, and the reason this map matches rather than counts: the
     // message joined the turn already running, so no `turn_saved` for a turn of its own will name it.
     // Marked rather than stamped, and deliberately given no turn controls: while that holds it has no
