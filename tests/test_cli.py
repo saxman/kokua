@@ -314,7 +314,7 @@ def test_main_web_reports_a_broken_agents_table_as_an_instruction(monkeypatch, t
     # asserted-on string is `[agents.coder]`'s tools line, which is why it fails loudly if that line is
     # edited without editing this: a no-op replace leaves a *valid* config and the test stops testing.
     broken = settings.example_text().replace(
-        'tools = ["fs", "fs_write", "compute", "time"]', 'tools = ["fs", "nope", "time"]'
+        'tools = ["fs", "fs_write", "compute", "time", "messaging"]', 'tools = ["fs", "nope", "time"]'
     )
     assert "nope" in broken, "the [agents.coder] tools line moved; this replace no longer breaks anything"
     text = broken

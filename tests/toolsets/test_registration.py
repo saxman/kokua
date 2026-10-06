@@ -150,6 +150,7 @@ def test_the_cross_cutting_toolsets_are_exactly_these():
         "github_backup",
         "mcp",
         "memory",
+        "messaging",
         "planning",
         "scheduling",
         "skills",

@@ -12,6 +12,7 @@ from kokua.core.messaging import (
     WORKER_SOURCE,
     Message,
     MessageBus,
+    current_address,
     current_bus,
     matches,
 )
@@ -80,6 +81,65 @@ def test_a_repeated_entry_open_registers_one_address_not_one_per_open():
     bus.entry_reader("assistant")
 
     assert bus.roster() == ["assistant"]
+
+
+def test_opening_a_worker_reader_sets_current_address_to_its_own():
+    # `toolsets/messaging.py`'s `send_message` has no argument naming its caller, so it reads this
+    # contextvar; a tool has nothing else to read, with no argument and nothing on the call stack
+    # naming the run.
+    bus = MessageBus()
+    token = current_address.set(None)
+    try:
+        bus.reader("subagent-researcher")
+        assert current_address.get() == "researcher#1"
+    finally:
+        current_address.reset(token)
+
+
+def test_opening_the_entry_reader_sets_current_address_to_its_own():
+    bus = MessageBus()
+    token = current_address.set(None)
+    try:
+        bus.entry_reader("assistant")
+        assert current_address.get() == "assistant"
+    finally:
+        current_address.reset(token)
+
+
+def test_a_sequentially_opened_second_reader_leaves_current_address_at_its_own():
+    # Models AIMU's common dispatch shape: a round with exactly one tool call never gets a
+    # `TaskGroup.create_task` of its own (see `current_address`'s comment), so a worker spawned and
+    # awaited sequentially from inside a tool call opens its reader in the *same* Context as the run
+    # that spawned it. Opening "coder" after "researcher" is that shape; nothing has drained yet to
+    # put "researcher" back, so the contextvar is left pointing at whichever run opened last.
+    bus = MessageBus()
+    token = current_address.set(None)
+    try:
+        bus.reader("subagent-researcher")
+        bus.reader("subagent-coder")
+        assert current_address.get() == "coder#1"
+    finally:
+        current_address.reset(token)
+
+
+def test_a_readers_own_drain_reasserts_its_address_after_a_nested_open_moved_it():
+    # The other half of the same shape: AIMU's loop drains once per round, always after that round's
+    # own tool dispatch and before the next (see `_tool_loop.run`'s PENDING_TOOLS branch), so a
+    # reader's own drain is what undoes a nested spawn's clobber before this run's *next* round of
+    # tool calls -- the one point that matters, even though the nested run's own calls saw the wrong
+    # value in between.
+    bus = MessageBus()
+    token = current_address.set(None)
+    try:
+        drain_researcher = bus.reader("subagent-researcher")
+        bus.reader("subagent-coder")
+        assert current_address.get() == "coder#1"  # the nested open's clobber, confirmed
+
+        drain_researcher()
+
+        assert current_address.get() == "researcher#1"
+    finally:
+        current_address.reset(token)
 
 
 def test_an_unnamed_run_registers_nothing_rather_than_a_placeholder():

@@ -497,9 +497,9 @@ unconfigured, which is what `email-report` did on the entry agent until the seco
 
 #### The shipped entry agent's inventory
 
-All 35 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
+All 37 tools the shipped `[agents.assistant]` table resolves to, and where each comes from. This is what
 `config.example.toml` declares, not a fixed list: a different `tools` line produces a different set.
-Fourteen of the 35 come from AIMU, more than a third, and so are not greppable in this repository (more
+Fourteen of the 37 come from AIMU, more than a third, and so are not greppable in this repository (more
 once skills are installed, since AIMU injects a tool per skill script on top of this set), which is why
 this table exists rather than a naming convention alone:
 
@@ -515,6 +515,7 @@ this table exists rather than a naming convention alone:
 | `list_conversations`, `read_conversation`, `search_conversations`, `rename_conversation`, `export_conversation` | `toolsets/conversations.py` | `conversations` |
 | `list_capabilities`, `compose_subagent` | `toolsets/capabilities.py` | `capabilities` |
 | `benchmark_model` | `toolsets/benchmark.py` | `benchmark` |
+| `send_message`, `list_agents` | `toolsets/messaging.py` | `messaging` |
 | `spawn_subagent` | AIMU `make_async_subagent_tool` | implied by a non-empty `delegates_to` |
 
 Two conventions keep this honest. Every Kokua-side agent tool lives under `toolsets/` and nowhere else,

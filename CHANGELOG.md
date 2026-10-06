@@ -800,7 +800,7 @@ script is how the skill does its work.
 
 ### Toolsets
 
-**All 22 toolsets Kokua ships are one file each under `src/kokua/toolsets/`, named for the toolset, and
+**All 23 toolsets Kokua ships are one file each under `src/kokua/toolsets/`, named for the toolset, and
 registered in `pyproject.toml`'s `kokua.toolsets` entry-point table** -- the same table a third party's
 package writes into. There is no second route, no index in code, and no directory scan: that table is the
 index. Adding a toolset is a new file and one line, and `tests/toolsets/test_registration.py` fails until
@@ -883,6 +883,34 @@ test suites and a shell child's own cap would need `preexec_fn`, which is neithe
 thread-safe. The approval gate is the control.
 `tests/toolsets/test_compute.py`, `tests/core/test_build.py`, and `tests/workflows/planning/test_reviewers.py`
 cover it.
+
+**`messaging` gives an agent `send_message(to, text)` and `list_agents()`, over the per-turn message bus
+a mid-turn message already reached.** `core/messaging.py`'s bus mints an address for every run that
+opens a reader this turn (an exact one per worker, like `researcher#1`, and the declared name alone for
+the entry agent), and until this release the only sender who could use an address was the user's own
+typed message, sent to `EVERYONE`. This toolset lets an agent address one of those runs directly: the
+entry agent can redirect a worker already running, and a worker can report back to the parent that
+spawned it, by its declared name. `list_agents` shows the current roster plus the two standing
+selectors, `user` and `everyone`; `send_message` refuses a `to` that matches nothing on the roster
+right now, rather than accepting it and later reporting nothing delivered, since the roster can answer
+that without knowing whether any run is still alive (review focus item from the design: a send-time
+check needs no liveness tracking because the roster is append-only). It cannot refuse the opposite
+case, a worker that has already finished: the roster does not retire an address, by the same argument
+`core/messaging.py` makes for never inferring a run has ended, so a message to a finished worker is
+accepted and comes back as an undelivered report at the end of the turn instead (invariant 10 in
+`core/turns.py`). A receipt therefore says a message was *accepted for* the addresses it matched, never
+that any of them will read it -- a bare label matching several runs is satisfied by any one of them, so
+naming both in a receipt cannot promise both will see it. The sender's own address cannot be an
+argument (a tool has nothing in its arguments or its call stack naming the run calling it), so it comes
+off a `current_address` contextvar `core/messaging.py` sets when a reader opens, and re-asserts on
+every drain so that a nested spawn dispatched sequentially in the same `asyncio` Task (the common
+case: a round with exactly one tool call never gets a `TaskGroup.create_task` of its own) cannot leave
+it pointing at the wrong run once that nested call returns. Declared on the shipped entry agent and all
+three shipped workers, since both directions need it: `[agents.assistant].tools` and each of
+`[agents.researcher]`, `[agents.coder]`, `[agents.introspector]` name `messaging`. Deliberately absent
+from `[security].confirm_tools`: a gate is for a call that reaches past the model, and this one writes
+to an in-process bus every reader is another agent in this same turn, nothing outside it.
+`tests/core/test_messaging.py` and `tests/toolsets/test_messaging.py` cover it.
 
 The four below are Kokua's own standalone capabilities, needing nothing but `AssistantConfig`. They are
 the shortest worked examples of the shape: one file, one `TOOLSET`, one entry-point line.

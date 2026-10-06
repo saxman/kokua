@@ -385,7 +385,7 @@ change. Full rationale, with the code that backs each claim, is in
    `isinstance(channel, WebChannel)` in `core/` or `workflows/`.
 2. **Grow by plugin, not by core change.** Capability arrives as a `FrontEnd` or a `Toolset`. A third
    party's arrives through the `kokua.frontends` / `kokua.toolsets` entry-point groups, and **every one of
-   the 22 toolsets Kokua ships arrives the same way**, listed in `pyproject.toml`'s
+   the 23 toolsets Kokua ships arrives the same way**, listed in `pyproject.toml`'s
    `[project.entry-points."kokua.toolsets"]` table beside where a third party's entry would go. There is no
    second route and no index in code: that table *is* the index, and
    `tests/toolsets/test_registration.py` pins it against `src/kokua/toolsets/` in both directions so a
@@ -488,7 +488,8 @@ src/kokua/
                 settings_runtime, diagnostics, build, agents (build_registry, validate_agents, prompt
                 assembly, delegation), agent_registry, turn_gate, turn_registry, messages, titles,
                 errors, transcripts, metrics (what a turn cost, accumulated from AIMU's run events),
-                steering (the per-turn mailbox a message typed mid-turn reaches, and its two sources)
+                messaging (the per-turn message bus a message typed mid-turn reaches, its two sources,
+                and the addresses an agent can send to)
   config/       schema, paths, file, store (writes + write policy), table, settings_sources (joins a
                 toolset's declared settings into the table; the one module under config/ that imports
                 upward, so the rest of the layer stays at the bottom)
@@ -503,7 +504,7 @@ src/kokua/
   toolsets/     audio, compute, documents, fs, fs_write, memory, misc, skills, speech, time,
                 transcription, web
                 -- wrappers over AIMU's groups and stores,
-                capabilities, config, conversations, mcp, scheduling -- one Kokua subsystem each,
+                capabilities, config, conversations, mcp, messaging, scheduling -- one Kokua subsystem each,
                 planning -- a Workflow and no tools, aimu_agents, benchmark, github_backup, image --
                 Kokua's own, needing only the config. One file per toolset, named for the toolset, each
                 listed in pyproject.toml's kokua.toolsets table, and nothing else in the directory
@@ -579,7 +580,7 @@ and does so inside the function that needs it rather than at module scope, becau
 imports `settings_sources` at module level to build its cold-key schema -- hoisting the upward import
 would close that loop and break `import kokua.toolsets.core` on a partially-initialized module.
 
-Note the convention is only part of the answer: fourteen of the 35 tools the shipped entry agent holds
+Note the convention is only part of the answer: fourteen of the 37 tools the shipped entry agent holds
 come from AIMU and are not in this repo at all, which is why
 [docs/explanation/architecture.md](docs/explanation/architecture.md#how-an-agents-tools-resolve) carries
 the full inventory and `tests/core/test_build.py` pins it as an exact set. That inventory is what

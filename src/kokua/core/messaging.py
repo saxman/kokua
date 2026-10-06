@@ -245,12 +245,17 @@ class MessageBus:
         filter's decision alone. That is why the match is recorded rather than inferred afterwards
         (see :meth:`_take`): once a cursor has passed over someone else's mail, its position no
         longer distinguishes mail that reached its recipient from mail that reached nobody.
+
+        Sets :data:`current_address` to this run's own address, both here and again on every drain;
+        see that contextvar's own comment for why a single set at open is not enough.
         """
         address = self._register(agent, ordinal=True)
+        current_address.set(address)
         seen = 0
 
         def drain() -> list[str]:
             nonlocal seen
+            current_address.set(address)
             start, seen = seen, len(self._messages)
             return self._take(start, seen, address)
 
@@ -275,10 +280,15 @@ class MessageBus:
         cursor's own position, passed over rather than unread. Whether anyone at all took it is the
         other half of what :meth:`close` hands back, and that is the record :meth:`_take` keeps
         rather than anything this position can say.
+
+        Sets :data:`current_address` to the entry address, both here and again on every drain; see
+        that contextvar's own comment for why a single set at open is not enough.
         """
         address = self._register(agent, ordinal=False)
+        current_address.set(address)
 
         def drain() -> list[str]:
+            current_address.set(address)
             start, self._entry_seen = self._entry_seen, len(self._messages)
             return self._take(start, self._entry_seen, address)
 
@@ -371,6 +381,26 @@ class MessageBus:
 #: A contextvar for the reason ``subagent_events`` is one: a spawn's context is copied from the turn
 #: that made it, so a worker reaches its own turn's bus with nothing threaded through the spawn.
 current_bus: ContextVar[Optional[MessageBus]] = ContextVar("current_bus", default=None)
+
+#: The address of whichever run is currently making a tool call, read by ``toolsets/messaging.py``'s
+#: ``send_message`` to say who a message is from. A tool is a plain callable AIMU invokes with
+#: nothing in its arguments or its call stack naming the run that is calling it, so this contextvar is
+#: the only route back to that fact; see :meth:`MessageBus.reader` and :meth:`MessageBus.entry_reader`,
+#: which set it from the same address they mint and hand the model-facing tool nothing further to do.
+#:
+#: Set in two places on purpose, not one. A reader opens once, at the start of its run, so setting it
+#: there alone would cover a run's first round and nothing past it: AIMU's loop dispatches a round's
+#: tool calls directly on the task that is already running whenever that round calls exactly one tool
+#: (the common case), with no ``TaskGroup.create_task`` and therefore no fresh ``Context`` to isolate
+#: a nested run's own ``set`` from this one. A worker sequentially spawned and awaited from inside a
+#: tool call therefore shares this run's own ``Context`` for the rest of this run's life, and its own
+#: open would leave this contextvar holding its address, not this run's, once it returns. What undoes
+#: that is where AIMU's loop drains an inbox: once per round, always after that round's own tool
+#: dispatch and before the next one, on the same run that opened this reader. So the drain closure
+#: re-asserts this run's address every time, which lands strictly before this run's *next* round of
+#: tool calls -- the one place that matters -- even though a round in between may have left it
+#: pointing at whatever a nested spawn set it to.
+current_address: ContextVar[Optional[str]] = ContextVar("current_address", default=None)
 
 
 class _ContextSource:
