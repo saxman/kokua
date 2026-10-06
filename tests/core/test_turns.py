@@ -2101,13 +2101,13 @@ async def test_an_undelivered_message_runs_through_the_real_resubmit_path(assist
     """
     asked = []
 
-    async def offer_once(text, *args, **kwargs):
+    async def send_once(text, *args, **kwargs):
         asked.append(text)
         if len(asked) == 1:
             current_bus.get().send("and one more thing", sender=USER, to=EVERYONE)
         return "done"
 
-    assistant._book.agent_for(assistant._active_id).run = offer_once
+    assistant._book.agent_for(assistant._active_id).run = send_once
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     assert asked == ["hello", "and one more thing"]
@@ -2125,17 +2125,17 @@ async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assista
     sent = []
     assistant._ui.send = lambda text, **kwargs: sent.append(text)
 
-    async def offer_then_stop(*args, **kwargs):
+    async def send_then_stop(*args, **kwargs):
         # Raised from inside the run rather than delivered to the task, which is indistinguishable to
         # `reactive`'s `except asyncio.CancelledError` and needs no second task to do the stopping.
         current_bus.get().send("never mind, do the other thing", sender=USER, to=EVERYONE)
         raise asyncio.CancelledError()
 
-    assistant._book.agent_for(assistant._active_id).run = offer_then_stop
+    assistant._book.agent_for(assistant._active_id).run = send_then_stop
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     assert submitted == []
-    # Asserted on the sent text rather than on the offer landing directly: a bus that never saw
+    # Asserted on the sent text rather than on the send landing directly: a bus that never saw
     # the offer (an `AttributeError` the generic error branch would swallow) sends the plain
     # "(stopped)" notice instead, which does not contain "not delivered", so this also covers the
     # case the old assertion on `offer`'s return value existed to rule out.
@@ -2305,7 +2305,8 @@ async def test_the_bus_a_reactive_turn_builds_carries_that_turns_review_context(
     """The join between the two halves of the amendment, which each half's own test leaves open.
 
     ``test_reactive_turn_opens_a_review_context_carrying_the_request`` proves ``reactive`` opens a
-    context and ``test_an_offer_amends_the_running_turns_review_context`` proves a bus amends the
+    context and ``test_a_send_amends_the_running_turns_review_context`` (in ``test_messaging.py``) proves a bus
+    amends the
     context it was handed, and both stay green if ``reactive`` builds its bus with no context at
     all. That mutation makes a security-relevant amendment a silent no-op in production, so what is
     asserted here is the wiring: offer a message from inside the turn's own run and read back the request a
@@ -2498,7 +2499,7 @@ async def test_a_follow_up_turn_carries_the_token_of_the_message_that_became_it(
     agent = assistant._book.agent_for(assistant._active_id)
     asked = []
 
-    async def offer_once(text, *args, **kwargs):
+    async def send_once(text, *args, **kwargs):
         asked.append(text)
         agent.model_client.messages.extend(
             [{"role": "user", "content": text}, {"role": "assistant", "content": "done"}]
@@ -2507,7 +2508,7 @@ async def test_a_follow_up_turn_carries_the_token_of_the_message_that_became_it(
             current_bus.get().send("and one more thing", sender=USER, to=EVERYONE, token="b2")
         return "done"
 
-    agent.run = offer_once
+    agent.run = send_once
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     assert asked == ["hello", "and one more thing"]
