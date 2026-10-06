@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -2146,6 +2147,77 @@ async def test_an_undelivered_agent_message_is_reported_and_not_rerun(assistant)
     assert submitted == []
     assert any("not delivered" in text for text in sent)
     assert any("researcher#1" in text and "look at the index" in text for text in sent)
+
+
+async def test_a_backgrounded_turns_report_is_logged_rather_than_sent_to_the_wrong_conversation(assistant, caplog):
+    """The report runs after the ``finally`` has reset ``streaming_conversation``, so the channel can
+    no longer mute it: sent, it would appear in whatever conversation the user has moved to.
+
+    That is a loss rather than a misplacement, because the notice is display-only and ``_persist`` has
+    already run, so it is gone from the conversation it belongs to. ``_report_undeliverable`` therefore
+    makes the comparison itself. The foregrounded counterpart is
+    ``test_an_undelivered_agent_message_is_reported_and_not_rerun``, which asserts the send.
+    """
+    background = assistant._active_id
+    await assistant.new_conversation()
+    assert assistant._active_id != background
+
+    async def resubmit(conversation_id, messages, **kwargs):
+        raise AssertionError("nothing here is the user's to re-run")
+
+    assistant._turns._resubmit_messages = resubmit
+    sent = []
+
+    async def send(text, **kwargs):
+        sent.append(text)
+
+    assistant._ui.send = send
+
+    async def leave_one_undelivered(*args, **kwargs):
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    assistant._book.agent_for(background).run = leave_one_undelivered
+    with caplog.at_level(logging.WARNING, logger="kokua.core.turns"):
+        await assistant._turns.reactive(message("hello"), conversation_id=background)
+
+    assert not any("not delivered" in text for text in sent if isinstance(text, str))
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "researcher#1" in logged and "look at the index" in logged
+
+
+async def test_a_channel_that_cannot_take_the_report_still_leaves_the_resubmit_to_run(assistant):
+    """The safety condition the ordering rests on, which prose alone cannot hold.
+
+    The report is sent before the re-submit so its notice reads ahead of the follow-up turn's output.
+    That ordering is only safe because the report swallows what it can: a channel raising there must
+    not be what loses the user's own words, which are the next thing to run.
+    """
+    submitted = []
+
+    async def resubmit(conversation_id, messages, **kwargs):
+        submitted.append([m.text for m in messages])
+
+    assistant._turns._resubmit_messages = resubmit
+
+    async def send(content, **kwargs):
+        # Only the report fails. A channel refusing everything would send the turn down the generic
+        # error branch, whose own send would raise past the report and prove nothing about ordering.
+        if isinstance(content, str) and "not delivered" in content:
+            raise RuntimeError("the socket is gone")
+
+    assistant._ui.send = send
+
+    async def send_both(*args, **kwargs):
+        bus = current_bus.get()
+        bus.send("look at the index", sender="assistant", to="researcher#1")
+        bus.send("and use the cache", sender=USER, to=EVERYONE)
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = send_both
+    await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
+
+    assert submitted == [["and use the cache"]]
 
 
 async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assistant):

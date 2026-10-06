@@ -40,10 +40,14 @@ if TYPE_CHECKING:
 
 
 #: The user's own address, and the only one a front end ever sends under: a channel's typed message
-#: always enters the bus as coming from the user, never from an agent.
+#: always enters the bus as coming from the user, never from an agent. Refused as an agent name by
+#: ``core/agents.py``'s ``validate_agents``, because an entry agent declared under it would mint this
+#: exact address and ``close`` would then re-run its messages as the user's own.
 USER = "user"
 
-#: The selector that reaches every reader on the bus, regardless of label or ordinal.
+#: The selector that reaches every reader on the bus, regardless of label or ordinal. Refused as an
+#: agent name for the matching reason: ``matches`` answers this before it looks at an address, so a
+#: message meant for that one agent would reach every run on the bus instead.
 EVERYONE = "everyone"
 
 
@@ -319,6 +323,22 @@ class MessageBus:
         cannot write today and a sender could. The two cannot hand the same message back twice,
         because they decide one list between them: a message is appended once, whichever of them said
         so.
+
+        **A bare label naming several runs is satisfied by any one of them.** The drain record is kept
+        per message, not per address, so a message to ``researcher`` that one of two researchers
+        drained counts as delivered and is not reported, even though the second never saw it. That is
+        the honest limit of liveness-free addressing rather than an oversight: an obligation per
+        address would mean knowing which addresses are still running, which nothing in AIMU's protocol
+        says and which this bus deliberately does not guess (see :meth:`_register`). So what a report
+        means is "no matching reader took this", and a receipt a sender is given can promise no more.
+
+        The sender test keys on :data:`USER`, which ``core/agents.py``'s ``validate_agents`` refuses as
+        an agent name for this reason: an entry agent declared under it would mint that exact address
+        and have its own messages re-run as the user's.
+
+        Called once, from the turn's ``finally``. Not idempotent, and deliberately not made so: a
+        second call re-returns everything still undrained, because advancing the entry cursor is the
+        only state it changes and the drain record is a reader's to write.
         """
         self._open = False
         start, self._entry_seen = self._entry_seen, len(self._messages)
@@ -334,13 +354,17 @@ class MessageBus:
         return resubmit, report
 
     def peek_undelivered(self) -> list[Message]:
-        """What the entry agent has not read yet, without consuming it or closing the bus.
+        """What *the user* has sent and the entry agent has not read yet, without consuming it.
 
         For a stop, where ``close()`` still runs in the turn's ``finally`` right afterwards: the
         cancelled branch needs to know whether to say anything was lost before that happens, and
         advancing the cursor here would make ``close()`` see nothing left to hand back.
+
+        Filtered by sender, where ``close`` splits by it, because the one caller turns this into the
+        sentence "your last message was not delivered". An agent's note to a worker is not the user's
+        message, so counting it would make that sentence false about something the user never typed.
         """
-        return list(self._messages[self._entry_seen :])
+        return [message for message in self._messages[self._entry_seen :] if message.sender == USER]
 
 
 #: The running turn's bus, set by ``TurnRunner`` for the turn's duration and None outside one.

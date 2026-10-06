@@ -242,6 +242,40 @@ def test_a_user_message_no_reader_matched_still_runs_as_a_follow_up_turn():
     assert report == []
 
 
+def test_a_bare_label_one_of_two_readers_drained_is_delivered_not_reported():
+    """The limit invariant 10 states out loud, because the stronger reading is the intuitive one.
+
+    The drain record is kept per message, not per address, so a label two researchers carry and only
+    one drains counts as delivered. The alternative, an obligation per matching address, would mean
+    knowing which of the two is still running, which nothing in AIMU's protocol says. So what a
+    report means is "no matching reader took this", and this is the case that fixes those words.
+    """
+    bus = MessageBus()
+    bus.entry_reader("assistant")
+    first = bus.reader("researcher")
+    bus.reader("researcher")
+    bus.send("check the index", sender="assistant", to="researcher")
+    first()
+
+    resubmit, report = bus.close()
+
+    assert resubmit == [] and report == []
+
+
+def test_peek_ignores_an_agents_message_because_the_notice_it_feeds_is_about_the_users():
+    """The stop notice this feeds says "your last message was not delivered", which is a sentence
+    about something the user typed. An agent's note to a worker sitting past the entry cursor would
+    make it true of nothing the user said."""
+    bus = MessageBus()
+    bus.send("look at the index", sender="assistant", to="researcher#1")
+
+    assert bus.peek_undelivered() == []
+
+    bus.send("use the cache instead", sender=USER, to=EVERYONE)
+
+    assert [m.text for m in bus.peek_undelivered()] == ["use the cache instead"]
+
+
 def test_peek_undelivered_neither_consumes_nor_closes():
     # The property this task's review called out by name: a second peek sees the same thing the
     # first did, and close() afterward still sees it too. A peek sharing entry_reader()'s mutating

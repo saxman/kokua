@@ -15,7 +15,7 @@ from aimu.aio.tools.builtin import SubagentObserver, make_async_subagent_tool
 from kokua.config.file import ConfigError
 from kokua.config.schema import DEFAULT_SYSTEM_MESSAGE, AssistantConfig
 from kokua.core import conversation_commands
-from kokua.core.messaging import WORKER_SOURCE
+from kokua.core.messaging import EVERYONE, USER, WORKER_SOURCE
 from kokua.core.metrics import record_event
 from kokua.plugins import discover_toolsets, own_distribution_toolset_names
 from kokua.registry.context import LiveState, ToolsetContext
@@ -143,6 +143,16 @@ def build_registry(config: AssistantConfig) -> ToolsetRegistry:
     return register(sources)
 
 
+#: Agent names the message bus has already spent. An agent's declared name becomes the address a
+#: mid-turn message is sent to (``core/messaging.py``'s ``_register``), so these two collide rather
+#: than merely confuse: an entry agent named ``user`` mints the user's own address, and ``close``
+#: would re-run that agent's messages as the user's own words; one named ``everyone`` can never be
+#: addressed alone, since ``matches`` answers the broadcast before it looks at an address. Refused at
+#: startup rather than at reader-open time, because the collision is in the config and is silent
+#: everywhere else.
+RESERVED_AGENT_NAMES = frozenset({USER, EVERYONE})
+
+
 def validate_agents(config: AssistantConfig, registry: Mapping[str, Toolset]) -> None:
     """Reject a config whose agents cannot be built, before anything is built.
 
@@ -164,6 +174,12 @@ def validate_agents(config: AssistantConfig, registry: Mapping[str, Toolset]) ->
             f"table. Configured agents: {known}."
         )
     for name, agent in config.agents.items():
+        if name in RESERVED_AGENT_NAMES:
+            raise ConfigError(
+                f"[agents.{name}] uses a name reserved by the message bus. An agent's declared name is "
+                f"the address a message is sent to, and {name!r} already means something there: "
+                f"{USER!r} is the user's own address and {EVERYONE!r} reaches every run. Rename the agent."
+            )
         try:
             select(agent.tools, registry, agent=name, entry_point=config.entry_agent)
         except ToolsetError as e:

@@ -149,10 +149,14 @@ Every rule here was learned from a bug. Read them before changing anything in th
    one exception and is deliberate: someone who cancelled the turn is not asking for one more, so
    those messages are reported as undelivered instead.
    One window is uncovered and known: the re-submit happens after the ``finally`` has released the
-   gate, so an exception escaping that block (out of ``_persist``, the gate's ``__aexit__``, or
-   ``_notify_if_backgrounded``) computes the leftovers and drops them, which is "neither". Moving the
+   gate, so an exception escaping that block (out of ``_persist``, the gate's ``__aexit__``,
+   ``_notify_if_backgrounded``, or a cancellation landing in ``_report_undeliverable``, which swallows
+   everything else by design) computes the leftovers and drops them, which is "neither". Moving the
    re-submit into the ``finally`` trades it for two worse faults, awaiting during a cancellation and
    re-running a gate-cancelled turn's messages, so the window stands rather than being closed there.
+   ``_report_undeliverable`` is the one await in that window this module added rather than inherited,
+   and it is why that method catches: an invariant-10 notice must not be able to widen invariant 9's
+   window, which is the whole reason it is ordered ahead of the re-submit at all.
    A scheduled firing carries the same bus and the same guarantee, and the three places it differs
    all follow from its shape rather than from a different rule. Its bus is opened by
    ``_run_unattended`` rather than by the body that reads it, unlike the ``current_metrics`` scope
@@ -172,11 +176,20 @@ Every rule here was learned from a bug. Read them before changing anything in th
    ``test_a_stopped_turn_does_not_resubmit_its_undelivered_messages``,
    ``test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_turn``.)
 
-10. **A message addressed to an agent is delivered at that agent's next round boundary or reported
-    undeliverable, never both and never neither.** Invariant 9 governs a message addressed to the
-    conversation, which can become a turn; this one governs a message addressed to a run, which
-    cannot, because re-running one worker's note to another as a user turn would put words in the
-    user's mouth. So the fallback here is a sentence rather than a turn.
+10. **A message addressed to an agent is delivered to a matching reader at its next round boundary,
+    or reported undeliverable because no matching reader took it, never both and never neither.**
+    Invariant 9 governs a message addressed to the conversation, which can become a turn; this one
+    governs a message addressed to a run, which cannot, because re-running one worker's note to
+    another as a user turn would put words in the user's mouth. So the fallback here is a sentence
+    rather than a turn.
+    Read "a matching reader" strictly, because the obvious stronger reading is not what holds. A bare
+    label naming several runs is satisfied by **any one** of them: the drain record is per message
+    rather than per address, so a message to ``researcher`` that one of two researchers drained is
+    delivered and is not reported, though the second never saw it. The stronger rule would need to
+    know which addresses are still running, and nothing in AIMU's protocol says that (see
+    ``MessageBus._register``), so there is no honest version of it. This is also the bound on what a
+    sender may be promised: a receipt can say a message was accepted and, later, that nothing took
+    it, never that a particular run read it.
     The bus records which messages a reader drained, which is what lets ``close`` tell an undelivered
     message from a delivered one rather than inferring it from a cursor position. A position cannot
     carry that fact: every cursor advances past every message whether its filter matched or not, so a
@@ -184,22 +197,32 @@ Every rule here was learned from a bug. Read them before changing anything in th
     read from all of their positions. ``close`` therefore returns two lists, the user's messages to
     re-run and the agents' to report, and this path reports the second before running the first, so
     the notice reads ahead of the follow-up turn's own output.
-    Two gaps are known rather than covered, and one difference is deliberate. The window invariant 9
-    names, an exception escaping the outer ``finally``, applies here too. A stopped turn reports
-    nothing, because the report sits after that ``finally`` rather than inside it and the cancelled
-    branch returns before reaching it, so a stop is the same deliberate exception invariant 9 makes
-    for a user's message, one shade worse: there, the stop notice at least says a message was not
-    delivered. The difference is that a scheduled firing writes the report to the log instead of the
-    channel, for the reason ``_report`` raises an alert rather than sending a message: the run
-    happened in a conversation the user is not reading, so a sentence there would be about somebody
-    else's.
+    **Where the report goes follows from who is watching, not from which path ran.** The report is
+    display-only and lands after ``_persist``, so it is never stored: sending it to a channel that is
+    showing a different conversation does not misplace it, it destroys it, because
+    ``streaming_conversation`` has already been reset by the ``finally`` and the channel can no longer
+    tell that this turn was backgrounded. So ``_report_undeliverable`` compares the turn's
+    conversation against the active one itself and logs instead of sending when they differ, which is
+    the same test ``_notify_if_backgrounded`` makes and the opposite branch of it. One rule covers
+    both paths: a scheduled firing is backgrounded by construction (invariant 4 leaves the active
+    pointer alone), so it logs, except on a channel with no conversation list, where the firing shares
+    the viewed conversation and the user is in fact reading it.
+    Two gaps are known rather than covered. The window invariant 9 names, an exception escaping the
+    outer ``finally``, applies here too, and this notice is an await inside it, which is why it
+    catches rather than raises. A stopped turn reports nothing, because the report sits after that
+    ``finally`` rather than inside it and the cancelled branch returns before reaching it, so a stop
+    is the same deliberate exception invariant 9 makes for a user's message, one shade worse: there,
+    the stop notice at least says a message was not delivered.
     A message to an address that never existed this turn needs nothing extra: no reader can match it,
     so it is reported here like any other undeliverable one. Refusing it at send time would serve the
     sender better, and the roster can answer that much without tracking liveness, but it belongs with
     whatever lets a sender write an address rather than here.
     (Regressions: ``test_close_reports_an_undelivered_agent_message_rather_than_resubmitting_it``,
     ``test_a_message_every_cursor_passed_over_is_reported_rather_than_lost``,
-    ``test_an_undelivered_agent_message_is_reported_and_not_rerun``.)
+    ``test_a_bare_label_one_of_two_readers_drained_is_delivered_not_reported``,
+    ``test_an_undelivered_agent_message_is_reported_and_not_rerun``,
+    ``test_a_backgrounded_turns_report_is_logged_rather_than_sent_to_the_wrong_conversation``,
+    ``test_a_channel_that_cannot_take_the_report_still_leaves_the_resubmit_to_run``.)
 """
 
 from __future__ import annotations
@@ -545,9 +568,9 @@ class TurnRunner:
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
         # Ahead of the re-submit, so the notice reads before the follow-up turn's own output rather
-        # than after it. Safe in that order only because the report cannot raise (see
+        # than after it. Safe in that order only because the report swallows what it can (see
         # `_report_undeliverable`): a channel failing here must not cost the user the turn below.
-        await self._report_undeliverable(undeliverable, reply_to=msg)
+        await self._report_undeliverable(conversation_id, undeliverable, reply_to=msg)
         if resubmit and not stopped:
             # Accepted by the bus and never read, because the turn ended first. Running them as a
             # follow-up turn is the fallback the design promises: a message is delivered or it is the
@@ -556,7 +579,7 @@ class TurnRunner:
             await self._resubmit_messages(conversation_id, resubmit, like=msg)
 
     async def _report_undeliverable(
-        self, messages: list[Message], *, reply_to: Optional[ChannelMessage] = None
+        self, conversation_id: str, messages: list[Message], *, reply_to: Optional[ChannelMessage] = None
     ) -> None:
         """Say that an agent's message reached no run, which is the only fate it can be given.
 
@@ -566,21 +589,36 @@ class TurnRunner:
         ended, so there is nobody else still in the turn to tell.
 
         Both the address and the text are named, because neither alone identifies the message. The
-        address is what nothing answered to, which is the fact worth acting on, and the text is what
-        a user would have to ask the assistant to repeat without it.
+        address is what nothing answered to, which is the fact worth acting on, and the text is what a
+        user would have to ask the assistant to repeat without it. The log line carries both for the
+        same reason, since on the branch below it is the only record there will be.
 
-        Nothing raised, for the reason the caller depends on: this runs ahead of a re-submit that
-        carries the user's own words into a turn, and a channel that cannot take a notice must not be
-        what loses them. A log is the honest place for that failure, as it is for a scheduled
-        firing's report of the same thing (invariant 10).
+        **A backgrounded turn logs rather than sends, and the comparison is made here rather than left
+        to the channel.** This runs after ``reactive``'s ``finally``, which has already reset
+        ``streaming_conversation``, so a channel that mutes background frames can no longer tell that
+        this turn was not the one being watched and would show the notice in whatever conversation the
+        user has moved to. The notice is display-only and lands after ``_persist``, so that is not a
+        misplacement but a loss: it is gone from the conversation it belongs to. ``conversation_id``
+        against ``self._book.active_id`` is the same test ``_notify_if_backgrounded`` makes, taken on
+        the opposite branch, since a notice is *for* a backgrounded turn and this is *about* the
+        conversation it ran in.
+
+        ``Exception`` is caught and ``CancelledError`` is deliberately not: this await sits inside the
+        window invariant 9 names, ahead of a re-submit carrying the user's own words into a turn, so a
+        channel that cannot take a notice must not be what loses them. A cancellation is the one thing
+        that still has to propagate, which leaves exactly the window invariant 9 already describes
+        rather than a wider one.
         """
         if not messages:
             return
         lines = "\n".join(f"- to {message.to}: {message.text}" for message in messages)
+        if conversation_id != self._book.active_id:
+            logger.warning("A message no run read, in a conversation nobody is viewing:\n%s", lines)
+            return
         try:
             await self._ui.send(f"(a message this turn's agents sent was not delivered)\n{lines}", reply_to=reply_to)
         except Exception:
-            logger.warning("A message no run read could not be reported", exc_info=True)
+            logger.warning("A message no run read could not be reported:\n%s", lines, exc_info=True)
 
     async def _resubmit_messages(
         self, conversation_id: str, messages: list[Message], *, like: Optional[ChannelMessage] = None
@@ -924,16 +962,11 @@ class TurnRunner:
             proactive_turn.reset(proactive_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
-        if undeliverable:
-            # Logged rather than sent, which is the one place invariant 10 differs between a firing and
-            # a reactive turn, and for the reason `_report` raises an alert instead of a message: this
-            # run happened in a conversation the user is not reading, so a notice there would be a
-            # sentence about somebody else's.
-            logger.warning(
-                "A scheduled firing's agents sent %d message(s) no run read: %s",
-                len(undeliverable),
-                "; ".join(f"to {message.to}" for message in undeliverable),
-            )
+        # The same helper the reactive path uses, and it decides the same way: a firing is
+        # backgrounded by construction (invariant 4 leaves the active pointer alone), so this logs,
+        # except on a channel with no conversation list, where the firing shares the viewed
+        # conversation and the user is reading it after all. One rule rather than two (invariant 10).
+        await self._report_undeliverable(conversation_id, undeliverable)
         if resubmit:
             # Accepted by the bus and never read, because the firing ended first, so it runs as a
             # follow-up turn: a message is delivered or it is the next turn, never neither (invariant

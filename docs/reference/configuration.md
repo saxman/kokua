@@ -622,6 +622,11 @@ reaches the file: anything else would be quoted on the way in and land under a n
 again. `agents.*` is refused for that reason and one more, being the wildcard a lock pattern covers the
 whole section with rather than an agent.
 
+**Two names are refused outright: `user` and `everyone`.** An agent's name is also the address a message
+typed mid-turn is sent to, and those two already mean something there: `user` is the user's own address,
+and `everyone` reaches every run. An agent declared under either would collide rather than merely
+confuse, so startup refuses it and says which name to change.
+
 **This whole section is locked by default.** See [who may change which key](#who-may-change-which-key)
 for what removing `agents.*` from `[security].locked_config_keys` actually permits.
 

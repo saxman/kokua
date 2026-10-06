@@ -290,8 +290,10 @@ arrive deserves: the user's own words can become the next turn, while an agent's
 two apart needs more than a cursor position, which is why the bus records which messages a reader
 actually took: every cursor advances past every message whether its filter matched or not, so a message
 addressed to a run that never drained it looks read from every position on the bus. That is
-[invariant 10](https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py), with the three gaps
-it leaves named there.
+[invariant 10](https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py), including the limit
+of liveness-free addressing it rests on (a bare label naming several runs is satisfied by any one of
+them, so a report means "nothing took this" and never "this run did not read it") and the gaps it
+leaves.
 
 **Liveness resets, safety does not.** AIMU's loop drains the bus once per round, at all three ways a
 round can end, and a delivered message moves the round budget's base so the run gets a fresh
