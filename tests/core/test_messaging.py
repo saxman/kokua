@@ -66,11 +66,16 @@ def test_an_unnamed_run_registers_nothing_rather_than_a_placeholder():
 
 
 def test_a_message_carries_its_sender_and_its_selector():
+    """Read where the envelope is kept, not off the drain, because the drain yields text alone (see
+    ``test_a_reader_drains_the_text_alone``). A ``send`` that accepted ``sender`` and ``to`` and then
+    discarded both would satisfy a text-only assertion, so a text-only assertion cannot be what holds
+    this. The literal strings are deliberate: they are the values ``USER`` and ``EVERYONE`` carry, and
+    a sender types them by hand.
+    """
     bus = MessageBus()
-    drain = bus.entry_reader("assistant")
     bus.send("use the cache", sender="user", to="everyone")
 
-    assert drain() == ["use the cache"]
+    assert bus.close() == [Message("use the cache", sender="user", to="everyone", token=None)]
 
 
 def test_a_reader_sees_messages_offered_before_and_after_it_opened():
