@@ -11,7 +11,7 @@ from aimu.aio import RunHandle
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
-from kokua.core.messaging import ENTRY_SOURCE, Message, MessageBus, current_bus
+from kokua.core.messaging import ENTRY_SOURCE, EVERYONE, USER, Message, MessageBus, current_bus
 from kokua.core.turn_registry import TurnInfo
 from kokua.toolsets.planning import PLANNING_WORKFLOW
 from kokua.workflows import Workflow, WorkflowResult
@@ -2021,7 +2021,7 @@ async def test_a_failed_turn_still_closes_its_bus(assistant):
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     assert current_bus.get() is None
-    assert buses[0].offer("too late") is False
+    assert buses[0].send("too late", sender=USER, to=EVERYONE) is False
 
 
 async def test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn(assistant):
@@ -2033,19 +2033,21 @@ async def test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn(ass
     assistant._turns._resubmit_messages = capture_resubmit
 
     async def ignore_message(*args, **kwargs):
-        current_bus.get().offer("just missed it")
+        current_bus.get().send("just missed it", sender=USER, to=EVERYONE)
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = ignore_message
     await assistant._turns.reactive(message("hello"), conversation_id=assistant._active_id)
 
     # `like` is the finishing turn's own message, carried so the follow-up keeps its `sender` and
-    # `channel`: the bus holds text and a token alone, so those have no other route back.
-    assert submitted == [(assistant._active_id, [Message("just missed it")], message("hello"))]
+    # `channel`: a bus message carries no channel identity, so those two have no other route back.
+    assert submitted == [
+        (assistant._active_id, [Message("just missed it", sender=USER, to=EVERYONE)], message("hello"))
+    ]
 
 
 async def test_a_follow_up_turn_keeps_the_sender_and_channel_of_the_turn_it_came_from(assistant):
-    """The bus carries text and a token alone, so a follow-up built from scratch would reach
+    """A bus message carries no channel identity, so a follow-up built from scratch would reach
     ``reactive`` with no ``sender`` and no ``channel``: the two fields a channel routes a reply by
     (``send(reply_to=...)``). Inert on every channel in this repository and not inert by definition,
     which is why the finishing turn's own message is the template this one is derived from. ``images``
@@ -2063,7 +2065,7 @@ async def test_a_follow_up_turn_keeps_the_sender_and_channel_of_the_turn_it_came
     )
 
     await assistant._turns._resubmit_messages(
-        assistant._active_id, [Message("just missed it", token="b2")], like=original
+        assistant._active_id, [Message("just missed it", sender=USER, to=EVERYONE, token="b2")], like=original
     )
 
     assert submitted == [
@@ -2102,7 +2104,7 @@ async def test_an_undelivered_message_runs_through_the_real_resubmit_path(assist
     async def offer_once(text, *args, **kwargs):
         asked.append(text)
         if len(asked) == 1:
-            current_bus.get().offer("and one more thing")
+            current_bus.get().send("and one more thing", sender=USER, to=EVERYONE)
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = offer_once
@@ -2126,7 +2128,7 @@ async def test_a_stopped_turn_does_not_resubmit_its_undelivered_messages(assista
     async def offer_then_stop(*args, **kwargs):
         # Raised from inside the run rather than delivered to the task, which is indistinguishable to
         # `reactive`'s `except asyncio.CancelledError` and needs no second task to do the stopping.
-        current_bus.get().offer("never mind, do the other thing")
+        current_bus.get().send("never mind, do the other thing", sender=USER, to=EVERYONE)
         raise asyncio.CancelledError()
 
     assistant._book.agent_for(assistant._active_id).run = offer_then_stop
@@ -2286,7 +2288,8 @@ async def test_a_message_typed_during_a_follow_up_turn_reaches_that_turn(assista
     async def run(text, *args, **kwargs):
         asked.append(text)
         if len(asked) == 1:
-            current_bus.get().offer("and one more thing")  # never drained, so it runs as a turn
+            # Never drained, so it runs as a turn.
+            current_bus.get().send("and one more thing", sender=USER, to=EVERYONE)
         elif len(asked) == 2:
             offered.append(assistant._offer_message(message("and a third"), assistant._active_id))
         return "done"
@@ -2353,7 +2356,7 @@ async def test_an_unattended_turn_publishes_a_bus_too(assistant):
     assert bus is not None
     assert routed is bus  # the entry routing reads carries this firing's own bus
     assert source is ENTRY_SOURCE
-    assert bus.offer("too late") is False  # shut when the firing ended
+    assert bus.send("too late", sender=USER, to=EVERYONE) is False  # shut when the firing ended
 
 
 async def test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_turn(assistant):
@@ -2368,7 +2371,7 @@ async def test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_tur
     async def run(text, *args, **kwargs):
         asked.append(text)
         if len(asked) == 1:  # offered once, so a drain that stopped working costs one turn, not a loop
-            current_bus.get().offer("while you are at it, check the log")
+            current_bus.get().send("while you are at it, check the log", sender=USER, to=EVERYONE)
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = run
@@ -2397,7 +2400,7 @@ async def test_a_firings_bus_is_shut_even_when_the_channel_raises_during_teardow
 
     await assistant._turns.proactive("the scheduled prompt")  # the failure is reported, not raised
 
-    assert seen and seen[0].offer("too late") is False
+    assert seen and seen[0].send("too late", sender=USER, to=EVERYONE) is False
 
 
 async def test_a_follow_up_turn_that_fails_is_not_reported_as_the_firing_failing(assistant):
@@ -2409,7 +2412,7 @@ async def test_a_follow_up_turn_that_fails_is_not_reported_as_the_firing_failing
 
     async def run(text, *args, **kwargs):
         asked.append(text)
-        current_bus.get().offer("while you are at it, check the log")
+        current_bus.get().send("while you are at it, check the log", sender=USER, to=EVERYONE)
         return "done"
 
     async def explode(*args, **kwargs):
@@ -2501,7 +2504,7 @@ async def test_a_follow_up_turn_carries_the_token_of_the_message_that_became_it(
             [{"role": "user", "content": text}, {"role": "assistant", "content": "done"}]
         )
         if len(asked) == 1:
-            current_bus.get().offer("and one more thing", token="b2")
+            current_bus.get().send("and one more thing", sender=USER, to=EVERYONE, token="b2")
         return "done"
 
     agent.run = offer_once
@@ -2523,4 +2526,4 @@ async def test_a_mid_turn_message_hands_the_bus_the_id_its_front_end_drew_it_und
     )
 
     assert accepted is True
-    assert bus.close() == [Message("use the cache", "b2")]
+    assert bus.close() == [Message("use the cache", sender=USER, to=EVERYONE, token="b2")]

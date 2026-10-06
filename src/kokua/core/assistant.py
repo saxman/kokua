@@ -42,6 +42,7 @@ from kokua.core.conversations import UNTITLED, ConversationBook, TurnInFlight
 from kokua.core.diagnostics import diag_report
 from kokua.core.interaction import HumanGate
 from kokua.core.messages import TITLE_MAX, first_user_text
+from kokua.core.messaging import EVERYONE, USER
 from kokua.core.subagents import SubagentReporter
 from kokua.core import titles
 from kokua.mcp.auth import OAuthSettings
@@ -871,8 +872,9 @@ class Assistant:
         if info is None or info.bus is None or info.handle.done:
             return False
         # The front end's own id for the bubble it drew rides along, so a message this turn accepts and
-        # never reads can still be named by the follow-up turn it becomes (see `Message`).
-        return info.bus.offer(msg.text or "", token=(msg.metadata or {}).get("token"))
+        # never reads can still be named by the follow-up turn it becomes (see `Message`). Sent from
+        # the user to every reader on the bus, since a channel has no way yet to address a single run.
+        return info.bus.send(msg.text or "", sender=USER, to=EVERYONE, token=(msg.metadata or {}).get("token"))
 
     async def _run_conversation_command(self, word: str, argument: str) -> None:
         """Run `/new`, `/conversations`, or `/switch`, and report what happened on the channel.

@@ -13,7 +13,7 @@ first consume a message the conversation never saw. ("A declared agent" is the l
 a worker ``toolsets/capabilities.py`` composes per call builds its own spawn tool and is handed no
 source, so it cannot be redirected. ``TODO.md`` carries that gap.)
 
-**Nothing here awaits.** ``offer`` and ``close`` are both synchronous, and asyncio is
+**Nothing here awaits.** ``send`` and ``close`` are both synchronous, and asyncio is
 single-threaded, so there is no interleaving between the moment a turn's ``finally`` shuts the
 bus and the moment the serve loop asks whether it is open. That is the whole of invariant 9: a
 message is accepted and delivered, or refused and run as its own turn, and never both or neither.
@@ -31,18 +31,34 @@ if TYPE_CHECKING:
     from kokua.core.auto_approval import ReviewContext
 
 
+#: The user's own address, and the only one a front end ever sends under: a channel's typed message
+#: always enters the bus as coming from the user, never from an agent.
+USER = "user"
+
+#: The selector that reaches every reader on the bus, regardless of label or ordinal.
+EVERYONE = "everyone"
+
+
 @dataclass(frozen=True)
 class Message:
-    """One message handed to a running turn: what the user said, and the front end's id for it.
+    """One message on a turn's bus, and who it is from and for.
 
-    The id is what a front end that draws its own bubbles matches a message to its fate by, and it has
-    to travel this far because a message can meet a further fate here: accepted into the turn, never
-    read, and then run as a turn of its own. That follow-up turn's save is the only frame left to name
-    the bubble, and the text cannot name it (two messages can read the same). ``None`` where the
-    channel draws no bubbles, which is every channel but the web page.
+    ``to`` is a selector rather than a recipient list: an address for one run, a label for every run
+    with that label, or ``EVERYONE``. Matching is a pure function (see ``matches``) so a reader can
+    answer "is this mine" without the bus knowing who is reading.
+
+    ``token`` is the front end's own id for the message, carried for the reason the front end needs
+    it: the page draws a bubble before it knows which of a message's fates it met. It is what a front
+    end that draws its own bubbles matches a message to its fate by, and it has to travel this far
+    because a message can meet a further fate here: accepted into the turn, never read, and then run
+    as a turn of its own. That follow-up turn's save is the only frame left to name the bubble, and the
+    text cannot name it (two messages can read the same). ``None`` where the channel draws no bubbles,
+    which is every channel but the web page.
     """
 
     text: str
+    sender: str
+    to: str
     token: Optional[str] = None
 
 
@@ -52,9 +68,9 @@ class MessageBus:
     def __init__(self, review_context: Optional["ReviewContext"] = None) -> None:
         self._messages: list[Message] = []
         self._open = True
-        # The turn's auto-approval review context, if it opened one, amended by `offer` so a
+        # The turn's auto-approval review context, if it opened one, amended by `send` so a
         # reviewer judges a redirected turn's calls against what the user now wants. Held as a field
-        # rather than read from ``current_review_context`` at use time because an offer arrives on
+        # rather than read from ``current_review_context`` at use time because a send arrives on
         # the serve loop's task while that contextvar is set inside the turn's own, so it is not
         # visible there.
         self._review_context = review_context
@@ -62,19 +78,64 @@ class MessageBus:
         # a worker having seen a message is not the conversation having seen it, so a message only a
         # worker consumed still runs as a follow-up turn rather than vanishing into a summary.
         self._entry_seen = 0
+        # Every address that has opened a reader this turn, in the order they opened, and the next
+        # ordinal per label. Append-only and never retired: nothing in AIMU's protocol signals that a
+        # run ended, and inferring it from reader-open order is the identity-by-ordering the protocol
+        # itself warns against. So an address names a run that opened a reader, not one still open,
+        # and `close` is what reports a message nobody drained.
+        self._roster: list[str] = []
+        self._ordinals: dict[str, int] = {}
 
-    def offer(self, text: str, *, token: Optional[str] = None) -> bool:
+    def roster(self) -> list[str]:
+        """Every address that has opened a reader this turn, oldest first."""
+        return list(self._roster)
+
+    #: AIMU names a spawned worker ``subagent-{agent_type}``, which is its own decoration of the
+    #: agent_type Kokua declared. Addresses follow the config's vocabulary instead, so a sender types
+    #: the name it can see in `[agents.<name>]`. Pinned as a fact about the release in
+    #: ``tests/test_aimu_compat.py``, since a change to it upstream would silently rename every
+    #: worker address here.
+    _AIMU_WORKER_PREFIX = "subagent-"
+
+    def _register(self, label: Optional[str], *, ordinal: bool) -> Optional[str]:
+        """Mint and record this run's address, or None for a run with no name to address.
+
+        ``ordinal`` is False for the entry agent, of which exactly one runs per turn, so a worker can
+        address its parent by the name the config gave it rather than by a counter it cannot know.
+
+        A worker's label arrives carrying AIMU's prefix and is stripped to the declared name. The
+        strip is unconditional, so a declared agent literally called ``subagent-foo`` would collapse
+        to ``foo``; that edge is accepted rather than guarded, because asking which declared names
+        exist would mean this module reaching into the config at reader-open time to serve a case
+        nobody hits.
+        """
+        if label is None:
+            return None
+        if ordinal and label.startswith(self._AIMU_WORKER_PREFIX):
+            label = label[len(self._AIMU_WORKER_PREFIX) :]
+        if not ordinal:
+            address = label
+        else:
+            self._ordinals[label] = self._ordinals.get(label, 0) + 1
+            address = f"{label}#{self._ordinals[label]}"
+        self._roster.append(address)
+        return address
+
+    def send(self, text: str, *, sender: str, to: str, token: Optional[str] = None) -> bool:
         """Hand a message to the running turn. ``False`` means the turn is gone: run it as a turn.
 
-        ``token`` is the front end's own id for the message, carried for the reason :class:`Message`
-        gives and never read here. Keyword-only, which is the shape every optional opaque id on this
-        feature's surfaces takes (``ChannelUI.message_taken`` and ``turn_saved``,
-        ``RichChannel.send_message_frame`` and ``send_turn_saved``), so a caller cannot pass one by
-        position and an added parameter cannot change what a positional argument means.
+        ``sender`` is the address the message is from and ``to`` is the selector it is for (an
+        address, a label, or ``EVERYONE``); see :class:`Message` for what each means and how a
+        reader will match against ``to``. ``token`` is the front end's own id for the message,
+        carried for the reason :class:`Message` gives and never read here. Keyword-only, which is the
+        shape every optional opaque id on this feature's surfaces takes (``ChannelUI.message_taken``
+        and ``turn_saved``, ``RichChannel.send_message_frame`` and ``send_turn_saved``), so a caller
+        cannot pass one by position and an added parameter cannot change what a positional argument
+        means.
         """
         if not self._open:
             return False
-        self._messages.append(Message(text, token))
+        self._messages.append(Message(text, sender, to, token))
         self._amend_review_context(text)
         return True
 
@@ -84,14 +145,14 @@ class MessageBus:
         A reviewer judges one gated call's arguments against the request text, so a turn redirected
         mid-run would otherwise have its calls judged against instructions the user has already
         replaced. The context comes off this instance for the reason ``__init__`` gives: a
-        contextvar set inside the turn is invisible on the task an offer arrives on.
+        contextvar set inside the turn is invisible on the task a send arrives on.
 
         **The amendment happens on acceptance, not on delivery**, which is the earlier of the two
         moments a reader might expect. Acceptance is where the text already is, so it costs nothing;
         delivery would mean carrying the text as far as the drain and amending from inside AIMU's own
         loop. The gap between the two only ever makes the reviewer read something
         the user did say and the run has not acted on yet, because this appends and never replaces,
-        never touches ``used``, and is reachable only from ``offer``, whose input is the user's own
+        never touches ``used``, and is reachable only from ``send``, whose input is the user's own
         words. A message accepted and never drained is the case the gap is visible in, and all it
         leaves behind is a sentence in a context the turn is about to discard.
 
@@ -114,7 +175,7 @@ class MessageBus:
 
         Drains the text alone, which is what AIMU's loop takes as the prompt for its next round.
 
-        Opens at zero, so a worker spawned *after* a message was offered still receives it. That is
+        Opens at zero, so a worker spawned *after* a message was sent still receives it. That is
         deliberate, and it is where this cursor and :meth:`entry_reader`'s differ: the entry cursor
         measures one conversation's progress through the whole turn, while a worker's measures one
         run that did not exist when the earlier messages arrived. Replaying them to it is context
@@ -124,9 +185,11 @@ class MessageBus:
         property, append-only with every reader seeing the list, depend on when a reader was opened.
 
         ``agent`` is the run's own name, passed positionally by AIMU's loop so it can address one run
-        rather than every run's drain. Accepted and ignored here: nothing yet reads it, so it is kept
-        only to match the shape AIMU's constructor rehearses before a run starts.
+        rather than every run's drain. It mints this run's roster address via :meth:`_register` with
+        ``ordinal=True``, since AIMU can spawn more than one worker under the same declared name and
+        each one opening a reader needs its own address (see :meth:`_register`).
         """
+        self._register(agent, ordinal=True)
         seen = 0
 
         def drain() -> list[str]:
@@ -144,9 +207,12 @@ class MessageBus:
         other side: this position is the conversation's, so every entry-agent run inside a turn shares
         it, where each worker gets a fresh one opened at zero.
 
-        ``agent`` is accepted for the reason :meth:`reader` gives: AIMU passes the run's name
-        positionally, and nothing here reads it yet.
+        ``agent`` is the entry agent's declared name, passed positionally by AIMU's loop. It mints the
+        turn's entry address via :meth:`_register` with ``ordinal=False``, so exactly one address
+        exists per turn no matter how many entry-agent runs share this cursor, and a worker can
+        address its parent by the name the config gives it rather than by a counter it cannot know.
         """
+        self._register(agent, ordinal=False)
 
         def drain() -> list[str]:
             pending = self._messages[self._entry_seen :]
@@ -203,7 +269,8 @@ class _ContextSource:
 
     def reader(self, agent: Optional[str] = None) -> Callable[[], list[str]]:
         """Open this run's cursor. ``agent`` is the run's own name, passed positionally by AIMU's
-        loop; accepted and ignored here, since nothing yet reads it.
+        loop, straight through to :meth:`MessageBus.entry_reader` or :meth:`MessageBus.reader`, which
+        mint this run's roster address from it.
         """
         bus = current_bus.get()
         if bus is None:

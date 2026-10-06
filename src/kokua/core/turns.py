@@ -139,7 +139,7 @@ Every rule here was learned from a bug. Read them before changing anything in th
    reason nothing is auto-approved while nobody is watching.
 
 9. **A message typed mid-turn reaches the running turn or becomes the next one, never both and never
-   neither.** ``MessageBus.offer`` and ``close`` are both synchronous and asyncio is single-threaded,
+   neither.** ``MessageBus.send`` and ``close`` are both synchronous and asyncio is single-threaded,
    so the serve loop cannot observe a bus as open in the same tick this ``finally`` shuts it. What that
    alone does not cover is the window after the loop's last drain: a message accepted there is never
    read, so ``close`` hands it back and this path runs it as a follow-up turn. The "never both" half
@@ -534,10 +534,11 @@ class TurnRunner:
         one. Both callers reach here only with something to run, so there is always a first.
 
         ``like`` is the message the finishing turn was made of, used as the template this one is built
-        from so the follow-up keeps that turn's ``sender`` and ``channel``. The bus carries only text
-        and a token (see :class:`kokua.core.messaging.Message`), so those two fields have no other
-        route back, and they are what a channel routes a reply by (``send(reply_to=...)``): inert on
-        every channel in this repository, and not inert by definition. ``images`` is cleared because a
+        from so the follow-up keeps that turn's ``sender`` and ``channel``. A bus message carries a
+        front-end token but no channel identity (see :class:`kokua.core.messaging.Message`), so those
+        two ``ChannelMessage`` fields have no other route back, and they are what a channel routes a
+        reply by (``send(reply_to=...)``): inert on every channel in this repository, and not inert by
+        definition. ``images`` is cleared because a
         message handed to a running turn is text only, and ``metadata`` is replaced rather than
         inherited so nothing else riding the original (a per-turn reasoning effort, for one) is
         re-applied to a turn the user never asked that of. A scheduled firing passes nothing, because it
