@@ -338,8 +338,8 @@ class TurnRunner:
         # the same loop step and does read the entry before this line runs, which is why
         # `Assistant._offer_message` refuses an entry whose bus is absent. A late *reader* is
         # harmless by contrast, since the bus is append-only and a cursor opened afterwards still
-        # sees what was offered before it.
-        # Carries `review_context` rather than reading the contextvar, because an offer arrives on the
+        # sees what was sent before it.
+        # Carries `review_context` rather than reading the contextvar, because a send arrives on the
         # serve loop's own task while that contextvar is set inside this turn's: invisible from there.
         bus = MessageBus(review_context=review_context)
         bus_token = current_bus.set(bus)

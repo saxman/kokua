@@ -46,10 +46,36 @@ def test_two_workers_sharing_a_label_get_distinct_addresses():
     assert bus.roster() == ["researcher#1", "researcher#2"]
 
 
+def test_the_ordinal_counter_is_kept_per_label_not_globally():
+    # A global counter would also pass the two-researcher case above, since nothing else opens a
+    # reader in between. Interleaving a second label is what tells the two apart: a per-label
+    # counter leaves "researcher" untouched by "coder" opening in the middle, where a global one
+    # would not.
+    bus = MessageBus()
+    bus.reader("subagent-researcher")
+    bus.reader("subagent-coder")
+    bus.reader("subagent-researcher")
+
+    assert bus.roster() == ["researcher#1", "coder#1", "researcher#2"]
+
+
 def test_the_entry_agent_takes_its_bare_name_with_no_ordinal():
     # Exactly one entry agent runs per turn, so an ordinal would be noise, and a worker can address
     # its parent by the name the config gives it.
     bus = MessageBus()
+    bus.entry_reader("assistant")
+
+    assert bus.roster() == ["assistant"]
+
+
+def test_a_repeated_entry_open_registers_one_address_not_one_per_open():
+    # Reachable, not theoretical: the planning workflow passes ENTRY_SOURCE at three call sites
+    # (the planner's own run, the executor's, and one more per review round), so a planned turn
+    # opens this cursor two or three times in a single turn. Exactly one agent runs under this
+    # cursor regardless, so the roster must list it once.
+    bus = MessageBus()
+    bus.entry_reader("assistant")
+    bus.entry_reader("assistant")
     bus.entry_reader("assistant")
 
     assert bus.roster() == ["assistant"]

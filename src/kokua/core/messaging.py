@@ -115,6 +115,14 @@ class MessageBus:
             label = label[len(self._AIMU_WORKER_PREFIX) :]
         if not ordinal:
             address = label
+            if address in self._roster:
+                # Exactly one entry agent runs per turn, however many times its cursor is opened
+                # (the planning workflow opens it two or three times on its default path: the
+                # planner's run, the executor's, and one more per review round), so a repeat open
+                # must not add a second listing for an address already on the roster. A worker's
+                # ordinal makes this unreachable on the other branch: each open mints a fresh
+                # `label#n`, so there is nothing to collide with.
+                return address
         else:
             self._ordinals[label] = self._ordinals.get(label, 0) + 1
             address = f"{label}#{self._ordinals[label]}"
