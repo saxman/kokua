@@ -4,7 +4,11 @@ AIMU's ``spawn_subagent`` returns only a string, so a delegating turn used to lo
 pause. :class:`SubagentReporter` implements AIMU's ``SubagentObserver`` and does two independent
 jobs per callback: send a ``subagent`` frame (the page renders one foldable card per spawn, updated
 in place by ``id``) and append the same event to a per-turn list that the turn persists, so a reload
-replays what was seen live.
+replays what was seen live. A third, unrelated to display, rides the same ``spawned``/``finished``
+pair: bracketing ``core/messaging.py``'s ``current_address`` around the spawn's run, which is what
+keeps a worker's own address from leaking into whoever spawned it once that worker returns. See
+``spawned``'s own docstring for why this reporter, rather than anything in ``core/messaging.py``
+itself, is where that has to live.
 
 Display and recording are deliberately separate. A background turn's frames are muted by the
 channel, but its events are still recorded, so switching into that conversation shows the work. The
@@ -40,7 +44,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from pathlib import Path
 from typing import Callable, Optional, Union
 
@@ -48,6 +52,7 @@ from aimu.models import StreamChunk, StreamingContentType
 
 from kokua import payloads
 from kokua.channels.ui import ChannelUI
+from kokua.core.messaging import current_address
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +91,11 @@ class SubagentReporter:
         # accumulated text a second time. Discarded on finish, since this one reporter lives as long
         # as the connection and must not grow an entry per spawn ever made.
         self._streamed_answers: set[str] = set()
+        # The `current_address` (core/messaging.py) token saved per spawn, keyed by spawn_id the same
+        # way `_streamed_answers` is: a UUID AIMU mints once per spawn, so concurrent spawns sharing
+        # this one reporter never collide on the key even though neither dict is otherwise isolated
+        # per turn. See `spawned`/`finished` for what this buys.
+        self._address_tokens: dict[str, Token[Optional[str]]] = {}
         # Where an oversized tool response is spilled to (see ``payloads.py``). A path rather than the
         # whole config, because this is the only setting the reporter reads and taking the config
         # would let it grow a dependency on anything else in there.
@@ -96,7 +106,27 @@ class SubagentReporter:
         stored conversation says what produced its answer. ``model`` is omitted when none is configured
         anywhere, since AIMU resolves that case at client construction and there is no string to record;
         ``thinking`` is omitted on ``None`` for the same reason, but recorded on ``False``, which is the
-        declaration "do not reason" rather than the absence of one."""
+        declaration "do not reason" rather than the absence of one.
+
+        Also clears ``current_address`` (core/messaging.py) for the run about to start, saving a token
+        ``finished`` restores. This fires before AIMU calls ``agent.run`` at all (``spawned`` is the
+        first thing ``_run_observed`` does), and it is the one hook every spawn Kokua makes shares,
+        declared or composed: both ``core/agents.py`` and ``toolsets/capabilities.py`` build their
+        ``spawn_subagent`` with this reporter as ``observer``. That matters because `current_address`
+        is not Task-scoped -- a round with one tool call (the common case) dispatches it with a plain
+        ``await``, not ``TaskGroup.create_task``, so the spawned run shares this run's own ``Context``
+        for as long as it runs and for however long afterward nothing else touches the var. Clearing
+        here rather than only saving forces the question "did this run claim an address of its own":
+        one that opens a reader overwrites ``None`` with it the moment ``run()`` calls ``_open_inbox``,
+        before its first model call; one that does not (``toolsets/capabilities.py``'s composed worker
+        was the one shipped case, fixed alongside this; any future path making the same mistake is the
+        reason this exists rather than a one-off patch there) leaves it ``None`` for its own tool
+        calls, which is what lets ``send_message`` refuse a forgetful worker instead of mis-attributing
+        it to whoever spawned it. Restoring on ``finished`` is the other half: without it, the spawning
+        run's *own* later tool calls in the same round (dispatched sequentially, sharing the same
+        Context) would still see the child's leftover address once the child returns.
+        """
+        self._address_tokens[spawn_id] = current_address.set(None)
         event = {"id": spawn_id, "role": agent_type or "subagent", "task": task, "status": "running"}
         model = self._model_for(agent_type)
         if model:
@@ -175,6 +205,16 @@ class SubagentReporter:
         return append
 
     async def finished(self, spawn_id: str, result: str, error: Optional[BaseException]) -> None:
+        # Restores `current_address` to whatever `spawned` saved before clearing it, undoing that
+        # clear regardless of how this spawn ended (`_run_observed` calls this from a `finally`, so a
+        # cancelled or failed spawn restores exactly like a successful one). Popped rather than left,
+        # for the same reason `_streamed_answers` is discarded below: this reporter outlives any one
+        # spawn. `reset` is safe here because `finished` always runs in the same Context `spawned` set
+        # the token in -- both calls happen inside the one coroutine `_run_observed` awaits, never
+        # across a `TaskGroup` boundary.
+        address_token = self._address_tokens.pop(spawn_id, None)
+        if address_token is not None:
+            current_address.reset(address_token)
         streamed = spawn_id in self._streamed_answers
         self._streamed_answers.discard(spawn_id)
         event: dict

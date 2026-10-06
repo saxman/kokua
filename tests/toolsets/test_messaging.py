@@ -2,7 +2,9 @@
 
 The bus's own mechanics (rosters, delivery tracking, `close`'s two lists) are covered in
 `tests/core/test_messaging.py`; these assert on the tool surface, which is the half a model reads and
-the half that decides whether to send at all.
+the half that decides whether to send at all. `tests/conftest.py`'s `reset_current_address` fixture
+resets the `current_address` contextvar around every test in this process, so a test here that wants a
+specific starting value sets it explicitly and everything else can assume the clean default.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ def test_send_message_outside_a_turn_says_so_rather_than_raising():
     assert "no turn" in send_message("researcher", "hello").lower()
 
 
-def test_list_agents_names_the_roster_and_the_user():
+def test_list_agents_names_the_roster_and_everyone():
     bus = MessageBus()
     bus.entry_reader("assistant")
     bus.reader("researcher")
@@ -49,6 +51,9 @@ def test_list_agents_names_the_roster_and_the_user():
     try:
         listing = list_agents()
         assert "assistant" in listing and "researcher#1" in listing and "everyone" in listing
+        # Fix round 1, I1: `user` is a sender, not a selector (the module docstring's ruling), so it
+        # must not appear as something `send_message` could be told to reach.
+        assert "user" not in listing.lower()
     finally:
         current_bus.reset(token)
 
@@ -57,36 +62,30 @@ def test_list_agents_outside_a_turn_says_so_rather_than_raising():
     assert "no turn" in list_agents().lower()
 
 
-def test_send_message_refusal_does_not_merely_say_refused_while_still_sending():
-    # Negative control for the refusal test above. A receipt is only proof of a refusal if nothing
-    # was actually handed to the bus; a sender-facing sentence is not. If `send_message` sent the
-    # text and *also* worded its reply like a refusal, a check on wording alone would still pass. The
-    # strong assertion is the bus's own state: `close()` must report nothing and resubmit nothing, or
-    # the message went out despite the words saying otherwise.
-    bus = MessageBus()
-    bus.reader("researcher")
-    token = current_bus.set(bus)
-    try:
-        receipt = send_message("analyst#1", "hello")
-        wording_alone_looks_right = "no agent" in receipt.lower()
-        resubmit, report = bus.close()
-        assert wording_alone_looks_right
-        assert resubmit == [] and report == [], "the refusal must mean nothing was sent, not just said"
-    finally:
-        current_bus.reset(token)
-
-
 def test_send_message_to_everyone_is_accepted_even_with_an_empty_roster():
     # `to == EVERYONE` is valid independently of who has opened a reader so far: a broadcast also
     # reaches a worker spawned later in the turn, whose reader opens at zero (see
     # `MessageBus.reader`). Refusing it here for lack of a roster would contradict that.
+    #
+    # Fix round 1, I5: the previous version of this test only asserted `"no agent" not in
+    # receipt.lower()`, which passes under almost any receipt that is not itself the refusal
+    # sentence -- including one from a broken implementation that silently dropped the broadcast
+    # instead of sending it. The strong check is the bus's own state: the message must actually be
+    # there, addressed to everyone, attributed to whoever called this.
     bus = MessageBus()
-    token = current_bus.set(bus)
+    current_address.set("assistant")
+    bus_token = current_bus.set(bus)
     try:
         receipt = send_message(EVERYONE, "hello, whoever shows up")
-        assert "no agent" not in receipt.lower()
     finally:
-        current_bus.reset(token)
+        current_bus.reset(bus_token)
+    assert "accepted" in receipt.lower()
+    resubmit, report = bus.close()
+    assert resubmit == []
+    assert len(report) == 1
+    assert report[0].to == EVERYONE
+    assert report[0].text == "hello, whoever shows up"
+    assert report[0].sender == "assistant"
 
 
 def test_send_message_attributes_the_sender_from_whichever_run_last_opened_a_reader():
@@ -96,22 +95,37 @@ def test_send_message_attributes_the_sender_from_whichever_run_last_opened_a_rea
     # contextvar's own comment), leaves it pointing at "researcher#1" -- so a message to "coder" is
     # correctly attributed to the run that is actually making this call, not to "coder" itself.
     bus = MessageBus()
-    address_token = current_address.set(None)
+    bus.reader("coder")
+    bus.reader("researcher")
+    bus_token = current_bus.set(bus)
     try:
-        bus.reader("coder")
-        bus.reader("researcher")
-        bus_token = current_bus.set(bus)
-        try:
-            send_message("coder", "status?")
-        finally:
-            current_bus.reset(bus_token)
+        send_message("coder", "status?")
     finally:
-        current_address.reset(address_token)
+        current_bus.reset(bus_token)
     resubmit, report = bus.close()
     assert resubmit == []
     assert len(report) == 1
     assert report[0].sender == "researcher#1"
     assert report[0].to == "coder"
+
+
+def test_send_message_refuses_when_this_run_has_no_address_of_its_own():
+    # Fix round 1, requirement 2. A run that never opened a reader (a composed or spawned worker
+    # whose spec forgot an inbox; see `core/subagents.py`'s `SubagentReporter` for the other half of
+    # the fix) must not be able to send under whoever happens to be sharing its Context. `current_
+    # address` is explicitly `None` here -- the state a forgetful worker is actually left in, not
+    # merely "untouched" -- and that alone must be refused even though "researcher#1" is a perfectly
+    # valid destination on the roster.
+    bus = MessageBus()
+    bus.reader("researcher")
+    current_address.set(None)
+    bus_token = current_bus.set(bus)
+    try:
+        receipt = send_message("researcher", "hello")
+    finally:
+        current_bus.reset(bus_token)
+    assert "no address" in receipt.lower()
+    assert bus.close() == ([], [])
 
 
 def test_toolset_declares_both_tools_and_is_not_entry_point_only():
@@ -130,14 +144,10 @@ def test_list_agents_names_an_address_that_has_already_finished():
     # nothing here that *could* drop it -- the bus never retires an address -- so this is really a
     # statement that the roster is read as-is.
     bus = MessageBus()
-    address_token = current_address.set(None)
+    drain = bus.reader("researcher")
+    drain()  # a finished run's last act, in spirit: nothing further distinguishes it from a live one
+    bus_token = current_bus.set(bus)
     try:
-        drain = bus.reader("researcher")
-        drain()  # a finished run's last act, in spirit: nothing further distinguishes it from a live one
-        bus_token = current_bus.set(bus)
-        try:
-            assert "researcher#1" in list_agents()
-        finally:
-            current_bus.reset(bus_token)
+        assert "researcher#1" in list_agents()
     finally:
-        current_address.reset(address_token)
+        current_bus.reset(bus_token)

@@ -49,7 +49,7 @@ from (`"stocks"`, not `"mcp:stocks"`), so this command is the one place provenan
 
 | Provider | What is in it |
 | --- | --- |
-| **built-in toolset** | all 21 `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group, one file each under `src/kokua/toolsets/` and named for the toolset. Wrappers over AIMU's tool groups and its two stores (`web`, `fs`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`, `memory`, `documents`, `skills`); one per Kokua subsystem (`capabilities`, `config`, `conversations`, `mcp`, `scheduling`); the `/plan` workflow and nothing else (`planning`); and Kokua's own standalone capabilities (`aimu_agents`, `benchmark`, `github_backup`, `image`) |
+| **built-in toolset** | all 23 `Toolset`s Kokua's own distribution registers under the `kokua.toolsets` entry-point group, one file each under `src/kokua/toolsets/` and named for the toolset. Wrappers over AIMU's tool groups and its two stores (`web`, `fs`, `fs_write`, `compute`, `time`, `misc`, `audio`, `speech`, `transcription`, `memory`, `documents`, `skills`); one per Kokua subsystem (`capabilities`, `config`, `conversations`, `mcp`, `messaging`, `scheduling`); the `/plan` workflow and nothing else (`planning`); and Kokua's own standalone capabilities (`aimu_agents`, `benchmark`, `github_backup`, `image`) |
 | **skill** | one entry per skill in your skills folder, so an individual skill is declarable by name (see [add skills](add-skills.md)) |
 | **plugin** | every other `Toolset` installed under the `kokua.toolsets` entry-point group -- i.e. one a third party's package registered |
 | **MCP server** | one per `[[mcp.server]]` table, named by its required `name` |

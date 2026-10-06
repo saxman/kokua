@@ -152,6 +152,18 @@ def test_compose_spec_carries_only_keys_aimu_accepts(tmp_path):
     assert set(spec) <= SUBAGENT_SPEC_KEYS
 
 
+def test_compose_spec_gives_the_composed_worker_its_own_inbox(tmp_path):
+    """Fix round 1, requirement 1. Without this, a composed worker never opens a reader, never mints
+    an address on the bus, and `core/messaging.py`'s `current_address` is left holding whatever its
+    caller set -- which is exactly the impersonation route the review found live through the shipped
+    `[agents.assistant].tools` (holding both `capabilities` and `messaging`). `WORKER_SOURCE`, not
+    `ENTRY_SOURCE`: a composed worker is an independent run, not the conversation's own cursor, the
+    same distinction `build_agent_specs` draws for a declared one."""
+    from kokua.core.messaging import WORKER_SOURCE
+
+    assert _spec(_state(tmp_path))["inbox"] is WORKER_SOURCE
+
+
 def test_compose_spec_builds_the_named_toolsets_tools(tmp_path):
     sources = [("AIMU capability", [_toolset("web", tools=[_sample_tool])])]
     spec = _spec(_state(tmp_path, sources=sources))
@@ -279,6 +291,18 @@ async def test_compose_subagent_forwards_the_approval_gate_and_the_observer(tmp_
     await compose("w", "Do it.", ["web"], "Instructions.")
     assert spawn.calls[0]["tool_approval"] is state.tool_approval
     assert spawn.calls[0]["observer"] is state.observer
+
+
+async def test_compose_subagent_passes_events_for_turn_metrics(tmp_path, monkeypatch):
+    """Fix round 1, requirement 1's other half. Missing until now for the same reason `inbox` was:
+    without it, a composed worker's model calls never reach `current_metrics`, so the turn's own cost
+    accounting silently excludes whatever it spent. `_spawn_tool`/`make_delegation_tool` (the
+    declared-worker factories in core/agents.py) pass the same module-level constant."""
+    from kokua.core.metrics import record_event
+
+    compose, spawn = _compose(_state(tmp_path), monkeypatch)
+    await compose("w", "Do it.", ["web"], "Instructions.")
+    assert spawn.calls[0]["events"] is record_event
 
 
 async def test_compose_subagent_calls_aimu_with_max_depth_one_at_every_level(tmp_path, monkeypatch):

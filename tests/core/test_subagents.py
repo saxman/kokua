@@ -10,6 +10,7 @@ from aimu.models import StreamChunk, StreamingContentType
 
 from kokua import payloads
 from kokua.channels.ui import ChannelUI
+from kokua.core.messaging import current_address
 from kokua.core.subagents import RESPONSE_PREVIEW_CHARS, SubagentReporter, subagent_events
 from tests.channels import SubagentCapturingChannel
 
@@ -545,3 +546,71 @@ async def test_a_spawn_with_no_thinking_configured_anywhere_records_none():
     events = _collect()
     await reporter.spawned("s-1", "researcher", "find sources")
     assert "thinking" not in events[0]
+
+
+# Fix round 1, requirement 2's other half. `send_message` refuses when `current_address` is unset,
+# and these cover why it is ever *correctly* unset or restored rather than merely hoping `reader()`
+# ran. `core/messaging.py` itself cannot do this: a reader opens once, at a run's own start, and
+# nothing in AIMU's Inbox protocol calls back when a run ends, so there is no hook there to restore
+# the caller's address once a spawned run returns. `spawned`/`finished` are the one pair AIMU calls
+# around every spawn Kokua makes, declared or composed (both factories pass this reporter as
+# `observer`), which is what makes them the right place for this instead.
+
+
+async def test_spawned_clears_current_address_for_the_run_about_to_start():
+    reporter, _ = _reporter()
+    current_address.set("assistant")
+
+    await reporter.spawned("s-1", "researcher", "find sources")
+
+    assert current_address.get() is None
+
+
+async def test_finished_restores_whatever_spawned_saved():
+    reporter, _ = _reporter()
+    current_address.set("assistant")
+
+    await reporter.spawned("s-1", "researcher", "find sources")
+    # Standing in for the spawned run opening its own reader mid-flight, between `spawned` and
+    # `finished`, the way a real one does inside `agent.run()`.
+    current_address.set("researcher#1")
+    await reporter.finished("s-1", "the answer", None)
+
+    assert current_address.get() == "assistant"
+
+
+async def test_finished_restores_even_when_the_spawn_failed():
+    # `_run_observed` calls `finished` from a `finally`, so the restore must not depend on a clean
+    # result either. Nothing here reaches into AIMU's loop to prove that ordering; it only pins that
+    # *this* reporter's own restore does not skip itself when `error` is set.
+    reporter, _ = _reporter()
+    current_address.set("assistant")
+
+    await reporter.spawned("s-1", "researcher", "find sources")
+    current_address.set("researcher#1")
+    await reporter.finished("s-1", "", ValueError("boom"))
+
+    assert current_address.get() == "assistant"
+
+
+async def test_nested_spawns_restore_in_the_right_order():
+    # A composed worker that itself composes one more (depth > 1) is two `spawned`/`finished` pairs,
+    # not one, and they nest: the outer's `finished` must not run before the inner's, and each must
+    # restore to what was current when *it* started, not to some shared default. Tokens keyed by
+    # spawn_id (see `SubagentReporter.__init__`) are what keeps this correct without an explicit
+    # stack: each `finished` only ever resets the token its own `spawned` saved.
+    reporter, _ = _reporter()
+    current_address.set("assistant")
+
+    await reporter.spawned("outer", "composed", "task")
+    current_address.set("researcher#1")  # the outer spawn claims its own address
+
+    await reporter.spawned("inner", "composed", "nested task")
+    current_address.set("coder#1")  # the inner spawn claims its own, deeper still
+    assert current_address.get() == "coder#1"
+
+    await reporter.finished("inner", "inner answer", None)
+    assert current_address.get() == "researcher#1"  # back to the outer spawn's own address
+
+    await reporter.finished("outer", "outer answer", None)
+    assert current_address.get() == "assistant"  # back to the original caller

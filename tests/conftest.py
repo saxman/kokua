@@ -68,3 +68,22 @@ def no_generated_titles(monkeypatch):
 
     monkeypatch.setattr("kokua.core.titles.summarize_title", no_title)
     monkeypatch.setattr("kokua.core.titles.summarize_conversation_title", no_title)
+
+
+@pytest.fixture(autouse=True)
+def reset_current_address():
+    """Undo the one side effect `MessageBus.reader`/`entry_reader` have beyond the bus itself:
+    setting `core/messaging.py`'s `current_address`. Unlike `current_bus` and the other turn-scoped
+    contextvars, which only the code that explicitly manages a turn ever touches, this one is set by
+    a method several tests here call for reasons that have nothing to do with addressing (roster
+    mechanics in `tests/core/test_messaging.py`, a real turn run in `tests/core/test_delegation.py`,
+    `tests/core/test_turns.py`, and `tests/workflows/planning/test_runner.py`), so without a reset
+    whichever test last opened a reader leaves its address as the ambient value for whatever runs
+    next in this process -- nothing in those tests' own code resets it, since they do not know it
+    exists.
+    """
+    from kokua.core.messaging import current_address
+
+    token = current_address.set(None)
+    yield
+    current_address.reset(token)

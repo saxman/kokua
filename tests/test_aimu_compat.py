@@ -541,6 +541,53 @@ def test_aimu_still_names_a_spawned_worker_with_the_prefix_addresses_strip(monke
     assert seen_agent_names == ["subagent-researcher"]
 
 
+def test_aimu_still_drains_the_inbox_during_a_run_not_only_at_its_start(monkeypatch):
+    """Fix round 1. ``core/messaging.py``'s ``current_address`` is kept correct across a nested spawn
+    by reasserting it on every drain (see that contextvar's own comment), which depends on AIMU
+    calling a reader's drain *during* a run, not only opening the reader once at the start. Nothing in
+    Kokua's own suite can tell the two apart: ``tests/core/test_messaging.py`` calls ``MessageBus.
+    reader()`` and its returned ``drain()`` directly, so it would pass unchanged even if AIMU stopped
+    calling the drain on its own. This is the fact that closes that gap, pinned against a real
+    ``Agent`` rather than inferred from reading ``_tool_loop.py``: with ``_take_message`` patched to a
+    no-op, this fails (the recorded count drops to 0) while the rest of the suite keeps passing.
+
+    One drain call is reachable with no tool round at all: even a plain one-shot answer, the shape
+    this test scripts, takes AIMU's ``TERMINAL_HEALTHY`` branch, which drains once before returning
+    (to catch a message that arrived while the model was producing its answer). A test proving drain
+    happens *after dispatch* specifically would need a genuine tool-call round, which the project's
+    own mock client cannot produce (its ``"tool"`` response simulates one by appending messages
+    directly, without ever handing AIMU's loop a real tool call to classify); this is the weaker but
+    honest claim that does not depend on building one.
+    """
+    import asyncio
+
+    from aimu.aio.tools import builtin as aio_builtin
+    from aimu.aio.tools.builtin import make_async_subagent_tool
+
+    from tests.helpers import MockAsyncModelClient
+
+    drain_calls = 0
+
+    class _CountingInbox:
+        def reader(self, agent: Optional[str] = None):
+            def drain():
+                nonlocal drain_calls
+                drain_calls += 1
+                return []
+
+            return drain
+
+    monkeypatch.setattr(aio_builtin, "_fresh_async_subagent_client", lambda model: MockAsyncModelClient(["done"]))
+
+    spawn = make_async_subagent_tool(
+        "mock:mock",
+        agent_types={"researcher": {"system_message": "Look things up."}},
+        inbox=_CountingInbox(),
+    )
+    asyncio.run(spawn("researcher", "find something"))
+    assert drain_calls >= 1
+
+
 def test_the_floor_covers_the_agent_parameter_the_probe_cannot_see():
     """The probe is a name lookup, so it cannot tell whether the loop passes the agent's name.
 

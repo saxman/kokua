@@ -86,24 +86,19 @@ def test_a_repeated_entry_open_registers_one_address_not_one_per_open():
 def test_opening_a_worker_reader_sets_current_address_to_its_own():
     # `toolsets/messaging.py`'s `send_message` has no argument naming its caller, so it reads this
     # contextvar; a tool has nothing else to read, with no argument and nothing on the call stack
-    # naming the run.
+    # naming the run. (`tests/conftest.py`'s `reset_current_address` resets this var around every
+    # test in the process, so nothing here manages it by hand.)
     bus = MessageBus()
-    token = current_address.set(None)
-    try:
-        bus.reader("subagent-researcher")
-        assert current_address.get() == "researcher#1"
-    finally:
-        current_address.reset(token)
+    bus.reader("subagent-researcher")
+
+    assert current_address.get() == "researcher#1"
 
 
 def test_opening_the_entry_reader_sets_current_address_to_its_own():
     bus = MessageBus()
-    token = current_address.set(None)
-    try:
-        bus.entry_reader("assistant")
-        assert current_address.get() == "assistant"
-    finally:
-        current_address.reset(token)
+    bus.entry_reader("assistant")
+
+    assert current_address.get() == "assistant"
 
 
 def test_a_sequentially_opened_second_reader_leaves_current_address_at_its_own():
@@ -113,13 +108,10 @@ def test_a_sequentially_opened_second_reader_leaves_current_address_at_its_own()
     # that spawned it. Opening "coder" after "researcher" is that shape; nothing has drained yet to
     # put "researcher" back, so the contextvar is left pointing at whichever run opened last.
     bus = MessageBus()
-    token = current_address.set(None)
-    try:
-        bus.reader("subagent-researcher")
-        bus.reader("subagent-coder")
-        assert current_address.get() == "coder#1"
-    finally:
-        current_address.reset(token)
+    bus.reader("subagent-researcher")
+    bus.reader("subagent-coder")
+
+    assert current_address.get() == "coder#1"
 
 
 def test_a_readers_own_drain_reasserts_its_address_after_a_nested_open_moved_it():
@@ -129,17 +121,24 @@ def test_a_readers_own_drain_reasserts_its_address_after_a_nested_open_moved_it(
     # tool calls -- the one point that matters, even though the nested run's own calls saw the wrong
     # value in between.
     bus = MessageBus()
-    token = current_address.set(None)
-    try:
-        drain_researcher = bus.reader("subagent-researcher")
-        bus.reader("subagent-coder")
-        assert current_address.get() == "coder#1"  # the nested open's clobber, confirmed
+    drain_researcher = bus.reader("subagent-researcher")
+    bus.reader("subagent-coder")
+    assert current_address.get() == "coder#1"  # the nested open's clobber, confirmed
 
-        drain_researcher()
+    drain_researcher()
 
-        assert current_address.get() == "researcher#1"
-    finally:
-        current_address.reset(token)
+    assert current_address.get() == "researcher#1"
+
+    # Fix round 1, I6: the contextvar transition above is the mechanism, not the property anyone
+    # cares about. Pin the end-to-end behavior it exists for: a `send` made right after this drain
+    # is attributed to "researcher#1", the run whose own drain just ran, not to "coder#1", the
+    # nested spawn that clobbered it in between.
+    bus.send("status?", sender=current_address.get(), to="coder")
+    resubmit, report = bus.close()
+    assert resubmit == []
+    assert len(report) == 1
+    assert report[0].sender == "researcher#1"
+    assert report[0].to == "coder"
 
 
 def test_an_unnamed_run_registers_nothing_rather_than_a_placeholder():
