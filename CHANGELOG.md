@@ -956,6 +956,15 @@ message index, which lists a mid-turn message either way. A turn with several de
 one delivery at a time (`MessageBus.entry_deliveries`), so a turn where you spoke in one round and a
 worker in another tags only the worker's; where the pairing cannot be made safely, which is a `/plan`
 turn whose planner rounds were rolled back under a delivery, it can only under-tag, never mis-tag.
+**The tag is a key on the stored message, which the model reading the turn live never sees**, so a
+worker's note still read as bare words inside a recipient's own context, indistinguishable there from
+yours. `MessageBus`'s two drains (`reader`, `entry_reader`) now render that same distinction into the
+words themselves: yours passes through bare, and an agent's is rendered `[message from researcher#1]
+...`, the same form the CLI's own mid-turn marker uses. Done at the drain rather than at `send`, so the
+prefix reaches what AIMU's loop takes as the next round's prompt, and so the stored content of the
+*appended* message it becomes (the words a reader sees are exactly the words the model saw), while
+`Message.text` itself stays bare: `close()`'s undelivered report, `entry_deliveries`'s tagging
+decision, and the sender's own receipt all read that field directly and never see the prefix.
 
 **An agent's message never amends what an auto-approval reviewer reads as the turn's request**, where
 yours does. A reviewer judges one gated call's arguments against that text, so a model that could

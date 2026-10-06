@@ -2647,7 +2647,9 @@ async def test_an_agent_message_reaches_the_stored_transcript_tagged(assistant):
     Asserted on the stored session rather than on the agent's live messages, because the tag is
     written for a reader who comes back later: it has to be in place before ``_persist`` snapshots
     the turn, which is why it is applied where the indices are resolved and not in the outer
-    ``finally`` that closes the bus.
+    ``finally`` that closes the bus. The stored content itself carries the ``[message from ...]``
+    prefix too, because the drain rendered it before AIMU joined and appended it: the tag protects a
+    transcript reader, and the prefix in the words is what protected the model that read them live.
     """
     conversation_id = assistant._active_id
     agent = assistant._book.agent_for(conversation_id)
@@ -2658,7 +2660,7 @@ async def test_an_agent_message_reaches_the_stored_transcript_tagged(assistant):
     await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
 
     stored = assistant._store.get(conversation_id)
-    assert stored.messages[3]["content"] == "look at the index"
+    assert stored.messages[3]["content"] == "[message from researcher#1] look at the index"
     assert stored.messages[3][PROVENANCE_KEY] == PROVENANCE_AGENT
     # And it is still recorded as a mid-turn message, which is what keeps it from replaying as a turn
     # of its own whichever of the two a reader asks.
@@ -2696,7 +2698,7 @@ async def test_a_round_that_carried_both_the_user_and_an_agent_stays_untagged(as
     await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
 
     stored = assistant._store.get(conversation_id)
-    assert stored.messages[3]["content"] == "use the cache\n\nand the index"
+    assert stored.messages[3]["content"] == "use the cache\n\n[message from researcher#1] and the index"
     assert PROVENANCE_KEY not in stored.messages[3]
     assert stored.metadata["messages"]["0"] == [3]
 
@@ -2720,7 +2722,10 @@ async def test_two_deliveries_in_one_turn_are_tagged_one_at_a_time(assistant):
     await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
 
     stored = assistant._store.get(conversation_id)
-    assert [stored.messages[index]["content"] for index in (3, 6)] == ["use the cache", "and the index"]
+    assert [stored.messages[index]["content"] for index in (3, 6)] == [
+        "use the cache",
+        "[message from researcher#1] and the index",
+    ]
     assert PROVENANCE_KEY not in stored.messages[3]
     assert stored.messages[6][PROVENANCE_KEY] == PROVENANCE_AGENT
     assert stored.metadata["messages"]["0"] == [3, 6]
@@ -2742,7 +2747,7 @@ async def test_an_agent_message_in_an_unattended_turn_is_tagged_rather_than_read
     await assistant._turns.proactive("summarize the log")
 
     stored = assistant._store.get(conversation_id)
-    assert stored.messages[3]["content"] == "look at the index"
+    assert stored.messages[3]["content"] == "[message from researcher#1] look at the index"
     assert stored.messages[3][PROVENANCE_KEY] == PROVENANCE_AGENT
     assert stored.messages[0][PROVENANCE_KEY] == PROVENANCE_PROACTIVE  # the firing's own prompt still is
 

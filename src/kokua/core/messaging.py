@@ -76,6 +76,25 @@ class Message:
     token: Optional[str] = None
 
 
+def _for_model(message: Message) -> str:
+    """The text a drain hands AIMU's loop for *message*, attributed if an agent sent it.
+
+    The user's own words pass through bare: the model is already reading inside the user's own
+    conversation, so a user message needs no tag to say whose turn this is, the same reading
+    :meth:`MessageBus._amend_review_context` relies on when it tests ``sender == USER``. An agent's
+    message is prefixed with its own address instead, so the words alone tell the reader another
+    agent wrote them. The envelope's ``sender`` already lets a stored message carry a
+    ``PROVENANCE_*`` tag a transcript reader can check; that tag is metadata the model never reads,
+    so this is the other half of the same defense, protecting the model that acts on the message
+    rather than the reader that looks at the record afterwards. ``[message from {sender}]`` matches
+    the form the CLI's own mid-turn marker uses, so an agent's message reads the same way whether a
+    person or a model is looking at it.
+    """
+    if message.sender == USER:
+        return message.text
+    return f"[message from {message.sender}] {message.text}"
+
+
 def matches(selector: str, address: Optional[str]) -> bool:
     """Whether a message addressed to *selector* is for the run at *address*.
 
@@ -250,7 +269,8 @@ class MessageBus:
     def reader(self, agent: Optional[str] = None) -> Callable[[], list[str]]:
         """A cursor for one run: the entry agent's, or one spawned worker's.
 
-        Drains the text alone, which is what AIMU's loop takes as the prompt for its next round.
+        Drains text rendered per message (see :func:`_for_model`), which is what AIMU's loop takes as
+        the prompt for its next round: the user's own words bare, an agent's attributed to its sender.
 
         Opens at zero, so a worker spawned *after* a message was sent still receives it. That is
         deliberate, and it is where this cursor and :meth:`entry_reader`'s differ: the entry cursor
@@ -285,7 +305,7 @@ class MessageBus:
             nonlocal seen
             current_address.set(address)
             start, seen = seen, len(self._messages)
-            return [message.text for message in self._take(start, seen, address)]
+            return [_for_model(message) for message in self._take(start, seen, address)]
 
         return drain
 
@@ -326,7 +346,7 @@ class MessageBus:
                 # Empty drains are left out so a position in this list counts appended messages
                 # rather than rounds (see `entry_deliveries`).
                 self._entry_deliveries.append(taken)
-            return [message.text for message in taken]
+            return [_for_model(message) for message in taken]
 
         return drain
 
@@ -376,9 +396,10 @@ class MessageBus:
         Shared by both cursors because the recording is the half ``close`` depends on, and a cursor
         that advanced without recording would leave ``close`` inferring delivery from a position that
         cannot carry it. Whole messages come back and each caller takes what it needs: a drain hands
-        AIMU's loop the text alone, which is what it takes as the prompt for its next round, and the
-        envelope stays this side of that boundary, where ``close`` and
-        :meth:`entry_deliveries` still need the sender.
+        AIMU's loop text rendered from each message (see :func:`_for_model`), which is what it takes
+        as the prompt for its next round, and the envelope itself stays this side of that boundary:
+        AIMU never sees a sender, a selector or a token, only the words a drain chose to render.
+        ``close`` and :meth:`entry_deliveries` need the whole envelope and read it from here directly.
         """
         taken: list[Message] = []
         for index in range(start, stop):

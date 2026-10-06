@@ -606,8 +606,8 @@ def test_a_bare_label_reaches_every_worker_sharing_it_not_just_one():
     second = bus.reader("researcher")
     bus.send("to every researcher", sender="assistant", to="researcher")
 
-    assert first() == ["to every researcher"]
-    assert second() == ["to every researcher"]
+    assert first() == ["[message from assistant] to every researcher"]
+    assert second() == ["[message from assistant] to every researcher"]
 
 
 def test_a_drain_returns_only_what_is_addressed_to_its_reader():
@@ -616,7 +616,7 @@ def test_a_drain_returns_only_what_is_addressed_to_its_reader():
     second = bus.reader("analyst")
     bus.send("for the researcher", sender="assistant", to="researcher#1")
 
-    assert first() == ["for the researcher"]
+    assert first() == ["[message from assistant] for the researcher"]
     assert second() == []
 
 
@@ -629,7 +629,7 @@ def test_a_drain_advances_past_mail_addressed_to_someone_else():
     assert mine() == []
 
     bus.send("for you", sender="assistant", to="analyst#1")
-    assert mine() == ["for you"]
+    assert mine() == ["[message from assistant] for you"]
 
 
 def test_an_unnamed_reader_still_receives_a_broadcast():

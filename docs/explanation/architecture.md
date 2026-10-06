@@ -334,7 +334,12 @@ run (a compaction between rounds can move them) and `record_turn_provenance` sto
 `metadata["messages"]`. A message one of the turn's *agents* sent is not indistinguishable: the turn
 writes `messages.PROVENANCE_AGENT` onto it before `_persist` snapshots the turn
 (`TurnRunner._tag_agent_messages`), so a worker cannot reach the stored transcript wearing the user's
-role, and `is_user_turn` excludes it with no record needed. One qualifier, and it is the reason the
+role, and `is_user_turn` excludes it with no record needed. The tag alone is metadata the model itself
+never reads, so the two drains that hand AIMU's loop a message's text (`MessageBus.reader`,
+`MessageBus.entry_reader`) also render an agent's words attributed to its sender
+(`[message from researcher#1] ...`) and the user's own bare: the same distinction one level below the
+tag, protecting the model that acts on a message rather than the reader that looks at the record
+afterwards. One qualifier, and it is the reason the
 record still carries both kinds: a drain's list becomes *one* appended message, so a round that
 delivered the user's words and an agent's is one message that is both, and tagging it would hide what
 the user said. That case stays untagged and rests on the index alone
