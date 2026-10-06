@@ -411,7 +411,7 @@ class TurnRunner:
                                 stream=True,
                                 images=msg.images,
                                 thinking=thinking,
-                                steering=ENTRY_STEERING_SOURCE,
+                                inbox=ENTRY_STEERING_SOURCE,
                             )
                             await self._ui.send(stream, reply_to=msg)
                         finally:
@@ -929,7 +929,7 @@ class TurnRunner:
                 # The conversation's own cursor, not a worker's independent one: what a user who
                 # switched into this conversation types is the conversation having seen it, and `close`
                 # measures the leftovers from this cursor's position.
-                reply = await agent.run(prompt, steering=ENTRY_STEERING_SOURCE)
+                reply = await agent.run(prompt, inbox=ENTRY_STEERING_SOURCE)
                 if spec.echo_reply:
                     await self._ui.send(reply)
             except asyncio.CancelledError:

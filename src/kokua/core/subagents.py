@@ -118,7 +118,7 @@ class SubagentReporter:
                     "append": {"kind": "loop", "reason": call.get("kind"), "text": call.get("prompt", "")},
                 }
             )
-        elif chunk.phase == StreamingContentType.STEERING:
+        elif chunk.phase == StreamingContentType.INBOX:
             # The user redirected the turn while this worker was running, and the worker read it at
             # its next round. Recorded as its own kind rather than as a `loop` entry, because the
             # card's reader needs to see that a person said this, not the loop.

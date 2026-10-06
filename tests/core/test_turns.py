@@ -2081,7 +2081,7 @@ async def test_the_entry_agents_run_opens_the_conversations_own_cursor(assistant
     sources = []
 
     async def capture_source(*args, **kwargs):
-        sources.append(kwargs.get("steering"))
+        sources.append(kwargs.get("inbox"))
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = capture_source
@@ -2342,7 +2342,7 @@ async def test_an_unattended_turn_publishes_a_mailbox_too(assistant):
 
     async def capture(*args, **kwargs):
         entry = assistant._tracker.get(assistant._active_id)
-        seen.append((current_steering.get(), entry.steering if entry else None, kwargs.get("steering")))
+        seen.append((current_steering.get(), entry.steering if entry else None, kwargs.get("inbox")))
         return "done"
 
     assistant._book.agent_for(assistant._active_id).run = capture

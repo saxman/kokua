@@ -50,7 +50,7 @@ Line length is 120 (configured in `pyproject.toml`). Run lint + tests before com
 
 ## AIMU dependency (important)
 
-Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.33.0`. That
+Kokua is built on the [AIMU](https://github.com/saxman/aimu) library and requires `aimu>=0.34.0`. That
 floor is the requirement that ships in the wheel. Separately, `[tool.uv.sources]` points AIMU at
 `{ path = "../aimu", editable = true }`, so `uv sync` here installs the sibling checkout live: the two
 projects are developed together and architectural changes move code across the boundary.
@@ -59,7 +59,7 @@ Consequences for working in this repo:
 
 - **The version floor does not constrain your sibling checkout.** uv installs a path source without
   checking it against the specifier (a declared `aimu>=0.99.0` installs a 0.13.1 sibling and locks it
-  without complaint), so `>=0.33.0` governs an installed Kokua and nothing about your working copy.
+  without complaint), so `>=0.34.0` governs an installed Kokua and nothing about your working copy.
   Do not read the pin as a guarantee about the AIMU you are running.
 - **So a sibling on an older branch is the failure mode to expect, and the startup preflight is what
   catches it.** `kokua.aimu_compat` checks the version floor plus one capability probe, and prints the
@@ -319,32 +319,52 @@ Consequences for working in this repo:
   temp directory at startup and reading it back, a filesystem side effect a preflight has no business
   having. `tests/test_aimu_compat.py` does exactly that instead, where a side effect is free.
   `"compaction"` is the floor's job then, in its turn.
-  **AIMU 0.33.0 is the current floor, and `aio.SkillAgent.run`'s `steering` parameter is the single
-  capability behind this whole plan: a run already in progress can be handed a user message without
-  waiting for it to finish, which is what lets a message typed mid-turn reach the turn running now
-  instead of queuing behind it.** The shape is a signature check, the fifth time
+  **AIMU 0.33.0 was the floor until 0.34.0, and `aio.SkillAgent.run`'s `steering` parameter was the
+  single capability behind the mid-turn-steering plan: a run already in progress could be handed a user
+  message without waiting for it to finish, which is what let a message typed mid-turn reach the turn
+  running now instead of queuing behind it.** The shape was a signature check, the fifth time
   (`SkillManager(include=...)`, `SkillAgent(script_env=...)`, `WebChannel(stream_thinking=...)`,
-  `make_async_subagent_tool(events=...)`), and a name lookup would not do: `SkillAgent.run` predates
-  this floor by a long way, so only whether it takes this argument dates a checkout, not whether the
-  method exists at all. The probe grips the subclass rather than the base class, which is the whole of
-  this release's subtlety. `aio.Agent.run(steering=...)` landed in the *first* of the release's
-  steering commits, so gripping it would date a checkout to one drain site on one driver and nothing
-  past it. `aio.SkillAgent.run` cannot delegate to `super().run()` (it has to prepare, set skills up,
-  then call the post-prepare helpers that do the actual work), so it repeats `Agent.run`'s whole
-  parameter list by hand, and a parameter added to the base method reaches the subclass only when
-  someone remembers to copy it across. `steering` was not remembered until a whole-branch review caught
+  `make_async_subagent_tool(events=...)`), and a name lookup would not have done: `SkillAgent.run`
+  predated that floor by a long way, so only whether it took this argument dated a checkout, not whether
+  the method existed at all. The probe gripped the subclass rather than the base class, which was the
+  whole of that release's subtlety. `aio.Agent.run(steering=...)` landed in the *first* of the release's
+  steering commits, so gripping it would have dated a checkout to one drain site on one driver and
+  nothing past it. `aio.SkillAgent.run` could not delegate to `super().run()` (it has to prepare, set
+  skills up, then call the post-prepare helpers that do the actual work), so it repeated `Agent.run`'s
+  whole parameter list by hand, and a parameter added to the base method reached the subclass only when
+  someone remembered to copy it across. `steering` was not remembered until a whole-branch review caught
   it, after `compaction` and `script_env` had each needed the same hand-copy before it. So the base
-  class's signature is not evidence about the subclass's, and the subclass is what Kokua runs: the
-  entry agent is an `aio.SkillAgent`, and gripping it dates a checkout to every steering commit in the
+  class's signature was not evidence about the subclass's, and the subclass was what Kokua ran: the
+  entry agent is an `aio.SkillAgent`, and gripping it dated a checkout to every steering commit in that
   release and every fix after it, where an `Agent`-shaped probe would have passed on an AIMU where
-  Kokua's own first steered turn raised `TypeError`. What it leaves to the floor is larger than usual:
-  whether the spawn path honors a `"steering"` spec key, whether both drivers drain all three branches
-  a steered turn can take, whether the three stream consumers render the phase, whether the budget
-  reset on a drained mailbox is bounded, and whether a misbehaving host source is caught rather than
-  trusted. None of those is a signature, so no signature check reaches them; the first two are the same
-  one-level-down gap `events`' recursive passthrough left for its own capability, and the last three
-  are findings the branch review itself raised. `make_skill_update_tool` is the floor's job now, in its
-  turn.
+  Kokua's own first steered turn raised `TypeError`. What it left to the floor turned out larger than
+  usual: whether the spawn path honored a `"steering"` spec key, whether both drivers drained all three
+  branches a steered turn could take, whether the three stream consumers rendered the phase, whether the
+  budget reset on a drained mailbox was bounded, and whether a misbehaving host source was caught rather
+  than trusted. None of those was a signature, so no signature check reached them; the first two were
+  the same one-level-down gap `events`' recursive passthrough left for its own capability, and the last
+  three were findings the branch review itself raised. `Inbox` is the probe's job now, in its turn.
+  **AIMU 0.34.0 is the current floor, and it is the first one a rename alone has moved: AIMU renamed its
+  mid-turn-message seam from `Steering` to `Inbox`, with no legacy path, and taught it which agent is
+  opening each reader.** `Inbox.reader(agent=...)` is called once per run, at its start, and `agent` is
+  that run's own name, offered so a host can route a message to the one run it was meant for rather than
+  to every run's drain; AIMU attaches no meaning to the string beyond passing it back. The shape is a
+  plain name lookup, the sixth time (`resolve_default_text_model`, `ModelRefusalError`,
+  `SessionStore.list_summaries`, `builtin.get_web_content`, `aimu.skills.make_skill_update_tool`), and
+  the first time a rename rather than an addition has given it an exact question: a checkout predating
+  0.34.0 has `Steering` where this one has `Inbox`, so the two names cannot both resolve the way an old
+  and a new export usually can side by side. This task renamed only the names Kokua uses to talk to
+  AIMU (`steering=` to `inbox=` at every `agent.run` call site carrying `ENTRY_STEERING_SOURCE`, the
+  `"steering"` spec key to `"inbox"`, `StreamingContentType.STEERING` to `StreamingContentType.INBOX`),
+  and widened Kokua's three reader factories in `core/steering.py` to accept the `agent` label AIMU now
+  passes positionally, since `_BaseToolLoop.__init__` rehearses that exact call and raises `TypeError`
+  when it cannot be made. Kokua's own vocabulary for the seam (`SteeringMailbox`, `current_steering`,
+  the persisted key) is a later change. What this probe cannot see, and what the floor covers alone, is
+  larger than usual here: whether the loop actually passes the `agent` argument on both surfaces and
+  both drivers, whether the `INBOX` streaming phase is emitted where `STEERING` used to be, whether the
+  spawn path honors the `"inbox"` spec key, and whether 0.33.0's host-boundary guards survived the
+  rename. None of those is a name, so no name lookup reaches them. `aio.SkillAgent.run`'s `steering`
+  parameter is the floor's job now, in its turn, and the parameter it grips today is spelled `inbox`.
 - **Without `../aimu`** (CI, a fresh clone, or just running Kokua), `uv sync --no-sources` resolves AIMU
   from PyPI. Nothing in `pyproject.toml` needs editing for that any more.
 - **Both console scripts route through `kokua.cli`** so they share that preflight. `kokua-web` is

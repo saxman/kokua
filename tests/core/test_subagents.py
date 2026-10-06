@@ -54,7 +54,7 @@ def _continuing(kind, prompt):
 
 
 def _steering(text):
-    return StreamChunk(StreamingContentType.STEERING, {"text": text})
+    return StreamChunk(StreamingContentType.INBOX, {"text": text})
 
 
 async def test_a_spawn_opens_a_running_card_and_closes_it_with_the_answer():

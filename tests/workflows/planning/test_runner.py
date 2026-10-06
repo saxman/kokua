@@ -228,7 +228,7 @@ async def test_every_run_in_a_planned_turn_steers_on_the_conversations_own_curso
     sources = []
 
     async def capture(prompt, **kwargs):
-        sources.append(kwargs.get("steering"))
+        sources.append(kwargs.get("inbox"))
         return await run(prompt, **kwargs)
 
     agent.run = capture

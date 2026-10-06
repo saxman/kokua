@@ -351,30 +351,32 @@ async def test_a_steering_chunk_becomes_a_steering_frame():
     channel = WebChannel(ws)
 
     async def gen():
-        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
 
     await channel.stream_activity(gen())
     assert {"type": "steering", "text": "use the cache"} in ws.frames
 
 
 async def test_web_channel_send_relays_a_steering_message():
-    """The base channel already maps STEERING (AIMU 0.33.0), and what this pins is what the CONTINUING
-    test above pins: Kokua's ``send`` override delegates to the base loop, so the base's mapping reaches
-    the page unchanged, and an override that grew its own per-chunk branches would have to carry this
-    arm forward. Contrast ``stream_activity``, which maps chunks itself and so needs a STEERING arm of
-    its own, pinned separately."""
+    """The base channel already maps INBOX (AIMU 0.34.0, renamed from STEERING), and what this pins is
+    what the CONTINUING test above pins: Kokua's ``send`` override delegates to the base loop, so the
+    base's mapping reaches the page unchanged, and an override that grew its own per-chunk branches
+    would have to carry this arm forward. The base now names the frame ``"inbox"`` rather than
+    ``"steering"``, which is the base's own wire vocabulary and not Kokua's: contrast
+    ``stream_activity``, which maps chunks itself to Kokua's own ``"steering"`` frame type and so needs
+    an INBOX arm of its own, pinned separately."""
     ws = _FakeWS()
     channel = WebChannel(ws)
 
     async def gen():
         yield StreamChunk(StreamingContentType.GENERATING, "a")
-        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
         yield StreamChunk(StreamingContentType.GENERATING, "b")
 
     await channel.send(gen())
     assert ws.frames == [
         {"type": "token", "text": "a"},
-        {"type": "steering", "text": "use the cache"},
+        {"type": "inbox", "text": "use the cache"},
         {"type": "token", "text": "b"},
         {"type": "done"},
     ]
@@ -694,9 +696,11 @@ async def test_a_muted_turns_catch_up_keeps_the_tool_output():
 
 
 async def test_a_muted_turns_steering_frame_is_caught_up_not_dropped():
-    """`steering` is a turn-scoped marker exactly like `loop`, so it has to be muted while the user is
-    looking elsewhere and still recorded, or a redirect sent into a background turn would vanish
-    instead of showing up on the switch-in that catches the rest of that turn up."""
+    """`inbox` (AIMU's own name, reaching the page unmapped through the base `send()` loop this
+    subclass delegates to for a plain reactive turn) is a turn-scoped marker exactly like `loop`, so it
+    has to be muted while the user is looking elsewhere and still recorded, or a redirect sent into a
+    background turn would vanish instead of showing up on the switch-in that catches the rest of that
+    turn up."""
     from kokua.channels.web import streaming_conversation
 
     ws = _FakeWS()
@@ -705,7 +709,7 @@ async def test_a_muted_turns_steering_frame_is_caught_up_not_dropped():
     channel.begin_catch_up("running", "look it up")
 
     async def gen():
-        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
 
     token = streaming_conversation.set("running")
     try:
@@ -716,7 +720,7 @@ async def test_a_muted_turns_steering_frame_is_caught_up_not_dropped():
 
     channel.active_conversation_id = "running"
     await channel.send_history([], {})
-    steering = next(item for item in ws.frames[-1]["items"] if item["type"] == "steering")
+    steering = next(item for item in ws.frames[-1]["items"] if item["type"] == "inbox")
     assert steering["text"] == "use the cache"
 
 
@@ -2859,6 +2863,10 @@ async def test_an_accepted_steering_message_is_caught_up_once_rather_than_twice(
     conversation for it to be recorded against; the drain-time frame is the only evidence AIMU
     actually delivered the message, and it arrives inside the turn. A switch-in therefore sees the
     redirection, and sees it once.
+
+    The two frames carry different types for the same event: the accept-time one is Kokua's own
+    ``send_steering``, carrying ``"steering"``; the drain-time one reaches the page through the base
+    ``send()`` loop this subclass delegates to, so it carries AIMU's own name for the chunk, ``"inbox"``.
     """
     from kokua.channels.web import streaming_conversation
 
@@ -2870,7 +2878,7 @@ async def test_an_accepted_steering_message_is_caught_up_once_rather_than_twice(
     await channel.send_steering("use the cache", token="b1")  # accepted, on the serve loop's own task
 
     async def gen():
-        yield StreamChunk(StreamingContentType.STEERING, {"text": "use the cache"})
+        yield StreamChunk(StreamingContentType.INBOX, {"text": "use the cache"})
 
     token = streaming_conversation.set("running")
     try:
@@ -2879,4 +2887,4 @@ async def test_an_accepted_steering_message_is_caught_up_once_rather_than_twice(
         streaming_conversation.reset(token)
     await channel.send_history([], {})
 
-    assert [item["type"] for item in ws.frames[-1]["items"] if item["type"] == "steering"] == ["steering"]
+    assert [item["type"] for item in ws.frames[-1]["items"] if item["type"] == "inbox"] == ["inbox"]

@@ -545,7 +545,7 @@ def build_agent_specs(config: AssistantConfig, state: LiveState, delegator: str)
         # `STEERING_SOURCE`, never `ENTRY_STEERING_SOURCE`: a worker opens an independent cursor, so a
         # message only a worker consumed still comes back from `close` and runs as a follow-up turn
         # rather than counting as the conversation having seen it.
-        specs[name]["steering"] = STEERING_SOURCE
+        specs[name]["inbox"] = STEERING_SOURCE
     return specs
 
 

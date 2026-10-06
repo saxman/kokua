@@ -62,9 +62,27 @@ proactive_turn: ContextVar[bool] = ContextVar("proactive_turn", default=False)
 # background turn's sidebar refresh carries a muted conversation in the contextvar and would be dropped.
 # `steering` belongs here for the same reason `loop` does: it is a turn-scoped marker, not the
 # channel's own state, so a steered background turn must stay muted and catch up on switch-in exactly
-# like every other live frame that turn produces.
+# like every other live frame that turn produces. `inbox` belongs here for the same event under a
+# different name: AIMU's own un-overridden `send()` loop (reused via `super().send()` below for every
+# chunk this subclass does not map itself) emits `{"type": "inbox", ...}` for the same mid-turn message,
+# since AIMU renamed its `STEERING` chunk to `INBOX`. That frame reaches a plain reactive turn's base
+# path, where `stream_activity`'s own override still emits Kokua's `"steering"` for a planned one; both
+# name the same turn-scoped event and both have to be muted the same way.
 _TURN_FRAMES = frozenset(
-    {"token", "thinking", "tool", "message", "done", "loop", "steering", "image", "plan", "phase", "subagent"}
+    {
+        "token",
+        "thinking",
+        "tool",
+        "message",
+        "done",
+        "loop",
+        "steering",
+        "inbox",
+        "image",
+        "plan",
+        "phase",
+        "subagent",
+    }
 )
 
 
@@ -427,7 +445,7 @@ class WebChannel(BaseWebChannel):
             elif chunk.phase == StreamingContentType.CONTINUING:
                 call = chunk.content if isinstance(chunk.content, dict) else {}
                 await self.send_frame({"type": "loop", "reason": call.get("kind", ""), "text": call.get("prompt", "")})
-            elif chunk.phase == StreamingContentType.STEERING:
+            elif chunk.phase == StreamingContentType.INBOX:
                 # A separate frame from `loop`, not a third `reason` on it: `loop` says the loop
                 # injected a prompt of its own, and these are the user's own words. One frame that
                 # meant either would have the page attribute the user's message to the assistant.

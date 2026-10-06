@@ -109,7 +109,7 @@ class SteeringMailbox:
         if self._review_context is not None:
             self._review_context.request = f"{self._review_context.request}\n\nThe user then said: {text}"
 
-    def reader(self) -> Callable[[], list[str]]:
+    def reader(self, agent: Optional[str] = None) -> Callable[[], list[str]]:
         """A cursor for one run: the entry agent's, or one spawned worker's.
 
         Drains the text alone, which is what AIMU's loop takes as the prompt for its next round.
@@ -122,6 +122,10 @@ class SteeringMailbox:
         prompt with it in hand, and it is bounded (one round-budget reset per worker, under AIMU's own
         cap on those). Opening at the current length instead would make the mailbox's simplest
         property, append-only with every reader seeing the list, depend on when a reader was opened.
+
+        ``agent`` is the run's own name, passed positionally by AIMU's loop so it can address one run
+        rather than every run's drain. Accepted and ignored here: nothing yet reads it, so it is kept
+        only to match the shape AIMU's constructor rehearses before a run starts.
         """
         seen = 0
 
@@ -133,12 +137,15 @@ class SteeringMailbox:
 
         return drain
 
-    def entry_reader(self) -> Callable[[], list[str]]:
+    def entry_reader(self, agent: Optional[str] = None) -> Callable[[], list[str]]:
         """The entry agent's cursor, whose progress decides what ``close`` hands back.
 
         One per turn rather than one per run, which is the asymmetry :meth:`reader` explains from the
         other side: this position is the conversation's, so every entry-agent run inside a turn shares
         it, where each worker gets a fresh one opened at zero.
+
+        ``agent`` is accepted for the reason :meth:`reader` gives: AIMU passes the run's name
+        positionally, and nothing here reads it yet.
         """
 
         def drain() -> list[str]:
@@ -195,11 +202,14 @@ class _ContextSteering:
     def __init__(self, entry: bool) -> None:
         self._entry = entry
 
-    def reader(self) -> Callable[[], list[str]]:
+    def reader(self, agent: Optional[str] = None) -> Callable[[], list[str]]:
+        """Open this run's cursor. ``agent`` is the run's own name, passed positionally by AIMU's
+        loop; accepted and ignored here, since nothing yet reads it.
+        """
         mailbox = current_steering.get()
         if mailbox is None:
             return lambda: []
-        return mailbox.entry_reader() if self._entry else mailbox.reader()
+        return mailbox.entry_reader(agent) if self._entry else mailbox.reader(agent)
 
 
 #: Handed to the entry agent's own runs: the conversation's cursor, whose progress decides what

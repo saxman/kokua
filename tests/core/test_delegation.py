@@ -302,7 +302,7 @@ def test_every_spec_key_kokua_writes_is_one_aimu_accepts():
         "generate_kwargs",
         "max_iterations",
         "compaction",
-        "steering",
+        "inbox",
     } <= SUBAGENT_SPEC_KEYS
 
 
@@ -582,4 +582,4 @@ def test_every_worker_spec_carries_the_steering_source(tmp_path):
     specs = build_agent_specs(config, state, config.entry_agent)
 
     assert sorted(specs) == ["coder", "researcher"]
-    assert all(spec["steering"] is STEERING_SOURCE for spec in specs.values())
+    assert all(spec["inbox"] is STEERING_SOURCE for spec in specs.values())

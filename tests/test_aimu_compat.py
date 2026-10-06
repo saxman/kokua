@@ -6,6 +6,7 @@ from importlib.metadata import PackageNotFoundError
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 import pytest
 
@@ -179,30 +180,22 @@ def test_the_probe_catches_a_sibling_whose_base_class_alone_was_updated(monkeypa
 def test_the_probe_targets_the_release_the_floor_names():
     """The probe has to come from the floor's own release, or a sibling on the previous branch passes it.
 
-    The surface today is ``aio.SkillAgent.run``'s ``steering`` parameter: a run already in progress can
-    be handed a user message without waiting for it to finish, which is what lets a message typed
-    mid-turn reach the turn running now instead of queuing behind it.
+    The surface today is ``aimu.agents.Inbox``: AIMU renamed its mid-turn-message seam from ``Steering``
+    to ``Inbox``, with no legacy path, and taught it which agent is opening each reader, so a sibling
+    still on the previous branch has ``Steering`` and no ``Inbox`` at all.
 
-    It grips the *subclass*, not ``aio.Agent.run``, which took the same parameter in the first of the
-    release's steering commits. ``SkillAgent.run`` cannot delegate to ``super().run()`` (it prepares,
-    sets skills up, then calls the post-prepare helpers that do the real work), so it repeats
-    ``Agent.run``'s whole parameter list by hand, and ``steering`` was not copied across until a
-    whole-branch review caught the gap, in the release's last functional commit. Gripping ``Agent``
-    would date a checkout to one drain site on one driver; gripping ``SkillAgent`` dates it to every
-    steering commit in the release and every fix after it, which is what Kokua's entry agent runs.
+    A plain name lookup, not a signature check: unlike the parameter it replaces, the capability here is
+    the export itself, so nothing else has to be true of a checkout once the class is importable.
     """
     import importlib
 
     module = importlib.import_module(aimu_compat._PROBE_MODULE)
-    holder = getattr(module, aimu_compat._PROBE_CLASS)
-    probe = getattr(holder, aimu_compat._PROBE_SYMBOL, None)
+    probe = getattr(module, aimu_compat._PROBE_SYMBOL, None)
     assert probe is not None
-    assert aimu_compat._PROBE_MODULE == "aimu.aio"
-    assert aimu_compat._PROBE_CLASS == "SkillAgent"
-    assert aimu_compat._PROBE_SYMBOL == "run"
-    # A keyword argument no `getattr` would notice, since `SkillAgent.run` predates this floor by a long
-    # way: only whether it takes `steering` dates a checkout, not whether the method exists at all.
-    assert aimu_compat._PROBE_PARAMETER == "steering"
+    assert aimu_compat._PROBE_MODULE == "aimu.agents"
+    assert aimu_compat._PROBE_CLASS is None
+    assert aimu_compat._PROBE_SYMBOL == "Inbox"
+    assert aimu_compat._PROBE_PARAMETER is None
     assert aimu_compat._PROBE_MEMBER is None
 
 
@@ -475,18 +468,83 @@ def test_a_probe_that_checks_a_keyword_argument_still_works(monkeypatch):
         require_aimu()
 
 
-def test_the_probe_grips_the_steering_parameter():
+def test_the_floor_covers_the_skill_agent_parameter_the_probe_no_longer_grips():
+    """0.33.0's probe surface is 0.34.0's floor now that ``Inbox`` holds the one probe slot.
+
+    ``aio.SkillAgent.run`` is the exact method a mid-turn message reaches (Kokua's entry agent is an
+    ``aio.SkillAgent``), and the parameter the rename left it holding is spelled ``inbox``, not
+    ``steering``. Pinned directly, the way every other demoted surface in this file is: one probe slot
+    cannot hold every capability the floor has come to cover.
+    """
     import inspect
 
     from aimu.aio import SkillAgent
 
-    assert "steering" in inspect.signature(SkillAgent.run).parameters
+    assert "inbox" in inspect.signature(SkillAgent.run).parameters
+    assert "steering" not in inspect.signature(SkillAgent.run).parameters
 
 
-def test_the_floor_is_0_33_0():
+def test_the_floor_is_0_34_0():
     from kokua.aimu_compat import MINIMUM_AIMU
 
-    assert MINIMUM_AIMU == (0, 33, 0)
+    assert MINIMUM_AIMU == (0, 34, 0)
+
+
+def test_the_probe_grips_the_inbox_protocol():
+    from aimu.agents import Inbox
+
+    assert Inbox is not None
+
+
+def test_aimu_still_names_a_spawned_worker_with_the_prefix_addresses_strip(monkeypatch):
+    """Kokua strips `subagent-` to turn AIMU's label into the declared name a sender can type. A
+    change to this convention upstream would silently rename every worker address, so it is pinned
+    here as a fact about the release rather than left for the bus to discover.
+
+    Asserted behaviorally, against a mock client, rather than against the factory's source text: AIMU's
+    own suite now does exactly this (``tests/test_aio_subagent_tools.py``'s
+    ``test_a_spawned_worker_opens_its_reader_under_its_own_label``), spawning through
+    ``make_async_subagent_tool`` with a recording inbox and reading back the label the loop opened a
+    reader under. A source-text match would break on an upstream reformat that changed nothing this
+    depends on; this reads the label AIMU actually used instead.
+    """
+    import asyncio
+
+    from aimu.aio.tools import builtin as aio_builtin
+    from aimu.aio.tools.builtin import make_async_subagent_tool
+
+    from tests.helpers import MockAsyncModelClient
+
+    seen_agent_names: list[Optional[str]] = []
+
+    class _RecordingInbox:
+        def reader(self, agent: Optional[str] = None):
+            seen_agent_names.append(agent)
+            return lambda: []
+
+    # The factory builds a real `Agent` per spawn already; only the client needs faking, since a real
+    # model call is what the loop's own `run()` needs to reach the point where it opens a reader.
+    monkeypatch.setattr(aio_builtin, "_fresh_async_subagent_client", lambda model: MockAsyncModelClient(["done"]))
+
+    spawn = make_async_subagent_tool(
+        "mock:mock",
+        agent_types={"researcher": {"system_message": "Look things up."}},
+        inbox=_RecordingInbox(),
+    )
+    asyncio.run(spawn("researcher", "find something"))
+    assert seen_agent_names == ["subagent-researcher"]
+
+
+def test_the_floor_covers_the_agent_parameter_the_probe_cannot_see():
+    """The probe is a name lookup, so it cannot tell whether the loop passes the agent's name.
+
+    Asserted here as a fact about the release rather than a shape the preflight has to learn.
+    """
+    import inspect
+
+    from aimu.agents import Inbox
+
+    assert "agent" in inspect.signature(Inbox.reader).parameters
 
 
 def test_an_unimportable_aimu_carries_the_import_error(monkeypatch):

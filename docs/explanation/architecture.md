@@ -242,10 +242,12 @@ case).
 ### A message sent while a turn is running
 
 A turn is long: three model calls is seconds at best and minutes on a local model. Until AIMU 0.33.0
-gave `run()` a `steering` parameter (the capability behind the current floor, below), a message typed
+gave `run()` a `steering` parameter (one of the floor's past capabilities, below), a message typed
 inside that window queued behind the turn on the gate, so a correction arrived after the work it was
 meant to redirect had already been paid for. A message typed now reaches the turn that is already
-running, at its next model call.
+running, at its next model call. AIMU 0.34.0 renamed that parameter to `inbox` and taught it which
+agent is opening each reader, which is what the floor's own current paragraph, below, is about; the
+parameter Kokua passes changed name, not what it does.
 
 `core/steering.py` holds one `SteeringMailbox` per turn, opened by `TurnRunner` before the turn's first
 `await` and published on the turn tracker's entry for that conversation, which is what lets the serve
@@ -1101,28 +1103,54 @@ now: the method has a default implementation on the ABC (read everything, keep t
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 `TinyDBSessionStore`'s override from a plain inheritance of the default.
 
-The floor is now **`aimu>=0.33.0`**, for `aio.SkillAgent.run`'s `steering` parameter: a run already in
-progress can be handed a user message without waiting for it to finish, which is what lets a message
-typed mid-turn reach the turn running now instead of queuing behind it. Kokua's entry agent is an
-`aio.SkillAgent`, so this is the exact method a mid-turn message reaches.
+The floor is now **`aimu>=0.34.0`**, the first one a rename alone has moved: AIMU renamed its
+mid-turn-message seam from `Steering` to `Inbox`, with no legacy path, and taught it which agent is
+opening each reader. `Inbox.reader(agent=...)` is called once per run, at its start, and `agent` is
+that run's own name, offered so a host can route a message to the one run it was meant for rather than
+to every run's drain; AIMU attaches no meaning to the string beyond passing it back. The probe is a
+plain name lookup, the sixth time (`resolve_default_text_model`, `ModelRefusalError`,
+`SessionStore.list_summaries`, `builtin.get_web_content`, `aimu.skills.make_skill_update_tool`), and the
+first time a rename rather than an addition has given it an exact question: a checkout predating 0.34.0
+has `Steering` where this one has `Inbox`, so the two names cannot both resolve the way an old and a new
+export usually can side by side.
 
-The probe grips the subclass, not `aio.Agent.run`, which landed the same parameter in the *first* of
-the release's steering commits: gripping that handle would date a checkout to one drain site on one
-driver and nothing past it. `aio.SkillAgent.run` cannot delegate to `super().run()` (it prepares, sets
-skills up, then calls the post-prepare helpers that do the actual work), so it repeats `Agent.run`'s
-whole parameter list by hand, and a parameter added to the base method reaches the subclass only when
-someone remembers to copy it across. `steering` was not remembered until a whole-branch review caught
-it, after `compaction` and `script_env` had each needed the same hand-copy before it, so the base
-class's signature is not evidence about the subclass's. The shape is a signature check, the fifth time
-(`SkillManager(include=...)`, `SkillAgent(script_env=...)`, `WebChannel(stream_thinking=...)`,
-`make_async_subagent_tool(events=...)`).
+This moved only the names Kokua uses to talk to AIMU: every `agent.run(steering=...)` call carrying the
+entry agent's own source became `agent.run(inbox=...)`, the `"steering"` spec key became `"inbox"`, and
+`StreamingContentType.STEERING` became `StreamingContentType.INBOX`. Kokua's three reader factories in
+`core/steering.py` widened to accept the `agent` label AIMU now passes positionally, because
+`_BaseToolLoop.__init__` rehearses that exact call and raises `TypeError` when it cannot be made; that
+constructor sits on the path of every driver and every spawned worker, so the rename could not wait for
+Kokua's own vocabulary for the seam to follow in a later change.
 
-What it leaves to the floor is larger than usual: whether the spawn path honors a `"steering"` spec
-key, whether both drivers drain all three branches a steered turn can take, whether the three stream
-consumers render the phase, whether the budget reset on a drained mailbox is bounded, and whether a
-misbehaving host source is caught rather than trusted. None of those is a signature, so no signature
-check reaches them; the branch review that caught the missed `SkillAgent` copy raised the last three as
-findings in their own right.
+What this probe cannot see, and what the floor covers alone, is larger than usual here: whether the
+loop actually passes the `agent` argument on both surfaces and both drivers, whether the `INBOX`
+streaming phase is emitted where `STEERING` used to be, whether the spawn path honors the `"inbox"`
+spec key, and whether 0.33.0's host-boundary guards survived the rename rather than being lost in it.
+None of those is a name, so no name lookup reaches them.
+
+The floor was **`aimu>=0.33.0`** until then, for `aio.SkillAgent.run`'s `steering` parameter: a run
+already in progress could be handed a user message without waiting for it to finish, which is what let
+a message typed mid-turn reach the turn running now instead of queuing behind it. Kokua's entry agent
+is an `aio.SkillAgent`, so this was the exact method a mid-turn message reached.
+
+The probe gripped the subclass, not `aio.Agent.run`, which landed the same parameter in the *first* of
+the release's steering commits: gripping that handle would have dated a checkout to one drain site on
+one driver and nothing past it. `aio.SkillAgent.run` could not delegate to `super().run()` (it
+prepares, sets skills up, then calls the post-prepare helpers that do the actual work), so it repeated
+`Agent.run`'s whole parameter list by hand, and a parameter added to the base method reached the
+subclass only when someone remembered to copy it across. `steering` was not remembered until a
+whole-branch review caught it, after `compaction` and `script_env` had each needed the same hand-copy
+before it, so the base class's signature was not evidence about the subclass's. The shape was a
+signature check, the fifth time (`SkillManager(include=...)`, `SkillAgent(script_env=...)`,
+`WebChannel(stream_thinking=...)`, `make_async_subagent_tool(events=...)`).
+
+What it left to the floor turned out larger than usual: whether the spawn path honored a `"steering"`
+spec key, whether both drivers drained all three branches a steered turn could take, whether the three
+stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
+whether a misbehaving host source was caught rather than trusted. None of those was a signature, so no
+signature check reached them; the branch review that caught the missed `SkillAgent` copy raised the
+last three as findings in their own right, and the 0.34.0 rename above is exactly the kind of change
+that gap was written to warn about.
 
 The floor was **`aimu>=0.32.0`** until then, and two capabilities in that release were Kokua's, both
 about skill authoring. `make_skill_update_tool` is the factory
@@ -1461,7 +1489,7 @@ and did not become a turn.
 
 Two `steering` frames arrive for one steered message and only one of them carries a token. The tokened
 one is `WebChannel.send_steering`, the server saying the message was accepted; the other is mapped from
-AIMU's own `STEERING` chunk when a run *drains* the message, and it names no bubble because AIMU never
+AIMU's own `INBOX` chunk when a run *drains* the message, and it names no bubble because AIMU never
 sees a token (a reader's drain hands it the text alone, which is all the loop takes as a prompt). The
 untokened frame marks nothing on the composer's side and is what a sub-agent card renders instead.
 

@@ -7,7 +7,7 @@ installable, modular application: a small transport-agnostic core with capabilit
 Because there is no earlier release, this section describes what 0.1.0 *is* rather than what changed.
 The pre-release development history is in the git log.
 
-Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.33.0 or newer. Apache-2.0.
+Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer. Apache-2.0.
 
 ### Package and entry points
 
@@ -1706,24 +1706,45 @@ notice on startup.
   fix: a name lookup never asks what a function does, and Kokua calls neither function itself, so
   `tests/test_aimu_compat.py` authors a skill with optional frontmatter in a temp directory, attaches
   a script, and reads the file back. `"compaction"` joined the floor's job.
-  Today the floor is **0.33.0**, for `aio.SkillAgent.run`'s `steering` parameter: a run already in
-  progress can be handed a user message without waiting for it to finish, which is what lets a message
-  typed mid-turn reach the turn running now instead of queuing behind it. The probe is a signature
-  check, the fifth time (`SkillManager(include=...)`, `SkillAgent(script_env=...)`,
-  `WebChannel(stream_thinking=...)`, `make_async_subagent_tool(events=...)`), and it grips the subclass
-  rather than the base class on purpose: `aio.Agent.run(steering=...)` landed in the *first* of the
-  release's steering commits, so gripping it would date a checkout to one drain site on one driver and
-  nothing past it, while `aio.SkillAgent.run` cannot delegate to `super().run()` and so repeats
-  `Agent.run`'s whole parameter list by hand -- a parameter added to the base method reaches the
-  subclass only when someone remembers to copy it across, and `steering` was not remembered until a
+  **0.33.0** was the floor until 0.34.0, for `aio.SkillAgent.run`'s `steering` parameter: a run already
+  in progress could be handed a user message without waiting for it to finish, which is what let a
+  message typed mid-turn reach the turn running now instead of queuing behind it. The probe was a
+  signature check, the fifth time (`SkillManager(include=...)`, `SkillAgent(script_env=...)`,
+  `WebChannel(stream_thinking=...)`, `make_async_subagent_tool(events=...)`), and it gripped the
+  subclass rather than the base class on purpose: `aio.Agent.run(steering=...)` landed in the *first*
+  of the release's steering commits, so gripping it would have dated a checkout to one drain site on
+  one driver and nothing past it, while `aio.SkillAgent.run` could not delegate to `super().run()` and
+  so repeated `Agent.run`'s whole parameter list by hand -- a parameter added to the base method reached
+  the subclass only when someone remembered to copy it across, and `steering` was not remembered until a
   whole-branch review caught it, after `compaction` and `script_env` had each needed the same
-  hand-copy before it. Kokua's entry agent is an `aio.SkillAgent`, so gripping the subclass dates a
+  hand-copy before it. Kokua's entry agent is an `aio.SkillAgent`, so gripping the subclass dated a
   checkout to every steering commit in the release and every fix after it, where an `Agent`-shaped
   probe would have passed on an AIMU where Kokua's own first steered turn raised `TypeError`. What it
-  leaves to the floor is larger than usual: whether the spawn path honors a `"steering"` spec key,
-  whether both drivers drain all three branches a steered turn can take, whether the three stream
-  consumers render the phase, whether the budget reset on a drained mailbox is bounded, and whether a
-  misbehaving host source is caught rather than trusted. `make_skill_update_tool` joins the floor's job.
+  left to the floor turned out larger than usual: whether the spawn path honored a `"steering"` spec
+  key, whether both drivers drained all three branches a steered turn could take, whether the three
+  stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
+  whether a misbehaving host source was caught rather than trusted. `Inbox` joins the probe's job.
+  Today the floor is **0.34.0**, the first one a rename alone has moved: AIMU renamed its
+  mid-turn-message seam from `Steering` to `Inbox`, with no legacy path, and taught it which agent is
+  opening each reader. `Inbox.reader(agent=...)` is called once per run, at its start, and `agent` is
+  that run's own name, offered so a host can route a message to the one run it was meant for rather than
+  to every run's drain; AIMU attaches no meaning to the string beyond passing it back. The probe is a
+  plain name lookup, the sixth time (`resolve_default_text_model`, `ModelRefusalError`,
+  `SessionStore.list_summaries`, `builtin.get_web_content`, `aimu.skills.make_skill_update_tool`), and
+  the first time a rename rather than an addition has given it an exact question: a checkout predating
+  0.34.0 has `Steering` where this one has `Inbox`, so the two names cannot both resolve the way an old
+  and a new export usually can side by side. This renamed only the names Kokua uses to talk to AIMU
+  (every `agent.run(steering=...)` call carrying the entry agent's own source becomes
+  `agent.run(inbox=...)`, the `"steering"` spec key becomes `"inbox"`,
+  `StreamingContentType.STEERING` becomes `StreamingContentType.INBOX`) and widened Kokua's three
+  reader factories to accept the `agent` label AIMU now passes positionally, since
+  `_BaseToolLoop.__init__` rehearses that exact call and raises `TypeError` when it cannot be made.
+  Kokua's own vocabulary for the seam is a later change. What this probe cannot see, and what the
+  floor covers alone, is larger than usual here: whether the loop actually passes the `agent` argument
+  on both surfaces and both drivers, whether the `INBOX` streaming phase is emitted where `STEERING`
+  used to be, whether the spawn path honors the `"inbox"` spec key, and whether 0.33.0's host-boundary
+  guards survived the rename. `aio.SkillAgent.run`'s `steering` parameter joins the floor's job, and
+  the parameter it grips today is spelled `inbox`.
   It covers one surface at a time by design; every earlier release's capabilities are the floor's
   job, and `tests/test_aimu_compat.py` pins the floor against `pyproject.toml`'s specifier so the two
   halves of that one decision cannot drift. It pins the floor against the *prose* too: the README, the
