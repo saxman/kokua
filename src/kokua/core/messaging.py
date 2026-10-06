@@ -62,6 +62,27 @@ class Message:
     token: Optional[str] = None
 
 
+def matches(selector: str, address: Optional[str]) -> bool:
+    """Whether a message addressed to *selector* is for the run at *address*.
+
+    Three cases and no more, which is what keeps direct, group and broadcast one syntax: everyone,
+    one exact address, or a bare label reaching every run that carries it. The label comparison
+    splits on the ordinal separator rather than testing a string prefix, so ``research`` does not
+    reach ``researcher#1``.
+
+    *address* is optional because a run opened with no name registers no address (see
+    :meth:`MessageBus._register`): it has nothing to match a direct or group selector against, so it
+    answers only to ``EVERYONE``, the one case this checks before touching *address* at all.
+    """
+    if selector == EVERYONE:
+        return True
+    if address is None:
+        return False
+    if selector == address:
+        return True
+    return "#" not in selector and address.split("#", 1)[0] == selector
+
+
 class MessageBus:
     """One running turn's pending user messages, with a cursor per reader."""
 
@@ -195,16 +216,22 @@ class MessageBus:
         ``agent`` is the run's own name, passed positionally by AIMU's loop so it can address one run
         rather than every run's drain. It mints this run's roster address via :meth:`_register` with
         ``ordinal=True``, since AIMU can spawn more than one worker under the same declared name and
-        each one opening a reader needs its own address (see :meth:`_register`).
+        each one opening a reader needs its own address (see :meth:`_register`), and keeps that
+        address to filter its own drain against (see :func:`matches`), so a message addressed to one
+        researcher does not also reach another running under the same label.
+
+        The cursor still advances past every message on each call, matched or not: a cursor that
+        stalled on someone else's mail would re-examine it forever, and what comes back is the
+        filter's decision alone.
         """
-        self._register(agent, ordinal=True)
+        address = self._register(agent, ordinal=True)
         seen = 0
 
         def drain() -> list[str]:
             nonlocal seen
             pending = self._messages[seen:]
             seen = len(self._messages)
-            return [message.text for message in pending]
+            return [message.text for message in pending if matches(message.to, address)]
 
         return drain
 
@@ -219,13 +246,19 @@ class MessageBus:
         turn's entry address via :meth:`_register` with ``ordinal=False``, so exactly one address
         exists per turn no matter how many entry-agent runs share this cursor, and a worker can
         address its parent by the name the config gives it rather than by a counter it cannot know.
+        The address is kept to filter this cursor's drain against (see :func:`matches`), the same way
+        :meth:`reader` filters its own.
+
+        The cursor still advances past every message on each call, matched or not, which is what
+        decides what :meth:`close` hands back: a message addressed only to a worker is, from this
+        cursor's own position, passed over rather than unread.
         """
-        self._register(agent, ordinal=False)
+        address = self._register(agent, ordinal=False)
 
         def drain() -> list[str]:
             pending = self._messages[self._entry_seen :]
             self._entry_seen = len(self._messages)
-            return [message.text for message in pending]
+            return [message.text for message in pending if matches(message.to, address)]
 
         return drain
 

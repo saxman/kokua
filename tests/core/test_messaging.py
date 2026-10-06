@@ -13,6 +13,7 @@ from kokua.core.messaging import (
     Message,
     MessageBus,
     current_bus,
+    matches,
 )
 
 
@@ -302,3 +303,83 @@ def test_a_message_sent_without_a_token_has_none():
     bus.send("use the cache", sender=USER, to=EVERYONE)
 
     assert bus.close() == [Message("use the cache", sender=USER, to=EVERYONE, token=None)]
+
+
+def test_matches_everyone_reaches_every_address():
+    assert matches(EVERYONE, "researcher#1") is True
+    assert matches(EVERYONE, "assistant") is True
+
+
+def test_matches_an_exact_address_reaches_only_it():
+    assert matches("researcher#1", "researcher#1") is True
+    assert matches("researcher#1", "researcher#2") is False
+
+
+def test_matches_a_bare_label_reaches_every_worker_with_it():
+    # A group is a label, which is what gives direct, group and broadcast one syntax.
+    assert matches("researcher", "researcher#1") is True
+    assert matches("researcher", "researcher#2") is True
+    assert matches("researcher", "analyst#1") is False
+
+
+def test_a_bare_label_does_not_reach_a_differently_labelled_prefix():
+    # "research" must not reach "researcher#1" by string prefix; the label is the whole segment.
+    assert matches("research", "researcher#1") is False
+
+
+def test_a_bare_label_reaches_every_worker_sharing_it_not_just_one():
+    # The other half of test_two_workers_sharing_a_label_get_distinct_addresses: distinct addresses
+    # are only worth minting if a bare label still reaches every one of them. Checking only the
+    # first or only the second reader is exactly what a bus that stopped at the first match, or
+    # that indexed the roster by label instead of by address, would also satisfy.
+    bus = MessageBus()
+    first = bus.reader("researcher")
+    second = bus.reader("researcher")
+    bus.send("to every researcher", sender="assistant", to="researcher")
+
+    assert first() == ["to every researcher"]
+    assert second() == ["to every researcher"]
+
+
+def test_a_drain_returns_only_what_is_addressed_to_its_reader():
+    bus = MessageBus()
+    first = bus.reader("researcher")
+    second = bus.reader("analyst")
+    bus.send("for the researcher", sender="assistant", to="researcher#1")
+
+    assert first() == ["for the researcher"]
+    assert second() == []
+
+
+def test_a_drain_advances_past_mail_addressed_to_someone_else():
+    # The cursor moves to the end on every call; the filter decides what comes back. A cursor that
+    # stalled on another run's mail would re-examine it forever.
+    bus = MessageBus()
+    mine = bus.reader("analyst")
+    bus.send("not for you", sender="assistant", to="researcher#1")
+    assert mine() == []
+
+    bus.send("for you", sender="assistant", to="analyst#1")
+    assert mine() == ["for you"]
+
+
+def test_an_unnamed_reader_still_receives_a_broadcast():
+    # An unnamed reader (see test_an_unnamed_run_registers_nothing_rather_than_a_placeholder)
+    # registers no address, and matches() must not mistake "nothing to match against" for "matches
+    # nothing": EVERYONE is decided before address is ever touched, which is also what keeps this
+    # from needing a None check at every call site that drains.
+    bus = MessageBus()
+    drain = bus.reader()
+    bus.send("for everyone", sender=USER, to=EVERYONE)
+
+    assert drain() == ["for everyone"]
+
+
+def test_an_unnamed_reader_does_not_receive_a_direct_or_group_message():
+    # The flip side of the broadcast case above: with no address of its own, an unnamed reader has
+    # nothing a direct or a group selector could match, so it must not receive one by accident.
+    bus = MessageBus()
+    drain = bus.reader()
+    bus.send("not for you", sender="assistant", to="researcher#1")
+
+    assert drain() == []
