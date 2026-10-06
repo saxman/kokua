@@ -154,9 +154,10 @@ Every rule here was learned from a bug. Read them before changing anything in th
    everything else by design) computes the leftovers and drops them, which is "neither". Moving the
    re-submit into the ``finally`` trades it for two worse faults, awaiting during a cancellation and
    re-running a gate-cancelled turn's messages, so the window stands rather than being closed there.
-   ``_report_undeliverable`` is the one await in that window this module added rather than inherited,
-   and it is why that method catches: an invariant-10 notice must not be able to widen invariant 9's
-   window, which is the whole reason it is ordered ahead of the re-submit at all.
+   Two of those awaits this module added rather than inherited, ``_notify_if_backgrounded`` and
+   ``_report_undeliverable``, and the second is why that method catches: an invariant-10 notice must
+   not be able to widen invariant 9's window, which is the whole reason it is ordered ahead of the
+   re-submit at all.
    A scheduled firing carries the same bus and the same guarantee, and the three places it differs
    all follow from its shape rather than from a different rule. Its bus is opened by
    ``_run_unattended`` rather than by the body that reads it, unlike the ``current_metrics`` scope
@@ -174,13 +175,17 @@ Every rule here was learned from a bug. Read them before changing anything in th
    (Regressions: ``test_a_message_the_entry_agent_never_read_runs_as_a_follow_up_turn``,
    ``test_the_entry_agents_run_opens_the_conversations_own_cursor``,
    ``test_a_stopped_turn_does_not_resubmit_its_undelivered_messages``,
+   ``test_a_user_message_no_reader_matched_still_runs_as_a_follow_up_turn``,
    ``test_a_message_an_unattended_firing_never_read_runs_as_a_follow_up_turn``.)
 
 10. **A message addressed to an agent is delivered to a matching reader at its next round boundary,
     or reported undeliverable because no matching reader took it, never both and never neither.**
-    Invariant 9 governs a message addressed to the conversation, which can become a turn; this one
-    governs a message addressed to a run, which cannot, because re-running one worker's note to
-    another as a user turn would put words in the user's mouth. So the fallback here is a sentence
+    Note which word does the work. ``close`` splits by who a message was *from*, not by who it was
+    for: the user's own words can become a turn whatever they were addressed to, so a user message to
+    a run nothing answered for is re-submitted rather than reported, and is invariant 9's business
+    instead of this one. What cannot become a turn is an *agent's* message, because re-running one
+    worker's note to another as a user turn would put words in the user's mouth. So this invariant
+    governs an agent's message, invariant 9 governs the user's, and the fallback here is a sentence
     rather than a turn.
     Read "a matching reader" strictly, because the obvious stronger reading is not what holds. A bare
     label naming several runs is satisfied by **any one** of them: the drain record is per message
@@ -202,11 +207,16 @@ Every rule here was learned from a bug. Read them before changing anything in th
     showing a different conversation does not misplace it, it destroys it, because
     ``streaming_conversation`` has already been reset by the ``finally`` and the channel can no longer
     tell that this turn was backgrounded. So ``_report_undeliverable`` compares the turn's
-    conversation against the active one itself and logs instead of sending when they differ, which is
-    the same test ``_notify_if_backgrounded`` makes and the opposite branch of it. One rule covers
-    both paths: a scheduled firing is backgrounded by construction (invariant 4 leaves the active
-    pointer alone), so it logs, except on a channel with no conversation list, where the firing shares
-    the viewed conversation and the user is in fact reading it.
+    conversation against the active one itself and raises a ``ChannelUI.alert`` instead of sending
+    when they differ, which is the same test ``_notify_if_backgrounded`` makes and the opposite branch
+    of it. An alert rather than a log, because a log is only right on a channel with somewhere else to
+    put a backgrounded turn's output and ``CLIChannel`` has nowhere: it does not mute, so its user is
+    reading the terminal that turn is printing to, and a log would make it the one shipped front end
+    where this sentence vanished. ``alert`` is the method written for that split, printing where there
+    is no card surface. One rule covers both paths: a scheduled firing is backgrounded by construction
+    (invariant 4 leaves the active pointer alone), so it alerts, except on a channel with no
+    conversation list, where the firing shares the viewed conversation and the user is reading it
+    after all.
     Two gaps are known rather than covered. The window invariant 9 names, an exception escaping the
     outer ``finally``, applies here too, and this notice is an await inside it, which is why it
     catches rather than raises. A stopped turn reports nothing, because the report sits after that
@@ -588,35 +598,52 @@ class TurnRunner:
         saying so is what is left, and the user is who is told: the sender is a model whose run has
         ended, so there is nobody else still in the turn to tell.
 
-        Both the address and the text are named, because neither alone identifies the message. The
-        address is what nothing answered to, which is the fact worth acting on, and the text is what a
-        user would have to ask the assistant to repeat without it. The log line carries both for the
-        same reason, since on the branch below it is the only record there will be.
+        The sender, the selector and the text are all named, because no two of them identify the
+        message. The selector is what nothing answered to and the sender is who is now waiting on an
+        answer that will not come, which together are the fact worth acting on; the text is what a
+        user would otherwise have to ask the assistant to repeat.
 
-        **A backgrounded turn logs rather than sends, and the comparison is made here rather than left
-        to the channel.** This runs after ``reactive``'s ``finally``, which has already reset
-        ``streaming_conversation``, so a channel that mutes background frames can no longer tell that
-        this turn was not the one being watched and would show the notice in whatever conversation the
-        user has moved to. The notice is display-only and lands after ``_persist``, so that is not a
-        misplacement but a loss: it is gone from the conversation it belongs to. ``conversation_id``
-        against ``self._book.active_id`` is the same test ``_notify_if_backgrounded`` makes, taken on
-        the opposite branch, since a notice is *for* a backgrounded turn and this is *about* the
-        conversation it ran in.
+        **A backgrounded turn raises an alert instead of sending, and the comparison is made here
+        rather than left to the channel.** This runs after ``reactive``'s ``finally``, which has
+        already reset ``streaming_conversation``, so a channel that mutes background frames can no
+        longer tell that this turn was not the one being watched and would show the notice in whatever
+        conversation the user has moved to. The notice is display-only and lands after ``_persist``, so
+        that is not a misplacement but a loss: it is gone from the conversation it belongs to.
+        ``conversation_id`` against ``self._book.active_id`` is the same test
+        ``_notify_if_backgrounded`` makes, taken on the opposite branch, since a notice is *for* a
+        backgrounded turn and this is *about* the conversation it ran in.
+
+        ``alert`` rather than a log, and that choice is the one with a trap under it. A log would be
+        right only on a channel that has somewhere else to put a background turn's output, and
+        ``CLIChannel`` does not: it has no notification frame and does not mute, so its user is reading
+        the terminal that turn is still printing to, and logging would make this the one shipped front
+        end where the sentence disappeared. ``ChannelUI.alert`` is written for exactly that split,
+        raising a card where there is a card surface and printing the sentence where there is not,
+        which is why the text names the conversation in words (see its docstring). No ``group``:
+        ``notify`` groups by conversation so a later completion supersedes an earlier one, and
+        superseding is wrong here, since two turns in one conversation each losing a message are two
+        things to know rather than one.
 
         ``Exception`` is caught and ``CancelledError`` is deliberately not: this await sits inside the
         window invariant 9 names, ahead of a re-submit carrying the user's own words into a turn, so a
         channel that cannot take a notice must not be what loses them. A cancellation is the one thing
         that still has to propagate, which leaves exactly the window invariant 9 already describes
-        rather than a wider one.
+        rather than a wider one. The log is what that failure leaves behind, on either branch.
         """
         if not messages:
             return
-        lines = "\n".join(f"- to {message.to}: {message.text}" for message in messages)
-        if conversation_id != self._book.active_id:
-            logger.warning("A message no run read, in a conversation nobody is viewing:\n%s", lines)
-            return
+        lines = "\n".join(f"- from {message.sender} to {message.to}: {message.text}" for message in messages)
         try:
-            await self._ui.send(f"(a message this turn's agents sent was not delivered)\n{lines}", reply_to=reply_to)
+            if conversation_id == self._book.active_id:
+                await self._ui.send(
+                    f"(a message this turn's agents sent was not delivered)\n{lines}", reply_to=reply_to
+                )
+            else:
+                title = self._book.get(conversation_id).metadata.get("title") or "a conversation"
+                await self._ui.alert(
+                    f"In '{title}', a message one of the turn's agents sent was not delivered.\n{lines}",
+                    conversation_id=conversation_id,
+                )
         except Exception:
             logger.warning("A message no run read could not be reported:\n%s", lines, exc_info=True)
 
@@ -963,9 +990,11 @@ class TurnRunner:
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
         # The same helper the reactive path uses, and it decides the same way: a firing is
-        # backgrounded by construction (invariant 4 leaves the active pointer alone), so this logs,
+        # backgrounded by construction (invariant 4 leaves the active pointer alone), so this alerts,
         # except on a channel with no conversation list, where the firing shares the viewed
-        # conversation and the user is reading it after all. One rule rather than two (invariant 10).
+        # conversation and the user is reading it after all. One rule rather than two (invariant 10),
+        # and on a channel with no card surface `alert` prints, so the sentence reaches the user there
+        # rather than only a log.
         await self._report_undeliverable(conversation_id, undeliverable)
         if resubmit:
             # Accepted by the bus and never read, because the firing ended first, so it runs as a

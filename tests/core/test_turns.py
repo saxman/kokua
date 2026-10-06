@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 import pytest
 
@@ -2149,15 +2148,22 @@ async def test_an_undelivered_agent_message_is_reported_and_not_rerun(assistant)
     assert any("researcher#1" in text and "look at the index" in text for text in sent)
 
 
-async def test_a_backgrounded_turns_report_is_logged_rather_than_sent_to_the_wrong_conversation(assistant, caplog):
-    """The report runs after the ``finally`` has reset ``streaming_conversation``, so the channel can
-    no longer mute it: sent, it would appear in whatever conversation the user has moved to.
+class _MutingAlertChannel(AlertCapturingChannel):
+    """The web front end's shape: a card surface, and a viewed conversation to mute against.
 
-    That is a loss rather than a misplacement, because the notice is display-only and ``_persist`` has
-    already run, so it is gone from the conversation it belongs to. ``_report_undeliverable`` therefore
-    makes the comparison itself. The foregrounded counterpart is
-    ``test_an_undelivered_agent_message_is_reported_and_not_rerun``, which asserts the send.
+    ``active_conversation_id`` is what ``ChannelUI.mutes_background_turns`` reads and what
+    ``WebChannel._foreground`` compares a turn against, so a channel carrying it is one where an
+    in-conversation send from a backgrounded turn would have been dropped rather than shown.
     """
+
+    def __init__(self):
+        super().__init__()
+        self.active_conversation_id = None
+
+
+async def _background_turn_leaving_one_undelivered(tmp_path, channel) -> None:
+    """Run a turn on a conversation the user has switched away from, whose agent writes to nobody."""
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["placeholder"]))
     background = assistant._active_id
     await assistant.new_conversation()
     assert assistant._active_id != background
@@ -2166,24 +2172,68 @@ async def test_a_backgrounded_turns_report_is_logged_rather_than_sent_to_the_wro
         raise AssertionError("nothing here is the user's to re-run")
 
     assistant._turns._resubmit_messages = resubmit
-    sent = []
-
-    async def send(text, **kwargs):
-        sent.append(text)
-
-    assistant._ui.send = send
 
     async def leave_one_undelivered(*args, **kwargs):
         current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
         return "done"
 
     assistant._book.agent_for(background).run = leave_one_undelivered
-    with caplog.at_level(logging.WARNING, logger="kokua.core.turns"):
-        await assistant._turns.reactive(message("hello"), conversation_id=background)
+    await assistant._turns.reactive(message("hello"), conversation_id=background)
 
-    assert not any("not delivered" in text for text in sent if isinstance(text, str))
-    logged = "\n".join(record.getMessage() for record in caplog.records)
-    assert "researcher#1" in logged and "look at the index" in logged
+
+async def test_a_backgrounded_turns_report_is_raised_as_an_alert_not_into_the_viewed_conversation(tmp_path):
+    """The report runs after the ``finally`` has reset ``streaming_conversation``, so the channel can
+    no longer mute it: sent, it would appear in whatever conversation the user has moved to.
+
+    That is a loss rather than a misplacement, because the notice is display-only and ``_persist`` has
+    already run, so it is gone from the conversation it belongs to. ``_report_undeliverable`` makes the
+    comparison itself and raises an alert, which on this channel shape becomes a card outside any
+    conversation. The alert has to be self-contained (see ``ChannelUI.alert``), so the conversation,
+    the sender and the selector are all asserted: "undelivered" with none of them tells a reader
+    nothing they can act on. The foregrounded counterpart is
+    ``test_an_undelivered_agent_message_is_reported_and_not_rerun``, which asserts the send.
+    """
+    channel = _MutingAlertChannel()
+    await _background_turn_leaving_one_undelivered(tmp_path, channel)
+
+    assert not any("not delivered" in text for text in channel.sent)
+    raised = [text for text, *_ in channel.alerts if "not delivered" in text]
+    assert len(raised) == 1
+    assert "researcher#1" in raised[0] and "assistant" in raised[0] and "look at the index" in raised[0]
+    assert "'" in raised[0], "the alert must name the conversation in words, since its fallback prints"
+
+
+async def test_a_backgrounded_turns_report_still_reaches_a_channel_with_nowhere_else_to_put_it(tmp_path):
+    """The case a log would have lost, and the reason this is an alert rather than a log.
+
+    ``CLIChannel`` has no notification frame and does not mute, so its user is reading the terminal the
+    backgrounded turn is still printing to. ``ChannelUI.alert`` falls back to a plain send there, so
+    the sentence arrives; a log would have made this the one shipped front end where it vanished.
+    """
+    channel = FakeChannel()
+    await _background_turn_leaving_one_undelivered(tmp_path, channel)
+
+    assert any("not delivered" in text and "researcher#1" in text for text in channel.sent)
+
+
+async def test_a_firings_undeliverable_report_reaches_a_channel_with_no_conversation_list(tmp_path):
+    """The consolidation's payoff: a firing reports through the same helper a reactive turn does.
+
+    A scheduled run on a channel with no conversation list shares the viewed conversation, which is
+    what ``echo_reply`` is about, so its undeliverable message is the user's to see. The log-only
+    block this replaced reached nobody here.
+    """
+    channel = FakeChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["done"]))
+
+    async def leave_one_undelivered(*args, **kwargs):
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        return "done"
+
+    assistant._book.agent_for(assistant._active_id).run = leave_one_undelivered
+    await assistant._turns.proactive("check the feeds")
+
+    assert any("not delivered" in text and "researcher#1" in text for text in channel.sent)
 
 
 async def test_a_channel_that_cannot_take_the_report_still_leaves_the_resubmit_to_run(assistant):

@@ -266,6 +266,12 @@ def make_config_tools(
         # own converter, undried-run, because `agent_write` rebuilds the candidate agent with
         # `replace(agent, **{key: value})` and `generation` is a sub-table rather than a field: a write
         # to `temperature` would raise TypeError out of the tool call instead of being validated.
+        # So this tier predicts nothing about the next startup, and that gap is wider than a bad
+        # number: such a write can *create* an `[agents.<name>]` table under a name startup refuses
+        # (`core/agents.py`'s `RESERVED_AGENT_NAMES`), which the flat tier above would have caught.
+        # Unreachable in the shipped config, since `agents.*` is locked and the lock list is the one
+        # key `update_config` may never write, so reaching it takes a hand edit by the person the
+        # guard protects. Named rather than fixed, because the fix is a second dry-run shape.
         # Each flat key keeps its own converter and gains the dry run on top, rather than trading one for
         # the other; `_also_dry_run` says what each half catches and why neither covers the other.
         **{
