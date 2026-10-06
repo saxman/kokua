@@ -2305,7 +2305,7 @@ async def test_the_bus_a_reactive_turn_builds_carries_that_turns_review_context(
     context and ``test_an_offer_amends_the_running_turns_review_context`` proves a bus amends the
     context it was handed, and both stay green if ``reactive`` builds its bus with no context at
     all. That mutation makes a security-relevant amendment a silent no-op in production, so what is
-    asserted here is the wiring: steer the turn from inside its own run and read back the request a
+    asserted here is the wiring: offer a message from inside the turn's own run and read back the request a
     gated call in that turn would be judged against.
     """
     from kokua.core.auto_approval import current_review_context
@@ -2314,7 +2314,7 @@ async def test_the_bus_a_reactive_turn_builds_carries_that_turns_review_context(
     calls = []
     seen = {}
 
-    async def steer_from_inside(*args, **kwargs):
+    async def offer_from_inside(*args, **kwargs):
         calls.append(args)
         # Offered once only, so a drain that stopped working would cost one extra turn rather than
         # recurse through the follow-up path without end.
@@ -2324,7 +2324,7 @@ async def test_the_bus_a_reactive_turn_builds_carries_that_turns_review_context(
             ENTRY_SOURCE.reader()()  # delivered, so this message needs no follow-up turn
         return "done"
 
-    assistant._book.agent_for(assistant._active_id).run = steer_from_inside
+    assistant._book.agent_for(assistant._active_id).run = offer_from_inside
     await assistant._turns.reactive(message("find the bug"), conversation_id=assistant._active_id)
 
     assert calls and len(calls) == 1
