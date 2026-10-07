@@ -11,7 +11,7 @@ from aimu.aio import RunHandle
 from aimu.aio.channels.base import Channel, ChannelMessage
 
 from kokua.core.assistant import Assistant
-from kokua.core.messages import PROVENANCE_AGENT
+from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED, is_user_turn
 from kokua.core.messaging import ENTRY_SOURCE, EVERYONE, USER, Message, MessageBus, current_bus
 from kokua.core.turn_registry import TurnInfo
 from kokua.toolsets.planning import PLANNING_WORKFLOW
@@ -2681,10 +2681,15 @@ async def test_the_users_own_mid_turn_message_reaches_the_store_untagged(assista
     assert PROVENANCE_KEY not in stored.messages[3]
 
 
-async def test_a_round_that_carried_both_the_user_and_an_agent_stays_untagged(assistant):
-    """Review focus 1. One drain becomes one appended message, so this message is both, and tagging
-    is all-or-nothing per message. Tagging it would hide the user's own words from ``is_user_turn``,
-    which is the worse of the two errors; the recorded index covers it either way."""
+async def test_a_round_that_carried_both_the_user_and_an_agent_is_marked_mixed_not_agent(assistant):
+    """Review focus 1. One drain becomes one appended message, so this message is both, and
+    ``PROVENANCE_AGENT`` is all-or-nothing per message: tagging it ``PROVENANCE_AGENT`` would hide the
+    user's own words from ``is_user_turn``, which is the worse of the two errors, and the recorded
+    index covers that either way. But leaving the message with no tag at all would let a transcript
+    export or a search attribute the agent's half to the user, so it carries the narrower
+    ``PROVENANCE_MIXED`` instead: one ``is_user_turn`` reads exactly like an absent tag (see the
+    control below), and one a transcript reader can still tell apart from a plain user message.
+    """
     conversation_id = assistant._active_id
     agent = assistant._book.agent_for(conversation_id)
 
@@ -2699,7 +2704,8 @@ async def test_a_round_that_carried_both_the_user_and_an_agent_stays_untagged(as
 
     stored = assistant._store.get(conversation_id)
     assert stored.messages[3]["content"] == "use the cache\n\n[message from researcher#1] and the index"
-    assert PROVENANCE_KEY not in stored.messages[3]
+    assert stored.messages[3][PROVENANCE_KEY] == PROVENANCE_MIXED
+    assert is_user_turn(stored.messages[3]) is True  # the tag that would say otherwise is PROVENANCE_AGENT
     assert stored.metadata["messages"]["0"] == [3]
 
 
@@ -2729,6 +2735,61 @@ async def test_two_deliveries_in_one_turn_are_tagged_one_at_a_time(assistant):
     assert PROVENANCE_KEY not in stored.messages[3]
     assert stored.messages[6][PROVENANCE_KEY] == PROVENANCE_AGENT
     assert stored.metadata["messages"]["0"] == [3, 6]
+
+
+def test_fewer_deliveries_than_indices_leaves_every_index_untagged(assistant):
+    """The review's own shape, called directly against ``_tag_agent_messages`` rather than driven
+    through a turn: one agent-only delivery against two message indices.
+
+    Broadcasting that single delivery's answer across both indices, which is what the fallback did
+    before this fix, would tag the second index ``PROVENANCE_AGENT`` even though no delivery produced
+    it at all: a mis-pairing a count mismatch alone does not rule out, since the old guard only asked
+    whether the counts *differed*, not which direction. With fewer deliveries than indices the fix
+    refuses to broadcast and leaves both untagged, which is the direction "can only under-tag, never
+    mis-attribute" is supposed to hold unconditionally.
+    """
+    bus = MessageBus()
+    entry = bus.entry_reader("assistant")
+    bus.send("look at the index", sender="researcher#1", to="assistant")
+    entry()
+    assert len(bus.entry_deliveries()) == 1
+
+    class _FakeModelClient:
+        messages = [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}]
+
+    class _FakeAgent:
+        model_client = _FakeModelClient()
+
+    assistant._turns._tag_agent_messages(_FakeAgent(), bus, [0, 1])
+
+    assert PROVENANCE_KEY not in _FakeModelClient.messages[0]
+    assert PROVENANCE_KEY not in _FakeModelClient.messages[1]
+
+
+async def test_a_silent_round_in_between_does_not_throw_off_the_pairing(assistant):
+    """The invariant the whole by-position pairing rests on, end to end rather than as a pure unit
+    test alone: a round with nothing to drain leaves no entry in ``entry_deliveries()`` (the drain
+    returned nothing, so ``entry_reader``'s own ``if taken:`` guard never appends it) and no appended
+    ``user`` message either (``_delivering_run``'s matching guard), so the two lists this pairs by
+    position stay the same length and the direct pairing is taken, never the fallback. If either
+    guard were missing, this turn would mis-pair: three rounds sent or appended something in only two
+    of them, so an off-by-one would tag the user's own word with the agent's answer or the reverse.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+    agent.run = _delivering_run(
+        agent,
+        lambda: current_bus.get().send("use the cache", sender=USER, to=EVERYONE),
+        lambda: None,  # the silent round: nothing sent, nothing drained, nothing appended
+        lambda: current_bus.get().send("and the index", sender="researcher#1", to="assistant"),
+    )
+
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id)
+    assert stored.metadata["messages"]["0"] == [3, 8]
+    assert PROVENANCE_KEY not in stored.messages[3]
+    assert stored.messages[8][PROVENANCE_KEY] == PROVENANCE_AGENT
 
 
 async def test_an_agent_message_in_an_unattended_turn_is_tagged_rather_than_read_as_proactive(assistant):

@@ -27,6 +27,7 @@ from kokua.core.messages import (
     INJECTED_USER_PROVENANCE,
     LOOP_INJECTED_PROVENANCE,
     PROVENANCE_AGENT,
+    PROVENANCE_MIXED,
     message_text,
 )
 
@@ -67,7 +68,9 @@ def readable_messages(messages: list[dict]) -> list[tuple[str, object, str]]:
 
     Skips the system message, tool results, every user-role message the user did not type (the loop's
     injected turns, and a message one of a turn's agents sent to another, which is neither the user
-    nor the assistant speaking), and any message left with no
+    nor the assistant speaking), a mid-turn message that mixed the two into one appended text
+    (``messages.PROVENANCE_MIXED``, which cannot be split back into its two halves, so the whole
+    message is left out rather than counted as the user's), and any message left with no
     text -- which drops an assistant message whose only content was ``tool_calls``. The cost is that a
     turn whose visible work was all delegation shows only its final answer; that is acceptable because
     the loop ends every turn with a text answer, and the web UI is where the full trace is inspectable.
@@ -79,7 +82,7 @@ def readable_messages(messages: list[dict]) -> list[tuple[str, object, str]]:
         if role in _SKIPPED_ROLES:
             continue
         provenance = message.get(PROVENANCE_KEY)
-        if role == "user" and provenance in INJECTED_USER_PROVENANCE:
+        if role == "user" and (provenance in INJECTED_USER_PROVENANCE or provenance == PROVENANCE_MIXED):
             continue
         content = message.get("content")
         text = (message_text(content) + _image_placeholders(content)).strip()
@@ -309,8 +312,9 @@ def replay_items(
     while it ran (``record_turn_provenance``'s ``messages`` map). What the *user* sent is an ordinary
     untagged ``user`` entry in the transcript, so nothing in the message itself distinguishes one from
     a message that started a turn, and position cannot: for those, this record is the only thing that
-    can say. (What one of the turn's *agents* sent carries ``messages.PROVENANCE_AGENT``, so it has a
-    second answer that survives without the record; see the branch below.)
+    can say. (What one of the turn's *agents* sent carries ``messages.PROVENANCE_AGENT``, and a
+    delivery that mixed the user's words with an agent's carries ``messages.PROVENANCE_MIXED``, so
+    both have a second answer that survives without the record; see the branch below.)
     Without it a mid-turn message replays as a turn of its own, which is destructive rather
     than untidy, because a renderer stamps a turn's branch and delete-from-here controls on the first
     item carrying a ``message_index`` and the index of a message sent mid-turn cuts its *host* turn in
@@ -386,29 +390,33 @@ def replay_items(
                 # so it must not close that turn's failure notice either.
                 add({"type": "loop", "reason": provenance, "text": message_text(message.get("content"))}, ts)
                 continue
-            if index in mid_turn_set or provenance == PROVENANCE_AGENT:
-                # A message sent into the turn already running, by the user or by one of the turn's
-                # own agents. Deliberately carries no `message_index`: it has no turn of its own, so a
+            if index in mid_turn_set or provenance in (PROVENANCE_AGENT, PROVENANCE_MIXED):
+                # A message sent into the turn already running, by the user, by one of the turn's own
+                # agents, or by both at once (one delivery can join the two into a single appended
+                # text). Deliberately carries no `message_index`: it has no turn of its own, so a
                 # renderer must neither open one here nor offer the controls that act on one. It
                 # continues the turn in progress, so like a loop marker it must not close that turn's
                 # failure notice either.
                 #
                 # Either test is enough on its own, and the tag is the one that does not depend on a
                 # record surviving: the index comes from this turn's metadata, while the tag rides the
-                # message itself, so an agent's message is kept out of a user bubble even by a reader
-                # holding the messages and not the record. The user's own mid-turn message has no such
-                # second route, deliberately (it is untagged because it really is the user speaking),
-                # which is why the index is still what answers for it.
+                # message itself, so an agent's message, mixed or not, is kept out of a plain user
+                # bubble even by a reader holding the messages and not the record. The user's own
+                # mid-turn message has no such second route, deliberately (it is untagged because it
+                # really is the user speaking), which is why the index is still what answers for it.
                 #
-                # `from` says which of the two it was, and only a reader that attributes the words in
-                # so many letters needs it: the Markdown export writes "User (mid-turn)" over an inbox
-                # item, which would be a worker's note signed by the user. A flag on the item rather
-                # than an item type of its own, because a renderer that has not learned the flag
-                # still draws the message (the web page's replay keys on `inbox` and ignores keys it
-                # does not know, where an unknown *type* would be dropped in silence).
+                # `from` says which of the three it was, and only a reader that attributes the words
+                # in so many letters needs it: the Markdown export writes "User (mid-turn)" over an
+                # inbox item with none, which would be a worker's note (or half of one) signed by the
+                # user. A flag on the item rather than an item type of its own, because a renderer that
+                # has not learned the flag still draws the message (the web page's replay keys on
+                # `inbox` and ignores keys it does not know, where an unknown *type* would be dropped
+                # in silence).
                 item = {"type": "inbox", "text": message_text(message.get("content"))}
                 if provenance == PROVENANCE_AGENT:
                     item["from"] = "agent"
+                elif provenance == PROVENANCE_MIXED:
+                    item["from"] = "mixed"
                 add(item, ts)
                 continue
             flush_failure()  # whatever turn was in progress ends where this one begins

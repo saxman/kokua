@@ -527,9 +527,10 @@ def _render_item(item: dict, max_payload_chars: Optional[int], payloads_path: Op
         #
         # Who said it has to be read off the item rather than assumed, because one of the turn's own
         # agents can send one too (``core/messaging.py``) and a line signed "User" over a worker's
-        # note is the impersonation the provenance tag exists to stop. "Agent" rather than a name:
-        # the sender's address is not on the stored message, only the fact that it was not the user.
-        speaker = "Agent" if item.get("from") == "agent" else "User"
+        # note, or over a delivery that joined the two into one message, is the impersonation the
+        # provenance tag exists to stop. "Agent" and "Mixed" rather than a name: the sender's address
+        # is not on the stored message, only the fact that it was not the user, or not the user alone.
+        speaker = {"agent": "Agent", "mixed": "Mixed"}.get(item.get("from"), "User")
         return [f"**{speaker} (mid-turn):** {item.get('text', '')}"]
     if item_type == "tool":
         return _render_tool(item, max_payload_chars, payloads_path)

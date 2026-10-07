@@ -253,7 +253,7 @@ from kokua.config.file import thinking_request
 from kokua.core.auto_approval import ReviewContext, current_review_context
 from kokua.core.build import model_label
 from kokua.core.errors import describe_error
-from kokua.core.messages import derive_title, resolve_message_indices, resolve_user_index
+from kokua.core.messages import PROVENANCE_MIXED, derive_title, resolve_message_indices, resolve_user_index
 from kokua.core.messaging import ENTRY_SOURCE, Message, MessageBus, current_bus
 from kokua.core.metrics import TurnMetrics, current_metrics, record_event
 from kokua.core.subagents import subagent_events
@@ -756,16 +756,35 @@ class TurnRunner:
         the two counts disagree the pairing is not safe to make, and the ``/plan`` path is where that
         happens: the planner's rounds are rolled back (``workflows/planning``), so a message delivered
         while the plan was being drafted was drained and then had its appended message discarded,
-        leaving more deliveries than indices and every surviving pair off by one. The fallback is to
-        ask one question of every delivery at once, which can only under-tag: it tags nothing unless
-        *no* delivery in the whole turn carried the user's words, so a mis-pairing can never put the
-        agent tag on something the user said.
+        leaving more deliveries than indices and every surviving pair off by one.
+
+        The fallback answers one question for the whole turn at once, and the guarantee it has to keep
+        is that it can only under-tag, never put the agent tag on an index no delivery actually
+        produced. That guarantee needs *more* deliveries than indices, not merely an unequal count:
+        with fewer deliveries than indices, broadcasting one answer across every index would also
+        answer for an index nothing delivered at all, which is a mis-pairing a count mismatch alone
+        does not rule out. So the broadcast only runs with deliveries to spare; short of that, nothing
+        here is safe to tag and every index is left untagged, under-tagging completely rather than
+        guessing. With deliveries to spare, the broadcast asks whether every delivery in the whole turn
+        was agent-only and tags every index if so, which still cannot mis-tag: an aggregate answer of
+        "mixed" or "user" leaves every index untagged exactly as a mixed single delivery would.
 
         ``tag_for_delivery`` is what decides each answer, including the mixed delivery that must stay
-        untagged; see it for why under-tagging is the safe direction and what covers the gap.
+        untagged; see it for why under-tagging is the safe direction and what covers the gap. That gap
+        is not undefended even when untagged, on either side of it: see
+        :func:`kokua.core.messaging._for_model` for the half that protects the model reading the turn
+        live, and :meth:`kokua.core.messaging.MessageBus.is_mixed_delivery` for the half below, which
+        writes :data:`kokua.core.messages.PROVENANCE_MIXED` so a transcript export or a search does not
+        sign or count an agent's contributed words as the user's own, without disturbing
+        ``tag_for_delivery``'s own answer or ``is_user_turn``'s.
         """
         deliveries = bus.entry_deliveries()
-        if len(deliveries) != len(message_indices):
+        if len(deliveries) < len(message_indices):
+            # Fewer deliveries than appended messages: at least one index was not produced by any
+            # recorded delivery, so no single answer can be broadcast across all of them without
+            # answering for content that was never there. Leave every index untagged.
+            deliveries = []
+        elif len(deliveries) > len(message_indices):
             whole_turn = [message for delivery in deliveries for message in delivery]
             deliveries = [whole_turn] * len(message_indices)
         messages = agent.model_client.messages
@@ -773,6 +792,8 @@ class TurnRunner:
             tag = bus.tag_for_delivery(delivery)
             if tag is not None:
                 messages[index][PROVENANCE_KEY] = tag
+            elif bus.is_mixed_delivery(delivery):
+                messages[index][PROVENANCE_KEY] = PROVENANCE_MIXED
 
     def _record_provenance(
         self,

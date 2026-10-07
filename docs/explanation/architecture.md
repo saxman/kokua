@@ -341,9 +341,23 @@ never reads, so the two drains that hand AIMU's loop a message's text (`MessageB
 tag, protecting the model that acts on a message rather than the reader that looks at the record
 afterwards. One qualifier, and it is the reason the
 record still carries both kinds: a drain's list becomes *one* appended message, so a round that
-delivered the user's words and an agent's is one message that is both, and tagging it would hide what
-the user said. That case stays untagged and rests on the index alone
-(`MessageBus.tag_for_delivery`). That record is what keeps a reload from replaying one such turn as two: the
+delivered the user's words and an agent's is one message that is both, and `PROVENANCE_AGENT` cannot
+go on it, since that tag's own contract ("nothing here is the user's") would be false. `is_user_turn`
+reads this message exactly as it would an untagged one, and the per-turn index is what answers for it
+there (`MessageBus.tag_for_delivery`); the same holds for the one other case `PROVENANCE_AGENT` never
+reaches, where a mid-turn delivery cannot be paired with the message it became and the turn answers
+for the whole turn at once rather than guess (`TurnRunner._tag_agent_messages`). Neither is left
+undefended on the model's side (the words an agent contributed were already rendered attributed
+inside its own context by the drain, before AIMU ever joined them into the message) or, where the
+mixing can actually be told apart, on the transcript's: a mixed delivery carries
+`messages.PROVENANCE_MIXED` instead, a narrower tag `is_user_turn` does not look for, which is what
+lets `replay_items` mark it `from: "mixed"` and the Markdown export sign it **Mixed (mid-turn)**
+rather than crediting an agent's half to the user. Only the fallback's own complete under-tag, reached
+when a turn has fewer recorded deliveries than appended messages, carries neither tag; that shape is
+not reachable on any path shipped today, and the guard that refuses to guess at it lives beside the
+broadcast in `TurnRunner._tag_agent_messages`.
+
+That record is what keeps a reload from replaying one such turn as two: the
 `"inbox"` item `replay_items` emits carries no `message_index`, so a renderer that stamps a turn's
 controls on the first item carrying one has nothing to stamp it with, which is exactly right, since the
 index that would truncate "here" points into the middle of the host turn. A transcript stored before

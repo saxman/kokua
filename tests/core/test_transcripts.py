@@ -6,7 +6,7 @@ from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROA
 
 from aimu.sessions import Session
 
-from kokua.core.messages import PROVENANCE_AGENT
+from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED
 from kokua.core.transcripts import MAX_MESSAGE_CHARS, flatten_transcript, replay_items, search, truncate_lines
 
 
@@ -267,3 +267,44 @@ def test_an_agent_message_is_not_part_of_what_was_said():
         [message for message in _AGENT_MESSAGE_TURN if message.get(PROVENANCE_KEY) != PROVENANCE_AGENT]
     )
     assert not any("look at the index" in line for line in flatten_transcript(_AGENT_MESSAGE_TURN))
+
+
+# The same turn again, with the mid-turn message carrying both the user's own words and an agent's,
+# joined into the one appended text a mixed delivery becomes.
+_MIXED_MESSAGE_TURN = [
+    *_MID_TURN_TURN[:3],
+    {
+        "role": "user",
+        "content": "use the cache\n\n[message from researcher#1] and the index",
+        PROVENANCE_KEY: PROVENANCE_MIXED,
+    },
+    _MID_TURN_TURN[4],
+]
+
+
+def test_replay_items_marks_a_mixed_message_mixed_rather_than_agent_or_plain_user():
+    """The third state this task adds: ``PROVENANCE_AGENT`` would claim none of this message is the
+    user's, which is false, so a mixed delivery cannot carry it; but leaving it with no ``from`` at
+    all is what let a transcript reader sign an agent's contributed half with the user's name. Mixed
+    is neither of the other two.
+    """
+    items = replay_items(_MIXED_MESSAGE_TURN, mid_turn={"0": [3]})
+
+    assert {
+        "type": "inbox",
+        "text": "use the cache\n\n[message from researcher#1] and the index",
+        "from": "mixed",
+    } in items
+    assert not any(item.get("from") == "agent" for item in items)
+
+
+def test_a_mixed_message_is_not_part_of_what_was_said_either():
+    """The same exclusion the agent-only case gets, for the same reason: this text is not cleanly the
+    user's, so search must not match it as something the user said. The cost is real (the user's own
+    half of this message is unsearchable too), and it is the direction under-counting is supposed to
+    err in, the same one ``MessageBus.tag_for_delivery`` takes for the stored tag itself.
+    """
+    assert flatten_transcript(_MIXED_MESSAGE_TURN) == flatten_transcript(
+        [message for message in _MIXED_MESSAGE_TURN if message.get(PROVENANCE_KEY) != PROVENANCE_MIXED]
+    )
+    assert not any("and the index" in line for line in flatten_transcript(_MIXED_MESSAGE_TURN))

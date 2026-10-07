@@ -486,6 +486,20 @@ def test_a_reader_drains_the_text_alone():
     assert drain() == ["use the cache"]
 
 
+def test_a_drain_attributes_an_agent_sent_message_to_its_sender():
+    """The property this task adds beyond the tag: the words themselves name an agent's sender, so
+    a recipient's own context can tell a worker's note from the user's without reading any metadata.
+    The user-sent control sits beside it, so this cannot pass by prefixing everything a drain hands
+    back.
+    """
+    bus = MessageBus()
+    drain = bus.reader()
+    bus.send("and the index", sender="researcher#1", to=EVERYONE)
+    bus.send("use the cache", sender=USER, to=EVERYONE)
+
+    assert drain() == ["[message from researcher#1] and the index", "use the cache"]
+
+
 def test_an_agent_only_delivery_is_tagged():
     bus = MessageBus()
     entry = bus.entry_reader("assistant")

@@ -5,7 +5,7 @@ import re
 from aimu.models import PROVENANCE_KEY
 from aimu.sessions import Session
 
-from kokua.core.messages import PROVENANCE_AGENT
+from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED
 from kokua.transcript_export import _render_item, _render_subagent, render_markdown
 
 
@@ -854,3 +854,36 @@ def test_an_agent_message_is_exported_as_agent_sent_end_to_end():
     assert out.count("## Turn ") == 1
     assert "**Agent (mid-turn):** look at the index" in out
     assert "User (mid-turn)" not in out
+
+
+def test_a_mixed_sent_inbox_item_is_not_signed_by_the_user_either():
+    """A delivery that joined the user's own words with an agent's is not one the tag can call
+    ``PROVENANCE_AGENT`` (that would claim none of it is the user's, which is false), but it is not
+    the user's words alone either, and signing the whole of it "User" would credit an agent's half to
+    the user: the same impersonation the ``agent``-only case exists to stop, by a different route."""
+    item = {"type": "inbox", "text": "use the cache\n\n[message from researcher#1] and the index", "from": "mixed"}
+    assert _render_item(item, None) == [
+        "**Mixed (mid-turn):** use the cache\n\n[message from researcher#1] and the index"
+    ]
+
+
+def test_a_mixed_message_is_exported_as_mixed_not_user_end_to_end():
+    """Through ``replay_items`` rather than from a hand-written item, the same way the agent-only
+    case is pinned end to end, so the flag asserted here is the one ``PROVENANCE_MIXED`` actually
+    produces rather than one this test assumes."""
+    session = _session(
+        [
+            {"role": "user", "content": "summarize the log"},
+            {
+                "role": "user",
+                "content": "use the cache\n\n[message from researcher#1] and the index",
+                PROVENANCE_KEY: PROVENANCE_MIXED,
+            },
+            {"role": "assistant", "content": "done"},
+        ],
+        {"messages": {"0": [1]}},
+    )
+    out = render_markdown(session)
+    assert out.count("## Turn ") == 1
+    assert "**Mixed (mid-turn):** use the cache\n\n[message from researcher#1] and the index" in out
+    assert "**User (mid-turn):**" not in out

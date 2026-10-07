@@ -32,12 +32,13 @@ no marker at either level, because the tool call between two generations is alre
 card still keeps no iteration counter of its own: the counter could not have named the injection or
 quoted it anyway.
 
-AIMU also yields an ``INBOX`` chunk when the user sends a message to a worker already running, and the
-card carries it for the same reason it carries a ``loop`` entry: a round with nothing else between two
-generations needs its own marker, or the break reads as unexplained. The two are recorded as distinct
-kinds rather than one, because ``loop`` is the agent loop speaking and ``INBOX`` is the user's own
-words reaching the worker; a card that filed both under ``loop`` would credit the loop with what a
-person said.
+AIMU also yields an ``INBOX`` chunk when a message reaches a worker already running, whether the user
+sent it or one of the turn's own agents did (``core/messaging.py``), and the card carries it for the
+same reason it carries a ``loop`` entry: a round with nothing else between two generations needs its
+own marker, or the break reads as unexplained. The two are recorded as distinct kinds rather than one,
+because ``loop`` is the agent loop speaking and ``INBOX`` is somebody else's words reaching the
+worker; a card that filed both under ``loop`` would credit the loop with what a person, or another
+agent, said.
 """
 
 from __future__ import annotations

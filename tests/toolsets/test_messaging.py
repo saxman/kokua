@@ -43,6 +43,22 @@ def test_send_message_outside_a_turn_says_so_rather_than_raising():
     assert "no turn" in send_message("researcher", "hello").lower()
 
 
+def test_send_message_refuses_blank_text_rather_than_accepting_and_losing_it():
+    """The same rule `Assistant._offer_message` applies to the user's own blank text, stated here
+    explicitly rather than left to `_for_model`'s attribution prefix making the drained text
+    non-blank by accident: AIMU discards whitespace at the drain, so an accepted blank message would
+    be delivered to nobody and reported undelivered for words that were never there."""
+    bus = MessageBus()
+    bus.reader("researcher")
+    token = current_bus.set(bus)
+    try:
+        receipt = send_message("researcher", "   ")
+        assert "blank" in receipt.lower()
+        assert bus.close() == ([], [])
+    finally:
+        current_bus.reset(token)
+
+
 def test_list_agents_names_the_roster_and_everyone():
     bus = MessageBus()
     bus.entry_reader("assistant")

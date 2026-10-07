@@ -955,7 +955,11 @@ hide what you said from every one of those readers. That case stays untagged and
 message index, which lists a mid-turn message either way. A turn with several deliveries is answered
 one delivery at a time (`MessageBus.entry_deliveries`), so a turn where you spoke in one round and a
 worker in another tags only the worker's; where the pairing cannot be made safely, which is a `/plan`
-turn whose planner rounds were rolled back under a delivery, it can only under-tag, never mis-tag.
+turn whose planner rounds were rolled back under a delivery, the fallback broadcasts one answer across
+every index, but only when there are more deliveries than indices to answer for. With fewer, nothing
+is tagged at all rather than broadcasting an answer that could land on an index no delivery produced,
+which is what makes "it can only under-tag, never mis-tag" true unconditionally instead of resting on
+an unstated premise about delivery counts.
 **The tag is a key on the stored message, which the model reading the turn live never sees**, so a
 worker's note still read as bare words inside a recipient's own context, indistinguishable there from
 yours. `MessageBus`'s two drains (`reader`, `entry_reader`) now render that same distinction into the
@@ -965,6 +969,18 @@ prefix reaches what AIMU's loop takes as the next round's prompt, and so the sto
 *appended* message it becomes (the words a reader sees are exactly the words the model saw), while
 `Message.text` itself stays bare: `close()`'s undelivered report, `entry_deliveries`'s tagging
 decision, and the sender's own receipt all read that field directly and never see the prefix.
+**A mixed delivery is not left undefended either, on either side of the bus.** `PROVENANCE_AGENT`
+cannot go on it (its own contract is "nothing here is the user's", which would be false), so the
+message keeps the `messages.PROVENANCE_MIXED` tag instead: a second, narrower tag that answers "does
+this mix the two" without touching `is_user_turn`'s own answer, which stays exactly what it would be
+for a plain user message. `core/transcripts.py`'s replay reads it and marks the item `from: "mixed"`,
+and `transcript_export.py` signs it **Mixed (mid-turn)** rather than crediting the agent's half to the
+user; `readable_messages`/`flatten_transcript` drop the whole message from search, the same direction
+`tag_for_delivery` already takes for the stored tag (losing the user's own half of it rather than
+risking counting the agent's). The one case that still has neither tag is the fallback's complete
+under-tag, reached only when a turn has fewer recorded deliveries than appended mid-turn messages,
+which is not reachable on any path shipped today; see `TurnRunner._tag_agent_messages`'s own guard,
+added in the same pass, for why that specific shape is refused a broadcast rather than guessed at.
 
 **An agent's message never amends what an auto-approval reviewer reads as the turn's request**, where
 yours does. A reviewer judges one gated call's arguments against that text, so a model that could

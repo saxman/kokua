@@ -449,8 +449,9 @@ class WebChannel(BaseWebChannel):
                 await self.send_frame({"type": "loop", "reason": call.get("kind", ""), "text": call.get("prompt", "")})
             elif chunk.phase == StreamingContentType.INBOX:
                 # A separate frame from `loop`, not a third `reason` on it: `loop` says the loop
-                # injected a prompt of its own, and these are the user's own words. One frame that
-                # meant either would have the page attribute the user's message to the assistant.
+                # injected a prompt of its own, and these are somebody else's words, the user's or one
+                # of the turn's own agents' (`core/messaging.py`). One frame that meant either would
+                # have the page attribute the message to the assistant.
                 # `"inbox"`, matching the base path's own name for this chunk (see `send_message_frame`),
                 # so a planned turn's delivery frame and a plain turn's are one type for one handler.
                 sent = chunk.content if isinstance(chunk.content, dict) else {}

@@ -41,6 +41,24 @@ PROVENANCE_AGENT = "agent_message"
 # as a loop marker naming which injection it was, and an agent's message is not one of them.
 INJECTED_USER_PROVENANCE = LOOP_INJECTED_PROVENANCE | {PROVENANCE_AGENT}
 
+# Written onto a mid-turn message whose one appended text joined the user's own words with an agent's,
+# the delivery ``MessageBus.tag_for_delivery`` leaves untagged on purpose: that function's other tag,
+# ``PROVENANCE_AGENT``, means "nothing in this message came from the user", which would be false here,
+# so reusing it would misreport what the message actually is. This tag makes the honest claim instead
+# -- some of it is the user's and some is not -- for the one reader that needs to know that rather than
+# just "is this a turn the user took": a transcript export or a cross-conversation search must not sign
+# or count an agent's contributed words as the user's, which it would if it read this message the way
+# it reads an ordinary untagged one.
+#
+# Deliberately **not** added to :data:`INJECTED_USER_PROVENANCE`. That set is what :func:`is_user_turn`
+# and :func:`resolve_message_indices` exclude from, and both must keep answering for this message
+# exactly as they do for any other mid-turn message: it is not a turn boundary (the per-turn mid-turn
+# index already answers that, independently of any tag -- see ``core/conversations.py``'s
+# ``turn_end``), and it is not the user's own turn-starting message either way. Widening that set would
+# make ``is_user_turn`` claim the user said nothing here, which is exactly as false as ``PROVENANCE_AGENT``
+# would be, for the reason the mixed case has always stayed untagged there.
+PROVENANCE_MIXED = "agent_mixed_message"
+
 
 def is_user_turn(message: dict) -> bool:
     """Whether *message* is one the user actually sent, rather than one a machine put in their place.

@@ -35,6 +35,12 @@ NO_ADDRESS = (
     "This run has no address of its own on this turn's bus, so it cannot send. (A normally spawned "
     "agent always has one; seeing this means whatever built this run did not wire it up.)"
 )
+# Refused for the same reason `Assistant._offer_message` refuses blank text from the user: AIMU
+# discards whitespace at the drain, so an accepted blank message would be delivered to nobody and
+# then reported undelivered for words that were never there. Checked explicitly rather than left to
+# `_for_model`'s own prefix making the drained text non-blank by accident, which would hide the gap
+# today and reopen it the moment that rendering changes.
+BLANK_TEXT = "Blank text was not sent; there is nothing for another agent to read."
 
 
 @tool
@@ -70,6 +76,8 @@ def send_message(to: str, text: str) -> str:
     sender = current_address.get()
     if sender is None:
         return NO_ADDRESS
+    if not text.strip():
+        return BLANK_TEXT
     roster = bus.roster()
     matched = [address for address in roster if matches(to, address)]
     if to != EVERYONE and not matched:
