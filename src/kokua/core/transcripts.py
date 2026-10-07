@@ -17,6 +17,7 @@ it sits here rather than in either of them.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Optional
 
@@ -230,14 +231,70 @@ def search(
 _LOOP_PROVENANCE = LOOP_INJECTED_PROVENANCE
 
 # AIMU's make_async_subagent_tool (aimu/aio/tools/builtin.py) defaults its built tool's name to this
-# literal; kokua never overrides it. A spawn's own `subagent` card already shows its role, task, and
-# result, so the parent's `tool` frame for this one tool name is pure duplication and is suppressed
-# wherever a tool call becomes a display frame: `WebChannel.send_frame` and `replay_items`'s replay of a
-# stored message's tool_calls below agree on suppressing it because both read this one constant.
-# `core/build.py` imports it too, to find and replace the tool on a runtime rebuild; `channels.web`
-# imports it locally inside `send_frame`, since a top-level import back there would be circular (see
-# that method's comment).
+# literal; kokua never overrides it. `core/build.py` imports it to find and replace the tool on a
+# runtime rebuild.
 SPAWN_SUBAGENT_TOOL_NAME = "spawn_subagent"
+
+# The `capabilities` toolset's tool that builds a worker and runs it through the same spawn path. Named
+# here rather than imported from `toolsets/capabilities.py` because core does not import toolsets;
+# `tests/toolsets/test_capabilities.py` pins the two together.
+COMPOSE_SUBAGENT_TOOL_NAME = "compose_subagent"
+
+# Every tool whose call opens a sub-agent card. The card shows the call's arguments, the worker's run,
+# and its answer, so the call's own `tool` block would only repeat it, and in a different place: live,
+# the card opens when the worker starts and the tool block lands when it returns. So a card stands in
+# for its call wherever a tool call becomes a display item (`WebChannel.send_frame` live,
+# `replay_items` below on reload, `SubagentReporter` inside a parent card), and all three pair a card
+# with its call the same way, by `spawn_task`. A call that opened no card (a refused composition, an
+# unknown role) keeps its tool block, since it is then the only record of what was asked.
+SPAWN_TOOL_NAMES = frozenset({SPAWN_SUBAGENT_TOOL_NAME, COMPOSE_SUBAGENT_TOOL_NAME})
+
+
+def spawn_task(name: Optional[str], arguments: Any) -> Optional[str]:
+    """The task a spawn tool call handed its worker, or None for any other call.
+
+    This is what pairs a card with the call that opened it. AIMU's observer is told a spawn's task but
+    not the tool call id, and both spawn tools pass the task through to it unchanged, so the task string
+    is the one value the card and the call are guaranteed to share. Arguments arrive as a dict from a
+    live chunk and may be a JSON string in an older stored message.
+    """
+    if name not in SPAWN_TOOL_NAMES:
+        return None
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except ValueError:
+            return None
+    task = arguments.get("task") if isinstance(arguments, dict) else None
+    return task if isinstance(task, str) else None
+
+
+def _spawn_lineages(events: list[dict]) -> tuple[list[list[dict]], list[dict]]:
+    """Split one turn's recorded card events into one list per top-level spawn, holding that spawn's
+    events and every nested spawn's beneath it in recorded order, and the rest (reviewer verdicts).
+
+    A nested spawn's card renders inside its parent's, so it travels with its top-level ancestor: that
+    ancestor is the one whose call appears in the conversation's own messages and so the one a position
+    can be found for.
+    """
+    creates = {event["id"]: event for event in events if "task" in event and "id" in event}
+
+    def root(spawn_id: str) -> str:
+        seen = {spawn_id}
+        while (parent := creates[spawn_id].get("parent")) in creates and parent not in seen:
+            seen.add(parent)
+            spawn_id = parent
+        return spawn_id
+
+    lineages: dict[str, list[dict]] = {}
+    rest: list[dict] = []
+    for event in events:
+        if event.get("id") in creates:
+            lineages.setdefault(root(event["id"]), []).append(event)
+        else:
+            rest.append(event)
+    return list(lineages.values()), rest
+
 
 # A stored image reference: our own /images/<name> route, the compacted form persisted in place of inline
 # base64 (see images.py / messages.compact_message_images). Bounded to a bare filename (no slashes) so the match
@@ -295,11 +352,14 @@ def replay_items(
     message exists -- a transcript stored before results were replayed, or a turn cut short mid-dispatch
     -- and the page then renders the card exactly as it always did.
 
-    Two per-turn maps key a user-message index (as a string) to that turn's recorded reviewer activity,
-    interleaved right after the user bubble so it replays in place:
-      - ``subagent``: summary verdict cards (non-verbose turns). A verbose turn's plan reviewers show
-        up in ``trace`` instead, but its executor can still spawn its own sub-agents, and those cards
-        (identified by ``task`` on the create event or ``append`` on later ones) replay regardless.
+    Two per-turn maps key a user-message index (as a string) to that turn's recorded reviewer activity:
+      - ``subagent``: summary verdict cards (non-verbose turns), right after the user bubble, and the
+        turn's spawn cards. A spawn card replaces the tool call that opened it, at that call's place
+        among the assistant's tool calls (see ``SPAWN_TOOL_NAMES``), with any spawn nested under it
+        carried along to render inside it; one whose call is missing is placed at the turn's end. A
+        verbose turn's plan reviewers show up in ``trace`` instead, but its executor can still spawn
+        its own sub-agents, and those cards (identified by ``task`` on the create event or ``append``
+        on later ones) replay regardless.
       - ``trace``: the full raw verbose trace as ``phase`` + ``reasoning`` items. A traced turn shows
         the raw output instead of reviewer cards, and its trace already ends with the final answer, so
         the committed assistant message for that turn is skipped to avoid showing the answer twice.
@@ -365,6 +425,11 @@ def replay_items(
     results = _tool_results_by_call_id(messages)
     pending_failure: Optional[tuple[str, object]] = None  # (reason, the turn's timestamp)
     pending_undelivered: Optional[tuple[list[dict], object]] = None  # (the turn's reports, its timestamp)
+    # The turn's spawn cards not yet placed, each a lineage from `_spawn_lineages` with its turn's
+    # timestamp. Each is placed where its call sits among the assistant's tool calls, which is where it
+    # opened live; one whose call is not in the transcript (a turn cut short mid-dispatch, or a verbose
+    # turn whose assistant message is skipped) is placed when the turn ends instead.
+    pending_cards: list[tuple[list[dict], object]] = []
 
     def add(item: dict, timestamp) -> None:
         # Attach the source message's append-time timestamp (AIMU's inert ``timestamp`` key) so the page
@@ -374,6 +439,22 @@ def replay_items(
         if timestamp:
             item["ts"] = timestamp
         items.append(item)
+
+    def add_lineage(lineage: list[dict], timestamp) -> None:
+        for event in lineage:
+            add({"type": "subagent", **event}, timestamp)
+
+    def place_card_for(task: Optional[str], timestamp) -> bool:
+        """Place the first pending card opened for ``task``, if there is one, and say whether one was.
+        First, so two spawns given the same task pair with their calls in the order they were made."""
+        if task is None:
+            return False
+        for position, (lineage, _) in enumerate(pending_cards):
+            if lineage[0].get("task") == task:
+                del pending_cards[position]
+                add_lineage(lineage, timestamp)
+                return True
+        return False
 
     def flush_turn_end() -> None:
         """Close the turn in progress with its recorded failure and whatever it reported as
@@ -389,6 +470,10 @@ def replay_items(
         reads in the order it was watched in.
         """
         nonlocal pending_failure, pending_undelivered
+        # Cards first: they are output the turn produced, which the failure is about.
+        for lineage, turn_ts in pending_cards:
+            add_lineage(lineage, turn_ts)
+        pending_cards.clear()
         if pending_failure is not None:
             reason, turn_ts = pending_failure
             pending_failure = None
@@ -480,8 +565,10 @@ def replay_items(
                 # exactly like a reviewer's, and dropping it strands the card at "working...".
                 spawned = {event["id"] for event in events if "task" in event and "id" in event}
                 events = [event for event in events if event.get("id") in spawned]
-            for event in events:
+            lineages, verdicts = _spawn_lineages(events)
+            for event in verdicts:
                 add({"type": "subagent", **event}, ts)
+            pending_cards.extend((lineage, ts) for lineage in lineages)
         elif role == "assistant":
             if str(index - 1) in trace:
                 # The preceding user turn was verbose; its trace already contains this final answer
@@ -495,8 +582,8 @@ def replay_items(
             for call in message.get("tool_calls") or []:
                 fn = call.get("function", {})
                 name = fn.get("name")
-                if name == SPAWN_SUBAGENT_TOOL_NAME:
-                    continue  # shown as its own subagent card instead; see SPAWN_SUBAGENT_TOOL_NAME
+                if place_card_for(spawn_task(name, fn.get("arguments")), ts):
+                    continue  # the card stands in for its call; see SPAWN_TOOL_NAMES
                 add(
                     {
                         "type": "tool",

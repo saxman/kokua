@@ -822,6 +822,7 @@ function renderSubagent(frame, ts) {
     card = addFoldable("subagent" + (spawn ? " spawn" : ""), {}, opts, ts);  // stamp once, when first created
     if (frame.id) subagentCards[frame.id] = card;
     card.spawn = spawn;
+    card.tool = frame.tool || SPAWN_TOOL_NAME;  // only the create frame says, so it is kept on the card
     card.answers = [];  // every generated-text block, re-rendered as markdown when the spawn ends
     if (spawn) card.body.appendChild(spawnArgsLine(frame));
     // An `append` frame carries no role or status, so a card first created by one has no identity to
@@ -842,7 +843,7 @@ function renderSubagent(frame, ts) {
     // tells several concurrent spawns apart while they are all collapsed. Its full arguments,
     // task included, are on the card's own argument line. The kind word is what tells a reviewer's
     // card from a spawn's at a glance, which is the job the 🔎/🔧 icons used to do.
-    if (card.spawn) setFoldLabel(card.label, "subagent", SPAWN_TOOL_NAME + "(" + role + ")", status);
+    if (card.spawn) setFoldLabel(card.label, "subagent", card.tool + "(" + role + ")", status);
     else setFoldLabel(card.label, "review", role, status);
     if (frame.issues && frame.issues.length && frame.status !== "running") {
       const issuesMd = frame.issues.map((i) => "- " + i).join("\n");
@@ -864,18 +865,20 @@ function subagentStatusLabel(status, isSpawn) {
   return status || "done";
 }
 
-// The tool whose block the server suppresses in favour of the card (see SPAWN_SUBAGENT_TOOL_NAME
-// in channels/web.py); the card names it so the transcript still says which call was made.
+// The tool whose block the server suppresses in favour of the card (see SPAWN_TOOL_NAMES in
+// core/transcripts.py); the card names it so the transcript still says which call was made. A card
+// opened by any other spawn tool (compose_subagent) names its tool in `frame.tool`.
 const SPAWN_TOOL_NAME = "spawn_subagent";
 
 // A spawn card's first body line: the call's arguments, rendered exactly as a tool block's body
-// is. `agent_type` is reconstructed from the frame's role because kokua always builds AIMU's
-// typed spawn tool, whose parameters are agent_type and task (see toolsets/agents.py's build_agent_specs);
-// AIMU's untyped mode, which kokua never builds, would take task alone.
+// is. A card carrying `arguments` (compose_subagent's, see core/subagents.py's `spawn_call`) shows
+// them as given. Otherwise `agent_type` is reconstructed from the frame's role because kokua always
+// builds AIMU's typed spawn tool, whose parameters are agent_type and task (see core/agents.py's
+// build_agent_specs); AIMU's untyped mode, which kokua never builds, would take task alone.
 function spawnArgsLine(frame) {
   const el = document.createElement("div");
   el.className = "sa-args";
-  el.textContent = toolArgs({ agent_type: frame.role || "subagent", task: frame.task });
+  el.textContent = toolArgs(frame.arguments || { agent_type: frame.role || "subagent", task: frame.task });
   return el;
 }
 

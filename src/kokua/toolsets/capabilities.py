@@ -267,6 +267,8 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
         # of core.agents here would close that cycle.
         from kokua.core.agents import compaction_for_window
         from kokua.core.metrics import record_event
+        from kokua.core.subagents import spawn_call
+        from kokua.core.transcripts import COMPOSE_SUBAGENT_TOOL_NAME
 
         # The global default, not a per-agent cap: a composed worker is built per call and discarded
         # with the call, so it is not an agent the config describes and [assistant].max_iterations is
@@ -288,7 +290,14 @@ def _make_compose_tool(state: "LiveState", *, remaining_depth: int | None, model
             max_iterations=state.config.max_iterations,
             compaction=compaction_for_window(state.config.generation),
         )
-        return await spawn(label, task)
+        # The worker's card stands in for this call's own tool block, so it carries what the call
+        # was given, the capability names above all, which nothing else on the card would show.
+        arguments = {"name": name, "tools": tools, "instructions": instructions, "task": task}
+        token = spawn_call.set({"tool": COMPOSE_SUBAGENT_TOOL_NAME, "arguments": arguments})
+        try:
+            return await spawn(label, task)
+        finally:
+            spawn_call.reset(token)
 
     return compose_subagent
 

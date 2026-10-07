@@ -11,7 +11,7 @@ from aimu.models import StreamChunk, StreamingContentType
 from kokua import payloads
 from kokua.channels.ui import ChannelUI
 from kokua.core.messaging import MessageBus, current_address, current_bus
-from kokua.core.subagents import RESPONSE_PREVIEW_CHARS, SubagentReporter, subagent_events
+from kokua.core.subagents import RESPONSE_PREVIEW_CHARS, SubagentReporter, spawn_call, subagent_events
 from kokua.toolsets.messaging import send_message
 from tests.channels import SubagentCapturingChannel
 
@@ -786,3 +786,55 @@ async def test_nested_and_concurrent_spawns_through_aimus_own_spawn_path_name_th
     assert creates["left"]["parent"] == outer_id
     assert creates["right"]["parent"] == outer_id
     assert "parent" not in creates["after"], "a finished spawn must not be the parent of the next one"
+
+
+# A card stands in for the call that opened it (see `transcripts.SPAWN_TOOL_NAMES`): it names a tool
+# other than AIMU's own when `spawn_call` says so, and inside a parent's card the worker's own spawn
+# call is left to the child card rather than shown again as a tool entry.
+
+
+async def test_a_card_names_the_call_that_opened_it_when_one_is_declared():
+    reporter, channel = _reporter()
+    call = {"tool": "compose_subagent", "arguments": {"name": "w", "tools": ["web"], "task": "t"}}
+
+    token = spawn_call.set(call)
+    try:
+        await reporter.spawned("s-1", "w", "t")
+    finally:
+        spawn_call.reset(token)
+
+    assert channel.subagent_frames[0]["tool"] == "compose_subagent"
+    assert channel.subagent_frames[0]["arguments"]["tools"] == ["web"]
+
+
+async def test_the_declared_call_is_not_credited_to_a_spawn_the_worker_makes_in_turn():
+    reporter, channel = _reporter()
+    token = spawn_call.set({"tool": "compose_subagent", "arguments": {"task": "t"}})
+    try:
+        await reporter.spawned("outer", "w", "t")
+        await reporter.spawned("inner", "researcher", "nested")
+        await reporter.finished("inner", "", None)
+        await reporter.finished("outer", "", None)
+        assert spawn_call.get() is not None, "finished must restore what the composing call set"
+    finally:
+        spawn_call.reset(token)
+
+    assert "tool" not in channel.subagent_frames[1]
+
+
+async def test_a_workers_spawn_call_is_left_to_the_child_card_it_opened():
+    reporter, channel = _reporter()
+    events = _collect()
+
+    await reporter.spawned("outer", "w", "t")
+    await reporter.spawned("inner", "w", "nested task")
+    await reporter.finished("inner", "answer", None)
+    await reporter.chunk("outer", _tool_call("compose_subagent", {"task": "nested task"}, "answer"))
+    await reporter.chunk("outer", _tool_call("compose_subagent", {"task": "refused"}, "Could not compose"))
+
+    tool_entries = [event["append"] for event in events if event.get("append", {}).get("kind") == "tool"]
+    assert [entry["arguments"]["task"] for entry in tool_entries] == ["refused"], (
+        "a call that opened no card keeps its entry, since it is then the only record of what was asked"
+    )
+    sent = [frame for frame in channel.subagent_frames if frame.get("append", {}).get("kind") == "tool"]
+    assert len(sent) == 1

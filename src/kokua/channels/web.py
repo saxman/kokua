@@ -31,6 +31,7 @@ starts and when its state reaches the store.
 
 from __future__ import annotations
 
+from collections import Counter
 from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
@@ -202,6 +203,10 @@ class WebChannel(BaseWebChannel):
         # Per-conversation catch-up records for the turns in flight right now, opened and dropped by the
         # core (begin_catch_up / end_catch_up). A conversation with no running turn has no entry.
         self._catch_up: dict[str, _CatchUpRecord] = {}
+        # Tasks of top-level spawn cards opened whose call's tool frame has not arrived yet, counted
+        # because two spawns can be given the same task. A card opens when its worker starts and AIMU
+        # sends the call's tool frame only once it returns, so the card is always counted first.
+        self._cards_awaiting_call: Counter[str] = Counter()
 
     def begin_catch_up(self, conversation_id: str, text: str, image_paths: Optional[list[str]] = None) -> None:
         """Start recording a turn's output, so switching into its conversation mid-turn shows the turn.
@@ -237,8 +242,8 @@ class WebChannel(BaseWebChannel):
         Every live frame passes through here -- the base class's ``send()`` and this class's own
         ``stream_activity()`` both map chunks to frames by calling this inherited method -- which is
         what makes it the one place both the muting rule (:data:`_TURN_FRAMES`, re-evaluated per frame
-        so a switch mid-reply takes effect immediately) and the ``spawn_subagent`` suppression (see
-        SPAWN_SUBAGENT_TOOL_NAME) can live without duplicating the chunk-to-frame mapping. Replay is
+        so a switch mid-reply takes effect immediately) and the spawn-call suppression (see
+        SPAWN_TOOL_NAMES) can live without duplicating the chunk-to-frame mapping. Replay is
         handled separately, by :func:`kokua.core.transcripts.replay_items`, since a stored turn's tool
         calls reach the browser batched inside one ``history`` frame rather than through here.
         """
@@ -246,11 +251,18 @@ class WebChannel(BaseWebChannel):
         # imports this module (for streaming_conversation/proactive_turn, above) before this module
         # has finished loading, so a top-level `from kokua.core.transcripts import ...` back from here
         # would be circular whenever this module is what starts the import chain.
-        from kokua.core.transcripts import SPAWN_SUBAGENT_TOOL_NAME
+        from kokua.core.transcripts import spawn_task
 
         frame_type = frame.get("type")
-        if frame_type == "tool" and frame.get("name") == SPAWN_SUBAGENT_TOOL_NAME:
-            return
+        if frame_type == "subagent" and "task" in frame and "parent" not in frame:
+            self._cards_awaiting_call[frame["task"]] += 1
+        elif frame_type == "tool":
+            task = spawn_task(frame.get("name"), frame.get("arguments"))
+            if task is not None and self._cards_awaiting_call[task] > 0:
+                self._cards_awaiting_call[task] -= 1
+                if not self._cards_awaiting_call[task]:
+                    del self._cards_awaiting_call[task]
+                return
         if frame_type in _TURN_FRAMES:
             record = self._catch_up.get(streaming_conversation.get())
             if record is not None:
@@ -496,7 +508,7 @@ class WebChannel(BaseWebChannel):
         frames is what makes that safe: a live frame from the running turn can land between two awaits,
         which would both misorder the catch-up and duplicate the frame it interleaved with.
         """
-        # Imported here, not at module level: the same cycle as send_frame's SPAWN_SUBAGENT_TOOL_NAME
+        # Imported here, not at module level: the same cycle as send_frame's spawn_task
         # import above applies to any top-level import back from kokua.core.transcripts.
         from kokua.core.transcripts import replay_items
 
