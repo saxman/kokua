@@ -133,7 +133,7 @@ And the sibling, in its own card, two blocks later in the same export:
 **Message (mid-turn):** [message from researcher#1] the answer is 42
 ````
 
-**That second block is the only genuinely new row of the matrix, happening.** One worker's words
+**That second block is the matrix's one new row between two running agents, happening.** One worker's words
 reached another worker that was running at the same time, between its first round and its second, and
 nothing in the parent relayed them. The parent was inside its `TaskGroup` the whole time.
 
