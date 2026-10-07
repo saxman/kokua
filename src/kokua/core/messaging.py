@@ -8,10 +8,12 @@ reaches the model at its next model call rather than queuing behind the turn on 
 Three design points are worth reading before changing anything here.
 
 **Append-only with a cursor per reader, not a queue.** The user's message goes to the entry agent
-*and* to every worker a declared agent spawned, so a shared queue would let whichever worker drained
-first consume a message the conversation never saw. ("A declared agent" is the limit, not a flourish:
-a worker ``toolsets/capabilities.py`` composes per call builds its own spawn tool and is handed no
-source, so it cannot be redirected. ``TODO.md`` carries that gap.)
+*and* to every worker the turn spawned, so a shared queue would let whichever worker drained first
+consume a message the conversation never saw. "Every worker" includes one
+``toolsets/capabilities.py`` composes per call, which builds its own spawn tool rather than going
+through ``core/agents.py`` and so had to be given a source of its own; see that module for the second
+reason it needs one, which is that a run opening no reader mints no address and would send under
+whoever composed it.
 
 **Nothing here awaits.** ``send`` and ``close`` are both synchronous, and asyncio is
 single-threaded, so there is no interleaving between the moment a turn's ``finally`` shuts the

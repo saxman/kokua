@@ -38,8 +38,9 @@ src/kokua/
                           replay items (replay_items), shared by the web channel's history replay and
                           the Markdown export
     turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
-    messaging.py         MessageBus: what the user types into a turn that is already running,
-                          and the two sources that decide who has read it
+    messaging.py         MessageBus: what the user types into a turn that is already running, and
+                          what one of that turn's own agents sends another; the roster of addresses
+                          it mints per run, and the two sources that decide who has read it
     interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
     auto_approval.py     the optional model reviewer that may answer an approval prompt in the user's
                           place, and the code that decides whether it did (explanation/auto-approval.md)
@@ -266,8 +267,9 @@ declared agent spawned, because a redirection the user meant for the work is use
 the supervisor. A shared queue would let whichever reader drained first consume a message the others never
 saw, so the bus is append-only and each run opens its own cursor over it. Two sources decide which
 cursor: `ENTRY_SOURCE` opens the bus's *entry* cursor and goes to every run of the entry
-agent, while `WORKER_SOURCE` opens an independent one and rides the spec of every worker
-`build_agent_specs` writes (see below for the one spawn path that does not go through it). The distinction
+agent, while `WORKER_SOURCE` opens an independent one and rides the spec of every worker Kokua spawns,
+whether `build_agent_specs` wrote that spec for a declared agent or `compose_subagent` built it per
+call. The distinction
 is load-bearing rather than tidy, because `close()` measures what is left over from the entry cursor's
 position. Hand the entry agent a worker-shaped source and that position never moves, so every message
 the turn actually *delivered* would also run again as a turn of its own. A worker having read a message
@@ -295,6 +297,24 @@ of liveness-free addressing it rests on (a bare label naming several runs is sat
 them, so a report means "nothing took this" and never "this run did not read it") and the gaps it
 leaves.
 
+**An address is minted at reader-open, and the roster dies with the turn.** The same bus carries a
+message one of the turn's own agents addressed to another (`toolsets/messaging.py`'s `send_message` and
+`list_agents`), which needs something the user's broadcast never did: a name per run. `MessageBus`
+mints one in each reader factory, because that is the only moment a run is individuated (the entry
+agent's declared name with no ordinal, since exactly one runs per turn; `label#ordinal` for a worker,
+with AIMU's `subagent-` decoration stripped so the address reads the way `[agents.<name>]` does), and
+`matches` is the pure predicate a drain filters itself with: `everyone`, one exact address, or a bare
+label reaching every run under it. The roster is append-only and turn-scoped, and both halves are
+load-bearing. Nothing in AIMU's `Inbox` protocol signals that a run has ended, and inferring it from
+reader-open order is the identity-by-ordering that protocol's own docstring warns against, so an
+address names a run that *opened a reader*, never one still open. That is what makes a send to a
+finished worker an accept followed by an undelivered report rather than a refusal, while a send to an
+address that never existed this turn is refused outright, since the roster can answer that much without
+liveness. **Who can reach whom is decided by the execution model rather than by the bus, and
+[Agent messaging](../how-agents-work/agent-messaging.md) is where that argument lives** (a parent is
+blocked for as long as its children run, so sibling-to-sibling is the only direction this adds);
+nothing here repeats it.
+
 **Liveness resets, safety does not.** AIMU's loop drains the bus once per round, at all three ways a
 round can end, and a delivered message moves the round budget's base so the run gets a fresh
 `max_iterations` stretch counted from there: a human saying something is the evidence that the run is
@@ -307,19 +327,23 @@ already replaced. That amendment rides the bus rather than the contextvar beside
 offer arrives on the serve loop's task while `current_review_context` is set inside the turn's own and
 is therefore invisible from where the offer lands.
 
-Four run shapes can receive a message mid-turn, and the differences between them follow from their
+Five run shapes can receive a message mid-turn, and the differences between them follow from their
 shapes rather than from different rules. A plain reactive turn is the simple case. Every entry-agent
 run inside a `/plan` turn shares the one entry cursor, since a cursor belongs to a turn and not to a
 run, so a message one of those runs delivered is not re-submitted by the one after it. A spawned worker
 reads through its spec, which `build_agent_specs` writes unconditionally: a stated exception to "a
 capability is declared, never defaulted", because the value is not a per-worker setting but the one
 process-wide source that resolves whichever turn is running when a reader is opened, and a worker with
-no turn around it gets a drain that returns nothing. One spawn path does not go through
-`build_agent_specs` and so is not covered: `toolsets/capabilities.py`'s `compose_subagent` builds its
-own spawn tool for a worker composed per call, and passes no `inbox` (nor `events`, the same gap one
-subsystem over), so a worker composed that way cannot receive a message mid-turn. `capabilities` is in
-the shipped default `[agents.assistant].tools`, which makes this reachable on a default install rather
-than hypothetical; `TODO.md` carries the fix. A scheduled firing opens its bus in `_run_unattended`
+no turn around it gets a drain that returns nothing. A worker `toolsets/capabilities.py`'s
+`compose_subagent` builds per call reaches the same place by a different route, and is the one run
+shape whose source was added for two reasons rather than one: that tool builds its own spawn tool
+instead of going through `build_agent_specs`, and for a while passed no `inbox` (nor `events`, the same
+omission one subsystem over), so a composed worker could not receive a message mid-turn. It writes both
+now, and delivery is only half of why `inbox` is unconditional there: a run that opens no reader mints
+no address, which leaves `current_address` holding whatever its caller set, so `send_message` would
+have attributed a composed worker's message to the agent that composed it. `capabilities` and
+`messaging` are both in the shipped default `[agents.assistant].tools`, so that was reachable on a
+default install rather than hypothetical. A scheduled firing opens its bus in `_run_unattended`
 rather than in the body that reads it, because the body runs in a child task that copies the context at
 creation, and reaches `close()` outside the gate hold, because a follow-up turn takes a hold of its own
 (invariant 1). What deliberately cannot receive a message mid-turn is an independent reviewer
@@ -1909,6 +1933,36 @@ the *end* of its turn -- held until the next user message or the end of the tran
 the user carried on in keeps the notice inside the turn it describes. An unattended run needs this most,
 since `_report`'s status line goes to whichever conversation the user was viewing at the time, leaving the
 run's own conversation with no account of why it holds only half a turn.
+
+**`metadata["undelivered"]` is keyed and flushed the same way, for a record that has nowhere else to
+live.** When a turn ends, whatever one of its own agents sent that no reader took is both said once
+(`TurnRunner._report_undeliverable`, to the user, since the sender's run is over) and stored
+(`ConversationBook.record_undelivered`, under `str(user_index)` like `failure` beside it). Stored
+because the sentence scrolls away, and because unlike a mid-turn message that *was* delivered there is
+no message in `session.messages` to read it back off: never becoming a message is the whole of what
+undelivered means, so this record is the only place it exists. `replay_items` emits it as its own
+`"undelivered"` item type rather than folding it into the `"inbox"` item beside it, because the two
+answer different questions a reader asks (did this reach anyone, versus did the user or an agent say
+this), and flushes it at the same point `failure` is flushed, at the next user message or the end of the
+transcript, with failure first, which is the order the live turn produces them in. The page draws it
+with `addBubble("notice", ...)`, naming the sender, the selector, and the text, because no two of the
+three identify the message.
+
+**A mid-turn message replays in one of three states, and the page tells them apart.** `replay_items`
+decides which from the stored provenance tag and marks the `"inbox"` item `from: "agent"`,
+`from: "mixed"`, or nothing at all, and `app.js`'s `renderMidTurn` turns those into three different
+rows: a kind word (`inbox`, `agent`, `mixed`) and a class list (`.inbox`, `.inbox.agent`,
+`.inbox.mixed`). The dimming is the part that carries an argument. `.inbox` deliberately stays out of
+`app.css`'s dimmed machine-event group (`loop`, `thinking`, `tool`, `subagent`, `plan`), because the
+plain case is a person's own words and dimming them would read as the opposite; `.inbox.agent` folds
+back into that group, because nobody typed it; and `.inbox.mixed` keeps the undimmed default, since
+part of that one message really is the user's own words. So the kind word is the only thing separating
+`mixed` from the plain case, which is why the end-to-end suite asserts the label, the class, and the
+computed colour rather than any one of them. A live sub-agent card uses the same renderer for a
+delivery it received, and recovers only the unambiguous half: the card frame carries no `from` field
+(addressing stays out of the channel, principle 1), so `cardMessageFrom` reads the attribution off the
+text's own *leading* `[message from ...]` marker, and a mixed delivery reads there as the plain case,
+the same direction `MessageBus.tag_for_delivery` takes when it cannot tell either.
 
 Planning's reviewer verdicts and a turn's spawned sub-agents share one `subagent` frame type and one
 persisted map (`metadata["subagent"]`); `task` on the create event is what tells the two apart.

@@ -180,14 +180,15 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   been paid for. `core/messaging.py` gives each turn a message bus, `Assistant._offer_message` routes a
   plain message into the one running on the conversation being viewed, and AIMU's loop drains it at the
   turn's next model call. The bus is append-only with **a cursor per reader**, not a queue, because
-  the message goes to the entry agent *and* to every spawned worker that is itself a declared agent (a
-  worker `toolsets/capabilities.py` composes per call is declared nowhere, and is handed no source, so
-  it cannot be redirected): a redirection that only reaches the supervisor redirects nothing, and a
-  shared queue would let whichever reader drained first consume a message the others never saw. Four
+  the message goes to the entry agent *and* to every spawned worker: a redirection that only reaches
+  the supervisor redirects nothing, and a
+  shared queue would let whichever reader drained first consume a message the others never saw. Five
   run shapes can receive a message mid-turn, and they are the
-  four a turn is made of: a plain turn, a `/plan` turn (where every entry-agent run shares the one
+  five a turn is made of: a plain turn, a `/plan` turn (where every entry-agent run shares the one
   cursor, since a cursor belongs to a turn and not to a run), every worker spawned through
-  `build_agent_specs`, and a scheduled firing, which a user who switched into its conversation can
+  `build_agent_specs`, a worker `toolsets/capabilities.py` composes per call (which was the one shape
+  this missed until `messaging` landed; see that toolset's entry under Toolsets), and a scheduled
+  firing, which a user who switched into its conversation can
   redirect like any other. The one run that
   deliberately cannot receive a message mid-turn is an independent reviewer (`workflows/critics.py`),
   which is context-free by design.
@@ -238,6 +239,25 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   pair in place of everything the executor appended, so a message delivered there is live and in the
   catch-up record but not in the stored messages. A message delivered while the plan was still being
   drafted is in neither on either path, because planning scratch is rolled back.
+- **Change, for anyone running a pre-release checkout: "steering" is renamed to messaging throughout,
+  with no legacy path on either side of the AIMU boundary.** Steering was one case of messaging all
+  along, so the special case stops naming the general mechanism. AIMU's half is the 0.34.0 floor below
+  (`Steering` becomes `Inbox`, `run(steering=)` becomes `run(inbox=)`, the `"steering"` spec key and
+  `StreamingContentType.STEERING` likewise), and it breaks any third-party `Steering` implementation and
+  any exhaustive `match chunk.phase`. Kokua's half is `core/steering.py` to `core/messaging.py`,
+  `SteeringMailbox` to `MessageBus`, `SteeringMessage` to `Message`, `send_steering` /
+  `steering_taken` to `send_message_frame` / `message_taken`, the web frame and card kind `steering` to
+  `message`, and the CSS class `.bubble.user.steered` to `.bubble.user.mid-turn`.
+  **One of those is a persisted key, and it is the only entry with a data cost:
+  `session.metadata["steering"]` is now `session.metadata["messages"]`, and there is deliberately no
+  dual-read.** A store written by a pre-rename checkout that holds such a record replays that turn the
+  way it did before the record existed, as two turns rather than one, which is the defect the record was
+  added to prevent. The rename is affordable only because that record was empty everywhere it was
+  checked: the feature merged days earlier and no stored conversation carried one. A graceful migration
+  was considered and rejected, since a dual-read is a second way of saying the same thing that never
+  comes out again. The first steered turn in a store would have converted this into a real data
+  migration, so anyone holding one should branch or delete the affected conversation rather than expect
+  a reader for the old key.
 - **Branch a conversation at a turn.** Every turn in the web UI carries a branch control, on the
   message that opened it and beside the delete-from-here control:
   it forks a new conversation holding everything through that turn and switches to it, leaving the
@@ -1975,18 +1995,22 @@ notice on startup.
   worked example throughout.
 - **A "How agents work" catalogue** teaches the mechanisms an agentic system is made of: each page
   explains one in general terms first, then a transcript captured from a real run against Kokua, then
-  the code that produced it. Six of the section's thirteen planned pages exist:
+  the code that produced it. Seven of the section's fourteen planned pages exist:
   [Get it running](https://saxman.info/kokua/how-agents-work/get-it-running/),
   [The turn loop](https://saxman.info/kokua/how-agents-work/the-turn-loop/),
   [Tool calling](https://saxman.info/kokua/how-agents-work/tool-calling/),
   [Capability is declared](https://saxman.info/kokua/how-agents-work/capability-is-declared/),
-  [Context and memory](https://saxman.info/kokua/how-agents-work/context-and-memory/), and
-  [Delegation](https://saxman.info/kokua/how-agents-work/delegation/); the
-  [section index](https://saxman.info/kokua/how-agents-work/) names the rest.
+  [Context and memory](https://saxman.info/kokua/how-agents-work/context-and-memory/),
+  [Delegation](https://saxman.info/kokua/how-agents-work/delegation/), and
+  [Agent messaging](https://saxman.info/kokua/how-agents-work/agent-messaging/); the
+  [section index](https://saxman.info/kokua/how-agents-work/) names the rest. The fourteenth was not on
+  the original thirteen: the messaging page opens on the who-can-reach-whom matrix, because a correct,
+  general bus whose execution model permits only one direction teaches something about multi-agent
+  systems that a working feature would not have, and no page beside it can show that.
   `tests/test_docs.py::test_catalogue_pages_follow_the_template` holds every mechanism page to the same
   five `##` sections in the same order, so a page that drops or reorders one fails the suite instead of
   drifting unnoticed, and `test_every_catalogue_page_is_listed_in_the_index` holds the section index to
-  the directory it indexes in both directions, since that index is the one file all thirteen pages have
+  the directory it indexes in both directions, since that index is the one file all fourteen pages have
   to touch.
 - **Documentation site** at [saxman.info/kokua](https://saxman.info/kokua/), built from `docs/` with
   mkdocs-material and published by `.github/workflows/docs.yml` on every push to main. The build is

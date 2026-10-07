@@ -2311,9 +2311,7 @@ def test_the_three_senders_of_a_mid_turn_message_are_told_apart_on_the_page(page
                             {"id": "c-1", "status": "done"},
                         ]
                     },
-                    "undelivered": {
-                        "0": [{"sender": "researcher#2", "to": "coder#9", "text": "check the warranty"}]
-                    },
+                    "undelivered": {"0": [{"sender": "researcher#2", "to": "coder#9", "text": "check the warranty"}]},
                 },
             )
         )
