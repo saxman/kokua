@@ -803,12 +803,23 @@ function claimBubble(token) {
 
 // Render/update a sub-agent card as a foldable block. Two producers share this frame type: a
 // planning reviewer (role + status + issues) and a spawned sub-agent (role + task + status, its
-// body built up from `append` frames). A spawn card is the one carrying `task`.
+// body built up from `append` frames). A spawn card is the one carrying `task`. A spawn made by
+// another spawn names it in `parent` (see core/subagents.py's `current_spawn`) and is drawn inside
+// that card, at the point in its run where the call was made; a parent this view never drew (the turn
+// began before the page loaded) leaves it at the top level rather than losing it.
 function renderSubagent(frame, ts) {
   let card = frame.id ? subagentCards[frame.id] : null;
   if (!card) {
     const spawn = !!frame.task;
-    card = addFoldable("subagent" + (spawn ? " spawn" : ""), {}, { md: true }, ts);  // stamp once, when first created
+    const parentCard = frame.parent ? subagentCards[frame.parent] : null;
+    if (parentCard) {
+      // The child card is something appended after the parent's open blocks, so it closes them, the
+      // same way a tool entry does in appendSubagentEntry.
+      parentCard.reasoning = null;
+      parentCard.answer = null;
+    }
+    const opts = { md: true, parent: parentCard ? parentCard.body : undefined };
+    card = addFoldable("subagent" + (spawn ? " spawn" : ""), {}, opts, ts);  // stamp once, when first created
     if (frame.id) subagentCards[frame.id] = card;
     card.spawn = spawn;
     card.answers = [];  // every generated-text block, re-rendered as markdown when the spawn ends

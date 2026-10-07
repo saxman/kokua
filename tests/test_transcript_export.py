@@ -705,6 +705,47 @@ def test_a_multi_round_sub_agent_groups_all_its_events_into_one_card():
     assert "the answer" in out
 
 
+def test_a_spawn_made_by_a_worker_is_quoted_inside_its_parents_card_where_it_was_made():
+    """A composed worker can compose another. Rendered flat, the two cards read as siblings and the
+    document cannot say which agent made which call, so the child is quoted inside its parent's card at
+    the point in the parent's run it was spawned, with the parent's later output after it."""
+    session = _session(
+        [{"role": "user", "content": "delegate"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "outer", "role": "maker", "task": "make it", "status": "running"},
+                    {"id": "outer", "append": {"kind": "reasoning", "text": "delegating"}},
+                    {"id": "inner", "role": "generator", "task": "generate", "status": "running", "parent": "outer"},
+                    {"id": "inner", "status": "done", "append": {"kind": "answer", "text": "inner result"}},
+                    {"id": "outer", "status": "done", "append": {"kind": "answer", "text": "outer result"}},
+                ]
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert "> **Sub-agent (generator):** generate" in out
+    assert "> _status: done_" in out
+    assert out.index("delegating") < out.index("generator") < out.index("outer result")
+
+
+def test_a_spawn_whose_parent_is_not_in_the_record_is_still_rendered():
+    session = _session(
+        [{"role": "user", "content": "delegate"}, {"role": "assistant", "content": "done"}],
+        {
+            "subagent": {
+                "0": [
+                    {"id": "inner", "role": "generator", "task": "generate", "status": "running", "parent": "gone"},
+                    {"id": "inner", "status": "done", "append": {"kind": "answer", "text": "inner result"}},
+                ]
+            }
+        },
+    )
+    out = render_markdown(session)
+    assert "**Sub-agent (generator):** generate" in out
+    assert "inner result" in out
+
+
 def test_two_interleaved_spawns_each_get_their_own_card():
     """Concurrent spawns append into the same list in emission order, so a card has to be assembled
     by id, not by contiguous position."""

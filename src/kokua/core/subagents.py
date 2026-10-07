@@ -10,6 +10,11 @@ keeps a worker's own address from leaking into whoever spawned it once that work
 ``spawned``'s own docstring for why this reporter, rather than anything in ``core/messaging.py``
 itself, is where that has to live.
 
+A spawn made from inside another spawn's run carries ``parent``, the spawning card's ``id``, on its
+create event, so the page can draw the card inside its parent's rather than beside it. AIMU's callbacks
+say nothing about who spawned whom; ``current_spawn`` recovers it the same way ``current_address`` is
+kept, and this reporter is again the only place every spawn passes through.
+
 Display and recording are deliberately separate. A background turn's frames are muted by the
 channel, but its events are still recorded, so switching into that conversation shows the work. The
 same split is what makes a cancelled spawn recoverable: recording is synchronous, while the send is
@@ -62,6 +67,12 @@ logger = logging.getLogger(__name__)
 # concurrent spawns append to the one list the turn later persists.
 subagent_events: ContextVar[Optional[list[dict]]] = ContextVar("subagent_events", default=None)
 
+# The spawn whose run is current, None at the turn's own level. AIMU's observer callbacks name a spawn
+# but not who spawned it, and a composed worker can compose another, so without this every card would
+# render as a sibling of every other and a reader could not tell which agent made which call. Bracketed
+# by `spawned`/`finished` exactly as `current_address` is, for the same Context reasons (see `spawned`).
+current_spawn: ContextVar[Optional[str]] = ContextVar("current_spawn", default=None)
+
 # How much of a sub-agent's tool response is kept inline in a recorded card. Anything longer is
 # written to a payload file and the card holds this much plus a reference (see ``payloads.py``).
 #
@@ -109,6 +120,9 @@ class SubagentReporter:
         # value `send_message` refuses on, the next drain in that Context sets it again, and the
         # Context in question belongs to a turn that is being cancelled.
         self._address_tokens: dict[str, Token[Optional[str]]] = {}
+        # The `current_spawn` token saved per spawn, kept and restored exactly as `_address_tokens` is,
+        # with the same leak on a `BaseException` inside `spawned`.
+        self._spawn_tokens: dict[str, Token[Optional[str]]] = {}
         # Where an oversized tool response is spilled to (see ``payloads.py``). A path rather than the
         # whole config, because this is the only setting the reporter reads and taking the config
         # would let it grow a dependency on anything else in there.
@@ -140,7 +154,13 @@ class SubagentReporter:
         Context) would still see the child's leftover address once the child returns.
         """
         self._address_tokens[spawn_id] = current_address.set(None)
+        parent = current_spawn.get()
+        self._spawn_tokens[spawn_id] = current_spawn.set(spawn_id)
         event = {"id": spawn_id, "role": agent_type or "subagent", "task": task, "status": "running"}
+        # Omitted at the turn's own level rather than written as None, so a card recorded before this
+        # field existed and a top-level card read the same way.
+        if parent is not None:
+            event["parent"] = parent
         model = self._model_for(agent_type)
         if model:
             event["model"] = str(model)
@@ -239,6 +259,9 @@ class SubagentReporter:
         address_token = self._address_tokens.pop(spawn_id, None)
         if address_token is not None:
             current_address.reset(address_token)
+        spawn_token = self._spawn_tokens.pop(spawn_id, None)
+        if spawn_token is not None:
+            current_spawn.reset(spawn_token)
         streamed = spawn_id in self._streamed_answers
         self._streamed_answers.discard(spawn_id)
         event: dict

@@ -372,6 +372,10 @@ header { display: flex; align-items: center; justify-content: space-between; gap
    and .assistant above), so they need no styling of their own -- only placement inside the card's
    body: released from the transcript's prose measure, which would apply twice over. */
 .subagent .fold-body > .bubble { max-width: none; margin: 6px 0 6px 2px; }
+/* A card spawned by another card's worker sits in that card's body (renderSubagent), so the smaller
+   type above would compound at every level of nesting. Held at its parent's size instead: the
+   nesting itself is what shows depth. */
+.subagent .subagent { font-size: 1em; }
 /* Not a foldable: a failure is one short line and the reason the reader is looking, so it stays
    visible rather than hiding behind a disclosure triangle. */
 .subagent .sa-error {
