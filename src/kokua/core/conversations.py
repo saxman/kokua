@@ -809,10 +809,15 @@ class ConversationBook:
         hold directly), so a concurrent ``delete`` is already excluded by the time any of them touches
         the store. This one is not: ``TurnRunner`` only learns what to write here from
         ``MessageBus.close()``, which by design runs in the turn's own outer ``finally`` *after* that
-        hold -- and after the pin -- have already released (see ``core/turns.py``'s invariant 10 and
-        its own note on this call), so nothing stands between this write and a ``delete_conversation``
-        racing it. Without the guard, ``get`` on a key a concurrent delete just removed hands back a
-        fresh empty ``Session`` (exactly the hazard this method's own sibling warns about), and
+        hold has released (see ``core/turns.py``'s invariant 10 and its own note on this call), so
+        nothing stands between this write and a ``delete_conversation`` racing it. The pin that turn
+        still holds while it writes is no second defense: a pin keeps the conversation's agent in the
+        registry, not its session in the store. The window is narrower than it looks and is not closed,
+        which is the form that invariant states it in: ``TurnGate.turn``'s own exit releases this
+        conversation's lock before re-acquiring the gate's shared condition, and that re-acquire
+        suspends whenever another conversation's turn is finishing in the same instant, which is a
+        yield point a waiting delete can run on. Without the guard, ``get`` on a key a concurrent
+        delete just removed hands back a fresh empty ``Session`` (exactly the hazard this method's own sibling warns about), and
         ``save`` would write that straight back, resurrecting a conversation someone just deleted as a
         blank "New conversation". The check and the write that follows it share one synchronous call
         (this class's store is sync throughout, by the ABC's own contract -- see ``aimu.sessions``),

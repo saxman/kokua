@@ -1938,7 +1938,12 @@ run's own conversation with no account of why it holds only half a turn.
 **`metadata["undelivered"]` is keyed and flushed the same way, for a record that has nowhere else to
 live.** When a turn ends, whatever one of its own agents sent that no reader took is both said once
 (`TurnRunner._report_undeliverable`, to the user, since the sender's run is over) and stored
-(`ConversationBook.record_undelivered`, under `str(user_index)` like `failure` beside it). Stored
+(`ConversationBook.record_undelivered`, under `str(user_index)` like `failure` beside it). The two
+halves answer differently on an ending that was not asked for, and that asymmetry is deliberate: the
+record is written from the turn's own `finally` and so reaches every ending, while the sentence sits
+after that block and a stopped turn never reaches it, because an await inside a cancellation is the one
+thing that block cannot hold (invariants 9 and 10). So a `/stop` leaves the record and no sentence,
+where before it left neither. Stored
 because the sentence scrolls away, and because unlike a mid-turn message that *was* delivered there is
 no message in `session.messages` to read it back off: never becoming a message is the whole of what
 undelivered means, so this record is the only place it exists. `replay_items` emits it as its own

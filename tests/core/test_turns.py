@@ -2175,20 +2175,61 @@ async def test_an_undelivered_agent_message_survives_a_reload(assistant):
     assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
 
 
-async def test_a_delete_racing_the_undelivered_record_does_not_resurrect_the_conversation(assistant):
-    """`record_undelivered`'s write lands after both the gate and the pin have released (``reactive``'s
-    own ``finally`` unpins before this runs), in the same window ``_notify_if_backgrounded`` awaits in
-    just ahead of it. A ``delete_conversation`` landing there removes the session; without a guard,
-    ``record_undelivered`` would still call ``self._store.get(conversation_id)``, which
-    :meth:`ConversationBook.exists`'s own docstring already names the consequence of ("the store
-    returns an empty ``Session`` for a missing key"), and then save it right back -- a ghost "New
-    conversation" where the one just deleted used to be. Reproduced by standing in for
-    ``_notify_if_backgrounded``, the one real ``await`` already in that window, with the delete the
-    review's probe used.
+async def test_a_stopped_turn_still_records_an_undelivered_agent_message(assistant):
+    """The one thing a stopped turn can still be given about an agent's message, where before it was
+    given nothing at all: no sentence, no record, and no log.
 
-    The sibling resubmit path one line below this one does not share the exposure: it calls
+    The report is correctly out of reach on this path (an await inside a cancellation, which is
+    invariant 9's own argument), and the cancelled branch returns before it. The record is a
+    synchronous write, so the only thing keeping it from a stop was its position, one line above the
+    report rather than inside the ``finally`` that runs on every ending. Asserted on the store,
+    because what a record is worth is what survives the process.
+
+    The sibling test above covers the same write on a turn that finished, which is why that one is no
+    control for this one: it passes with the call on either side of that ``finally``.
+    """
+    conversation_id = assistant._active_id
+    agent = assistant._book.agent_for(conversation_id)
+
+    async def send_then_stop(text, *args, **kwargs):
+        # Appends the turn's own user message, for the reason the sibling's stub does: the record is
+        # keyed under an index `resolve_user_index` has to find a real message at.
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        # Raised from inside the run rather than delivered to the task, which is indistinguishable to
+        # `reactive`'s own `except asyncio.CancelledError`.
+        raise asyncio.CancelledError()
+
+    agent.run = send_then_stop
+    await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
+
+    stored = assistant._store.get(conversation_id).metadata["undelivered"]
+    reports = next(iter(stored.values()))
+    assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
+
+
+async def test_a_delete_racing_the_undelivered_record_does_not_resurrect_the_conversation(assistant):
+    """`record_undelivered`'s write takes no hold of its own, so a delete that reaches the store first
+    has to be refused by that method's own guard rather than excluded by a lock.
+
+    Where the window is, now that the write sits in ``reactive``'s ``finally`` rather than after it:
+    ``TurnGate.turn``'s exit releases this conversation's lock and *then* re-acquires the gate's
+    shared condition, and that re-acquire suspends whenever another conversation's turn is finishing
+    in the same instant, which is a yield point a waiting ``delete_conversation`` can run on before
+    this ``finally`` executes at all. No test can land a delete inside an asyncio lock acquisition, so
+    this one lands it immediately ahead of the write instead, which leaves the write meeting the
+    identical state: a session that is gone. Without the guard, ``self._store.get(conversation_id)``
+    hands back a fresh empty ``Session`` (:meth:`ConversationBook.exists`'s own docstring names the
+    consequence) and ``save`` writes it straight back, a ghost "New conversation" where the deleted
+    one used to be.
+
+    The store's own ``delete`` rather than ``Assistant.delete_conversation``: this call site is
+    synchronous, so there is no awaiting the whole delete path from inside it, and what the guard
+    answers to is the session being gone, which is the half of that path this reproduces.
+
+    The sibling resubmit path below this block does not share the exposure: it calls
     ``self.reactive(...)`` again, which takes this conversation's gate (invariant 1) and so serializes
-    against ``delete``'s own hold of the identical lock, where this write took none at all.
+    against ``delete``'s own hold of the identical lock, where this write takes none at all.
     """
     conversation_id = assistant._active_id
     agent = assistant._book.agent_for(conversation_id)
@@ -2199,13 +2240,13 @@ async def test_a_delete_racing_the_undelivered_record_does_not_resurrect_the_con
         return "done"
 
     agent.run = leave_one_undelivered
+    record = assistant._turns._record_undelivered
 
-    async def delete_mid_window(*args, **kwargs):
-        # Stands in for the notification this turn would otherwise send, landing the delete in the
-        # exact window the review reproduced rather than guessing at the timing.
-        await assistant.delete_conversation(conversation_id)
+    def delete_then_record(*args, **kwargs):
+        assistant._store.delete(conversation_id)
+        record(*args, **kwargs)
 
-    assistant._turns._notify_if_backgrounded = delete_mid_window
+    assistant._turns._record_undelivered = delete_then_record
     await assistant._turns.reactive(message("hello"), conversation_id=conversation_id)
 
     assert conversation_id not in assistant._store.list_keys()
@@ -2302,9 +2343,9 @@ async def test_a_firings_undeliverable_report_reaches_a_channel_with_no_conversa
 async def test_a_firings_undelivered_message_survives_a_reload(tmp_path):
     """The same gap `test_an_undelivered_agent_message_survives_a_reload` closes on the reactive
     path, on the path that discovers the turn's own index a different way: ``_unattended_body``
-    has to hand it back to ``_run_unattended`` across the child task boundary (see that body's own
-    ``return proactive_index``), since the caller that closes the bus never sees
-    ``agent.model_client`` to resolve it itself."""
+    has to hand it across the child task boundary (see ``_PublishedIndex``), since the caller that
+    closes the bus never sees ``agent.model_client`` to resolve it itself. This is the ending where a
+    return value would have done; the stopped sibling below is why one does not."""
     channel = FakeChannel()
     assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["done"]))
     agent = assistant._book.agent_for(assistant._active_id)
@@ -2317,6 +2358,33 @@ async def test_a_firings_undelivered_message_survives_a_reload(tmp_path):
         return "done"
 
     agent.run = leave_one_undelivered
+    await assistant._turns.proactive("check the feeds")
+
+    stored = assistant._store.get(assistant._active_id).metadata["undelivered"]
+    reports = next(iter(stored.values()))
+    assert reports == [{"sender": "assistant", "to": "researcher#1", "text": "look at the index"}]
+
+
+async def test_a_stopped_firing_still_records_an_undelivered_agent_message(tmp_path):
+    """The stopped reactive turn's gap, on the path that cannot carry its index back in a return.
+
+    A firing's body ends three ways and two of them raise, so ``_run_unattended`` learns where the
+    turn landed only on the ending that returns. The stop is not that ending: it raises out of the
+    child task, the caller turns that into an ordinary return from inside its own gate hold, and the
+    record keyed under that index would have been written against ``-1`` and silently dropped. So the
+    index is published as the body commits (``_PublishedIndex``) rather than returned, and this is the
+    ending that says so: the sibling above passes either way.
+    """
+    channel = FakeChannel()
+    assistant = await Assistant.create(_config(tmp_path), channel, client=MockAsyncModelClient(["done"]))
+    agent = assistant._book.agent_for(assistant._active_id)
+
+    async def send_then_stop(text, *args, **kwargs):
+        agent.model_client.messages.append({"role": "user", "content": text})
+        current_bus.get().send("look at the index", sender="assistant", to="researcher#1")
+        raise asyncio.CancelledError()
+
+    agent.run = send_then_stop
     await assistant._turns.proactive("check the feeds")
 
     stored = assistant._store.get(assistant._active_id).metadata["undelivered"]

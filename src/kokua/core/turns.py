@@ -217,46 +217,65 @@ Every rule here was learned from a bug. Read them before changing anything in th
     (invariant 4 leaves the active pointer alone), so it alerts, except on a channel with no
     conversation list, where the firing shares the viewed conversation and the user is reading it
     after all.
-    Two gaps are known rather than covered. The window invariant 9 names, an exception escaping the
-    outer ``finally``, applies here too, and this notice is an await inside it, which is why it
-    catches rather than raises. A stopped turn reports nothing, because the report sits after that
-    ``finally`` rather than inside it and the cancelled branch returns before reaching it, so a stop
-    is the same deliberate exception invariant 9 makes for a user's message, one shade worse: there,
-    the stop notice at least says a message was not delivered.
+    Two gaps are known rather than covered, and both are about the *sentence* rather than about the
+    pair of them, which is why the two halves of this invariant are stated separately below. The
+    window invariant 9 names, an exception escaping the outer ``finally``, applies here too, and this
+    notice is an await inside it, which is why it catches rather than raises. A stopped turn reports
+    nothing, because the report sits after that ``finally`` rather than inside it, the cancelled branch
+    returns before reaching it, and it cannot be moved in, being an await inside a cancellation
+    (invariant 9's own argument). So a stop is the same deliberate exception invariant 9 makes for a
+    user's message, one shade worse: there, the stop notice at least says a message was not delivered.
+    What a stop does not lose is the record, for the reason that paragraph gives.
     A message to an address that never existed this turn needs nothing extra: no reader can match it,
     so it is reported here like any other undeliverable one. Refusing it at send time would serve the
     sender better, and the roster can answer that much without tracking liveness, but it belongs with
     whatever lets a sender write an address rather than here.
     **The live report above is not the only one: ``_record_undelivered`` persists the same list
     (``ConversationBook.record_undelivered``) so a reload shows what the live sentence otherwise loses
-    the moment it scrolls off. It is called from the same place in both ``reactive`` and
-    ``_run_unattended``, right beside ``_report_undeliverable`` and for the identical reason the
-    ordering comment there gives: after the outer ``finally`` has already released this conversation's
-    pin and gate (``bus.close()`` runs in that same ``finally``, which is what makes ``undeliverable``
-    available at all). That makes it, as far as this module goes, the first store write a turn makes
-    from outside both -- ``_record_provenance`` and every call it makes into
-    ``record_turn_provenance`` run from inside the gate hold, before the ``finally`` that releases it,
-    which is why that call never had this exposure. A ``delete_conversation`` landing in the same
-    window ``_notify_if_backgrounded`` awaits in removes the session out from under a write with no
-    hold of its own: :meth:`ConversationBook.record_undelivered`'s own guard (checking
-    :meth:`ConversationBook.exists` before reading) is what closes that window, not a second gate hold
-    taken here -- the store is synchronous throughout (by ``aimu.sessions``'s own contract), so the
-    check and the write that follows it cannot be interleaved by anything else on the event loop, and
-    a hold would only re-open a second way of saying the same thing. Contrast the resubmit call two
-    lines below in ``reactive``: that one *does* re-take this conversation's gate, because it calls
-    ``self.reactive(...)`` again, a whole new turn rather than one store write, and a second,
-    sequential ``gate.turn`` taken only after the first has fully released is not the nested case
-    invariant 1 forbids (``_prune_task_conversations`` taking ``delete``'s own hold, sequentially,
-    after ``_run_unattended`` has returned, is the same shape). So the two awaits sitting one line
-    apart in this same window are safe for two different reasons, and neither reason transfers to the
+    the moment it scrolls off. It is written from inside the outer ``finally`` on both paths, as the
+    statement after the ``bus.close()`` that discovers what there is to write, and that placement is
+    the one thing about this pair that is not a free choice: every ending has to reach the record,
+    including the three the report cannot.** A reactive stop returns from the cancelled branch; a
+    firing's stop returns from inside its own gate hold, and a firing's failure raises out of it. The
+    report cannot follow the record in, being an await inside a cancellation, while this write is
+    synchronous, which is the whole of why one half of the pair moved and the other stayed where it is.
+    So the two halves answer differently: the sentence is conditional on how the turn ended, and the
+    record is not. A firing needs one thing more, because its index is resolved inside a child task
+    that raises on two of its three endings and so can hand nothing back by returning:
+    ``_unattended_body`` publishes it instead (see :class:`_PublishedIndex`), which is the same answer
+    the workflow branch of ``reactive`` already reaches for with ``WorkflowContext.publish_user_index``.
+    Both calls catch, for two reasons rather than one: a store error must not replace a cancellation
+    propagating out of that ``finally``, and must not skip the teardown below it, which would leave the
+    turn's pin and its contextvars set for the life of the process.
+    **The write still takes no hold of its own, so the delete it can race is still
+    :meth:`ConversationBook.record_undelivered`'s own guard to refuse.** It runs after this
+    conversation's gate hold has released and before its pin does, which is nearer than the old
+    placement after ``_notify_if_backgrounded``'s await and is not the same thing as safe:
+    ``TurnGate.turn``'s exit releases this conversation's lock and *then* re-acquires the gate's shared
+    condition, and that re-acquire suspends whenever another conversation's turn is finishing in the
+    same instant, which is a yield point a waiting ``delete_conversation`` can run on before this
+    ``finally`` executes at all. By contrast ``_record_provenance`` and every call it makes into
+    ``record_turn_provenance`` run from inside the gate hold, which is why those never had this
+    exposure. So the guard (checking :meth:`ConversationBook.exists` before reading) is what closes
+    the window, not a second gate hold taken here -- the store is synchronous throughout (by
+    ``aimu.sessions``'s own contract), so the check and the write that follows it cannot be
+    interleaved by anything else on the event loop, and a hold would only re-open a second way of
+    saying the same thing. Contrast the resubmit call below this block in ``reactive``: that one *does*
+    re-take this conversation's gate, because it calls ``self.reactive(...)`` again, a whole new turn
+    rather than one store write, and a second, sequential ``gate.turn`` taken only after the first has
+    fully released is not the nested case invariant 1 forbids (``_prune_task_conversations`` taking
+    ``delete``'s own hold, sequentially, after ``_run_unattended`` has returned, is the same shape). So
+    the record and the resubmit are safe for two different reasons, and neither reason transfers to the
     other: the resubmit's safety is mutual exclusion, and the record's is a single-shot check on an
-    already-atomic write.**
+    already-atomic write.
     (Regressions: ``test_close_reports_an_undelivered_agent_message_rather_than_resubmitting_it``,
     ``test_a_message_every_cursor_passed_over_is_reported_rather_than_lost``,
     ``test_a_bare_label_one_of_two_readers_drained_is_delivered_not_reported``,
     ``test_an_undelivered_agent_message_is_reported_and_not_rerun``,
     ``test_a_backgrounded_turns_report_is_logged_rather_than_sent_to_the_wrong_conversation``,
     ``test_a_channel_that_cannot_take_the_report_still_leaves_the_resubmit_to_run``,
+    ``test_a_stopped_turn_still_records_an_undelivered_agent_message``,
+    ``test_a_stopped_firing_still_records_an_undelivered_agent_message``,
     ``test_a_delete_racing_the_undelivered_record_does_not_resurrect_the_conversation``.)
 """
 
@@ -311,6 +330,26 @@ class ProactiveTarget:
     announce: Optional[str] = None
     prunes_for_task: Optional[str] = None
     task_id: Optional[str] = None
+
+
+@dataclass
+class _PublishedIndex:
+    """Where an unattended turn's own user message landed, handed back by a body that may raise.
+
+    A return value reaches ``_run_unattended`` on one of ``_unattended_body``'s three endings only:
+    a stop and a failure both raise, and an exception carries no return value with it. The caller
+    needs the index on all three, because what the turn's bus hands back when it closes has to be
+    keyed under that index whatever the ending was, and the caller never sees ``agent.model_client``
+    to resolve it for itself. So the body publishes it as it commits, which is the same answer the
+    workflow branch of ``reactive`` already reaches for with ``WorkflowContext.publish_user_index``,
+    for the identical reason.
+
+    ``-1`` is the honest starting value and the one the store reads as "no turn to key this under"
+    (:meth:`ConversationBook.record_undelivered`), so a run that raised before committing anything
+    records nothing rather than recording against the wrong turn.
+    """
+
+    value: int = -1
 
 
 def _holds_no_report(session: SessionSummary) -> bool:
@@ -602,6 +641,17 @@ class TurnRunner:
             current_review_context.reset(review_token)
             current_bus.reset(bus_token)
             resubmit, undeliverable = bus.close()
+            # Written here rather than beside the report below, which is what a stopped turn can still
+            # be given: the cancelled branch returns before the report, and the report cannot follow it
+            # in here, being an await inside a cancellation (invariant 9's own argument), while this
+            # write is synchronous and this block runs on every ending. Caught rather than allowed out,
+            # for two reasons: a store error must not replace a cancellation propagating out of this
+            # `finally`, and must not skip the resets below it, which would leave this turn's pin and
+            # contextvars set for the life of the process.
+            try:
+                self._record_undelivered(conversation_id, user_index, undeliverable)
+            except Exception:
+                logger.warning("A message no run read could not be recorded", exc_info=True)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
             # Normally already done by `_persist`; this covers a turn that raised before reaching it,
@@ -609,10 +659,9 @@ class TurnRunner:
             self._ui.end_catch_up(conversation_id)
             self._book.unpin(conversation_id)
         await self._notify_if_backgrounded(conversation_id, succeeded=succeeded, failure_reason=failure_reason)
-        # Recorded before it is reported, so a channel that fails to take the report (swallowed just
-        # below) still leaves a reload with something to show; the record does not depend on the
-        # report succeeding, nor the other way around.
-        self._record_undelivered(conversation_id, user_index, undeliverable)
+        # These same messages are already recorded, by the `finally` above: a channel that fails to take
+        # the report (swallowed just below) still leaves a reload with something to show, and the record
+        # does not depend on the report succeeding, nor the other way around.
         # Ahead of the re-submit, so the notice reads before the follow-up turn's own output rather
         # than after it. Safe in that order only because the report swallows what it can (see
         # `_report_undeliverable`): a channel failing here must not cost the user the turn below.
@@ -1047,16 +1096,15 @@ class TurnRunner:
         bus = MessageBus()
         bus_token = current_bus.set(bus)
         self._book.pin(conversation_id)  # invariant 2
-        # Where this firing's own user message landed, for `record_undelivered` below. -1 (no turn to
-        # key a report under) unless `_unattended_body` returns its own `proactive_index`, which it
-        # only does on the one path that reaches that call: a run that neither stopped nor raised (see
-        # the comment on `handle.result()` just below for why the other two paths never touch this).
-        user_index = -1
+        # Where this firing's own user message landed, for the `record_undelivered` call in the
+        # `finally` below. Published by the body rather than returned, because every one of its three
+        # endings needs to reach that call and two of them raise; see :class:`_PublishedIndex`.
+        published_index = _PublishedIndex()
         try:
             # Held here rather than in the child so there is exactly one hold for the firing either way
             # (invariant 1). An asyncio lock has no owning task, so releasing it here is sound.
             async with self._gate.turn(conversation_id):  # invariant 1
-                handle = RunHandle.start(self._unattended_body(prompt, spec, bus=bus))
+                handle = RunHandle.start(self._unattended_body(prompt, spec, bus=bus, index=published_index))
                 # Tracked inside the gate, for the same reason the catch-up record is opened there: a
                 # firing queued behind a turn already running on this conversation would otherwise
                 # overwrite that turn's entry, which is the one `/stop` and shutdown reach. A queued
@@ -1077,13 +1125,10 @@ class TurnRunner:
                     ),
                 )
                 try:
-                    # `_unattended_body` returns its `proactive_index` only when it falls through to
-                    # the end of its own try (not stopped, no error raised), which is also the only
-                    # one of its three endings that lets execution reach this assignment: the other
-                    # two raise (`CancelledError` below, or the body's own re-raised failure), and an
-                    # exception carries no return value to assign. Harmless on those paths precisely
-                    # because nothing after them reads `user_index` either -- see its own comment above.
-                    user_index = await handle.result()
+                    # Nothing to take from the result: the index this run's record is keyed under
+                    # arrives through `published_index` instead, on every ending rather than on the
+                    # one that returns (see :class:`_PublishedIndex`).
+                    await handle.result()
                 except asyncio.CancelledError:
                     # Two different cancellations land here and have to end differently: a stop, which
                     # cancels the child and is this firing's own ending, and a shutdown, which cancels
@@ -1104,15 +1149,23 @@ class TurnRunner:
             # that has already ended.
             current_bus.reset(bus_token)
             resubmit, undeliverable = bus.close()
+            # In this block for the reason `reactive` writes it in its own: a stop returns from inside
+            # the hold above and a failure raises out of it, so this is the only place a record reaches
+            # all three endings. Caught for that method's two reasons, the second of which is the
+            # teardown directly below.
+            try:
+                self._record_undelivered(conversation_id, published_index.value, undeliverable)
+            except Exception:
+                logger.warning("A message no run read could not be recorded", exc_info=True)
             self._book.unpin(conversation_id)
             # Normally already done by `_persist`; this covers a run that raised before reaching it.
             self._ui.end_catch_up(conversation_id)
             proactive_turn.reset(proactive_token)
             subagent_events.reset(collector_token)
             streaming_conversation.reset(token)
-        # Recorded before it is reported, for the reason `reactive`'s own call to this gives: a
-        # channel that cannot take the report below should not be what costs a reload the record.
-        self._record_undelivered(conversation_id, user_index, undeliverable)
+        # These messages are already recorded, in the `finally` above and for the reason it gives.
+        # Reached only by a firing that finished: a stop returns before this line and a failure raises
+        # past it, which is why the record is the half that had to move and this one did not.
         # The same helper the reactive path uses, and it decides the same way: a firing is
         # backgrounded by construction (invariant 4 leaves the active pointer alone), so this alerts,
         # except on a channel with no conversation list, where the firing shares the viewed
@@ -1138,7 +1191,9 @@ class TurnRunner:
                 logger.warning("A message a scheduled firing never read could not be run", exc_info=True)
         return False
 
-    async def _unattended_body(self, prompt: str, spec: ProactiveTarget, *, bus: MessageBus) -> int:
+    async def _unattended_body(
+        self, prompt: str, spec: ProactiveTarget, *, bus: MessageBus, index: _PublishedIndex
+    ) -> None:
         """One unattended turn, inside its caller's gate hold. See the module's concurrency invariants.
 
         Ends cancelled when it was stopped, as a cancelled task should, having first recorded and
@@ -1150,12 +1205,12 @@ class TurnRunner:
         can reach the bus without it being threaded through; this body is not that, it is the caller's
         own code, and a parameter leaves no absent case to guard against.
 
-        Returns ``proactive_index``, the turn's own user-message position, on the one ending that
-        falls through to it (not stopped, no error raised): ``_run_unattended`` is what ``close()``s
-        ``bus`` and discovers what went undelivered, but it is this body, not that caller, that knows
-        where this turn landed in the transcript, since the caller never sees ``agent.model_client``.
-        A caller reading this return value is only meaningful on that one ending; the other two raise
-        instead of returning, which is the caller's to handle, not this docstring's.
+        ``index`` is where this turn's own user message landed, published as soon as it is resolved
+        rather than returned. ``_run_unattended`` is what ``close()``s ``bus`` and so discovers what
+        went undelivered, but it is this body that knows where the turn landed in the transcript,
+        since the caller never sees ``agent.model_client``; and all three of this body's endings have
+        to carry that fact, where a return value carries it on the one that does not raise. See
+        :class:`_PublishedIndex`.
         """
         conversation_id = spec.conversation_id
         started = time.monotonic()
@@ -1220,6 +1275,10 @@ class TurnRunner:
             # rather than below the loop changes nothing about what they find: neither helper reads
             # the tag that loop writes.
             proactive_index = resolve_user_index(agent.model_client.messages, start)
+            # Published the moment it is known, which is ahead of every ending below: the two that
+            # raise reach the caller with no return value, and its `record_undelivered` call needs
+            # this index on all three (see :class:`_PublishedIndex`).
+            index.value = proactive_index
             message_indices = resolve_message_indices(agent.model_client.messages, proactive_index)
             self._tag_agent_messages(agent, bus, message_indices)
             for message in agent.model_client.messages[start:]:
@@ -1253,12 +1312,6 @@ class TurnRunner:
                 raise asyncio.CancelledError
             if error is not None:
                 raise error
-            # `_run_unattended` assigns this and keys its `record_undelivered` call under it, so a
-            # fourth ending added here has to return the index too: one returning None reaches that
-            # call with None and raises in `record_undelivered`'s own guard. Safe today because this
-            # is the only ending that does not raise, which is the reasoning `_run_unattended` states
-            # in full where it reads the result.
-            return proactive_index
         finally:
             current_metrics.reset(metrics_token)
 
