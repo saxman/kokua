@@ -1317,10 +1317,10 @@ class TurnRunner:
             # A firing carries a bus too, so one of its own agents can message it, and that message
             # must not be read as the firing's own output: `is_user_turn` treats a proactive tag as a
             # turn somebody took, where the agent tag is exactly what says nobody did. The agent tag
-            # survives either order, since this pass assigns where the loop below defaults, and it
+            # survives either order, since this pass assigns where the tagging below defaults, and it
             # goes first because it is the more specific of the two claims. Resolving the indices here
-            # rather than below the loop changes nothing about what they find: neither helper reads
-            # the tag that loop writes.
+            # rather than below changes nothing about what they find: neither helper reads the tag
+            # written after them.
             proactive_index = resolve_user_index(agent.model_client.messages, start)
             # Published the moment it is known, which is ahead of every ending below: the two that
             # raise reach the caller with no return value, and its `record_undelivered` call needs
@@ -1328,13 +1328,8 @@ class TurnRunner:
             index.value = proactive_index
             message_indices = resolve_message_indices(agent.model_client.messages, proactive_index)
             self._tag_agent_messages(agent, bus, message_indices)
-            for message in agent.model_client.messages[start:]:
-                # Tag every message this unprompted run appended, so replayed history can distinguish
-                # it from a user-driven turn. setdefault, not assignment: the agent loop tags the
-                # turns it injects itself (`continuation`, `final_answer`), and those tags are how a
-                # transcript tells an injected nudge from something the user typed. Overwriting them
-                # made every nudge replay as a user bubble.
-                message.setdefault(PROVENANCE_KEY, PROVENANCE_PROACTIVE)
+            if spec.echo_reply:
+                self._tag_echoed_firing(agent.model_client.messages, start, proactive_index)
             # The reason is recorded here rather than left to `_report`, whose status line goes to
             # whichever conversation the user is viewing rather than to this one. Before the persist,
             # and synchronously, for invariant 5's reason.
@@ -1361,6 +1356,39 @@ class TurnRunner:
                 raise error
         finally:
             current_metrics.reset(metrics_token)
+
+    @staticmethod
+    def _tag_echoed_firing(messages: list[dict], start: int, prompt_index: int) -> None:
+        """Mark the two messages of a firing that landed in the conversation the user is reading.
+
+        Only the echoing path calls this, and that is the whole design. A firing normally mints its
+        own conversation, whose session metadata already carries the task's id -- the conversation
+        *is* the record that a task produced it, at the granularity that is actually true. There the
+        user is not reading along and the finish is announced by a notification, so no individual
+        message arrived unasked-for and none is tagged. A channel with no conversation list has
+        nowhere to mint, so the firing runs in the conversation the user is looking at, and there the
+        prompt nobody typed and the reply echoed back are the only record that anything arrived on
+        its own.
+
+        Two messages, not every message the run appended. The tool calls, the tool results, and the
+        assistant turns that narrate them are the loop working, and AIMU's contract is that ordinary
+        assistant turns carry no provenance at all: absence means "ordinary turn". Tagging the whole
+        exchange said of every round what is only true of the last one, so a scheduled task doing a
+        dozen rounds replayed as a dozen proactive messages.
+
+        ``setdefault``, not assignment: the agent loop tags the turns it injects itself
+        (``continuation``, ``final_answer``), and those tags are how a transcript tells an injected
+        nudge from something the user typed. Overwriting them made every nudge replay as a user
+        bubble.
+        """
+        appended = messages[start:]
+        prompt = messages[prompt_index] if 0 <= prompt_index < len(messages) else None
+        # The answer, when the run produced one: a firing that failed or was stopped mid-loop ends on
+        # a tool result instead, and in that case nothing was echoed at anybody.
+        push = appended[-1] if appended and appended[-1].get("role") == "assistant" else None
+        for message in (prompt, push):
+            if message is not None:
+                message.setdefault(PROVENANCE_KEY, PROVENANCE_PROACTIVE)
 
     async def _report(self, text: str, spec: ProactiveTarget) -> None:
         """Raise an unattended run's own status line as an alert, tolerating a channel that cannot

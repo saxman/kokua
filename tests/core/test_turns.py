@@ -204,25 +204,80 @@ async def test_a_turn_that_committed_no_user_message_publishes_nothing(tmp_path)
     assert channel.turns_saved == []
 
 
-async def test_assistant_proactive_tags_turn_provenance(tmp_path):
+async def test_a_firing_that_mints_its_own_conversation_tags_no_message(tmp_path):
+    """The conversation is the record, so no message in it needs to claim to be one.
+
+    A minted conversation carries the task's id in its metadata and the user is not reading it:
+    the firing is announced out of band by a notification. Tagging each message ``proactive``
+    there said of every tool round what is only true of the conversation as a whole, so a task
+    doing a dozen rounds replayed as a dozen proactive messages.
+    """
+    from aimu.models import PROVENANCE_KEY
+
+    channel = _ConvCapturingChannel()  # pushes a conversation list, so the firing mints its own
+    assistant = await Assistant.create(
+        _config(tmp_path),
+        channel,
+        client_factory=lambda cid: MockAsyncModelClient(["Time for a walk."]),
+    )
+
+    await assistant._proactive("remind", task_id="t1")
+
+    summary = assistant._book.sessions_for_task("t1")[0]
+    session = assistant._book.get(summary.key)
+    assert session.messages  # the firing ran
+    assert not [m for m in session.messages if m.get(PROVENANCE_KEY)]
+    # What records the firing instead, at the granularity that is actually true of it.
+    assert session.metadata["task_id"] == "t1"
+
+
+async def test_a_firing_with_nowhere_else_to_go_tags_the_prompt_and_the_reply(tmp_path):
+    """A channel with no conversation list runs the firing in the conversation being viewed.
+
+    There is no minted conversation to carry the task id and the user *is* reading this one, so
+    the two messages that arrived without them asking are the only record that anything did: the
+    prompt nobody typed and the reply echoed back at them. The run's own tool rounds are ordinary
+    loop work and stay untagged.
+    """
     from aimu.models import PROVENANCE_KEY, PROVENANCE_PROACTIVE
 
-    channel = FakeChannel()
     client = MockAsyncModelClient(["Time for a walk."])
-    assistant = await Assistant.create(_config(tmp_path), channel, client=client)
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
 
     await assistant._proactive("remind")
 
-    tagged = [m.get(PROVENANCE_KEY) for m in assistant._agent.model_client.messages]
-    assert PROVENANCE_PROACTIVE in tagged
-    assert all(p in (None, PROVENANCE_PROACTIVE) for p in tagged)
+    messages = assistant._agent.model_client.messages
+    tagged = [(m["role"], m.get(PROVENANCE_KEY)) for m in messages if m.get(PROVENANCE_KEY)]
+    assert tagged == [("user", PROVENANCE_PROACTIVE), ("assistant", PROVENANCE_PROACTIVE)]
+
+
+async def test_an_echoed_firing_leaves_its_own_working_turns_untagged(tmp_path):
+    """The bug this narrowing exists for, on the one path that still tags anything.
+
+    An assistant turn that calls a tool is the loop working, not a message pushed at anybody.
+    Tagging every appended message made each of them replay as proactive, which is what a task
+    doing many rounds showed a dozen of.
+    """
+    from aimu.models import PROVENANCE_KEY
+
+    client = MockAsyncModelClient(["tool", "Here is the verified summary."])
+    assistant = await Assistant.create(_config(tmp_path), FakeChannel(), client=client)
+
+    await assistant._proactive("summarize the news")
+
+    messages = assistant._agent.model_client.messages
+    working = [m for m in messages if m.get("tool_calls")]
+    assert working, messages  # the run really did call a tool, so there is something to not tag
+    assert not [m for m in working if m.get(PROVENANCE_KEY)]
+    assert not [m for m in messages if m["role"] == "tool" and m.get(PROVENANCE_KEY)]
 
 
 async def test_assistant_proactive_keeps_the_loops_own_provenance(tmp_path):
     """The proactive tag must not overwrite the tags the agent loop already set on the turns it
     injected. A degenerate turn makes the loop inject a continuation nudge and mark it
     ``continuation``; stamping every message ``proactive`` on top left the nudge indistinguishable
-    from user input, so the web transcript replayed it as a user bubble."""
+    from user input, so the web transcript replayed it as a user bubble. Asserted on the echoed
+    path, the only one that still tags anything for it to collide with."""
     from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY, PROVENANCE_PROACTIVE
 
     # An empty first response is a degenerate turn, which is what makes the loop nudge and retry.
@@ -235,7 +290,7 @@ async def test_assistant_proactive_keeps_the_loops_own_provenance(tmp_path):
     nudges = [m for m in messages if m.get(PROVENANCE_KEY) == PROVENANCE_CONTINUATION]
     assert len(nudges) == 1
     assert nudges[0]["role"] == "user"
-    # Everything the loop did not tag itself is still marked as the unattended turn it belongs to.
+    # The reply the user is about to be shown is still marked as having arrived unasked-for.
     assert messages[-1].get(PROVENANCE_KEY) == PROVENANCE_PROACTIVE
 
 
@@ -1723,24 +1778,27 @@ async def test_a_failed_firing_records_why_it_stopped_in_its_own_conversation(tm
     assert "out of context" in reason
 
 
-async def test_a_failed_firing_tags_its_partial_messages_as_proactive(tmp_path):
-    """The provenance tag is what keeps a replayed unattended turn from reading as something the user
-    typed. Applied in the same place the transcript is snapshotted, so a partial turn is tagged too:
-    tagging only where the run returned normally left the failed path's messages untagged the moment
-    they started being persisted."""
-    channel = _ConvCapturingChannel()
+async def test_a_failed_echoed_firing_still_tags_the_prompt_it_injected(tmp_path):
+    """The tagging runs where the transcript is snapshotted, so a partial turn is covered too.
+
+    Tagging only where the run returned normally left the failed path's messages untagged the
+    moment they started being persisted. On the echoing path that still matters: the prompt
+    nobody typed is sitting in the user's own conversation whether or not the run produced an
+    answer, and without the tag it replays as something they said. There is no reply to tag,
+    because the run raised before producing one.
+    """
     assistant = await Assistant.create(
         _config(tmp_path),
-        channel,
+        FakeChannel(),  # no conversation list, so the firing runs in the viewed conversation
         client_factory=lambda cid: MockAsyncModelClient([RuntimeError("out of context")]),
     )
 
     await assistant._proactive("scan the transcripts", task_name="digest", task_id="t1")
 
-    summary = assistant._book.sessions_for_task("t1")[0]
-    session = assistant._book.get(summary.key)
+    session = assistant._store.get(assistant._active_id)
     assert session.messages
-    assert all(m.get(PROVENANCE_KEY) == PROVENANCE_PROACTIVE for m in session.messages)
+    assert session.messages[0][PROVENANCE_KEY] == PROVENANCE_PROACTIVE
+    assert session.messages[0]["role"] == "user"
 
 
 async def test_a_task_that_fails_every_firing_still_honours_its_cap(tmp_path):
