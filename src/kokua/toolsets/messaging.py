@@ -57,6 +57,14 @@ def send_message(to: str, text: str) -> str:
     you about that: your own run will already be over by the time anyone could know, so the user
     (not you) is the one told.
 
+    To brief an agent you are about to spawn, send to `everyone` *before* you spawn it. A message
+    stays on the bus and each run reads from the start of it, so a run that did not exist when you
+    sent it still reads it on its first round. `everyone` is the only selector that can do this: an
+    exact address or a bare label is refused until a run with that name is already on the roster. The
+    receipt for such a broadcast names only who was on the roster when you sent it, which is the
+    smaller set; the agents you spawn afterwards read it too, and are not listed because they do not
+    exist yet.
+
     Args:
         to: An exact address, a bare label, or `everyone`.
         text: The message to send.

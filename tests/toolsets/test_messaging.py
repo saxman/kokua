@@ -61,6 +61,25 @@ def test_send_message_refuses_an_address_that_never_existed_this_turn():
         current_bus.reset(token)
 
 
+def test_send_messages_docstring_tells_the_model_how_to_brief_a_worker_it_has_not_spawned():
+    """The model is the reader that matters for this one, and it is the surface the explanation missed:
+    the broadcast-before-spawn qualifier landed on the page and in this module's `TOOLSET` comment,
+    neither of which a model reads, while the docstring that *is* its instructions said nothing.
+
+    Both facts are behaviours the suite already pins, which is why this pins the prose instead: a bare
+    label or an exact address is refused against a roster the run is not on yet
+    (`test_send_message_refuses_an_address_that_never_existed_this_turn`), and a broadcast does reach a
+    worker spawned a round later while its receipt names only the roster at send time
+    (`test_an_orchestrators_broadcast_reaches_a_worker_it_spawns_afterwards`). Reword freely; what has
+    to survive is that a model can learn the route from the tool it is holding.
+    """
+    doc = send_message.__doc__
+    assert "spawn" in doc
+    assert EVERYONE in doc
+    assert "refused" in doc
+    assert "receipt" in doc
+
+
 def test_send_message_outside_a_turn_says_so_rather_than_raising():
     assert "no turn" in send_message("researcher", "hello").lower()
 
