@@ -312,7 +312,8 @@ finished worker an accept followed by an undelivered report rather than a refusa
 address that never existed this turn is refused outright, since the roster can answer that much without
 liveness. **Who can reach whom is decided by the execution model rather than by the bus, and
 [Agent messaging](../how-agents-work/agent-messaging.md) is where that argument lives** (a parent is
-blocked for as long as its children run, so sibling-to-sibling is the only direction this adds);
+blocked for as long as its children run, so sibling-to-sibling is the only direction this adds between
+two runs already going, and an orchestrator's own reach is a broadcast ahead of a spawn);
 nothing here repeats it.
 
 **Liveness resets, safety does not.** AIMU's loop drains the bus once per round, at all three ways a

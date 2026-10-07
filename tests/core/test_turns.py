@@ -2769,7 +2769,7 @@ async def test_the_users_own_mid_turn_message_reaches_the_store_untagged(assista
 
 
 async def test_a_round_that_carried_both_the_user_and_an_agent_is_marked_mixed_not_agent(assistant):
-    """A mixed delivery stays untagged, and the index is what carries it.
+    """A mixed delivery is tagged ``PROVENANCE_MIXED``, never ``PROVENANCE_AGENT``.
 
     One drain becomes one appended message, so this message is both, and
     ``PROVENANCE_AGENT`` is all-or-nothing per message: tagging it ``PROVENANCE_AGENT`` would hide the
@@ -2803,8 +2803,8 @@ async def test_two_deliveries_in_one_turn_are_tagged_one_at_a_time(assistant):
 
     The user speaks in the first round and a worker in the second, so the turn holds one message of
     each kind. A single answer taken over the whole turn tags both or neither: tagging both would put
-    the agent tag on what the user said, which is the failure the mixed case is untagged to avoid,
-    arriving by a different route.
+    the agent tag on what the user said, which is the failure the mixed case refuses
+    ``PROVENANCE_AGENT`` to avoid, arriving by a different route.
     """
     conversation_id = assistant._active_id
     agent = assistant._book.agent_for(conversation_id)

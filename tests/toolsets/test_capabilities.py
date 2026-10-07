@@ -72,7 +72,19 @@ def _recording(monkeypatch) -> _RecordingSpawn:
 
     That import is deliberately function-level, to keep the AIMU surface the startup preflight probes
     off the module's import path, so there is no module attribute here to replace.
+
+    ``core.agents`` is imported first, and that one line is load-bearing rather than tidy.
+    ``compose_subagent`` imports it (for ``compaction_for_window``) at call time too, so without this
+    the *first* import of that module in a session can happen while this patch is live, and its
+    module-level ``from aimu.aio.tools.builtin import make_async_subagent_tool`` binds permanently to
+    this double. ``monkeypatch`` reverts the name it was given and cannot reach that second binding,
+    so every later ``wire_agent`` in the session builds its spawn tool from a recorder: the symptom is
+    ``tests/core/test_build.py`` failing on ``spawn.__doc__`` being ``None``, but only when it is
+    collected after this module, which the default suite never does (``tests/core/`` sorts first).
+    Importing it here means the binding is made against the real factory, whoever imports it next.
     """
+    import kokua.core.agents  # noqa: F401  (see above: bind the real factory before patching)
+
     spawn = _RecordingSpawn()
     monkeypatch.setattr("aimu.aio.tools.builtin.make_async_subagent_tool", spawn)
     return spawn
@@ -155,8 +167,9 @@ def test_compose_spec_carries_only_keys_aimu_accepts(tmp_path):
 def test_compose_spec_gives_the_composed_worker_its_own_inbox(tmp_path):
     """A composed worker needs an inbox of its own. Without one it never opens a reader, never mints
     an address on the bus, and `core/messaging.py`'s `current_address` is left holding whatever its
-    caller set -- which is exactly the impersonation route the review found live through the shipped
-    `[agents.assistant].tools` (holding both `capabilities` and `messaging`). `WORKER_SOURCE`, not
+    caller set -- so a composed worker's message would be sent under the address of the agent that
+    composed it. That is reachable on the shipped `[agents.assistant].tools`, which holds both
+    `capabilities` and `messaging`, rather than hypothetical. `WORKER_SOURCE`, not
     `ENTRY_SOURCE`: a composed worker is an independent run, not the conversation's own cursor, the
     same distinction `build_agent_specs` draws for a declared one."""
     from kokua.core.messaging import WORKER_SOURCE
@@ -294,7 +307,7 @@ async def test_compose_subagent_forwards_the_approval_gate_and_the_observer(tmp_
 
 
 async def test_compose_subagent_passes_events_for_turn_metrics(tmp_path, monkeypatch):
-    """The events half of the same omission, missing for the same reason `inbox` was:
+    """`events`, the other argument this spawn call was missing, for the same reason `inbox` was:
     without it, a composed worker's model calls never reach `current_metrics`, so the turn's own cost
     accounting silently excludes whatever it spent. `_spawn_tool`/`make_delegation_tool` (the
     declared-worker factories in core/agents.py) pass the same module-level constant."""

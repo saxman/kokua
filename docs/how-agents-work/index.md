@@ -28,9 +28,10 @@ the choices it did about them.
   model decides which directions can carry anything.
 
 The mechanism pages land one at a time rather than all at once, so this list says plainly which of the
-fourteen planned pages exist today. Seven of them, all listed above. The fourteenth was not on the
-original thirteen: *Agent messaging* was added when the mechanism was, since the constraint it teaches
-is not visible from any of the pages beside it. The remaining seven, in the order a newcomer would want
+fourteen planned pages exist today. Seven of them, all listed above. *Agent messaging* is the one the
+original plan did not name, added alongside the mechanism itself: what it teaches is that the execution
+model, not the message bus, decides which agents can reach which, and that is a fact about multi-agent
+systems rather than about Kokua. The remaining seven, in the order a newcomer would want
 them, under the titles they will land with:
 
 1. Agents and workflows

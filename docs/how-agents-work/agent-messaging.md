@@ -13,22 +13,58 @@ which is nearly all of them:
 | From | To | Reality |
 | --- | --- | --- |
 | the user | anyone | Works. This is the message you type while a reply is still being written. |
-| a worker | a concurrently dispatched sibling | **Works, and is the only genuinely new direction.** |
+| a worker | a concurrently dispatched sibling | **Works, and is the only new direction between two agents that are both already running.** |
 | a worker | its parent | Lands at the parent's next round, which is after every worker has returned. So it arrives *later* than the worker's own return value, which makes it marginal rather than useful. |
-| an orchestrator | a worker it is waiting on | Impossible. Not refused: there is simply no moment at which it could happen. |
+| an orchestrator | a worker it has **not spawned yet** | Works, by broadcasting before the spawn, because a worker's cursor opens at zero. A brief rather than a redirect, and the one route an orchestrator has. |
+| an orchestrator | a worker it is **already waiting on** | Impossible, and not because it is refused: there is no moment at which it could happen. One way across exists, and it is the most instructive thing on this page: see below. |
 
 The reason is one sentence, and it is about the turn loop rather than about messaging. **A parent is
 blocked for exactly as long as its children run.** Dispatch several tool calls concurrently and the
 parent is inside an `asyncio.TaskGroup` that does not return until the last of them does; dispatch them
 one at a time and the parent is inside the child's own `await`. Either way the parent can only speak at
-a round boundary, and every worker it could address is one it is currently blocked on. There is no
-instant where the orchestrator holds the floor *and* a recipient exists.
+a round boundary, and a worker it is waiting on is one that will have returned before that boundary
+arrives. So that last row is a property of blocking spawn rather than a hole in the bus, and lifting it
+in general means workers running as background tasks a parent polls instead of tool calls it awaits,
+which is a larger change to the turn loop than a message bus is.
 
-So read that last row as a property of blocking spawn, not as a hole in the bus. Making it possible
-means workers running as background tasks a parent polls, instead of tool calls it awaits, which is a
-larger change to the turn loop than a message bus is. The row stays empty, honestly, and the bus is
-what makes the constraint legible instead of folkloric: you can call `list_agents`, see the roster, send
-to it, and watch what happens.
+**Now notice what the row does not say, because this is the part worth keeping.** It says an
+orchestrator cannot reach a worker it is *already waiting on*. It does not say an orchestrator cannot
+reach a worker at all, and the difference is a design decision one layer down: **a worker's cursor
+opens at zero rather than at the end of the list.** A message sent before a worker existed is therefore
+still in front of that worker's first drain. So an orchestrator that broadcasts and *then* spawns does
+reach the worker it spawns. Driving the bus directly, which is the shortest way to see it:
+
+```text
+roster when it sends : ['assistant']
+receipt              : Accepted for assistant. Delivered to whichever of them reads it next, if any of them do.
+roster after spawn   : ['assistant', 'researcher#1']
+worker's first drain : ['[message from assistant] check the cache first']
+```
+
+Two rounds of one turn, no new machinery, and nothing reported undelivered (`close()` returns two
+empty lists, so the third observation point has nothing to say). It works because broadcasting is the
+one selector with nothing to check against: `everyone` matches every reader whenever that reader opens,
+while a bare label or an exact address is refused at send time against a roster that does not hold it
+yet. Swap `everyone` for `researcher` in the first round and the same script answers
+`No agent matches 'researcher'. Addressable right now: assistant, or 'everyone'.`
+
+**The cursor opening at zero was not put there for this**, which is why it is worth reading rather than
+just using. Its own reasoning is that replaying earlier messages to a newly spawned worker is *context
+rather than news*: the orchestrator had already read that message when it wrote the spawn prompt, so
+the worker is being handed the same instruction its task string was written under. Opening at the
+current length instead would make the bus's simplest property, append-only with every reader seeing the
+list, depend on when a reader happened to open. The escape is a consequence of that choice, not its
+purpose.
+
+It costs something, and the page's own ledger should carry it: a delivery resets the recipient's round
+budget, so every worker spawned after a broadcast starts with a fresh stretch of autonomous rounds. One
+reset per worker, under the loop's own cap on extensions, which is what keeps this bounded rather than
+unbounded.
+
+So the honest summary is narrower than an absolute and more useful: an orchestrator can brief workers
+it has not spawned yet, and cannot redirect one it is currently waiting on. The bus is what makes that
+legible instead of folkloric. You can call `list_agents`, see the roster, send to it, and watch what
+happens.
 
 Two mechanisms underneath that are worth understanding on their own, because they recur in any system
 that does this.
@@ -185,8 +221,16 @@ way AIMU's spawn tool labels it.
 [`toolsets/messaging.py`](https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/messaging.py)
 registers `send_message(to, text)` and `list_agents()` through the `kokua.toolsets` entry point, and an
 agent holds them because its `[agents.<name>].tools` names `messaging`. The shipped config names it on
-the entry agent and on all three shipped workers, because both permitted directions need it. `list_agents`
-is not garnish: without discovery a model invents addresses, which is how sends reach nobody.
+the entry agent and on all three shipped workers, and the two cases are declared for different reasons,
+which is worth separating because it is easy to say "both directions need it" and be wrong. **Being a
+recipient needs no toolset at all**: a worker receives because the loop drains the reader its spec
+opened, with nothing declared. So what the three workers' declaration buys is the ability to *send*,
+which is both permitted worker directions (to a sibling, and to the parent). What the **entry agent's**
+declaration buys is different: `list_agents`, and the broadcast-before-spawn route above, which is the
+only reason an orchestrator has to hold `send_message` at all.
+
+`list_agents` is not garnish either way: without discovery a model invents addresses, which is how
+sends reach nobody.
 
 ```toml
 [agents.assistant]
@@ -208,8 +252,12 @@ first-class concern rather than a later one: silent delivery failure in multi-ag
 measured at 69 to 98 per cent where there is no verification protocol, and at zero where there is one
 ([arXiv 2606.04896](https://arxiv.org/abs/2606.04896)).
 
-1. **Send** returns an accept-receipt naming who the selector matched. Not a delivery promise, for the
-   reason the captured run shows.
+1. **Send** returns an accept-receipt naming who the selector matched *at that moment*. Not a delivery
+   promise, for the reason the captured run shows, and in the broadcast-before-spawn case not even a
+   complete list: `Accepted for assistant` is literally true of the roster it was asked about and says
+   nothing about the workers spawned a round later that will actually read it. "An accept, not a
+   promise" is the design's own framing, and this is the case where the accept names the wrong set in
+   the generous direction rather than the stingy one.
 2. **Delivery** shows on the recipient's sub-agent card at the round it landed, live and on reload.
 3. **Close** reports anything addressed to an agent that no reader took: a sentence to the user, and a
    record in the turn's own metadata so a reload still shows it.

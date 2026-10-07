@@ -1,9 +1,10 @@
 """Messages sent into a turn that is already running, by the user or by one of its own agents.
 
 A turn holds one bus for its whole life. AIMU's loop opens a reader over it at the start of every
-run inside that turn that was handed a source (the entry agent's own runs, and every worker whose
-spec ``core/agents.py`` writes) and drains that reader once per round, so what the user types
-reaches the model at its next model call rather than queuing behind the turn on the gate.
+run inside that turn that was handed a source (the entry agent's own runs, and every worker the turn
+spawns, whether ``core/agents.py`` wrote its spec or ``toolsets/capabilities.py`` composed it) and
+drains that reader once per round, so what the user types reaches the model at its next model call
+rather than queuing behind the turn on the gate.
 
 Three design points are worth reading before changing anything here.
 
@@ -302,6 +303,14 @@ class MessageBus:
         prompt with it in hand, and it is bounded (one round-budget reset per worker, under AIMU's own
         cap on those). Opening at the current length instead would make the bus's simplest
         property, append-only with every reader seeing the list, depend on when a reader was opened.
+
+        One consequence is worth naming, because it is the only route by which an *agent* reaches a
+        worker at all: a parent is blocked for as long as its children run, so it cannot redirect a
+        worker it is already waiting on, but a broadcast it sends before spawning is still in front of
+        that worker's first drain. Only ``EVERYONE`` can do it, since a label or an exact address is
+        refused by ``toolsets/messaging.py`` against a roster the run is not on yet.
+        ``docs/how-agents-work/agent-messaging.md`` is where that matrix and this escape from it are
+        explained.
 
         ``agent`` is the run's own name, passed positionally by AIMU's loop so it can address one run
         rather than every run's drain. It mints this run's roster address via :meth:`_register` with

@@ -110,8 +110,12 @@ TOOLSET = Toolset(
     description="Send a message to another agent running in this turn, and list who is reachable.",
     build=lambda ctx: [send_message, list_agents],
     cross_cutting=True,
-    # Both permitted directions need it: the entry agent addresses a worker, and a worker answers
-    # its parent, so this cannot be restricted to the agent Kokua constructs directly the way `skills`
-    # is.
+    # Not restricted to the agent Kokua constructs directly, the way `skills` is, because a worker is
+    # one of the senders: a worker addresses a sibling running beside it, or answers its parent. Note
+    # what this is *not* an argument about. Receiving needs no toolset at all (the loop drains the
+    # reader a worker's spec opened, declared or not), so what a declaration buys anyone is the
+    # ability to send, which is why the entry agent's own declaration is justified separately: it buys
+    # `list_agents`, and the one send an orchestrator can usefully make, which is a broadcast ahead of
+    # a spawn (see `MessageBus.reader` on a cursor opening at zero).
     entry_point_only=False,
 )

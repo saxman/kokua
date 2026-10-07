@@ -104,6 +104,42 @@ def test_send_message_to_everyone_is_accepted_even_with_an_empty_roster():
     assert report[0].sender == "assistant"
 
 
+def test_an_orchestrators_broadcast_reaches_a_worker_it_spawns_afterwards():
+    """The one route an orchestrator has to a worker, end to end, and the one the test above stops short
+    of.
+
+    That test pins the *send*: a broadcast is accepted with nothing on the roster, because `EVERYONE`
+    has nothing to check against. It then closes the bus with no worker ever spawned, so what it
+    asserts is the message being *reported undelivered*. This asserts the other outcome, which is the
+    one that matters: a parent is blocked for as long as its children run, so it cannot redirect a
+    worker it is already waiting on, but a broadcast it sends in an earlier round is still in front of
+    that worker's first drain (`MessageBus.reader` opens at zero), attributed to the parent, and
+    therefore not reported at all. Worth pinning as one test rather than two, because
+    `docs/how-agents-work/agent-messaging.md` teaches it as the documented way across the matrix's
+    empty row, and either half alone leaves that claim resting on the other.
+
+    The receipt is checked for what it does *not* promise. "Accepted for assistant" names the roster at
+    send time and says nothing about the worker that will actually read it, which is the accept-not-a-
+    promise rule pointing the generous way for once.
+    """
+    bus = MessageBus()
+    bus.entry_reader("assistant")  # the orchestrator's own run, which mints `assistant`
+    bus_token = current_bus.set(bus)
+    try:
+        receipt = send_message(EVERYONE, "check the cache first")
+    finally:
+        current_bus.reset(bus_token)
+    assert "Accepted for assistant" in receipt
+    assert "researcher" not in receipt
+
+    worker = bus.reader("subagent-researcher")  # spawned a round later, cursor at zero
+    assert worker() == ["[message from assistant] check the cache first"]
+
+    resubmit, report = bus.close()
+    assert resubmit == []
+    assert report == []  # a reader took it, so the third observation point has nothing to say
+
+
 def test_send_message_attributes_the_sender_from_whichever_run_last_opened_a_reader():
     # `send_message` has no argument naming who is calling it: the sender comes off the
     # `current_address` contextvar `core/messaging.py` sets when a reader opens. Opening "coder"'s

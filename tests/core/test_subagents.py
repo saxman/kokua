@@ -654,8 +654,8 @@ async def test_a_real_spawn_through_the_reporter_leaves_the_parents_own_send_cor
     attributing a message to whatever `current_address` holds is `tests/core/test_messaging.py`.
     Neither is the join the bracket was built for -- `send_message`, called by the parent right after
     a real spawn runs through this reporter, attributed to the parent and not to the worker it just
-    spawned -- which is exactly the shape two earlier reviews each had to construct by hand because no
-    test did it.
+    spawned -- which is the shape that has to be reconstructed by hand whenever this is questioned, so
+    it is pinned here instead.
     """
     reporter, _ = _reporter()
     bus = MessageBus()
