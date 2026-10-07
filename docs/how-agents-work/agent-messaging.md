@@ -143,7 +143,9 @@ finishing is not knowable at that instant, which is exactly why the sentence tha
 
 **`researcher#1` received its own broadcast.** `everyone` means every reader on the bus, and the sender
 is one. That is visible in the first block: the `Message (mid-turn)` line sits in the *sender's* card.
-Worth knowing before you write a fan-out that counts replies.
+Worth knowing before you write a fan-out that counts replies, and worth following to the other end of
+the same mechanism, which is under [What it costs](#what-it-costs): a delivery to yourself extends your
+own round budget.
 
 **The words carry their own attribution, and the two markers say different things.** `Message
 (mid-turn)` is the phase: something was delivered here rather than injected by the loop, which is
@@ -301,12 +303,27 @@ its own gated calls are judged against is an escalation.
 **A delivery resets the recipient's round budget whoever sent it, and that is a cost rather than a
 choice.** The budget extension fires on any delivery, inside AIMU's loop, and making it conditional
 would mean the drain carrying more than a list of strings, which is what keeps the loop ignorant of
-addressing at all. So an agent messaging a worker does extend that worker's autonomous stretch. What
-bounds it is a cap the loop already has (one extension per permitted round), so a sender reaches the
-same ceiling a person reaches by typing repeatedly, and `send_message` is a declared capability rather
-than a default one. One cheap mitigation exists and is deliberately not taken: refusing `everyone` from
-an agent would eliminate the worst case by construction, and would also remove a capability that was
-asked for.
+addressing at all. So an agent messaging a worker does extend that worker's autonomous stretch, and
+`send_message` is a declared capability rather than a default one.
+
+**A run can buy its own rounds, because the sender is one of the readers.** This is the other end of
+the self-delivery seen above, and it is the part worth knowing: `everyone` reaches the sender, and so
+does the sender's own exact address, so `send_message(to="researcher#1", ...)` called *by*
+`researcher#1` extends `researcher#1`'s own budget. What the loop's cap buys is a bound rather than a
+ceiling you would recognise from the human case. There are at most `max_iterations` extensions, and
+each moves the budget's *base* to the round the message landed in rather than adding a round, so a run
+that sends every round gets roughly twice its cap, and one that sends only on its last permitted round
+gets up to about `max_iterations` times it. Bounded, which is why it is left alone; quadratic, which is
+why the number is written down. The tempting comparison, that a sender reaches the same ceiling a
+person reaches by typing repeatedly, is numerically close and conceptually wrong: a person typing is a
+person in the loop, which is the evidence the extension exists to act on, where a run messaging itself
+is the round cap being lifted by the thing it exists to bound. The mitigation this page used to
+record, refusing `everyone` from an agent, would not have reached it: a self-address does the same
+thing with no broadcast involved. The lever that would is in `send_message` instead, dropping the
+caller from the set its selector resolves to and refusing one that resolves to nobody else: it removes
+only a capability nobody asked for, since what was asked for was messaging *another* agent, and the
+one thing it changes besides is what a broadcast's receipt names, the sender no longer appearing in
+its own. It is still not taken; it is the one on the record now.
 
 **Liveness is not tracked, so the roster over-promises in one direction and the receipt under-promises
 in the other.** A send to a worker that has already finished is *accepted*, then reported undelivered

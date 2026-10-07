@@ -1013,8 +1013,16 @@ appending to it is the principal exercising your own budget. The whole rule is o
 `MessageBus.send`, which is why it is pinned directly. What is *not* ruled out, and is recorded rather
 than designed away: a delivery extends the recipient's round budget whoever sent it, because AIMU's
 `_extend_budget` fires on any delivery and the drain's `list[str]` contract is what keeps AIMU
-ignorant of senders. AIMU's own cap (one extension per permitted round) is what bounds it, and
-`messaging` is a declared capability, so no agent holds it by default.
+ignorant of senders. That includes a run's message to *itself*, since `matches` answers `everyone`
+before it reads an address and an exact self-address matches too, so a sender is a reader like any
+other and no broadcast is needed to reach it. AIMU's own cap on extensions (at most `max_iterations`
+of them) is what bounds it, and the bound is worth stating as the number it is rather than as a flat
+ceiling: each extension moves the budget's base to the round the message landed in, so the worst case
+is on the order of `max_iterations` times the cap. `messaging` is a declared capability, so no agent
+holds it by default. `core/messaging.py`'s `WORKER_SOURCE` and
+[Agent messaging](https://saxman.info/kokua/how-agents-work/agent-messaging/) carry the argument, and
+the lever on the record is in `send_message` (excluding the caller from its own selector), not the
+refusal of `to=everyone` an earlier draft recorded, which a self-address goes around.
 `tests/core/test_messaging.py`, `tests/core/test_subagents.py`, `tests/toolsets/test_messaging.py`,
 `tests/toolsets/test_capabilities.py`, `tests/core/test_messages.py`, `tests/core/test_turns.py`,
 `tests/core/test_transcripts.py`, `tests/core/test_conversations.py`, `tests/test_transcript_export.py`,

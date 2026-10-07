@@ -129,6 +129,12 @@ def matches(selector: str, address: Optional[str]) -> bool:
     *address* is optional because a run opened with no name registers no address (see
     :meth:`MessageBus._register`): it has nothing to match a direct or group selector against, so it
     answers only to ``EVERYONE``, the one case this checks before touching *address* at all.
+
+    Nothing here excludes a sender from its own message, and nothing upstream does either: this is a
+    pure predicate over one address, so a run matches its own broadcast, its own label, and its own
+    exact address. That is intended for a broadcast (``everyone`` means every reader, and the sender
+    is one) and it carries a cost the recipient's round budget pays, which :data:`WORKER_SOURCE`
+    states in full.
     """
     if selector == EVERYONE:
         return True
@@ -621,12 +627,35 @@ ENTRY_SOURCE = _ContextSource(entry=True)
 #: module's design (and principle 1's) separable. So an agent messaging a worker does extend that
 #: worker's autonomous stretch, and this is written down rather than asserted and quietly unmet.
 #:
-#: What bounds the residual is a cap AIMU already has rather than anything here: ``_extend_budget``
-#: allows one extension per permitted round and logs once when it refuses more, so a run's rounds stay
-#: bounded by its own ``max_iterations`` (that many extensions at the very most) rather than growing
-#: with the number of messages sent to it. ``send_message`` is also a declared capability
-#: (``[agents.<name>].tools``), so no agent
-#: holds it by default. Two mitigations are deliberately not taken: no config key for this, and no
-#: refusal of ``to=EVERYONE`` from an agent, which would remove a capability that was asked for. The
-#: design records the second as the one to revisit if the residual ever bites.
+#: **A run reaches that same extension by addressing itself, and nothing here stops it.** A sender is
+#: a reader like any other: :func:`matches` answers ``EVERYONE`` before it looks at an address at all,
+#: and an exact self-address matches on the next line, while ``toolsets/messaging.py``'s
+#: ``send_message`` excludes nobody from the set it matches. So ``to="researcher#1"`` sent *by*
+#: ``researcher#1`` delivers to ``researcher#1`` and moves that run's own budget base, with no
+#: broadcast involved. Self-delivery is deliberate and documented
+#: (``docs/how-agents-work/agent-messaging.md``: ``everyone`` means every reader, and the sender is
+#: one); the budget consequence of it is what is recorded here.
+#:
+#: What bounds the residual is a cap AIMU already has rather than anything here, and the bound is
+#: quadratic rather than flat. ``_extend_budget`` allows one extension per permitted round and logs
+#: once when it refuses more, so there are at most ``max_iterations`` extensions; but each one moves
+#: the budget's *base* to the round the message landed in rather than adding a round, so a run that
+#: sends on every round gets roughly twice its cap, and one that sends only on its last permitted
+#: round gets up to about ``max_iterations`` times it. Bounded either way, which is what makes leaving
+#: this defensible, and worth stating as the number it actually is. ``send_message`` is also a declared
+#: capability (``[agents.<name>].tools``), so no agent holds it by default.
+#:
+#: One comparison this used to make is withdrawn, and so is the mitigation that rested on it. "A
+#: sender reaches the same ceiling a person reaches by typing repeatedly" is numerically close and
+#: conceptually wrong: a person typing repeatedly is a person in the loop, which is the evidence the
+#: extension exists to act on, where a run delivering to itself is the round cap being lifted by the
+#: thing the round cap is there to bound. And the mitigation recorded against the residual, refusing
+#: ``to=EVERYONE`` from an agent, would not reach it, since a self-address produces the identical
+#: extension with no ``everyone`` anywhere in it. The lever that would close it is in ``send_message``
+#: rather than here: drop the caller's own address from the set it matches, and refuse a selector that
+#: resolves to nobody else, which would remove only a capability nobody asked for, since what was
+#: asked for was messaging *another* agent. It would also change what a broadcast's receipt names (the
+#: sender would stop appearing in its own), which is the part to get right if it is ever taken. Still
+#: not taken, and no config key is added for it either, but it is the lever on the record now, because
+#: the one that was there answered a different residual.
 WORKER_SOURCE = _ContextSource(entry=False)

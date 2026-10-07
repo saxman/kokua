@@ -320,7 +320,13 @@ nothing here repeats it.
 round can end, and a delivered message moves the round budget's base so the run gets a fresh
 `max_iterations` stretch counted from there: a human saying something is the evidence that the run is
 not spinning, which is what the cap exists to catch. (AIMU caps the extensions, because a bus whose
-cursor never advanced would otherwise lift the bound entirely.) The auto-approval budget is left alone
+cursor never advanced would otherwise lift the bound entirely.) **An agent's message is not that
+evidence and gets the same extension**, including a run's message to itself, which `matches` allows
+because a sender is a reader like any other. The extension cap is what keeps that bounded, at a number
+worth knowing rather than assuming: at most `max_iterations` extensions, each moving the base rather
+than adding a round, so the worst case is on the order of `max_iterations` times the cap.
+[Agent messaging](../how-agents-work/agent-messaging.md#what-it-costs) carries the argument and the one
+lever that would close it. The auto-approval budget is left alone
 on purpose. It bounds how many gated calls run without a prompt, and more user text does not make a
 gated call safer. What the message *does* reach there is `ReviewContext.request`, amended so a reviewer
 judges a redirected turn's calls against what the user now wants rather than against instructions

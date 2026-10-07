@@ -25,6 +25,28 @@ def test_send_message_returns_a_receipt_naming_who_it_was_accepted_for():
         current_bus.reset(token)
 
 
+def test_a_sender_is_not_excluded_from_its_own_selector():
+    """Self-delivery, pinned on the surface a model actually sends from.
+
+    Documented behaviour rather than a defect: ``everyone`` means every reader and the sender is one.
+    What this test exists for is the consequence recorded beside it (``core/messaging.py``'s
+    ``WORKER_SOURCE``): every delivery extends the recipient's round budget, so a run delivering to
+    itself extends its own. Pinned for both selectors, because the mitigation the design used to
+    record against that residual was a refusal of ``everyone`` from an agent, and the exact-address
+    case shows why that lever would not have closed it.
+    """
+    bus = MessageBus()
+    drain = bus.reader("researcher")  # mints `researcher#1` and sets `current_address` to it
+    token = current_bus.set(bus)
+    try:
+        assert "researcher#1" in send_message(EVERYONE, "hello all")
+        assert "researcher#1" in send_message("researcher#1", "note to self")
+    finally:
+        current_bus.reset(token)
+
+    assert drain() == ["[message from researcher#1] hello all", "[message from researcher#1] note to self"]
+
+
 def test_send_message_refuses_an_address_that_never_existed_this_turn():
     # The roster can answer this without liveness, so refusing beats accepting and
     # then reporting nothing delivered.
