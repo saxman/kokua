@@ -60,8 +60,9 @@ def _compose_spec(
 ) -> dict:
     """The AIMU ``agent_types`` spec for one composed sub-agent.
 
-    Raises ``ToolsetError`` when a name does not resolve, which the calling tool turns into text rather
-    than letting it propagate: a raising tool breaks the agent's tool loop. Naming this toolset itself
+    Raises ``ToolsetError`` when a name does not resolve, or resolves to a toolset that builds no tools,
+    which the calling tool turns into text rather than letting it propagate: a raising tool breaks the
+    agent's tool loop. Naming this toolset itself
     among ``tools`` is one such rejection, checked before ``select`` runs so the message is specific
     rather than a generic resolution error: it is also the escape hatch that would defeat the depth
     cap, since a sub-agent handed a fresh ``compose_subagent`` of its own would read the cap again from
@@ -97,7 +98,29 @@ def _compose_spec(
     # entry-point-only, and `select` above has already rejected it here. The ad-hoc label is the honest
     # value for `agent_name`: it names no `[agents.*]` table, so every per-agent accessor answers with
     # the `[assistant]` defaults, which is the tier this sub-agent actually runs on.
-    built = build_tools(selected, ToolsetContext(state=state, agent=None, agent_name=name))
+    context = ToolsetContext(state=state, agent=None, agent_name=name)
+    # Built one toolset at a time so a toolset that yields nothing can be named. Some do that on purpose
+    # when unconfigured (`image` without AIMU_IMAGE_MODEL, `github_backup` without its token), and
+    # `planning` always does for a worker, which has no channel to run its command on. Composing anyway
+    # hands the model a worker without the tool its task depends on and no word of why, so it
+    # delegates the same request again a level down until the depth cap runs out.
+    built_by_toolset = [(toolset, build_tools([toolset], context)) for toolset in selected]
+    empty = [toolset for toolset, tools in built_by_toolset if not tools]
+    if empty:
+        named = "; ".join(f"{toolset.name!r} ({toolset.description})" for toolset in empty)
+        raise ToolsetError(
+            f"these capabilities provide no tools on this machine right now, so a sub-agent given them could "
+            f"not use them: {named}. Do not compose another sub-agent for them; compose without them, or tell "
+            "the user what they need."
+        )
+    # First wins on a shared tool name, matching what `build_tools` does across a list.
+    built = []
+    seen: set[str] = set()
+    for _, tools in built_by_toolset:
+        for fn in tools:
+            if fn.__name__ not in seen:
+                seen.add(fn.__name__)
+                built.append(fn)
     if extra_tools:
         built = built + list(extra_tools)
     opener = instructions.strip() or DEFAULT_SUBAGENT_INSTRUCTIONS

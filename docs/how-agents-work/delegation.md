@@ -174,6 +174,13 @@ since a worker holding a fresh copy would read the depth budget from scratch ins
 the caller's, so `[capabilities].max_depth` (default 3, `0` off) is what governs nesting. And its calls
 route through `[security].confirm_tools` exactly as a declared worker's do.
 
+A name can resolve and still give a worker nothing: `image` builds no tool until `AIMU_IMAGE_MODEL` is
+set, and `list_capabilities` lists it either way, because discovery never builds a toolset. So
+`compose_subagent` refuses a capability that builds to no tools, naming it with its description, rather
+than starting a worker without the one tool its task needs. Before that refusal, a request for an image
+on a machine with no image model went seven workers deep: each one found itself without the tool, took
+`compose_subagent` for the way to get it, and asked again one level down, until the depth cap ran out.
+
 That is the sense in which a composed sub-agent is not a config-described agent. There is no table to
 read, no `wire_agent` call, and no entry in `[agents.*]`: its label is even prefixed `composed:` so it
 can never collide with an agent name, and every per-agent setting it asks for answers with the

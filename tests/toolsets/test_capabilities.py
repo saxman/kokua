@@ -16,7 +16,19 @@ from kokua.registry.context import LiveState, ToolsetContext
 from kokua.registry.registry import Toolset, ToolsetError, register
 
 
-def _toolset(name: str, *, tools=(), **kwargs) -> Toolset:
+def _named_tool(name: str):
+    async def fn() -> str:
+        return "ok"
+
+    fn.__name__ = fn.__qualname__ = name
+    fn.__doc__ = f"The {name} tool."
+    return aimu_tool(fn)
+
+
+def _toolset(name: str, *, tools=None, **kwargs) -> Toolset:
+    """A toolset holding one tool of its own unless ``tools`` says otherwise, since composing from one
+    that holds none is refused (see the empty-toolset tests below)."""
+    tools = [_named_tool(f"{name}_tool")] if tools is None else list(tools)
     return Toolset(name=name, description=f"{name} description", build=lambda ctx: list(tools), **kwargs)
 
 
@@ -186,7 +198,7 @@ def test_compose_spec_builds_the_named_toolsets_tools(tmp_path):
 def test_compose_spec_appends_each_toolsets_guidance_to_the_instructions(tmp_path):
     """A capability's usage instructions travel with it into an ad-hoc worker exactly as they do into a
     declared one, so installing a toolset brings the words that make the model use it."""
-    guided = Toolset(name="web", description="Web.", build=lambda ctx: [], guidance=" Search before answering.")
+    guided = _toolset("web", guidance=" Search before answering.")
     spec = _spec(_state(tmp_path, sources=[("AIMU capability", [guided])]))
     assert spec["system_message"] == "Check the quote. Search before answering."
 
@@ -262,7 +274,7 @@ def test_compose_spec_hands_the_worker_a_composition_tool_when_given_one(tmp_pat
 
 
 def test_compose_spec_leaves_the_worker_without_one_by_default(tmp_path):
-    assert _spec(_state(tmp_path))["tools"] == []
+    assert [fn.__name__ for fn in _spec(_state(tmp_path))["tools"]] == ["web_tool"]
 
 
 def test_compose_spec_inherits_the_assistant_generation_defaults(tmp_path):
@@ -284,6 +296,51 @@ async def test_compose_subagent_runs_the_worker_under_its_given_name(tmp_path, m
     result = await compose("quote-checker", "Check AAPL.", ["web"], "Check quotes.")
     assert result == "quote-checker ran: Check AAPL."
     assert list(spawn.calls[0]["agent_types"]) == ["quote-checker"]
+
+
+# A toolset can build to nothing: `image` without AIMU_IMAGE_MODEL, `github_backup` without its token,
+# `planning` always for a worker. Composing anyway handed the model a worker without the tool its task
+# needed and no word of why, and each worker delegated the same request again a level down until the
+# depth cap ran out, seven workers deep in one recorded conversation.
+
+
+def test_compose_spec_refuses_a_capability_that_provides_no_tools(tmp_path):
+    state = _state(tmp_path, sources=[("plugin", [_toolset("image", tools=[])])])
+    with pytest.raises(ToolsetError) as excinfo:
+        _spec(state, tools=["image"])
+    assert "'image' (image description)" in str(excinfo.value), "the reason lives in the description"
+
+
+def test_compose_spec_names_only_the_empty_capability_among_several(tmp_path):
+    state = _state(tmp_path, sources=[("plugin", [_toolset("web"), _toolset("image", tools=[])])])
+    with pytest.raises(ToolsetError) as excinfo:
+        _spec(state, tools=["web", "image"])
+    assert "'image'" in str(excinfo.value)
+    assert "'web'" not in str(excinfo.value)
+
+
+def test_compose_spec_keeps_the_first_tool_when_two_capabilities_share_a_name(tmp_path):
+    first, second = _named_tool("shared"), _named_tool("shared")
+    state = _state(tmp_path, sources=[("plugin", [_toolset("web", tools=[first]), _toolset("fs", tools=[second])])])
+    assert _spec(state, tools=["web", "fs"])["tools"] == [first]
+
+
+async def test_compose_subagent_answers_an_empty_capability_without_spawning(tmp_path, monkeypatch):
+    compose, spawn = _compose(_state(tmp_path, sources=[("plugin", [_toolset("image", tools=[])])]), monkeypatch)
+    result = await compose("cat-image-maker", "Draw a cat.", ["image"], "Generate images.")
+    assert result.startswith("Could not compose 'cat-image-maker'")
+    assert "Do not compose another sub-agent" in result
+    assert spawn.calls == []
+
+
+def test_the_shipped_image_toolset_is_refused_when_no_image_model_is_configured(tmp_path, monkeypatch):
+    """The case that was recorded, against the real toolset rather than a stand-in."""
+    from kokua.toolsets.image import TOOLSET as IMAGE
+
+    monkeypatch.delenv("AIMU_IMAGE_MODEL", raising=False)
+    with pytest.raises(ToolsetError) as excinfo:
+        _spec(_state(tmp_path, sources=[("built-in toolset", [IMAGE])]), tools=["image"])
+    assert "AIMU_IMAGE_MODEL" in str(excinfo.value)
 
 
 async def test_compose_subagent_labels_an_unnamed_worker_rather_than_leaving_the_card_blank(tmp_path, monkeypatch):
@@ -474,7 +531,7 @@ def test_a_composed_sub_agents_toolsets_are_built_under_its_own_label(tmp_path):
 
     def record(ctx) -> list:
         holders.append(ctx.agent_name)
-        return []
+        return [_sample_tool]
 
     state = _state(tmp_path, sources=[("test", [Toolset(name="probe", description="records", build=record)])])
 
