@@ -577,7 +577,8 @@ async def test_a_spawn_with_no_thinking_configured_anywhere_records_none():
     assert "thinking" not in events[0]
 
 
-# Fix round 1, requirement 2's other half. `send_message` refuses when `current_address` is unset,
+# The other half of refusing a run with no address of its own. `send_message` refuses when
+# `current_address` is unset,
 # and these cover why it is ever *correctly* unset or restored rather than merely hoping `reader()`
 # ran. `core/messaging.py` itself cannot do this: a reader opens once, at a run's own start, and
 # nothing in AIMU's Inbox protocol calls back when a run ends, so there is no hook there to restore
@@ -646,7 +647,9 @@ async def test_nested_spawns_restore_in_the_right_order():
 
 
 async def test_a_real_spawn_through_the_reporter_leaves_the_parents_own_send_correctly_attributed():
-    """Fix round 2 (N4). Each half of the property the bracket exists for is pinned on its own
+    """The join the bracket exists for, which neither half proves alone.
+
+    Each half is pinned on its own
     elsewhere: `spawned`/`finished` restoring `current_address` is the tests above, and `bus.send`
     attributing a message to whatever `current_address` holds is `tests/core/test_messaging.py`.
     Neither is the join the bracket was built for -- `send_message`, called by the parent right after

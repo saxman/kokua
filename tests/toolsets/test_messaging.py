@@ -26,7 +26,7 @@ def test_send_message_returns_a_receipt_naming_who_it_was_accepted_for():
 
 
 def test_send_message_refuses_an_address_that_never_existed_this_turn():
-    # Review focus 2. The roster can answer this without liveness, so refusing beats accepting and
+    # The roster can answer this without liveness, so refusing beats accepting and
     # then reporting nothing delivered.
     bus = MessageBus()
     bus.reader("researcher")
@@ -67,7 +67,7 @@ def test_list_agents_names_the_roster_and_everyone():
     try:
         listing = list_agents()
         assert "assistant" in listing and "researcher#1" in listing and "everyone" in listing
-        # Fix round 1, I1: `user` is a sender, not a selector (the module docstring's ruling), so it
+        # `user` is a sender, not a selector (see the module docstring), so it
         # must not appear as something `send_message` could be told to reach.
         assert "user" not in listing.lower()
     finally:
@@ -83,7 +83,7 @@ def test_send_message_to_everyone_is_accepted_even_with_an_empty_roster():
     # reaches a worker spawned later in the turn, whose reader opens at zero (see
     # `MessageBus.reader`). Refusing it here for lack of a roster would contradict that.
     #
-    # Fix round 1, I5: the previous version of this test only asserted `"no agent" not in
+    # An earlier version of this test only asserted `"no agent" not in
     # receipt.lower()`, which passes under almost any receipt that is not itself the refusal
     # sentence -- including one from a broken implementation that silently dropped the broadcast
     # instead of sending it. The strong check is the bus's own state: the message must actually be
@@ -126,7 +126,7 @@ def test_send_message_attributes_the_sender_from_whichever_run_last_opened_a_rea
 
 
 def test_send_message_refuses_when_this_run_has_no_address_of_its_own():
-    # Fix round 1, requirement 2. A run that never opened a reader (a composed or spawned worker
+    # A run that never opened a reader (a composed or spawned worker
     # whose spec forgot an inbox; see `core/subagents.py`'s `SubagentReporter` for the other half of
     # the fix) must not be able to send under whoever happens to be sharing its Context. `current_
     # address` is explicitly `None` here -- the state a forgetful worker is actually left in, not

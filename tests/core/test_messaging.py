@@ -40,7 +40,7 @@ def test_an_agent_whose_declared_name_starts_with_the_prefix_is_an_accepted_edge
 
 
 def test_two_workers_sharing_a_label_get_distinct_addresses():
-    # Review focus 4. Two concurrent researchers must be separately addressable, which is the whole
+    # Two concurrent researchers must be separately addressable, which is the whole
     # reason an address is minted per reader rather than per agent name.
     bus = MessageBus()
     bus.reader("subagent-researcher")
@@ -130,7 +130,7 @@ def test_a_readers_own_drain_reasserts_its_address_after_a_nested_open_moved_it(
 
     assert current_address.get() == "researcher#1"
 
-    # Fix round 1, I6: the contextvar transition above is the mechanism, not the property anyone
+    # The contextvar transition above is the mechanism, not the property anyone
     # cares about. Pin the end-to-end behavior it exists for: a `send` made right after this drain
     # is attributed to "researcher#1", the run whose own drain just ran, not to "coder#1", the
     # nested spawn that clobbered it in between.

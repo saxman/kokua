@@ -542,7 +542,9 @@ def test_aimu_still_names_a_spawned_worker_with_the_prefix_addresses_strip(monke
 
 
 def test_aimu_still_drains_the_inbox_after_a_rounds_dispatch_not_only_on_a_healthy_turn(monkeypatch):
-    """Fix round 2 (N3). The previous version of this test scripted a one-shot answer with no tool
+    """Pins the drain AIMU messaging depends on, not merely that some drain happens.
+
+    An earlier version of this test scripted a one-shot answer with no tool
     call at all, so it only proved AIMU drains *somewhere* during a run -- the ``TERMINAL_HEALTHY``
     branch drains once before returning, with no dispatch anywhere in the run. Skipping only the
     *after-dispatch* drain while leaving that one in place still left the whole suite green, which

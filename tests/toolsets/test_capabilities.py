@@ -153,7 +153,7 @@ def test_compose_spec_carries_only_keys_aimu_accepts(tmp_path):
 
 
 def test_compose_spec_gives_the_composed_worker_its_own_inbox(tmp_path):
-    """Fix round 1, requirement 1. Without this, a composed worker never opens a reader, never mints
+    """A composed worker needs an inbox of its own. Without one it never opens a reader, never mints
     an address on the bus, and `core/messaging.py`'s `current_address` is left holding whatever its
     caller set -- which is exactly the impersonation route the review found live through the shipped
     `[agents.assistant].tools` (holding both `capabilities` and `messaging`). `WORKER_SOURCE`, not
@@ -294,7 +294,7 @@ async def test_compose_subagent_forwards_the_approval_gate_and_the_observer(tmp_
 
 
 async def test_compose_subagent_passes_events_for_turn_metrics(tmp_path, monkeypatch):
-    """Fix round 1, requirement 1's other half. Missing until now for the same reason `inbox` was:
+    """The events half of the same omission, missing for the same reason `inbox` was:
     without it, a composed worker's model calls never reach `current_metrics`, so the turn's own cost
     accounting silently excludes whatever it spent. `_spawn_tool`/`make_delegation_tool` (the
     declared-worker factories in core/agents.py) pass the same module-level constant."""

@@ -302,7 +302,7 @@ async def test_persist_writes_active_conversation(tmp_path):
 
 
 async def test_switch_methods_sync_channel_active_conversation_id(tmp_path):
-    """Item 1 from the Task 5 review: the muting key (WebChannel.active_conversation_id) and the
+    """The muting key (WebChannel.active_conversation_id) and the
     background-completion notification key (Assistant._active_id) must agree on what's viewed, so
     every switch method mirrors _active_id onto the channel (when it tracks one)."""
 

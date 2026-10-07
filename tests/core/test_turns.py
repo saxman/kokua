@@ -2769,7 +2769,9 @@ async def test_the_users_own_mid_turn_message_reaches_the_store_untagged(assista
 
 
 async def test_a_round_that_carried_both_the_user_and_an_agent_is_marked_mixed_not_agent(assistant):
-    """Review focus 1. One drain becomes one appended message, so this message is both, and
+    """A mixed delivery stays untagged, and the index is what carries it.
+
+    One drain becomes one appended message, so this message is both, and
     ``PROVENANCE_AGENT`` is all-or-nothing per message: tagging it ``PROVENANCE_AGENT`` would hide the
     user's own words from ``is_user_turn``, which is the worse of the two errors, and the recorded
     index covers that either way. But leaving the message with no tag at all would let a transcript
