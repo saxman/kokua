@@ -96,11 +96,18 @@ class SubagentReporter:
         # way `_streamed_answers` is: a UUID AIMU mints once per spawn, so concurrent spawns sharing
         # this one reporter never collide on the key even though neither dict is otherwise isolated
         # per turn. See `spawned`/`finished` for what this buys. The same lifetime concern
-        # `_streamed_answers` above carries applies here too: a spawn whose `finished` never runs (not
-        # reachable through `_run_observed`'s own `try`/`finally`, which always calls it once `spawned`
-        # has, but reachable by calling this reporter directly with an unmatched `spawned`) leaks one
-        # entry, and worse than `_streamed_answers`'s leak, leaves `current_address` cleared to `None`
-        # in whatever Context that spawn ran in, rather than merely growing this dict.
+        # `_streamed_answers` above carries applies here too, and the route to it is through AIMU
+        # rather than only through a hand-built call: `spawned` is awaited *outside* `_run_observed`'s
+        # own `try`/`finally`, and the notifier around it catches `Exception` alone, so a
+        # `BaseException` raised inside `spawned` escapes with `finished` never called. The one that
+        # happens is a `CancelledError` landing on the card send inside `spawned` (a `/stop`, or a
+        # shutdown reaching the websocket), which is after that method's first statement has already
+        # taken the token and put it here. That leaks one entry, and worse than
+        # `_streamed_answers`'s leak, leaves `current_address` cleared to `None` in whatever Context
+        # that spawn ran in, rather than merely growing this dict.
+        # Fail-closed in both halves, which is why it is recorded rather than guarded: `None` is the
+        # value `send_message` refuses on, the next drain in that Context sets it again, and the
+        # Context in question belongs to a turn that is being cancelled.
         self._address_tokens: dict[str, Token[Optional[str]]] = {}
         # Where an oversized tool response is spilled to (see ``payloads.py``). A path rather than the
         # whole config, because this is the only setting the reporter reads and taking the config

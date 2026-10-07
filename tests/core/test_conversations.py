@@ -12,7 +12,7 @@ from aimu.models import PROVENANCE_CONTINUATION, PROVENANCE_KEY
 
 from kokua.core.assistant import Assistant
 from kokua.core.conversations import ConversationNotFound, TurnInFlight, TurnNotFound
-from kokua.core.messages import PROVENANCE_AGENT, TITLE_MAX
+from kokua.core.messages import PROVENANCE_AGENT, PROVENANCE_MIXED, TITLE_MAX
 from tests.channels import FakeChannel, _ConvCapturingChannel, _config
 from tests.helpers import BlockingModelClient, MockAsyncModelClient, settle_titles
 
@@ -1803,6 +1803,31 @@ async def test_an_agent_message_is_no_turn_to_cut_at_even_with_the_record_withhe
         await assistant._book.truncate(parent.key, 4)
     # Through index 5, the answer the message redirected, exactly as the recorded case keeps it.
     assert assistant._store.get(assistant._book.branch(parent.key, 1)).messages == parent.messages[:6]
+
+
+async def test_a_mixed_delivery_is_no_turn_to_cut_at_only_because_the_record_says_so(tmp_path):
+    """The fourth kind of in-turn ``user`` message, which ``turn_end``'s enumeration used to leave out.
+
+    ``messages.PROVENANCE_MIXED`` is deliberately outside ``INJECTED_USER_PROVENANCE``, because part
+    of such a message really is the user's own words, so ``is_user_turn`` answers True for it exactly
+    as it does for the untagged kind. Read against the agent-tagged sibling above, which is this same
+    fixture with the record withheld and holds anyway: withholding the record here puts the cut back
+    at 4. So for a mixed delivery the record is the whole of what keeps a turn from being cut in half,
+    which is what that docstring now says rather than implying the tag answers for it too.
+    """
+    assistant, parent = await _assistant_with_mid_turn_parent(tmp_path)
+    parent.messages[4] = {**parent.messages[4], PROVENANCE_KEY: PROVENANCE_MIXED}
+    assistant._store.save(parent)
+
+    # With the record in place the tag changes nothing: no cut lands on the message.
+    assert not assistant._book.branchable(parent.key, 4)
+
+    parent.metadata.pop("messages")
+    assistant._store.save(parent)
+
+    assert assistant._book.branchable(parent.key, 4)
+    # Cut at 4, losing the redirected answer, which is the outcome the record alone prevents.
+    assert assistant._store.get(assistant._book.branch(parent.key, 1)).messages == parent.messages[:4]
 
 
 async def test_recording_a_turn_with_no_mid_turn_messages_writes_no_messages_map(tmp_path):

@@ -71,6 +71,27 @@ def test_the_entry_agent_takes_its_bare_name_with_no_ordinal():
     assert bus.roster() == ["assistant"]
 
 
+def test_a_worker_labelled_like_the_entry_agent_cannot_take_its_address():
+    """A composed worker's label is whatever the model calling ``compose_subagent`` passed, so a
+    declared-name guard in the config cannot reach it; the unconditional ordinal on the worker branch
+    is what keeps it from landing on the entry agent's own bare address.
+
+    Both halves are asserted, because the honest claim is narrower than "it cannot interfere": the
+    parent still receives its own mail, and the worker also sees it, since a bare label matches every
+    run carrying it. That second half is why ``RESERVED_AGENT_NAMES`` staying a config-only check is
+    acceptable rather than airtight, and why ``_register`` now says so.
+    """
+    bus = MessageBus()
+    parent = bus.entry_reader("assistant")
+    worker = bus.reader("subagent-assistant")  # a model-chosen label, by way of `compose_subagent`
+
+    assert bus.roster() == ["assistant", "assistant#1"]
+
+    bus.send("a note for the parent", sender="researcher#1", to="assistant")
+    assert parent() == ["[message from researcher#1] a note for the parent"]
+    assert worker() == ["[message from researcher#1] a note for the parent"]
+
+
 def test_a_repeated_entry_open_registers_one_address_not_one_per_open():
     # Reachable, not theoretical: the planning workflow passes ENTRY_SOURCE at three call sites
     # (the planner's own run, the executor's, and one more per review round), so a planned turn

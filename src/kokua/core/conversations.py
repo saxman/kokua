@@ -109,23 +109,29 @@ def mid_turn_indices(metadata: dict) -> frozenset[int]:
 def turn_end(messages: list[dict], user_index: int, *, mid_turn: frozenset[int] = frozenset()) -> Optional[int]:
     """The exclusive end of the turn opened at ``user_index``, or None if no turn starts there.
 
-    The end is the next message the user sent to *start* a turn, or the end of the transcript. Three
+    The end is the next message the user sent to *start* a turn, or the end of the transcript. Four
     kinds of ``user``-role message sit inside a turn rather than opening one, and none of them ends it:
 
     - the nudges the agent loop injects between tool-calling iterations, which carry the role and a
       provenance tag :func:`kokua.core.messages.is_user_turn` recognises;
     - a message one of the turn's own agents sent to another run on it (see ``core/messaging.py``),
       which carries ``messages.PROVENANCE_AGENT`` and so is recognised by that same predicate, with
-      no record needed; and
+      no record needed;
     - a message the user typed while the turn was running, which carries no tag at all, because it
-      genuinely is user input rather than something a machine put in their place.
+      genuinely is user input rather than something a machine put in their place; and
+    - one delivery that joined the two, which carries ``messages.PROVENANCE_MIXED``: a tag that
+      predicate deliberately does *not* recognise, because part of the message really is the user's
+      own words, so it answers ``True`` here exactly as the untagged kind above does.
 
-    ``mid_turn`` is what names the third kind, and it has to be a parameter because nothing in such a
-    message distinguishes it: ``session.metadata["messages"]`` is the only record, flattened by
-    :func:`mid_turn_indices`. It names the second kind too, which is belt and braces rather than
-    redundancy worth removing: the record and the tag answer for an agent's message independently, so
-    a reader holding the messages without the record still cannot cut one in half. Ending at either
-    would cut the turn off before the answer it produced, which
+    ``mid_turn`` is what names the third kind and the fourth, and it has to be a parameter because
+    nothing in such a message distinguishes it: ``session.metadata["messages"]`` is the only record,
+    flattened by :func:`mid_turn_indices`. It names the second kind too, which is belt and braces
+    rather than redundancy worth removing: there the record and the tag answer independently, so a
+    reader holding the messages without the record still cannot cut an agent's message in half. The
+    mixed kind gets no such second answer, which is why it is listed apart from that one rather than
+    folded into it: for a mixed delivery the record is the whole of what keeps a cut out, exactly as it
+    is for the user's own mid-turn words. Ending at any of the four would cut the turn off before the
+    answer it produced, which
     for a mid-turn message is the redirected answer a user branching there almost certainly wants.
     A mid-turn index is refused as a turn *start* for the same reason, so no cut this function approves
     can land inside a turn.

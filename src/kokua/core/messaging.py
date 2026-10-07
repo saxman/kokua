@@ -205,6 +205,23 @@ class MessageBus:
         to ``foo``; that edge is accepted rather than guarded, because asking which declared names
         exist would mean this module reaching into the config at reader-open time to serve a case
         nobody hits.
+
+        **A worker's label is not always a declared name, and the ordinal is what makes that safe.**
+        ``toolsets/capabilities.py``'s ``compose_subagent`` takes its label from the model that called
+        it, so an address minted on this branch can carry any string a model chose: it may join an
+        existing group (label ``researcher``, reached by ``to="researcher"`` along with every declared
+        researcher) or borrow the entry agent's own name, which the worker-to-parent selector
+        ``to="assistant"`` then reaches alongside the parent itself, since a bare label matches every
+        run carrying it. What it cannot do is *become* the entry
+        agent's address, because the ordinal suffix on this branch is unconditional: a composed
+        ``assistant`` mints ``assistant#1``, and the entry agent's bare ``assistant`` is minted on the
+        other branch and taken already. ``USER`` and ``EVERYONE`` are harmless for the same reason
+        (``user#1`` is not ``user``, and ``everyone`` is answered before any address is read), which is
+        what makes ``core/agents.py``'s ``RESERVED_AGENT_NAMES`` check being a *config* check rather
+        than one taken here sufficient. Confidentiality is not claimed for an addressed message in the
+        first place (possession of the capability is the control), so a model joining a label group is
+        a note rather than a hole; it is written down here beside the ``subagent-foo`` edge because a
+        reader meeting one of these would expect the other.
         """
         if label is None:
             return None
