@@ -978,9 +978,13 @@ and `transcript_export.py` signs it **Mixed (mid-turn)** rather than crediting t
 user; `readable_messages`/`flatten_transcript` drop the whole message from search, the same direction
 `tag_for_delivery` already takes for the stored tag (losing the user's own half of it rather than
 risking counting the agent's). The one case that still has neither tag is the fallback's complete
-under-tag, reached only when a turn has fewer recorded deliveries than appended mid-turn messages,
-which is not reachable on any path shipped today; see `TurnRunner._tag_agent_messages`'s own guard,
-added in the same pass, for why that specific shape is refused a broadcast rather than guessed at.
+under-tag, reached only when a turn has fewer recorded deliveries than appended mid-turn messages.
+**The in-text prefix covers it regardless**, which is the point worth keeping: an agent's words there
+still announce themselves to the model that reads them, so the two mechanisms cover each other rather
+than one of them resting on the other's reach. That shape is also not reachable on any path shipped
+today, but reachability is the weaker guarantee of the two and is the one a later change can revoke;
+see `TurnRunner._tag_agent_messages`'s own guard, added in the same pass, for why it is refused a
+broadcast rather than guessed at.
 
 **An agent's message never amends what an auto-approval reviewer reads as the turn's request**, where
 yours does. A reviewer judges one gated call's arguments against that text, so a model that could
