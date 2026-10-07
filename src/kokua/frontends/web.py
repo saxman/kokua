@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -58,6 +59,28 @@ _STATIC_ASSETS = {
 
 def _static_text(filename: str) -> str:
     return files("kokua").joinpath(f"web_static/{filename}").read_text(encoding="utf-8")
+
+
+# Where `index.html` names its own version, filled in as the page is served (see `_page_version`).
+PAGE_VERSION_PLACEHOLDER = "__KOKUA_PAGE_VERSION__"
+
+
+def _page_version() -> str:
+    """A short hash of everything the page is built from: ``index.html`` and every served asset.
+
+    The page is told the version it was served with (written into ``index.html``) and the version the
+    server serves now (the first frame on every connection), and reloads itself when the two differ.
+    That is what an open tab needs after a restart: it reconnects on its own and resyncs its data, but it
+    keeps running the script it loaded, so a restart that changed the page would otherwise leave the tab
+    drawing new frames with old code until someone thought to reload it. A hash of the content rather
+    than a per-process id, so a restart that changed nothing leaves the tab and its scroll position
+    alone. Read fresh each time, as the assets themselves are, so the two halves agree on any one
+    request; the files are a few hundred kilobytes, so hashing them costs about a millisecond.
+    """
+    digest = hashlib.sha256(_index_html().encode("utf-8"))
+    for name in sorted(_STATIC_ASSETS):
+        digest.update(_static_text(name).encode("utf-8"))
+    return digest.hexdigest()[:12]
 
 
 _CONTROL_TYPES = (
@@ -214,7 +237,7 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
     busy = {"active": False}  # one-active-connection guard (single user, single process)
 
     async def index(request):
-        return HTMLResponse(_index_html())
+        return HTMLResponse(_index_html().replace(PAGE_VERSION_PLACEHOLDER, _page_version()))
 
     async def static_asset(request):
         name = request.path_params["name"]
@@ -281,6 +304,9 @@ def build_app(config: AssistantConfig, *, client=None, client_factory=None) -> S
         busy["active"] = True
         channel = WebChannel(websocket)
         try:
+            # First, before anything slow, so a tab running an older page reloads at once rather than
+            # after the whole connect sequence it is about to throw away.
+            await channel.send_page_version(_page_version())
             await serve_connection(websocket, channel)
         finally:
             # Released on every exit, not only the serve loop's. The guard is taken before the assistant

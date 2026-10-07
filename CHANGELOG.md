@@ -575,6 +575,13 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
     forever. The same rule catches a server that dies partway through starting for any other reason, which
     looks identical from the socket's side, so that case also asks for a reload rather than retrying on
     its own. Nothing having arrived at all is the ordinary restart case, and does retry.
+  - **A tab left open across a restart that changed the page reloads itself.** A reconnect resyncs the
+    data but not the script, so after a restart that changed `app.js` an open tab kept drawing the new
+    server's frames with the old code, and a feature you had just restarted for looked broken until you
+    thought to reload. The server now writes a hash of the page's own files into `index.html` and sends
+    it as the first frame on every connection; a tab whose hash differs saves its composer draft, reloads,
+    and puts the draft back. A restart that left the page alone reloads nothing, and a mismatch the reload
+    cannot fix is tried once rather than in a loop.
   - Reloading the page replays the prior conversation, reasoning and tool calls included. What was
     streamed live is what is replayed: nothing in the core decides which frames are worth sending, so a
     front end that wants to fold or hide a block does that with the block in hand.

@@ -1277,6 +1277,50 @@ def test_ws_sends_history_on_connect(tmp_path):
     assert message_item["text"] == "Hi!" and message_item["proactive"] is False and "ts" in message_item
 
 
+# A tab left open across a restart reconnects and resyncs its data but keeps the script it loaded. The
+# page is told the version it was served and, first on every connection, the version served now, and
+# reloads on a mismatch (app.js's checkPageVersion, covered end to end in the e2e suite).
+
+
+def test_the_page_is_served_with_its_own_version(tmp_path):
+    from starlette.testclient import TestClient
+
+    from kokua.frontends.web import PAGE_VERSION_PLACEHOLDER, _page_version
+
+    html = TestClient(build_app(_config(tmp_path), client=MockAsyncModelClient([]))).get("/").text
+    assert PAGE_VERSION_PLACEHOLDER not in html
+    assert f'<meta name="kokua-page-version" content="{_page_version()}" />' in html
+
+
+def test_the_first_frame_on_a_connection_is_the_page_version(tmp_path):
+    from starlette.testclient import TestClient
+
+    from kokua.frontends.web import _page_version
+
+    app = build_app(_config(tmp_path), client=MockAsyncModelClient([]))
+    with TestClient(app).websocket_connect("/ws") as ws:
+        assert ws.receive_json() == {"type": "page", "version": _page_version()}
+
+
+def test_the_page_version_follows_every_asset_the_page_is_built_from(monkeypatch):
+    from kokua.frontends import web as web_frontend
+
+    before = web_frontend._page_version()
+    for name in [None, *web_frontend._STATIC_ASSETS]:
+        with monkeypatch.context() as patch:
+            if name is None:
+                patch.setattr(web_frontend, "_index_html", lambda: "changed page")
+            else:
+                original = web_frontend._static_text
+                patch.setattr(
+                    web_frontend, "_static_text", lambda n, name=name: "changed" if n == name else original(n)
+                )
+            assert web_frontend._page_version() != before, f"a change to {name or 'index.html'} must change it"
+    assert web_frontend._page_version() == before, (
+        "and an unchanged page must keep it, so a restart alone reloads nothing"
+    )
+
+
 def test_ws_connect_sends_conversations(tmp_path):
     from starlette.testclient import TestClient
 

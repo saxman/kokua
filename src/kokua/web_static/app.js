@@ -1586,8 +1586,13 @@ function renderPhase(label, detail, ts) {
 }
 
 function handleFrame(event) {
+  if (reloadingForNewPage) return;  // the page is being replaced; drawing more would only flash
   frameReceived = true;
   const frame = JSON.parse(event.data);
+  if (frame.type === "page") {
+    checkPageVersion(frame.version);
+    return;
+  }
   // Blocks are appended in arrival order (thinking -> tool -> answer, possibly several
   // rounds per turn). A tool call or answer token closes any open thinking block.
   if (frame.type === "thinking") {
@@ -2047,6 +2052,7 @@ function connect() {
     input.focus();
   };
   ws.onclose = () => {
+    if (reloadingForNewPage) return;  // the reload closes this socket; it is not an outage
     // A closed socket is not a booting one, on any path that reaches here: the one-connection
     // refusal below, a create()/start() failure the server closed on, or an ordinary outage.
     // Leaving the class set would stack "Starting up..." above "Disconnected...", and freeze the
@@ -2067,6 +2073,36 @@ function connect() {
   };
 }
 
+// The version of the page this tab was served, written into index.html by the server. Reconnecting
+// resyncs the data but not the script, so a restart that changed the page would leave this tab drawing
+// the new server's frames with the old code. Every connection opens with a `page` frame naming the
+// version the server serves now, and a mismatch reloads the tab (see frontends/web.py's
+// _page_version). The literal placeholder means the page was not served through that substitution,
+// so there is nothing to compare.
+const PAGE_VERSION_META = document.querySelector('meta[name="kokua-page-version"]');
+const PAGE_VERSION = PAGE_VERSION_META && !PAGE_VERSION_META.content.startsWith("__") ? PAGE_VERSION_META.content : "";
+// Session-scoped, so they live exactly as long as the tab: what the composer held when it reloaded,
+// and which version it reloaded for.
+const DRAFT_KEY = "kokua-draft";
+const RELOADED_FOR_KEY = "kokua-reloaded-for";
+let reloadingForNewPage = false;
+
+function checkPageVersion(version) {
+  if (!PAGE_VERSION || !version || version === PAGE_VERSION) return;
+  // Reloading for the same version twice means the reload did not bring that version in (the page
+  // and the socket disagree for some other reason), and a third would be a loop. Stay on this page,
+  // which still works, rather than flicker forever.
+  try {
+    if (sessionStorage.getItem(RELOADED_FOR_KEY) === version) return;
+    sessionStorage.setItem(RELOADED_FOR_KEY, version);
+    if (input.value) sessionStorage.setItem(DRAFT_KEY, input.value);
+  } catch (e) {
+    return;  // storage refused: without the loop guard a reload is not safe to attempt
+  }
+  reloadingForNewPage = true;
+  location.reload();
+}
+
 connect();
 
 // Grow the box with its content up to a cap, then scroll. A one-line <input> made a multi-line
@@ -2080,6 +2116,16 @@ function autoGrowInput() {
   input.style.overflowY = input.scrollHeight > max ? "auto" : "hidden";
 }
 input.addEventListener("input", autoGrowInput);
+
+// Put back what the composer held when checkPageVersion reloaded the tab, once.
+try {
+  const draft = sessionStorage.getItem(DRAFT_KEY);
+  if (draft) {
+    input.value = draft;
+    autoGrowInput();
+  }
+  sessionStorage.removeItem(DRAFT_KEY);
+} catch (e) {}
 
 // A textarea does not submit its form on Enter, so this is what sends. `isComposing` is the guard that
 // keeps an IME's Enter (accepting a candidate) from sending a half-typed message.
