@@ -669,7 +669,11 @@ Requires Python 3.11+ and [AIMU](https://github.com/saxman/aimu) 0.34.0 or newer
   gets a bus address of its own (`inbox=WORKER_SOURCE`, the same key a declared worker's spec carries)
   and reports its cost into the turn's own metrics (`events=record_event`); both were missing, the
   second silently and the first exploitably once `messaging` (below) gave an address something to
-  grant.
+  grant. `compose_subagent` refuses a capability that builds to no tools (`image` without
+  `AIMU_IMAGE_MODEL`, `github_backup` without its token, `planning` always), naming it with its
+  description. It used to compose the worker anyway, without the tool, and each worker then composed
+  another for the same request until the depth cap ran out: one recorded request for an image spent
+  seven workers and fourteen model calls finding out that no image model was configured.
 - **Guidance travels with the capability.** Each toolset carries the prompt text that makes the model use
   it, appended to any agent holding it, so installing a toolset brings its instructions and removing one
   takes them away. An agent's system message is its own opener (falling back to
