@@ -463,6 +463,8 @@
       
         
       
+        
+      
     
     
     
@@ -672,6 +674,34 @@
     
   
     Delegation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/agent-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent messaging
   
 
     
@@ -2264,60 +2294,61 @@ questions -- which providers, which tools, which models support vision -- are an
 </span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>                          replay items (replay_items), shared by the web channel's history replay and
 </span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>                          the Markdown export
 </span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    turns.py             TurnRunner: reactive and proactive turns. Concurrency invariants live here.
-</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    steering.py          SteeringMailbox: what the user types into a turn that is already running,
-</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>                          and the two sources that decide who has read it
-</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>    interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
-</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    auto_approval.py     the optional model reviewer that may answer an approval prompt in the user's
-</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>                          place, and the code that decides whether it did (explanation/auto-approval.md)
-</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>    settings_runtime.py  SettingsApplier: read, apply live, persist
-</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    commands: /stop, /diag, and the three conversation commands are parsed inline in
-</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>              assistant._serve_channel; a workflow's own command (e.g. /plan) dispatches through
-</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>              self._workflows, built from the toolset registry
-</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>    diagnostics.py       the /diag report
-</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>    conversation_commands.py  what /new, /conversations, and /switch print
-</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>    build.py             free functions that assemble a model client and wire one declared agent
-</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>    agents.py            assembles the registry from every provider; resolves, validates, and
-</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>                         prompts one declared agent, and builds its delegation tool
-</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>    subagents.py         SubagentReporter: sub-agent activity as display frames + recorded events
-</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>    agent_registry.py    per-conversation agent cache with LRU eviction and pinning
-</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>    turn_gate.py         writer-preferring readers-writer gate
-</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>    turn_registry.py     in-flight turn bookkeeping
-</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>    messages.py          transcript helpers: text extraction, the placeholder title, image compaction
-</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>    titles.py            the generated conversation title: one context-free model call
-</span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>    errors.py            describe_error: root-cause extraction for user-facing messages
-</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>    metrics.py           TurnMetrics + record_event: what a turn cost, accumulated from AIMU's
-</span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>                          ModelTurnFinished events into calls/tokens/seconds
-</span><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>
-</span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>  config/        settings: the schema, the file, the writers
-</span><span id="__span-0-44"><a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>    schema.py      AssistantConfig, AgentConfig, MCPServerConfig, the default prompt
-</span><span id="__span-0-45"><a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>    paths.py       the three locations that must resolve before config.toml can be read
-</span><span id="__span-0-46"><a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>    file.py        TOML discovery, parsing, schema validation
-</span><span id="__span-0-47"><a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>    store.py       comment-preserving tomlkit writes, the write policy, and apply_setting
-</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>    table.py       SettingsTable, built from CORE_RUNTIME_SETTINGS plus every toolset's declared hot
-</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>                   settings: the one declaration of what is changeable at runtime
-</span><span id="__span-0-50"><a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>    settings_sources.py  joins a toolset's declared settings into the table; the one module under
-</span><span id="__span-0-51"><a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>                   config/ that imports upward, so the rest of the layer stays at the bottom
-</span><span id="__span-0-52"><a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>
-</span><span id="__span-0-53"><a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>  workflows/     protocol.py (Workflow, WorkflowContext, WorkflowResult, is_rich), critics.py (the
-</span><span id="__span-0-54"><a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>                 shared context-free reviewer), planning/ (runner.py's PlanningWorkflow, prompts.py,
-</span><span id="__span-0-55"><a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>                 critics.py's thin wrappers over the shared reviewer)
-</span><span id="__span-0-56"><a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>  mcp/           servers.py (connect, attach, reconnect, runtime add/remove), auth.py (ChatOAuth)
-</span><span id="__span-0-57"><a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>  scheduling/    recurrence.py (pure schedule math), tasks.py (TaskService, over the `[scheduling.task.*]`
-</span><span id="__span-0-58"><a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>                 tables in config.toml)
-</span><span id="__span-0-59"><a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>  channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
-</span><span id="__span-0-60"><a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>  frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
-</span><span id="__span-0-61"><a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>  registry/      the machinery a toolset is built against, and no toolsets
-</span><span id="__span-0-62"><a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>    registry.py    the Toolset and Setting dataclasses, `register`, `select`, `build_tools`
-</span><span id="__span-0-63"><a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>    context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
-</span><span id="__span-0-64"><a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>  toolsets/      the named capabilities themselves, and nothing else: one file per toolset, each file
-</span><span id="__span-0-65"><a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>                 named for the toolset it declares, each exporting a module-level TOOLSET, and each
-</span><span id="__span-0-66"><a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>                 listed in pyproject.toml's kokua.toolsets entry-point table, which is the only index
-</span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>    audio.py, compute.py, documents.py, fs.py, memory.py, misc.py, skills.py, speech.py, time.py,
-</span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>                   transcription.py, web.py -- wrappers over AIMU's tool groups and stores
-</span><span id="__span-0-69"><a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>    capabilities.py, config.py, conversations.py, mcp.py, scheduling.py -- one Kokua subsystem's logic
-</span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>                   each, as agent tools (capabilities wraps the registry itself)
-</span><span id="__span-0-71"><a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>    planning.py    a Workflow instead of tools: the only toolset that contributes no tool at all
-</span><span id="__span-0-72"><a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>    aimu_agents.py, benchmark.py, github_backup.py, image.py -- Kokua's own, needing only the config
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    messaging.py         MessageBus: what the user types into a turn that is already running, and
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>                          what one of that turn's own agents sends another; the roster of addresses
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>                          it mints per run, and the two sources that decide who has read it
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>    interaction.py       HumanGate: tool approval and a workflow's own decision, as lock-guarded single slots
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>    auto_approval.py     the optional model reviewer that may answer an approval prompt in the user's
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>                          place, and the code that decides whether it did (explanation/auto-approval.md)
+</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    settings_runtime.py  SettingsApplier: read, apply live, persist
+</span><span id="__span-0-26"><a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>    commands: /stop, /diag, and the three conversation commands are parsed inline in
+</span><span id="__span-0-27"><a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>              assistant._serve_channel; a workflow's own command (e.g. /plan) dispatches through
+</span><span id="__span-0-28"><a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>              self._workflows, built from the toolset registry
+</span><span id="__span-0-29"><a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>    diagnostics.py       the /diag report
+</span><span id="__span-0-30"><a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>    conversation_commands.py  what /new, /conversations, and /switch print
+</span><span id="__span-0-31"><a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>    build.py             free functions that assemble a model client and wire one declared agent
+</span><span id="__span-0-32"><a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>    agents.py            assembles the registry from every provider; resolves, validates, and
+</span><span id="__span-0-33"><a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>                         prompts one declared agent, and builds its delegation tool
+</span><span id="__span-0-34"><a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>    subagents.py         SubagentReporter: sub-agent activity as display frames + recorded events
+</span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>    agent_registry.py    per-conversation agent cache with LRU eviction and pinning
+</span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>    turn_gate.py         writer-preferring readers-writer gate
+</span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>    turn_registry.py     in-flight turn bookkeeping
+</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>    messages.py          transcript helpers: text extraction, the placeholder title, image compaction
+</span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>    titles.py            the generated conversation title: one context-free model call
+</span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>    errors.py            describe_error: root-cause extraction for user-facing messages
+</span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>    metrics.py           TurnMetrics + record_event: what a turn cost, accumulated from AIMU's
+</span><span id="__span-0-42"><a id="__codelineno-0-42" name="__codelineno-0-42" href="#__codelineno-0-42"></a>                          ModelTurnFinished events into calls/tokens/seconds
+</span><span id="__span-0-43"><a id="__codelineno-0-43" name="__codelineno-0-43" href="#__codelineno-0-43"></a>
+</span><span id="__span-0-44"><a id="__codelineno-0-44" name="__codelineno-0-44" href="#__codelineno-0-44"></a>  config/        settings: the schema, the file, the writers
+</span><span id="__span-0-45"><a id="__codelineno-0-45" name="__codelineno-0-45" href="#__codelineno-0-45"></a>    schema.py      AssistantConfig, AgentConfig, MCPServerConfig, the default prompt
+</span><span id="__span-0-46"><a id="__codelineno-0-46" name="__codelineno-0-46" href="#__codelineno-0-46"></a>    paths.py       the three locations that must resolve before config.toml can be read
+</span><span id="__span-0-47"><a id="__codelineno-0-47" name="__codelineno-0-47" href="#__codelineno-0-47"></a>    file.py        TOML discovery, parsing, schema validation
+</span><span id="__span-0-48"><a id="__codelineno-0-48" name="__codelineno-0-48" href="#__codelineno-0-48"></a>    store.py       comment-preserving tomlkit writes, the write policy, and apply_setting
+</span><span id="__span-0-49"><a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>    table.py       SettingsTable, built from CORE_RUNTIME_SETTINGS plus every toolset's declared hot
+</span><span id="__span-0-50"><a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>                   settings: the one declaration of what is changeable at runtime
+</span><span id="__span-0-51"><a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>    settings_sources.py  joins a toolset's declared settings into the table; the one module under
+</span><span id="__span-0-52"><a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>                   config/ that imports upward, so the rest of the layer stays at the bottom
+</span><span id="__span-0-53"><a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>
+</span><span id="__span-0-54"><a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>  workflows/     protocol.py (Workflow, WorkflowContext, WorkflowResult, is_rich), critics.py (the
+</span><span id="__span-0-55"><a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>                 shared context-free reviewer), planning/ (runner.py's PlanningWorkflow, prompts.py,
+</span><span id="__span-0-56"><a id="__codelineno-0-56" name="__codelineno-0-56" href="#__codelineno-0-56"></a>                 critics.py's thin wrappers over the shared reviewer)
+</span><span id="__span-0-57"><a id="__codelineno-0-57" name="__codelineno-0-57" href="#__codelineno-0-57"></a>  mcp/           servers.py (connect, attach, reconnect, runtime add/remove), auth.py (ChatOAuth)
+</span><span id="__span-0-58"><a id="__codelineno-0-58" name="__codelineno-0-58" href="#__codelineno-0-58"></a>  scheduling/    recurrence.py (pure schedule math), tasks.py (TaskService, over the `[scheduling.task.*]`
+</span><span id="__span-0-59"><a id="__codelineno-0-59" name="__codelineno-0-59" href="#__codelineno-0-59"></a>                 tables in config.toml)
+</span><span id="__span-0-60"><a id="__codelineno-0-60" name="__codelineno-0-60" href="#__codelineno-0-60"></a>  channels/      ui.py (ChannelUI), protocol.py (RichChannel), cli.py, web.py
+</span><span id="__span-0-61"><a id="__codelineno-0-61" name="__codelineno-0-61" href="#__codelineno-0-61"></a>  frontends/     cli.py, web.py -- registered as plugins, exactly like a third party's
+</span><span id="__span-0-62"><a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>  registry/      the machinery a toolset is built against, and no toolsets
+</span><span id="__span-0-63"><a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>    registry.py    the Toolset and Setting dataclasses, `register`, `select`, `build_tools`
+</span><span id="__span-0-64"><a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>    context.py     LiveState (process-wide shared state) and the per-agent ToolsetContext
+</span><span id="__span-0-65"><a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>  toolsets/      the named capabilities themselves, and nothing else: one file per toolset, each file
+</span><span id="__span-0-66"><a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>                 named for the toolset it declares, each exporting a module-level TOOLSET, and each
+</span><span id="__span-0-67"><a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>                 listed in pyproject.toml's kokua.toolsets entry-point table, which is the only index
+</span><span id="__span-0-68"><a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>    audio.py, compute.py, documents.py, fs.py, memory.py, misc.py, skills.py, speech.py, time.py,
+</span><span id="__span-0-69"><a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>                   transcription.py, web.py -- wrappers over AIMU's tool groups and stores
+</span><span id="__span-0-70"><a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>    capabilities.py, config.py, conversations.py, mcp.py, scheduling.py -- one Kokua subsystem's logic
+</span><span id="__span-0-71"><a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>                   each, as agent tools (capabilities wraps the registry itself)
+</span><span id="__span-0-72"><a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>    planning.py    a Workflow instead of tools: the only toolset that contributes no tool at all
+</span><span id="__span-0-73"><a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>    aimu_agents.py, benchmark.py, github_backup.py, image.py -- Kokua's own, needing only the config
 </span></code></pre></div>
 <p><code>tests/</code> mirrors this layout.</p>
 <h2 id="the-core">The core<a class="headerlink" href="#the-core" title="Permanent link">&para;</a></h2>
@@ -2327,7 +2358,7 @@ serve loop, and little else. It owns:</p>
 <li><strong><code>ConversationBook</code></strong> -- the session store, the per-conversation agent cache, and which
   conversation is being viewed. These move together on a switch, which is why they are one object.</li>
 <li><strong><code>TurnRunner</code></strong> -- reactive turns (the user sent something) and proactive turns (a scheduled task
-  fired). The nine concurrency invariants are documented at the top of that module.</li>
+  fired). The ten concurrency invariants are documented at the top of that module.</li>
 <li><strong><code>HumanGate</code></strong> -- tool approval and a workflow's own decision, each a lock-guarded single-slot request
   the serve loop resolves with the user's next message. With
   <a href="../../reference/configuration/#securityauto_approval"><code>[security.auto_approval]</code></a> on, a gated call
@@ -2453,28 +2484,31 @@ undelegated turn's does not (<code>test_omits_by_agent_when_only_the_entry_agent
 case).</p>
 <h3 id="a-message-sent-while-a-turn-is-running">A message sent while a turn is running<a class="headerlink" href="#a-message-sent-while-a-turn-is-running" title="Permanent link">&para;</a></h3>
 <p>A turn is long: three model calls is seconds at best and minutes on a local model. Until AIMU 0.33.0
-gave <code>run()</code> a <code>steering</code> parameter (the capability behind the current floor, below), a message typed
+gave <code>run()</code> a <code>steering</code> parameter (one of the floor's past capabilities, below), a message typed
 inside that window queued behind the turn on the gate, so a correction arrived after the work it was
 meant to redirect had already been paid for. A message typed now reaches the turn that is already
-running, at its next model call.</p>
-<p><code>core/steering.py</code> holds one <code>SteeringMailbox</code> per turn, opened by <code>TurnRunner</code> before the turn's first
+running, at its next model call. AIMU 0.34.0 renamed that parameter to <code>inbox</code> and taught it which
+agent is opening each reader, which is what the floor's own current paragraph, below, is about; the
+parameter Kokua passes changed name, not what it does.</p>
+<p><code>core/messaging.py</code> holds one <code>MessageBus</code> per turn, opened by <code>TurnRunner</code> before the turn's first
 <code>await</code> and published on the turn tracker's entry for that conversation, which is what lets the serve
-loop route by conversation id alone. <code>Assistant._offer_steering</code> is the whole of the routing decision,
+loop route by conversation id alone. <code>Assistant._offer_message</code> is the whole of the routing decision,
 and it sits <em>below</em> every other branch in the serve loop, so nothing those branches could have answered
 changes meaning: <code>/stop</code> still cancels, the conversation commands still switch, a pending approval or
 plan verdict still consumes the reply, and a workflow command still starts a workflow turn of its own.
 It also declines in four shapes: there is no turn in flight on this conversation (or its handle has
-already finished, or it has not published its mailbox yet, which a burst the channel delivers in one
-loop step makes reachable); the mailbox has closed; the message carries an image, which has no defined
+already finished, or it has not published its bus yet, which a burst the channel delivers in one
+loop step makes reachable); the bus has closed; the message carries an image, which has no defined
 place inside a loop; or the text is blank, since AIMU discards whitespace at the drain and accepting it
 would mean an empty follow-up turn.</p>
 <p><strong>A cursor per reader, not a queue.</strong> The message goes to the entry agent <em>and</em> to every worker a
 declared agent spawned, because a redirection the user meant for the work is useless if it only reaches
 the supervisor. A shared queue would let whichever reader drained first consume a message the others never
-saw, so the mailbox is append-only and each run opens its own cursor over it. Two sources decide which
-cursor: <code>ENTRY_STEERING_SOURCE</code> opens the mailbox's <em>entry</em> cursor and goes to every run of the entry
-agent, while <code>STEERING_SOURCE</code> opens an independent one and rides the spec of every worker
-<code>build_agent_specs</code> writes (see below for the one spawn path that does not go through it). The distinction
+saw, so the bus is append-only and each run opens its own cursor over it. Two sources decide which
+cursor: <code>ENTRY_SOURCE</code> opens the bus's <em>entry</em> cursor and goes to every run of the entry
+agent, while <code>WORKER_SOURCE</code> opens an independent one and rides the spec of every worker Kokua spawns,
+whether <code>build_agent_specs</code> wrote that spec for a declared agent or <code>compose_subagent</code> built it per
+call. The distinction
 is load-bearing rather than tidy, because <code>close()</code> measures what is left over from the entry cursor's
 position. Hand the entry agent a worker-shaped source and that position never moves, so every message
 the turn actually <em>delivered</em> would also run again as a turn of its own. A worker having read a message
@@ -2484,48 +2518,115 @@ worker consumed still comes back from <code>close()</code>.</p>
 a turn that ends before reading it and then runs as a follow-up turn carrying the first message's front
 end id. The third exists because acceptance and delivery are not the same moment: the window after the
 loop's last drain is real, and <code>close()</code> hands back what was never read so
-<code>TurnRunner._resubmit_steering</code> can run it. <code>offer</code> and <code>close</code> are both synchronous, and asyncio is
-single-threaded, so the serve loop cannot see a mailbox as open in the same tick the turn's <code>finally</code>
+<code>TurnRunner._resubmit_messages</code> can run it. <code>offer</code> and <code>close</code> are both synchronous, and asyncio is
+single-threaded, so the serve loop cannot see a bus as open in the same tick the turn's <code>finally</code>
 shuts it. That is <a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py">invariant 9</a> in
 full, including the one window it does not cover and the reason closing that window would cost more than
 it buys. A stop is the deliberate exception: someone who cancelled the turn is not asking for one more,
-so the cancelled branch peeks at what was undelivered and says so in its notice instead of running it.</p>
-<p><strong>Liveness resets, safety does not.</strong> AIMU's loop drains the mailbox once per round, at all three ways a
+so the cancelled branch peeks at what was undelivered and says so in its notice instead of running it.
+<code>close()</code> hands back two lists rather than one, because who sent a message decides what its failure to
+arrive deserves: the user's own words can become the next turn, while an agent's note to another run is
+<em>reported</em> instead, since re-running it as a user turn would put words in the user's mouth. Telling the
+two apart needs more than a cursor position, which is why the bus records which messages a reader
+actually took: every cursor advances past every message whether its filter matched or not, so a message
+addressed to a run that never drained it looks read from every position on the bus. That is
+<a href="https://github.com/saxman/kokua/blob/main/src/kokua/core/turns.py">invariant 10</a>, including the limit
+of liveness-free addressing it rests on (a bare label naming several runs is satisfied by any one of
+them, so a report means "nothing took this" and never "this run did not read it") and the gaps it
+leaves.</p>
+<p><strong>An address is minted at reader-open, and the roster dies with the turn.</strong> The same bus carries a
+message one of the turn's own agents addressed to another (<code>toolsets/messaging.py</code>'s <code>send_message</code> and
+<code>list_agents</code>), which needs something the user's broadcast never did: a name per run. <code>MessageBus</code>
+mints one in each reader factory, because that is the only moment a run is individuated (the entry
+agent's declared name with no ordinal, since exactly one runs per turn; <code>label#ordinal</code> for a worker,
+with AIMU's <code>subagent-</code> decoration stripped so the address reads the way <code>[agents.&lt;name&gt;]</code> does), and
+<code>matches</code> is the pure predicate a drain filters itself with: <code>everyone</code>, one exact address, or a bare
+label reaching every run under it. The roster is append-only and turn-scoped, and both halves are
+load-bearing. Nothing in AIMU's <code>Inbox</code> protocol signals that a run has ended, and inferring it from
+reader-open order is the identity-by-ordering that protocol's own docstring warns against, so an
+address names a run that <em>opened a reader</em>, never one still open. That is what makes a send to a
+finished worker an accept followed by an undelivered report rather than a refusal, while a send to an
+address that never existed this turn is refused outright, since the roster can answer that much without
+liveness. <strong>Who can reach whom is decided by the execution model rather than by the bus, and
+<a href="../../how-agents-work/agent-messaging/">Agent messaging</a> is where that argument lives</strong> (a parent is
+blocked for as long as its children run, so sibling-to-sibling is the only direction this adds between
+two runs already going, and an orchestrator's own reach is a broadcast ahead of a spawn);
+nothing here repeats it.</p>
+<p><strong>Liveness resets, safety does not.</strong> AIMU's loop drains the bus once per round, at all three ways a
 round can end, and a delivered message moves the round budget's base so the run gets a fresh
 <code>max_iterations</code> stretch counted from there: a human saying something is the evidence that the run is
-not spinning, which is what the cap exists to catch. (AIMU caps the extensions, because a mailbox whose
-cursor never advanced would otherwise lift the bound entirely.) The auto-approval budget is left alone
+not spinning, which is what the cap exists to catch. (AIMU caps the extensions, because a bus whose
+cursor never advanced would otherwise lift the bound entirely.) <strong>An agent's message is not that
+evidence and gets the same extension</strong>, including a run's message to itself, which <code>matches</code> allows
+because a sender is a reader like any other. The extension cap is what keeps that bounded, at a number
+worth knowing rather than assuming: at most <code>max_iterations</code> extensions, each moving the base rather
+than adding a round, so the worst case is on the order of <code>max_iterations</code> times the cap.
+<a href="../../how-agents-work/agent-messaging/#what-it-costs">Agent messaging</a> carries the argument, and the
+lever on the record there closes a run messaging <em>itself</em> rather than the extension: two agents
+messaging each other reach it by sends the capability exists to allow. The cap above is the bound, not
+the lever. The auto-approval budget is left alone
 on purpose. It bounds how many gated calls run without a prompt, and more user text does not make a
 gated call safer. What the message <em>does</em> reach there is <code>ReviewContext.request</code>, amended so a reviewer
 judges a redirected turn's calls against what the user now wants rather than against instructions
-already replaced. That amendment rides the mailbox rather than the contextvar beside it, because an
+already replaced. That amendment rides the bus rather than the contextvar beside it, because an
 offer arrives on the serve loop's task while <code>current_review_context</code> is set inside the turn's own and
 is therefore invisible from where the offer lands.</p>
-<p>Four run shapes are steerable, and the differences between them follow from their shapes rather than
-from different rules. A plain reactive turn is the simple case. Every entry-agent run inside a <code>/plan</code>
-turn shares the one entry cursor, since a cursor belongs to a turn and not to a run, so a message one of
-those runs delivered is not re-submitted by the one after it. A spawned worker reads through
-its spec, which <code>build_agent_specs</code> writes unconditionally: a stated exception to "a capability is
-declared, never defaulted", because the value is not a per-worker setting but the one process-wide
-source that resolves whichever turn is running when a reader is opened, and a worker with no turn around
-it gets a drain that returns nothing. One spawn path does not go through <code>build_agent_specs</code> and so is
-not covered: <code>toolsets/capabilities.py</code>'s <code>compose_subagent</code> builds its own spawn tool for a worker
-composed per call, and passes no <code>steering</code> (nor <code>events</code>, the same gap one subsystem over), so a worker
-composed that way cannot be redirected. <code>capabilities</code> is in the shipped default
-<code>[agents.assistant].tools</code>, which makes this reachable on a default install rather than hypothetical;
-<code>TODO.md</code> carries the fix. A scheduled firing opens its mailbox in <code>_run_unattended</code> rather
-than in the body that reads it, because the body runs in a child task that copies the context at
+<p>Five run shapes can receive a message mid-turn, and the differences between them follow from their
+shapes rather than from different rules. A plain reactive turn is the simple case. Every entry-agent
+run inside a <code>/plan</code> turn shares the one entry cursor, since a cursor belongs to a turn and not to a
+run, so a message one of those runs delivered is not re-submitted by the one after it. A spawned worker
+reads through its spec, which <code>build_agent_specs</code> writes unconditionally: a stated exception to "a
+capability is declared, never defaulted", because the value is not a per-worker setting but the one
+process-wide source that resolves whichever turn is running when a reader is opened, and a worker with
+no turn around it gets a drain that returns nothing. A worker <code>toolsets/capabilities.py</code>'s
+<code>compose_subagent</code> builds per call reaches the same place by a different route, and is the one run
+shape whose source was added for two reasons rather than one: that tool builds its own spawn tool
+instead of going through <code>build_agent_specs</code>, and for a while passed no <code>inbox</code> (nor <code>events</code>, the same
+omission one subsystem over), so a composed worker could not receive a message mid-turn. It writes both
+now, and delivery is only half of why <code>inbox</code> is unconditional there: a run that opens no reader mints
+no address, which leaves <code>current_address</code> holding whatever its caller set, so <code>send_message</code> would
+have attributed a composed worker's message to the agent that composed it. <code>capabilities</code> and
+<code>messaging</code> are both in the shipped default <code>[agents.assistant].tools</code>, so that was reachable on a
+default install rather than hypothetical. A scheduled firing opens its bus in <code>_run_unattended</code>
+rather than in the body that reads it, because the body runs in a child task that copies the context at
 creation, and reaches <code>close()</code> outside the gate hold, because a follow-up turn takes a hold of its own
-(invariant 1). What is deliberately <em>not</em> steerable is an independent reviewer
+(invariant 1). What deliberately cannot receive a message mid-turn is an independent reviewer
 (<code>workflows/critics.py</code>), whose whole value is that it reads the request and nothing else: it passes no
-<code>steering</code> at all, so a redirection cannot reach the agent judging the work.</p>
-<p>Which of a turn's messages were steering is recorded, because nothing in the transcript shows it. A
-message
+<code>inbox</code> at all, so a redirection cannot reach the agent judging the work.</p>
+<p>Which of a turn's messages were sent mid-turn is recorded, because nothing in the transcript shows it. A
+message the user
 handed to a running turn is appended as an ordinary <code>user</code> message, indistinguishable from one that
-started a turn, so <code>resolve_steering_indices</code> reads the positions back off the message list after the
+started a turn, so <code>resolve_message_indices</code> reads the positions back off the message list after the
 run (a compaction between rounds can move them) and <code>record_turn_provenance</code> stores them under
-<code>metadata["steering"]</code>. That record is what keeps a reload from replaying one steered turn as two: the
-<code>"steering"</code> item <code>replay_items</code> emits carries no <code>message_index</code>, so a renderer that stamps a turn's
+<code>metadata["messages"]</code>. A message one of the turn's <em>agents</em> sent is not indistinguishable: the turn
+writes <code>messages.PROVENANCE_AGENT</code> onto it before <code>_persist</code> snapshots the turn
+(<code>TurnRunner._tag_agent_messages</code>), so a worker cannot reach the stored transcript wearing the user's
+role, and <code>is_user_turn</code> excludes it with no record needed. The tag alone is metadata the model itself
+never reads, so the two drains that hand AIMU's loop a message's text (<code>MessageBus.reader</code>,
+<code>MessageBus.entry_reader</code>) also render an agent's words attributed to its sender
+(<code>[message from researcher#1] ...</code>) and the user's own bare: the same distinction one level below the
+tag, protecting the model that acts on a message rather than the reader that looks at the record
+afterwards. A worker's drain adds <code>, sent before you started</code> inside that bracket for an agent's message
+that predates the worker, since its cursor opens at zero and a replayed request from a sibling that has
+since finished would otherwise read as live. One qualifier, and it is the reason the
+record still carries both kinds: a drain's list becomes <em>one</em> appended message, so a round that
+delivered the user's words and an agent's is one message that is both, and <code>PROVENANCE_AGENT</code> cannot
+go on it, since that tag's own contract ("nothing here is the user's") would be false. <code>is_user_turn</code>
+reads this message exactly as it would an untagged one, and the per-turn index is what answers for it
+there (<code>MessageBus.tag_for_delivery</code>); the same holds for the one other case <code>PROVENANCE_AGENT</code> never
+reaches, where a mid-turn delivery cannot be paired with the message it became and the turn answers
+for the whole turn at once rather than guess (<code>TurnRunner._tag_agent_messages</code>). Neither is left
+undefended on the model's side (the words an agent contributed were already rendered attributed
+inside its own context by the drain, before AIMU ever joined them into the message) or, where the
+mixing can actually be told apart, on the transcript's: a mixed delivery carries
+<code>messages.PROVENANCE_MIXED</code> instead, a narrower tag <code>is_user_turn</code> does not look for, which is what
+lets <code>replay_items</code> mark it <code>from: "mixed"</code> and the Markdown export sign it <strong>Mixed (mid-turn)</strong>
+rather than crediting an agent's half to the user. Only the fallback's own complete under-tag, reached
+when a turn has fewer recorded deliveries than appended messages, carries neither tag; that shape is
+not reachable on any path shipped today, and the guard that refuses to guess at it lives beside the
+broadcast in <code>TurnRunner._tag_agent_messages</code>.</p>
+<p>That record is what keeps a reload from replaying one such turn as two: the
+<code>"inbox"</code> item <code>replay_items</code> emits carries no <code>message_index</code>, so a renderer that stamps a turn's
 controls on the first item carrying one has nothing to stamp it with, which is exactly right, since the
 index that would truncate "here" points into the middle of the host turn. A transcript stored before
 turns recorded this has no entry and replays the old way, which is the best a reader can do with a
@@ -2534,7 +2635,7 @@ record nobody wrote.</p>
 the same as a plain turn. With <code>[planning]</code>'s <code>result_review</code> and <code>show_reasoning</code> both off, which is
 how they ship, execution goes through <code>_execute_streaming</code>: that path keeps the executor's own messages
 and rewrites only the prompt it ran them under, so a message delivered while the executor was working
-sits in the stored transcript and in <code>metadata["steering"]</code> like any other, and survives a reload.
+sits in the stored transcript and in <code>metadata["messages"]</code> like any other, and survives a reload.
 Turn either flag on and execution goes through <code>_execute_with_review</code> instead, which replaces
 everything the executor appended with a single user/assistant pair: a message delivered there reaches
 the model, shows live, reaches the catch-up record a switch-in replays, and is gone on reload, where
@@ -2676,9 +2777,9 @@ forgets raises nothing anywhere: the script simply runs with the settings missin
 unconfigured, which is what <code>email-report</code> did on the entry agent until the second route was wired.
 <code>tests/core/test_build.py</code> pins it, because nothing else would notice.</p>
 <h4 id="the-shipped-entry-agents-inventory">The shipped entry agent's inventory<a class="headerlink" href="#the-shipped-entry-agents-inventory" title="Permanent link">&para;</a></h4>
-<p>All 35 tools the shipped <code>[agents.assistant]</code> table resolves to, and where each comes from. This is what
+<p>All 37 tools the shipped <code>[agents.assistant]</code> table resolves to, and where each comes from. This is what
 <code>config.example.toml</code> declares, not a fixed list: a different <code>tools</code> line produces a different set.
-Fourteen of the 35 come from AIMU, more than a third, and so are not greppable in this repository (more
+Fourteen of the 37 come from AIMU, more than a third, and so are not greppable in this repository (more
 once skills are installed, since AIMU injects a tool per skill script on top of this set), which is why
 this table exists rather than a naming convention alone:</p>
 <table>
@@ -2739,6 +2840,11 @@ this table exists rather than a naming convention alone:</p>
 <td><code>benchmark_model</code></td>
 <td><code>toolsets/benchmark.py</code></td>
 <td><code>benchmark</code></td>
+</tr>
+<tr>
+<td><code>send_message</code>, <code>list_agents</code></td>
+<td><code>toolsets/messaging.py</code></td>
+<td><code>messaging</code></td>
 </tr>
 <tr>
 <td><code>spawn_subagent</code></td>
@@ -2927,18 +3033,20 @@ writes a new session holding a copy of the parent's transcript through the end o
 whose agent fails to build reverts the pointer rather than stranding the view. The parent is not
 touched, and the two are ordinary independent conversations afterwards.</p>
 <p>Three things decide the shape. The cut is <strong>a turn boundary</strong>, found by <code>turn_end</code>: the next message the
-user sent to <em>start</em> a turn. Two kinds of <code>user</code>-role message sit inside a turn instead, and <code>turn_end</code>
-skips both: the nudges the agent loop injects between tool-calling iterations, which carry a provenance
-tag (<code>messages.is_user_turn</code>), and a message the user typed while the turn was running, which carries no
-tag because it genuinely is user input. The second has no tell at all, so <code>turn_end</code> takes the recorded
-indices (<code>metadata["steering"]</code>, flattened by <code>steered_indices</code>) as an argument; a transcript stored
-before that record existed passes none and behaves exactly as it always did. Stopping at a steering
+user sent to <em>start</em> a turn. Three kinds of <code>user</code>-role message sit inside a turn instead, and <code>turn_end</code>
+skips all of them: the nudges the agent loop injects between tool-calling iterations, a message one of
+the turn's own agents sent to another run on it, which carries <code>messages.PROVENANCE_AGENT</code>, and a
+message the user typed while the turn was running, which carries no
+tag because it genuinely is user input. The first two carry a provenance tag <code>messages.is_user_turn</code>
+recognises; the third has no tell at all, so <code>turn_end</code> takes the recorded
+indices (<code>metadata["messages"]</code>, flattened by <code>mid_turn_indices</code>) as an argument; a transcript stored
+before that record existed passes none and behaves exactly as it always did. Stopping at a mid-turn
 message would copy a branch that loses both the redirection and the answer it produced, which is
-normally the reason for branching there, and a steering index is refused as a turn <em>start</em> for the same
+normally the reason for branching there, and a mid-turn index is refused as a turn <em>start</em> for the same
 reason. That is the only cut a transcript survives, because anywhere else
 can fall between an assistant message holding <code>tool_calls</code> and the <code>tool</code> messages answering them, which
 a provider rejects on the branch's <em>next</em> request rather than at the fork, where it could still be
-reported. The per-turn metadata maps (<code>subagent</code>, <code>trace</code>, <code>model</code>, <code>thinking</code>, <code>failure</code>, <code>usage</code>, <code>steering</code>) are
+reported. The per-turn metadata maps (<code>subagent</code>, <code>trace</code>, <code>model</code>, <code>thinking</code>, <code>failure</code>, <code>usage</code>, <code>messages</code>) are
 <strong>filtered, not remapped</strong>, because a prefix copy leaves every index where it was: the branch replays its
 inherited turns exactly as the parent does, cards and costs included. And <code>task_id</code> is <strong>not inherited</strong>,
 because a branch of a scheduled run is the user's conversation rather than another run of that task;
@@ -3271,26 +3379,49 @@ name lookup, structurally a half-step deeper than its predecessors since the sym
 now: the method has a default implementation on the ABC (read everything, keep the metadata, drop the
 messages), correct anywhere and slow where a full read is expensive, so a name lookup cannot tell
 <code>TinyDBSessionStore</code>'s override from a plain inheritance of the default.</p>
-<p>The floor is now <strong><code>aimu&gt;=0.33.0</code></strong>, for <code>aio.SkillAgent.run</code>'s <code>steering</code> parameter: a run already in
-progress can be handed a user message without waiting for it to finish, which is what lets a message
-typed mid-turn reach the turn running now instead of queuing behind it. Kokua's entry agent is an
-<code>aio.SkillAgent</code>, so this is the exact method a mid-turn message reaches.</p>
-<p>The probe grips the subclass, not <code>aio.Agent.run</code>, which landed the same parameter in the <em>first</em> of
-the release's steering commits: gripping that handle would date a checkout to one drain site on one
-driver and nothing past it. <code>aio.SkillAgent.run</code> cannot delegate to <code>super().run()</code> (it prepares, sets
-skills up, then calls the post-prepare helpers that do the actual work), so it repeats <code>Agent.run</code>'s
-whole parameter list by hand, and a parameter added to the base method reaches the subclass only when
-someone remembers to copy it across. <code>steering</code> was not remembered until a whole-branch review caught
-it, after <code>compaction</code> and <code>script_env</code> had each needed the same hand-copy before it, so the base
-class's signature is not evidence about the subclass's. The shape is a signature check, the fifth time
-(<code>SkillManager(include=...)</code>, <code>SkillAgent(script_env=...)</code>, <code>WebChannel(stream_thinking=...)</code>,
-<code>make_async_subagent_tool(events=...)</code>).</p>
-<p>What it leaves to the floor is larger than usual: whether the spawn path honors a <code>"steering"</code> spec
-key, whether both drivers drain all three branches a steered turn can take, whether the three stream
-consumers render the phase, whether the budget reset on a drained mailbox is bounded, and whether a
-misbehaving host source is caught rather than trusted. None of those is a signature, so no signature
-check reaches them; the branch review that caught the missed <code>SkillAgent</code> copy raised the last three as
-findings in their own right.</p>
+<p>The floor is now <strong><code>aimu&gt;=0.34.0</code></strong>, the first one a rename alone has moved: AIMU renamed its
+mid-turn-message seam from <code>Steering</code> to <code>Inbox</code>, with no legacy path, and taught it which agent is
+opening each reader. <code>Inbox.reader(agent=...)</code> is called once per run, at its start, and <code>agent</code> is
+that run's own name, offered so a host can route a message to the one run it was meant for rather than
+to every run's drain; AIMU attaches no meaning to the string beyond passing it back. The probe is a
+plain name lookup, the sixth time (<code>resolve_default_text_model</code>, <code>ModelRefusalError</code>,
+<code>SessionStore.list_summaries</code>, <code>builtin.get_web_content</code>, <code>aimu.skills.make_skill_update_tool</code>), and the
+first time a rename rather than an addition has given it an exact question: a checkout predating 0.34.0
+has <code>Steering</code> where this one has <code>Inbox</code>, so the two names cannot both resolve the way an old and a new
+export usually can side by side.</p>
+<p>This moved only the names Kokua uses to talk to AIMU: every <code>agent.run(steering=...)</code> call carrying the
+entry agent's own source became <code>agent.run(inbox=...)</code>, the <code>"steering"</code> spec key became <code>"inbox"</code>, and
+<code>StreamingContentType.STEERING</code> became <code>StreamingContentType.INBOX</code>. Kokua's three reader factories in
+<code>core/messaging.py</code> widened to accept the <code>agent</code> label AIMU now passes positionally, because
+<code>_BaseToolLoop.__init__</code> rehearses that exact call and raises <code>TypeError</code> when it cannot be made; that
+constructor sits on the path of every driver and every spawned worker, so the rename could not wait for
+Kokua's own vocabulary for the seam to follow in a later change.</p>
+<p>What this probe cannot see, and what the floor covers alone, is larger than usual here: whether the
+loop actually passes the <code>agent</code> argument on both surfaces and both drivers, whether the <code>INBOX</code>
+streaming phase is emitted where <code>STEERING</code> used to be, whether the spawn path honors the <code>"inbox"</code>
+spec key, and whether 0.33.0's host-boundary guards survived the rename rather than being lost in it.
+None of those is a name, so no name lookup reaches them.</p>
+<p>The floor was <strong><code>aimu&gt;=0.33.0</code></strong> until then, for <code>aio.SkillAgent.run</code>'s <code>steering</code> parameter: a run
+already in progress could be handed a user message without waiting for it to finish, which is what let
+a message typed mid-turn reach the turn running now instead of queuing behind it. Kokua's entry agent
+is an <code>aio.SkillAgent</code>, so this was the exact method a mid-turn message reached.</p>
+<p>The probe gripped the subclass, not <code>aio.Agent.run</code>, which landed the same parameter in the <em>first</em> of
+the release's steering commits: gripping that handle would have dated a checkout to one drain site on
+one driver and nothing past it. <code>aio.SkillAgent.run</code> could not delegate to <code>super().run()</code> (it
+prepares, sets skills up, then calls the post-prepare helpers that do the actual work), so it repeated
+<code>Agent.run</code>'s whole parameter list by hand, and a parameter added to the base method reached the
+subclass only when someone remembered to copy it across. <code>steering</code> was not remembered until a
+whole-branch review caught it, after <code>compaction</code> and <code>script_env</code> had each needed the same hand-copy
+before it, so the base class's signature was not evidence about the subclass's. The shape was a
+signature check, the fifth time (<code>SkillManager(include=...)</code>, <code>SkillAgent(script_env=...)</code>,
+<code>WebChannel(stream_thinking=...)</code>, <code>make_async_subagent_tool(events=...)</code>).</p>
+<p>What it left to the floor turned out larger than usual: whether the spawn path honored a <code>"steering"</code>
+spec key, whether both drivers drained all three branches a steered turn could take, whether the three
+stream consumers rendered the phase, whether the budget reset on a drained mailbox was bounded, and
+whether a misbehaving host source was caught rather than trusted. None of those was a signature, so no
+signature check reached them; the branch review that caught the missed <code>SkillAgent</code> copy raised the
+last three as findings in their own right, and the 0.34.0 rename above is exactly the kind of change
+that gap was written to warn about.</p>
 <p>The floor was <strong><code>aimu&gt;=0.32.0</code></strong> until then, and two capabilities in that release were Kokua's, both
 about skill authoring. <code>make_skill_update_tool</code> is the factory
 <a href="https://github.com/saxman/kokua/blob/main/src/kokua/toolsets/skills.py"><code>toolsets/skills.py</code></a> calls to
@@ -3514,7 +3645,7 @@ than a shared one.</p>
 <a href="https://saxman.info/aimu/how-to/build-personal-assistant/">AIMU's base <code>WebChannel</code></a>. The streaming transport
 (<code>token</code>/<code>thinking</code>/<code>tool</code>/<code>done</code> frames and <code>send()</code>) lives in AIMU's base; Kokua's subclass adds the
 frames its richer page needs, among them <code>conversations</code>, <code>history</code>, <code>approval</code>, <code>turn_saved</code>, and
-<code>steering</code>. The UI is a single self-contained <code>web_static/index.html</code> served as package data, plus
+<code>inbox</code>. The UI is a single self-contained <code>web_static/index.html</code> served as package data, plus
 vendored <code>marked</code> + <code>DOMPurify</code>
 (GitHub-flavored markdown, sanitized, rendered client-side as the answer streams) and vendored KaTeX,
 typeset after sanitization with <code>trust:false</code> once the turn completes. The server allowlists these assets: JS/CSS by name, the
@@ -3564,33 +3695,33 @@ read a missing one as "not mine" rather than as the next one waiting.</p>
 <p>The page draws a bubble the moment you press Enter, before the server has said anything about the
 message, and the turn controls that bubble eventually carries (branch, and delete-from-here) are
 addressed by a transcript index only the server knows. So something has to connect the two, and until
-mid-turn steering landed the page did that by <em>counting</em>: a queue of bubbles awaiting a save, each
+mid-turn messaging landed the page did that by <em>counting</em>: a queue of bubbles awaiting a save, each
 <code>turn_saved</code> consuming the oldest. Counting forced the page to predict server behavior before it sent,
 deciding for itself which composer text would be answered as a command and run no turn at all, and to
 keep that prediction in step with <code>Assistant._serve_channel</code>'s dispatch. Every wrong guess cost a
 control, and one direction of wrongness was destructive rather than untidy: an entry nothing ever
 consumed stranded at the head, so the <em>next</em> turn's save took it and stamped an older bubble with a newer
 turn's index, and clicking delete-from-here on one message then took that message and the one before it.</p>
-<p>Steering made counting impossible rather than merely fragile, because a message now has two frames it
-can be named by in sequence instead of one. So the page mints a <code>token</code> per composer message, the server
-echoes it on whichever frame reports that message's fate, and <code>app.js</code> keys its pending bubbles on it.
-Matching is also what makes an unclaimed entry harmless: text answered as a command, or consumed as the
-reply to a pending approval, is simply never named, and its entry is dropped at the next repaint along
-with the bubble it points at. Tokens carry a per-load random prefix, because a turn outlives the page
-that started it: reload while one is running and its save still arrives, and a counter starting over at 1
-would let that frame name a bubble this load drew.</p>
+<p>A message able to join a running turn made counting impossible rather than merely fragile, because a
+message now has two frames it can be named by in sequence instead of one. So the page mints a <code>token</code>
+per composer message, the server echoes it on whichever frame reports that message's fate, and <code>app.js</code>
+keys its pending bubbles on it. Matching is also what makes an unclaimed entry harmless: text answered
+as a command, or consumed as the reply to a pending approval, is simply never named, and its entry is
+dropped at the next repaint along with the bubble it points at. Tokens carry a per-load random prefix,
+because a turn outlives the page that started it: reload while one is running and its save still
+arrives, and a counter starting over at 1 would let that frame name a bubble this load drew.</p>
 <p>Three fates, and the page has to tell them apart from the frames alone. A <code>turn_saved</code> carrying the token
-means the message became a turn, and the bubble is stamped. A <code>steering</code> frame carrying it means the
+means the message became a turn, and the bubble is stamped. An <code>inbox</code> frame carrying it means the
 message joined the turn already running, and the bubble is <em>marked</em> rather than stamped: it has no turn
 of its own, so it gets no controls, and the index that would truncate "here" points into the middle of
 somebody else's turn. The third is both in order: accepted into a turn, never read, re-run as a turn of
-its own by <code>TurnRunner._resubmit_steering</code>, which carries the same token onto that turn's save. That is
+its own by <code>TurnRunner._resubmit_messages</code>, which carries the same token onto that turn's save. That is
 why the mark is looked up without being claimed, the one place in <code>app.js</code> the map is read that way, and
 why the save withdraws the mark when it stamps: the two standing together would say the message both did
 and did not become a turn.</p>
-<p>Two <code>steering</code> frames arrive for one steered message and only one of them carries a token. The tokened
-one is <code>WebChannel.send_steering</code>, the server saying the message was accepted; the other is mapped from
-AIMU's own <code>STEERING</code> chunk when a run <em>drains</em> the message, and it names no bubble because AIMU never
+<p>Two <code>inbox</code> frames arrive for one mid-turn message and only one of them carries a token. The tokened
+one is <code>WebChannel.send_message_frame</code>, the server saying the message was accepted; the other is mapped
+from AIMU's own <code>INBOX</code> chunk when a run <em>drains</em> the message, and it names no bubble because AIMU never
 sees a token (a reader's drain hands it the text alone, which is all the loop takes as a prompt). The
 untokened frame marks nothing on the composer's side and is what a sub-agent card renders instead.</p>
 <h3 id="reconnecting-after-a-dropped-socket">Reconnecting after a dropped socket<a class="headerlink" href="#reconnecting-after-a-dropped-socket" title="Permanent link">&para;</a></h3>
@@ -3928,6 +4059,42 @@ the <em>end</em> of its turn -- held until the next user message or the end of t
 the user carried on in keeps the notice inside the turn it describes. An unattended run needs this most,
 since <code>_report</code>'s status line goes to whichever conversation the user was viewing at the time, leaving the
 run's own conversation with no account of why it holds only half a turn.</p>
+<p><strong><code>metadata["undelivered"]</code> is keyed and flushed the same way, for a record that has nowhere else to
+live.</strong> When a turn ends, whatever one of its own agents sent that no reader took is both said once
+(<code>TurnRunner._report_undeliverable</code>, to the user, since the sender's run is over) and stored
+(<code>ConversationBook.record_undelivered</code>, under <code>str(user_index)</code> like <code>failure</code> beside it). The two
+halves answer differently on an ending that was not asked for, and that asymmetry is deliberate: the
+record is written from the turn's own <code>finally</code> and so reaches every ending, while the sentence sits
+after that block and a stopped turn never reaches it, because an await inside a cancellation is the one
+thing that block cannot hold (invariants 9 and 10). So a <code>/stop</code> leaves the record and no sentence,
+where before it left neither. Stored
+because the sentence scrolls away, and because unlike a mid-turn message that <em>was</em> delivered there is
+no message in <code>session.messages</code> to read it back off: never becoming a message is the whole of what
+undelivered means, so this record is the only place it exists. <code>replay_items</code> emits it as its own
+<code>"undelivered"</code> item type rather than folding it into the <code>"inbox"</code> item beside it, because the two
+answer different questions a reader asks (did this reach anyone, versus did the user or an agent say
+this), and flushes it at the same point <code>failure</code> is flushed, at the next user message or the end of the
+transcript, with failure first, which is the order the live turn produces them in. The page draws it
+with <code>addBubble("notice", ...)</code>, naming the sender, the selector, and the text, because no two of the
+three identify the message. Each text is capped on the way in, with a note saying how much is missing
+(<code>TurnRunner._capped_message_text</code>, at <code>core/transcripts.py</code>'s own per-message number): this is the one
+durable record here whose words are a model's rather than a person's, written behind nothing but a
+non-blank check, where a mid-turn message somebody typed is self-limiting.</p>
+<p><strong>A mid-turn message replays in one of three states, and the page tells them apart.</strong> <code>replay_items</code>
+decides which from the stored provenance tag and marks the <code>"inbox"</code> item <code>from: "agent"</code>,
+<code>from: "mixed"</code>, or nothing at all, and <code>app.js</code>'s <code>renderMidTurn</code> turns those into three different
+rows: a kind word (<code>inbox</code>, <code>agent</code>, <code>mixed</code>) and a class list (<code>.inbox</code>, <code>.inbox.agent</code>,
+<code>.inbox.mixed</code>). The dimming is the part that carries an argument. <code>.inbox</code> deliberately stays out of
+<code>app.css</code>'s dimmed machine-event group (<code>loop</code>, <code>thinking</code>, <code>tool</code>, <code>subagent</code>, <code>plan</code>), because the
+plain case is a person's own words and dimming them would read as the opposite; <code>.inbox.agent</code> folds
+back into that group, because nobody typed it; and <code>.inbox.mixed</code> keeps the undimmed default, since
+part of that one message really is the user's own words. So the kind word is the only thing separating
+<code>mixed</code> from the plain case, which is why the end-to-end suite asserts the label, the class, and the
+computed colour rather than any one of them. A live sub-agent card uses the same renderer for a
+delivery it received, and recovers only the unambiguous half: the card frame carries no <code>from</code> field
+(addressing stays out of the channel, principle 1), so <code>cardMessageFrom</code> reads the attribution off the
+text's own <em>leading</em> <code>[message from ...]</code> marker, and a mixed delivery reads there as the plain case,
+the same direction <code>MessageBus.tag_for_delivery</code> takes when it cannot tell either.</p>
 <p>Planning's reviewer verdicts and a turn's spawned sub-agents share one <code>subagent</code> frame type and one
 persisted map (<code>metadata["subagent"]</code>); <code>task</code> on the create event is what tells the two apart.
 <code>replay_items</code> replays that map on reload, interleaved right after its user bubble; a

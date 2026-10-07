@@ -463,6 +463,8 @@
       
         
       
+        
+      
     
     
     
@@ -672,6 +674,34 @@
     
   
     Delegation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/agent-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent messaging
   
 
     
@@ -3282,6 +3312,12 @@ narrower, letters, digits, hyphens, and underscores, so the section the tool rep
 reaches the file: anything else would be quoted on the way in and land under a name you could not name
 again. <code>agents.*</code> is refused for that reason and one more, being the wildcard a lock pattern covers the
 whole section with rather than an agent.</p>
+<p><strong>Two names are refused outright: <code>user</code> and <code>everyone</code>.</strong> An agent's name is also the address a message
+typed mid-turn is sent to, and those two already mean something there: <code>user</code> is the user's own address,
+and <code>everyone</code> reaches every run. An agent declared under either would collide rather than merely
+confuse, so it is refused twice over: <code>update_config</code> refuses the write when it is attempted, because it
+dry-runs the same startup check, and a config that reaches the file some other way (a hand edit) is
+refused at startup, naming the agent to rename.</p>
 <p><strong>This whole section is locked by default.</strong> See <a href="#who-may-change-which-key">who may change which key</a>
 for what removing <code>agents.*</code> from <code>[security].locked_config_keys</code> actually permits.</p>
 <table>
@@ -3340,7 +3376,8 @@ for what removing <code>agents.*</code> from <code>[security].locked_config_keys
 list is gone, and one you add is there on the next start.</p>
 <p>There is one namespace for every capability, so a name may be an AIMU built-in tool group (<code>web</code>, <code>fs</code>,
 <code>fs_write</code>, <code>compute</code>, <code>time</code>, <code>misc</code>, <code>audio</code>, <code>speech</code>, <code>transcription</code>), one of Kokua's own (<code>memory</code>,
-<code>documents</code>, <code>skills</code>, <code>capabilities</code>, <code>config</code>, <code>conversations</code>, <code>mcp</code>, <code>planning</code>, <code>scheduling</code>),
+<code>documents</code>, <code>skills</code>, <code>capabilities</code>, <code>config</code>, <code>conversations</code>, <code>mcp</code>, <code>messaging</code>, <code>planning</code>,
+<code>scheduling</code>),
 an installed plugin toolset (<code>aimu_agents</code>, <code>benchmark</code>, <code>github_backup</code>, <code>image</code>), a skill in your skills folder
 named by its own name, or an MCP server configured under <code>[[mcp.server]]</code>, named by its <code>name</code>. The list
 does not say which kind a name is. Run <code>kokua --list-toolsets</code> for every name this install accepts,

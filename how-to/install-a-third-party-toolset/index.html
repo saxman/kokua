@@ -463,6 +463,8 @@
       
         
       
+        
+      
     
     
     
@@ -672,6 +674,34 @@
     
   
     Delegation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/agent-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent messaging
   
 
     
@@ -1557,7 +1587,7 @@ example.</p>
 <h2 id="what-kokua-sees-when-you-install-one">What Kokua sees when you install one<a class="headerlink" href="#what-kokua-sees-when-you-install-one" title="Permanent link">&para;</a></h2>
 <p>Kokua discovers toolsets at startup with <code>kokua.plugins.discover_toolsets</code>, which reads every entry
 registered under the <code>kokua.toolsets</code> group through Python's own <code>importlib.metadata.entry_points</code>, the
-same call that finds Kokua's own 22 built-in toolsets listed in its <code>pyproject.toml</code>. There is no second
+same call that finds Kokua's own 23 built-in toolsets listed in its <code>pyproject.toml</code>. There is no second
 registry and no code change on Kokua's side to add a plugin: a package that publishes an entry in that
 group is found the moment it is installed into the environment Kokua runs in.</p>
 <p>jobme's <code>pyproject.toml</code> carries one line for this:</p>

@@ -465,6 +465,8 @@
       
         
       
+        
+      
     
     
     
@@ -779,6 +781,34 @@
     
   
     Delegation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent messaging
   
 
     
@@ -1593,7 +1623,7 @@ is the commitment to keep them there.</p>
 </span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>                                <span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
 </span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>                                <span class="n">images</span><span class="o">=</span><span class="n">msg</span><span class="o">.</span><span class="n">images</span><span class="p">,</span>
 </span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>                                <span class="n">thinking</span><span class="o">=</span><span class="n">thinking</span><span class="p">,</span>
-</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>                                <span class="n">steering</span><span class="o">=</span><span class="n">ENTRY_STEERING_SOURCE</span><span class="p">,</span>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>                                <span class="n">inbox</span><span class="o">=</span><span class="n">ENTRY_SOURCE</span><span class="p">,</span>
 </span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>                            <span class="p">)</span>
 </span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>                            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ui</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">stream</span><span class="p">,</span> <span class="n">reply_to</span><span class="o">=</span><span class="n">msg</span><span class="p">)</span>
 </span></code></pre></div>
@@ -1615,10 +1645,10 @@ obeys, is about a different thing: recording the turn's sub-agent events <em>bef
 notice, since a second cancellation racing that send would propagate straight past a record placed
 after it.)</p>
 <p><code>/stop</code> is not the only thing a channel can read into a turn that is already running, and the
-<code>steering=</code> argument above is the other one. A turn is long enough that the thing you most often want
+<code>inbox=</code> argument above is the other one. A turn is long enough that the thing you most often want
 mid-reply is not to cancel it but to correct it, and before this a correction typed into the composer
 queued behind the turn on the gate: it arrived after the rounds it was meant to redirect had already
-been spent. <code>ENTRY_STEERING_SOURCE</code> is a reader over the mailbox <code>TurnRunner</code> opens for the turn, which
+been spent. <code>ENTRY_SOURCE</code> is a reader over the message bus <code>TurnRunner</code> opens for the turn, which
 AIMU's loop drains once per round, so what you type lands at the turn's next model call and the loop
 takes one more round to act on it. Delivery also resets the round cap, for the reason the cap exists:
 the degenerate turn below is a model talking to itself, and a person saying something is the evidence

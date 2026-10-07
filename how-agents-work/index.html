@@ -465,6 +465,8 @@
       
         
       
+        
+      
     
     
     
@@ -677,6 +679,34 @@
     
   
     Delegation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="agent-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent messaging
   
 
     
@@ -1364,10 +1394,15 @@ the choices it did about them.</p>
 <li><a href="context-and-memory/">Context and memory</a>: the model remembers nothing, so everything it appears to
   remember was sent again.</li>
 <li><a href="delegation/">Delegation</a>: spending context on a subtask without spending the caller's.</li>
+<li><a href="agent-messaging/">Agent messaging</a>: one agent addressing another mid-turn, and why the execution
+  model decides which directions can carry anything.</li>
 </ul>
 <p>The mechanism pages land one at a time rather than all at once, so this list says plainly which of the
-thirteen planned pages exist today. Six of them, all listed above. The remaining seven, in the order a
-newcomer would want them, under the titles they will land with:</p>
+fourteen planned pages exist today. Seven of them, all listed above. <em>Agent messaging</em> is the one the
+original plan did not name, added alongside the mechanism itself: what it teaches is that the execution
+model, not the message bus, decides which agents can reach which, and that is a fact about multi-agent
+systems rather than about Kokua. The remaining seven, in the order a newcomer would want
+them, under the titles they will land with:</p>
 <ol>
 <li>Agents and workflows</li>
 <li>Humans in the loop</li>
@@ -1380,7 +1415,7 @@ newcomer would want them, under the titles they will land with:</p>
 <p>Those titles are settled rather than provisional, because the written pages already name some of them in
 prose, and a page that arrives under a different name leaves those mentions pointing at nothing.</p>
 <h2 id="writing-a-page-for-this-catalogue">Writing a page for this catalogue<a class="headerlink" href="#writing-a-page-for-this-catalogue" title="Permanent link">&para;</a></h2>
-<p>Three conventions hold thirteen pages together, and two of them are checked by <code>tests/test_docs.py</code>
+<p>Three conventions hold fourteen pages together, and two of them are checked by <code>tests/test_docs.py</code>
 rather than left to each author's memory.</p>
 <ul>
 <li><strong>A page that exists is a link; a page that does not is italics.</strong> Write

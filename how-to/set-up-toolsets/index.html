@@ -463,6 +463,8 @@
       
         
       
+        
+      
     
     
     
@@ -672,6 +674,34 @@
     
   
     Delegation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-agents-work/agent-messaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent messaging
   
 
     
@@ -1658,7 +1688,7 @@ from (<code>"stocks"</code>, not <code>"mcp:stocks"</code>), so this command is 
 <tbody>
 <tr>
 <td><strong>built-in toolset</strong></td>
-<td>all 21 <code>Toolset</code>s Kokua's own distribution registers under the <code>kokua.toolsets</code> entry-point group, one file each under <code>src/kokua/toolsets/</code> and named for the toolset. Wrappers over AIMU's tool groups and its two stores (<code>web</code>, <code>fs</code>, <code>compute</code>, <code>time</code>, <code>misc</code>, <code>audio</code>, <code>speech</code>, <code>transcription</code>, <code>memory</code>, <code>documents</code>, <code>skills</code>); one per Kokua subsystem (<code>capabilities</code>, <code>config</code>, <code>conversations</code>, <code>mcp</code>, <code>scheduling</code>); the <code>/plan</code> workflow and nothing else (<code>planning</code>); and Kokua's own standalone capabilities (<code>aimu_agents</code>, <code>benchmark</code>, <code>github_backup</code>, <code>image</code>)</td>
+<td>all 23 <code>Toolset</code>s Kokua's own distribution registers under the <code>kokua.toolsets</code> entry-point group, one file each under <code>src/kokua/toolsets/</code> and named for the toolset. Wrappers over AIMU's tool groups and its two stores (<code>web</code>, <code>fs</code>, <code>fs_write</code>, <code>compute</code>, <code>time</code>, <code>misc</code>, <code>audio</code>, <code>speech</code>, <code>transcription</code>, <code>memory</code>, <code>documents</code>, <code>skills</code>); one per Kokua subsystem (<code>capabilities</code>, <code>config</code>, <code>conversations</code>, <code>mcp</code>, <code>messaging</code>, <code>scheduling</code>); the <code>/plan</code> workflow and nothing else (<code>planning</code>); and Kokua's own standalone capabilities (<code>aimu_agents</code>, <code>benchmark</code>, <code>github_backup</code>, <code>image</code>)</td>
 </tr>
 <tr>
 <td><strong>skill</strong></td>
@@ -1775,7 +1805,7 @@ keys, all optional individually; anything else is a startup error naming the key
 </span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>
 </span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="k">[agents.report-writer]</span>
 </span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="n">description</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Builds and emails PDF reports."</span>
-</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"markdown-to-pdf"</span><span class="p">,</span><span class="w"> </span><span class="s2">"email-report"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="n">tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"markdown-to-pdf"</span><span class="p">,</span><span class="w"> </span><span class="s2">"email-report"</span><span class="p">,</span><span class="w"> </span><span class="s2">"fs"</span><span class="p">,</span><span class="w"> </span><span class="s2">"time"</span><span class="p">]</span>
 </span></code></pre></div>
 <ul>
 <li><strong><code>tools</code></strong> is the whole capability declaration, in one flat list over the one namespace. A built-in
