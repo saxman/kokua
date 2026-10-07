@@ -3081,3 +3081,24 @@ async def test_a_mid_turn_message_hands_the_bus_the_id_its_front_end_drew_it_und
 
     assert accepted is True
     assert bus.close() == ([Message("use the cache", sender=USER, to=EVERYONE, token="b2")], [])
+
+
+def test_the_undelivered_cap_is_the_same_number_a_read_caps_one_message_at():
+    """``UNDELIVERED_TEXT_CHARS``'s comment claims it is the number ``core/transcripts.py`` caps a
+    single message at, and the two are separate literals with a hand-copied cut string between them.
+    Nothing made that claim load-bearing, so changing one would leave the other asserting an equality
+    that had stopped holding, which is the kind of quiet falsehood a comment cannot catch.
+
+    Pinned rather than aliased, because the two sites are justified separately where they are declared:
+    one bounds what a read spends on a pasted document, the other bounds one line of context inside a
+    sentence about something that did not happen. They agree today on purpose, and a future change that
+    wants them to differ should have to come here and say so.
+    """
+    from kokua.core.transcripts import MAX_MESSAGE_CHARS
+    from kokua.core.turns import UNDELIVERED_TEXT_CHARS, _capped_message_text
+
+    assert UNDELIVERED_TEXT_CHARS == MAX_MESSAGE_CHARS
+
+    # And the cut string, which is copied rather than shared, says the same thing in the same shape.
+    long_text = "x" * (UNDELIVERED_TEXT_CHARS + 1)
+    assert _capped_message_text(long_text).endswith(f"... [message truncated, {len(long_text)} chars total]")

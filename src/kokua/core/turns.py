@@ -225,7 +225,11 @@ Every rule here was learned from a bug. Read them before changing anything in th
     returns before reaching it, and it cannot be moved in, being an await inside a cancellation
     (invariant 9's own argument). So a stop is the same deliberate exception invariant 9 makes for a
     user's message, one shade worse: there, the stop notice at least says a message was not delivered.
-    What a stop does not lose is the record, for the reason that paragraph gives.
+    A firing whose own run *failed* loses the sentence the same way and for the same reason, since the
+    error raises past the report on its way to ``proactive``: named here rather than left for a reader
+    to infer from the record paragraph below, which is where that case is established and which is a
+    worse place to meet it than the list of what this invariant does not cover.
+    What neither a stop nor a failure loses is the record, for the reason that paragraph gives.
     A message to an address that never existed this turn needs nothing extra: no reader can match it,
     so it is reported here like any other undeliverable one. Refusing it at send time would serve the
     sender better, and the roster can answer that much without tracking liveness, but it belongs with

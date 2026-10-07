@@ -668,10 +668,17 @@ ENTRY_SOURCE = _ContextSource(entry=True)
 #: extension exists to act on, where a run delivering to itself is the round cap being lifted by the
 #: thing the round cap is there to bound. And the mitigation recorded against the residual, refusing
 #: ``to=EVERYONE`` from an agent, would not reach it, since a self-address produces the identical
-#: extension with no ``everyone`` anywhere in it. The lever that would close it is in ``send_message``
-#: rather than here: drop the caller's own address from the set it matches, and refuse a selector that
-#: resolves to nobody else, which would remove only a capability nobody asked for, since what was
-#: asked for was messaging *another* agent. It would also change what a broadcast's receipt names (the
+#: extension with no ``everyone`` anywhere in it. The lever that closes the *self* route is in
+#: ``send_message`` rather than here: drop the caller's own address from the set it matches, and
+#: refuse a selector that resolves to nobody else, which would remove only a capability nobody asked
+#: for, since what was asked for was messaging *another* agent. **It does not close the extension**,
+#: and the reason is this residual's own shape one step over: two agents messaging each other, or a
+#: child messaging the run that spawned it, each send to *another* agent and so pass that rule while
+#: producing the identical extension. No selector rule reaches that, because every such send is
+#: exactly what the capability is for. What bounds it is AIMU's own cap on how many times a budget
+#: may be extended, which is why the bound above is the honest guarantee here rather than a lever;
+#: a lever that genuinely closed it would have to count deliveries per run, which is a different
+#: mechanism and not one this seam has. It would also change what a broadcast's receipt names (the
 #: sender would stop appearing in its own), which is the part to get right if it is ever taken. Still
 #: not taken, and no config key is added for it either, but it is the lever on the record now, because
 #: the one that was there answered a different residual.

@@ -325,6 +325,13 @@ only a capability nobody asked for, since what was asked for was messaging *anot
 one thing it changes besides is what a broadcast's receipt names, the sender no longer appearing in
 its own. It is still not taken; it is the one on the record now.
 
+**It closes the self route and not the extension**, and the distinction is the same one that retired
+the previous lever, one step over. Two workers messaging each other, or a child messaging the run that
+spawned it, each send to *another* agent, so a rule about your own address lets them through while the
+budget moves exactly as far. There is no selector rule that would not also forbid the thing messaging
+is for. What bounds it is the extension cap above; a lever that genuinely closed it would have to
+count deliveries per run, which is a different mechanism and not one this bus has.
+
 **Liveness is not tracked, so the roster over-promises in one direction and the receipt under-promises
 in the other.** A send to a worker that has already finished is *accepted*, then reported undelivered
 when the turn ends, which is the captured run above. A send to an address that never existed this turn

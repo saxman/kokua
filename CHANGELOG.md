@@ -1022,7 +1022,9 @@ is on the order of `max_iterations` times the cap. `messaging` is a declared cap
 holds it by default. `core/messaging.py`'s `WORKER_SOURCE` and
 [Agent messaging](https://saxman.info/kokua/how-agents-work/agent-messaging/) carry the argument, and
 the lever on the record is in `send_message` (excluding the caller from its own selector), not the
-refusal of `to=everyone` an earlier draft recorded, which a self-address goes around.
+refusal of `to=everyone` an earlier draft recorded, which a self-address goes around. It closes that
+route and not the extension, which two agents messaging each other reach by sends the capability
+exists to allow; the extension cap is the bound.
 `tests/core/test_messaging.py`, `tests/core/test_subagents.py`, `tests/toolsets/test_messaging.py`,
 `tests/toolsets/test_capabilities.py`, `tests/core/test_messages.py`, `tests/core/test_turns.py`,
 `tests/core/test_transcripts.py`, `tests/core/test_conversations.py`, `tests/test_transcript_export.py`,
